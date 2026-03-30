@@ -82,13 +82,14 @@
     font-size="14" font-weight="600"
   >{node.label}</text>
 
-  <!-- Subtitle (centered, below — generous size) -->
+  <!-- Subtitle (centered — truncation scales with node width) -->
   {#if node.subtitle}
+    {@const maxChars = Math.floor((pos.w - 40) / 6.5)}
     <text
       x={pos.x + pos.w / 2} y={pos.y + 46}
       text-anchor="middle" fill={txtColor}
       font-size="11" opacity=".7"
-    >{node.subtitle.length > 42 ? node.subtitle.slice(0, 40) + '...' : node.subtitle}</text>
+    >{node.subtitle.length > maxChars ? node.subtitle.slice(0, maxChars - 2) + '...' : node.subtitle}</text>
   {/if}
 
   <!-- Status badge pill (G9) -->
