@@ -34,6 +34,8 @@
         savedPositions = await r.json() || {};
       } catch {}
     }
+    // Auto-fit on first load (after a tick so layout is computed)
+    setTimeout(fitToContent, 50);
   });
 
   // Reactive graph state
@@ -224,6 +226,28 @@
   }
 
   function handleToggleTheme() { theme = toggleTheme(); }
+
+  function fitToContent() {
+    if (activePositions.size === 0) { appState.zoom = 1; appState.panX = 0; appState.panY = 0; return; }
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const [, pos] of activePositions) {
+      minX = Math.min(minX, pos.x);
+      minY = Math.min(minY, pos.y);
+      maxX = Math.max(maxX, pos.x + pos.w);
+      maxY = Math.max(maxY, pos.y + pos.h);
+    }
+    // Add padding around the content
+    const pad = 60;
+    const contentW = maxX - minX + pad * 2;
+    const contentH = maxY - minY + pad * 2;
+    // Estimate available canvas area (subtract sidebars)
+    const availW = Math.max(400, window.innerWidth - (appState.sidebarOpen ? 260 : 0) - (appState.panelOpen ? 300 : 0));
+    const availH = Math.max(300, window.innerHeight - 44 - 130); // topbar + comment bar
+    const zoom = Math.min(1, availW / contentW, availH / contentH);
+    appState.zoom = Math.max(0.2, Math.round(zoom * 20) / 20); // round to nearest 5%
+    appState.panX = -(minX - pad) * appState.zoom + (availW - contentW * appState.zoom) / 2;
+    appState.panY = -(minY - pad) * appState.zoom + (availH - contentH * appState.zoom) / 2;
+  }
 </script>
 
 <svelte:window onmousemove={handleMouseMove} onmouseup={handleMouseUp} />
@@ -239,7 +263,7 @@
       <button class="tb" onclick={() => appState.zoom = Math.max(0.15, appState.zoom - 0.15)}>-</button>
       <span class="zd">{Math.round(appState.zoom * 100)}%</span>
       <button class="tb" onclick={() => appState.zoom = Math.min(3, appState.zoom + 0.15)}>+</button>
-      <button class="tb" onclick={() => { appState.zoom = 1; appState.panX = 0; appState.panY = 0; }}>&#8962;</button>
+      <button class="tb" onclick={fitToContent}>&#8962;</button>
       <div class="sep"></div>
       <button class="tb" onclick={handleToggleTheme}>{theme === 'dark' ? '\u2606' : '\u263E'}</button>
     </div>

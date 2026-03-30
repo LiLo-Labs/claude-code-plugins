@@ -93,6 +93,15 @@ describe('EventStore', () => {
     expect(store.getState().comments[0].resolved).toBe(false);
   });
 
+  it('respects status on node.created when provided', () => {
+    const store = new EventStore();
+    store.apply({
+      id: 'ev_1', ts: '2026-03-30T00:00:00Z', type: 'node.created', actor: 'claude',
+      data: { nodeId: 'n1', label: 'Auth', subtitle: '', parent: null, depth: 'domain', category: 'arch', confidence: 2, status: 'done' },
+    });
+    expect(store.getState().nodes.get('n1').status).toBe('done');
+  });
+
   it('stores files field on node.created', () => {
     const store = new EventStore();
     store.apply({

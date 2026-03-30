@@ -37,7 +37,7 @@ export class EventStore {
           label: d.label,
           subtitle: d.subtitle || '',
           parent: d.parent || null,
-          status: 'planned',
+          status: d.status || 'planned',
           depth: d.depth || 'module',
           category: d.category || 'arch',
           confidence: d.confidence ?? 1,

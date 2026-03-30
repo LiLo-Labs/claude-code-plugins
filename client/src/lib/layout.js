@@ -88,13 +88,14 @@ export function computeEdgePath(fromPos, toPos) {
   const mx = (start.x + end.x) / 2;
   const my = (start.y + end.y) / 2;
 
-  const bf = Math.abs(end.y - start.y) > Math.abs(end.x - start.x) ? 0.2 : 0.15;
+  const bf = Math.abs(end.y - start.y) > Math.abs(end.x - start.x) ? 0.25 : 0.2;
   const px = -(end.y - start.y) * bf;
   const py = (end.x - start.x) * bf;
 
   const path = `M${start.x},${start.y} Q${mx + px},${my + py} ${end.x},${end.y}`;
-  const labelX = mx + px * 0.5;
-  const labelY = my + py * 0.5;
+  // Label at the bezier midpoint (t=0.5), pulled further from the straight line
+  const labelX = mx + px * 0.6;
+  const labelY = my + py * 0.6;
 
   return { path, labelX, labelY };
 }
