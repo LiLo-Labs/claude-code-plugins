@@ -24,16 +24,13 @@
   const txtColor = $derived(tabNode?.textColor || node.textColor || DEPTH_TEXT_COLORS[node.depth] || '#94a3b8');
   const hasComments = $derived(comments.length > 0);
 
-  // Status border color
+  // Border — mostly invisible, only notable for special states
   const borderColor = $derived(
-    hasComments ? '#3b82f6'
-    : node.hasWorkaround ? '#f97316'
-    : node.status === 'done' ? '#10b981'
-    : node.status === 'in-progress' ? '#eab308'
-    : node.status === 'blocked' ? '#ef4444'
-    : '#0002'
+    hasComments ? '#3b82f640'
+    : node.hasWorkaround ? '#f9731640'
+    : 'var(--bdr)'
   );
-  const borderW = $derived((hasComments || node.status !== 'planned') ? '2.5' : '1');
+  const borderW = $derived(hasComments || node.hasWorkaround ? '1.5' : '1');
 
   // Status badge text
   const badgeText = $derived(node.status === 'in-progress' ? 'in prog' : node.status);
