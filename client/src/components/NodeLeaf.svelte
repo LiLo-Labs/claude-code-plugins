@@ -17,7 +17,7 @@
 
   const dc = $derived(depthColor(node.depth));
   const sc = $derived(statusColor(node.status));
-  const textColor = $derived(node.textColor || '#e2e8f0'); // always light for readability on dark nodes
+  const textColor = $derived(node.textColor || 'var(--tx)'); // uses theme text color for contrast
   const hasComments = $derived(comments.length > 0);
   const strokeColor = $derived(
     hasComments ? '#3b82f6'
@@ -51,11 +51,11 @@
     />
   {/if}
 
-  <!-- Node background -->
+  <!-- Node background — dark muted, depth color as border only -->
   <rect
     x={pos.x} y={pos.y}
     width={pos.w} height={pos.h}
-    rx="8" fill={dc}
+    rx="8" fill="var(--bg-n)"
     stroke={strokeColor} stroke-width={strokeW}
   />
 

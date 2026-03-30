@@ -12,9 +12,23 @@
   import DetailPanel from './components/DetailPanel.svelte';
 
   let theme = $state('dark');
-  let savedPositions = $state({}); // user drag overrides: { nodeId: {x, y} }
+  let savedPositions = $state({});
   let drag = $state(createDragState());
-  let canvasComponent = $state(null);
+  let treeExpanded = $state(new Set()); // expanded nodes in tree view
+
+  function toggleTreeNode(nodeId) {
+    treeExpanded.has(nodeId) ? treeExpanded.delete(nodeId) : treeExpanded.add(nodeId);
+    treeExpanded = new Set(treeExpanded);
+  }
+  function deepToggleTree(nodeId) {
+    const expand = !treeExpanded.has(nodeId);
+    function recurse(id) {
+      expand ? treeExpanded.add(id) : treeExpanded.delete(id);
+      [...graphState.nodes.values()].filter(n => n.parent === id).forEach(c => recurse(c.id));
+    }
+    recurse(nodeId);
+    treeExpanded = new Set(treeExpanded);
+  }
 
   onMount(async () => {
     theme = getInitialTheme();
@@ -105,6 +119,8 @@
       <button class="tb" onclick={() => appState.zoom = Math.min(3, appState.zoom + 0.15)}>+</button>
       <button class="tb" onclick={() => { appState.zoom = 1; appState.panX = 0; appState.panY = 0; }}>&#8962;</button>
       <div class="sep"></div>
+      <button class="tb" onclick={() => appState.sidebarOpen = !appState.sidebarOpen} title="Toggle sidebar">{appState.sidebarOpen ? '\u2630' : '\u2261'}</button>
+      <button class="tb" onclick={() => appState.panelOpen = !appState.panelOpen} title="Toggle panel">\u2261</button>
       <button class="tb" onclick={handleToggleTheme}>{theme === 'dark' ? '\u2606' : '\u263E'}</button>
     </div>
   </header>
@@ -118,9 +134,11 @@
         </div>
         <TreeView
           nodes={graphState.nodes}
-          expandedNodes={new Set()}
+          expandedNodes={treeExpanded}
           selectedIds={appState.selectedIds}
           onselect={(id) => selectNode(id)}
+          ontoggle={toggleTreeNode}
+          ondeeptoggle={deepToggleTree}
         />
       </aside>
     {/if}
@@ -136,7 +154,7 @@
         {/each}
       </defs>
 
-      <!-- Parent-child structural edges (subtle, behind everything) -->
+      <!-- Parent-child structural edges — only direct parent→child, very subtle -->
       {#each [...graphState.nodes.values()] as node}
         {#if node.parent && activePositions.has(node.id) && activePositions.has(node.parent)}
           {@const parentPos = activePositions.get(node.parent)}
@@ -148,8 +166,8 @@
           {@const my = (py + cy) / 2}
           <path
             d="M{px},{py} C{px},{my} {cx},{my} {cx},{cy}"
-            fill="none" stroke="var(--bdr)" stroke-width="1.5"
-            stroke-dasharray="4 4" opacity=".4"
+            fill="none" stroke="var(--bdr)" stroke-width="1"
+            stroke-dasharray="3 6" opacity=".25"
           />
         {/if}
       {/each}
