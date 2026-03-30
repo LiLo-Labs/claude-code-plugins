@@ -74,31 +74,20 @@
         {/if}
 
         {#each openComments as comment}
-          <div class="comment-card">
-            <div class="comment-header">
-              <span class="actor" class:user={comment.actor === 'user'} class:claude={comment.actor === 'claude'}>
-                {comment.actor}
-              </span>
-              <span class="comment-actions">
-                <button class="act-resolve" title="Resolve" onclick={() => onresolve?.(comment.id)}>&#10003;</button>
-                <button class="act-delete" title="Delete" onclick={() => ondelete?.(comment.id)}>&times;</button>
-              </span>
-            </div>
-            <div class="comment-body">{comment.text}</div>
+          <div class="comment-row">
+            <span class="actor-dot" class:user={comment.actor === 'user'} class:claude={comment.actor === 'claude'}></span>
+            <span class="comment-text">{comment.text}</span>
+            <button class="act-btn resolve" title="Resolve" onclick={() => onresolve?.(comment.id)}>&#10003;</button>
+            <button class="act-btn del" title="Delete" onclick={() => ondelete?.(comment.id)}>&times;</button>
           </div>
         {/each}
 
         {#if resolvedComments.length > 0}
           <div class="resolved-label">Resolved ({resolvedComments.length})</div>
           {#each resolvedComments as comment}
-            <div class="comment-card faded">
-              <div class="comment-header">
-                <span class="actor">{comment.actor}</span>
-                {#if comment.resolvedBy}
-                  <span class="resolved-by">by {comment.resolvedBy}</span>
-                {/if}
-              </div>
-              <div class="comment-body">{comment.text}</div>
+            <div class="comment-row faded">
+              <span class="actor-dot"></span>
+              <span class="comment-text">{comment.text}</span>
             </div>
           {/each}
         {/if}
@@ -159,26 +148,21 @@
   .conf-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--bdr); }
   .conf-dot.filled { background: var(--ac); }
 
-  /* Comments in panel */
+  /* Comments — simple rows */
   .empty-comments { font-size: 11px; color: var(--tx-d); font-style: italic; }
-  .comment-card {
-    background: var(--bg); border: 1px solid var(--bdr);
-    border-radius: 6px; padding: 8px 10px; margin-bottom: 6px;
-  }
-  .comment-card.faded { opacity: 0.4; }
-  .comment-header { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
-  .actor { font-size: 10px; padding: 1px 6px; border-radius: 3px; font-weight: 600; background: var(--bg-e); color: var(--tx-d); }
-  .actor.user { background: rgba(16,185,129,.15); color: var(--gr); }
-  .actor.claude { background: rgba(168,85,247,.15); color: var(--pu); }
-  .comment-body { font-size: 12px; color: var(--tx); line-height: 1.4; }
-  .comment-actions { margin-left: auto; display: flex; gap: 2px; }
-  .comment-actions button { background: none; border: none; font-size: 14px; padding: 0 3px; cursor: pointer; }
-  .act-resolve { color: var(--gr); }
-  .act-resolve:hover { color: #34d399; }
-  .act-delete { color: var(--tx-d); }
-  .act-delete:hover { color: var(--rd); }
-  .resolved-label { font-size: 10px; color: var(--tx-d); text-transform: uppercase; letter-spacing: 0.06em; padding: 6px 0 4px; border-top: 1px solid var(--bdr); margin-top: 4px; }
-  .resolved-by { font-size: 10px; color: var(--tx-d); }
+  .comment-row { display: flex; align-items: center; gap: 6px; padding: 4px 0; border-bottom: 1px solid var(--bdr); font-size: 12px; }
+  .comment-row:last-of-type { border-bottom: none; }
+  .comment-row.faded { opacity: 0.35; }
+  .actor-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--tx-d); flex-shrink: 0; }
+  .actor-dot.user { background: var(--gr); }
+  .actor-dot.claude { background: var(--pu); }
+  .comment-text { color: var(--tx-m); flex: 1; }
+  .act-btn { background: none; border: none; font-size: 13px; padding: 0 2px; cursor: pointer; flex-shrink: 0; }
+  .act-btn.resolve { color: var(--gr); }
+  .act-btn.resolve:hover { color: #34d399; }
+  .act-btn.del { color: var(--tx-d); }
+  .act-btn.del:hover { color: var(--rd); }
+  .resolved-label { font-size: 10px; color: var(--tx-d); text-transform: uppercase; letter-spacing: 0.06em; padding: 6px 0 3px; margin-top: 2px; }
   .add-comment {
     font-size: 11px; color: var(--ac); cursor: pointer;
     padding: 6px 0; text-align: center;
