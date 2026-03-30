@@ -56,6 +56,22 @@ export const DEPTH_COLORS = {
   'interface': '#f97316',
 };
 
+// ── Depth Background Colors (dark, muted fills for nodes) ──
+export const DEPTH_BG_COLORS = {
+  system: '#1e293b',
+  domain: '#2a1a3c',
+  module: '#1a2a3c',
+  'interface': '#3a2a1c',
+};
+
+// ── Depth Text Colors (tinted, readable on dark backgrounds) ──
+export const DEPTH_TEXT_COLORS = {
+  system: '#93c5fd',
+  domain: '#c9a8f5',
+  module: '#7ab8f5',
+  'interface': '#f5c87a',
+};
+
 // ── Status Colors ──
 export const STATUS_COLORS = {
   done: '#10b981',

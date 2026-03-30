@@ -1,14 +1,15 @@
 <script>
   /**
-   * Node — a single card on the canvas.
-   * Matches the study-tutor visual style: colored background, centered text,
-   * status-colored border, title + subtitle.
+   * Node card — matches study-tutor visual style.
+   * Colored background per depth/subsystem, centered text, status border,
+   * left depth band, status badge pill, confidence dots.
    */
-  import { depthColor, statusColor } from '../lib/config.js';
+  import { depthColor, statusColor, DEPTH_BG_COLORS, DEPTH_TEXT_COLORS } from '../lib/config.js';
 
   let {
-    node,
-    pos,
+    node,      // from registry: label, subtitle, status, depth, confidence, etc.
+    tabNode,   // from tab: row, col, color, textColor overrides
+    pos,       // computed position: {x, y, w, h}
     isSelected = false,
     comments = [],
     onselect,
@@ -17,17 +18,25 @@
 
   const dc = $derived(depthColor(node.depth));
   const sc = $derived(statusColor(node.status));
-  const textColor = $derived(node.textColor || 'var(--tx)'); // uses theme text color for contrast
+  // Use tab-level color overrides, then depth defaults
+  const bgColor = $derived(tabNode?.color || node.color || DEPTH_BG_COLORS[node.depth] || '#1e293b');
+  const txtColor = $derived(tabNode?.textColor || node.textColor || DEPTH_TEXT_COLORS[node.depth] || '#94a3b8');
   const hasComments = $derived(comments.length > 0);
-  const strokeColor = $derived(
+
+  // Status border color
+  const borderColor = $derived(
     hasComments ? '#3b82f6'
     : node.hasWorkaround ? '#f97316'
     : node.status === 'done' ? '#10b981'
     : node.status === 'in-progress' ? '#eab308'
     : node.status === 'blocked' ? '#ef4444'
-    : dc + '40'
+    : '#0002'
   );
-  const strokeW = $derived((hasComments || node.status !== 'planned') ? '2.5' : '1');
+  const borderW = $derived((hasComments || node.status !== 'planned') ? '2.5' : '1');
+
+  // Status badge text
+  const badgeText = $derived(node.status === 'in-progress' ? 'in prog' : node.status);
+  const badgeW = $derived(badgeText.length * 6.5 + 16);
 </script>
 
 <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
@@ -51,52 +60,75 @@
     />
   {/if}
 
-  <!-- Node background — dark muted, depth color as border only -->
+  <!-- Node background — semantic color per subsystem -->
   <rect
     x={pos.x} y={pos.y}
     width={pos.w} height={pos.h}
-    rx="8" fill="var(--bg-n)"
-    stroke={strokeColor} stroke-width={strokeW}
+    rx="8" fill={bgColor}
+    stroke={borderColor} stroke-width={borderW}
+  />
+
+  <!-- Left depth color band (G10) -->
+  <rect
+    x={pos.x} y={pos.y + 1}
+    width="5" height={pos.h - 2}
+    rx="3" fill={dc} opacity=".6"
   />
 
   <!-- Title (centered) -->
   <text
-    x={pos.x + pos.w / 2} y={node.subtitle ? pos.y + 22 : pos.y + pos.h / 2 + 5}
-    text-anchor="middle" fill={textColor}
+    x={pos.x + pos.w / 2} y={pos.y + 28}
+    text-anchor="middle" fill={txtColor}
     font-size="13" font-weight="600"
   >{node.label}</text>
 
-  <!-- Subtitle (centered, below title) -->
+  <!-- Subtitle (centered, below — shown on node per study-tutor style) -->
   {#if node.subtitle}
     <text
-      x={pos.x + pos.w / 2} y={pos.y + 38}
-      text-anchor="middle" fill={textColor}
+      x={pos.x + pos.w / 2} y={pos.y + 46}
+      text-anchor="middle" fill={txtColor}
       font-size="10" opacity=".7"
-    >{node.subtitle.length > 36 ? node.subtitle.slice(0, 34) + '...' : node.subtitle}</text>
+    >{node.subtitle.length > 38 ? node.subtitle.slice(0, 36) + '...' : node.subtitle}</text>
   {/if}
 
-  <!-- Status checkmark for done -->
-  {#if node.status === 'done'}
-    <text x={pos.x + 12} y={pos.y + 18} fill="#10b981" font-size="14">&#10003;</text>
-  {/if}
+  <!-- Status badge pill (G9) -->
+  <rect
+    x={pos.x + pos.w - badgeW - 8} y={pos.y + 6}
+    width={badgeW} height="18" rx="9"
+    fill={sc} fill-opacity=".2"
+  />
+  <text
+    x={pos.x + pos.w - badgeW / 2 - 8} y={pos.y + 18}
+    text-anchor="middle" fill={sc}
+    font-size="10" font-weight="600"
+  >{badgeText}</text>
 
   <!-- Workaround warning -->
   {#if node.hasWorkaround}
-    <text x={pos.x + pos.w - 18} y={pos.y + 16} fill="#f97316" font-size="13">&#9888;</text>
+    <text x={pos.x + 12} y={pos.y + 16} fill="#f97316" font-size="13">&#9888;</text>
   {/if}
 
-  <!-- Comment indicator -->
+  <!-- Done checkmark -->
+  {#if node.status === 'done'}
+    <text x={pos.x + 12} y={pos.y + 16} fill="#10b981" font-size="13">&#10003;</text>
+  {/if}
+
+  <!-- Comment badge with count -->
   {#if hasComments}
-    <circle cx={pos.x + pos.w - 10} cy={pos.y + 10} r="5" fill="#3b82f6" />
+    <circle cx={pos.x + 14} cy={pos.y + pos.h - 12} r="7" fill="#3b82f6" opacity=".9" />
+    <text
+      x={pos.x + 14} y={pos.y + pos.h - 8}
+      text-anchor="middle" fill="white" font-size="10" font-weight="600"
+    >{comments.length}</text>
   {/if}
 
-  <!-- Confidence dots (bottom right, compact) -->
+  <!-- Confidence dots (4px, 10px spacing per spec) -->
   {#each [0, 1, 2] as i}
     <circle
-      cx={pos.x + pos.w - 18 + i * 7}
-      cy={pos.y + pos.h - 8}
-      r="2.5" fill={i < node.confidence ? dc : 'var(--bdr)'}
-      opacity=".6"
+      cx={pos.x + pos.w - 22 + i * 10}
+      cy={pos.y + pos.h - 12}
+      r="4" fill={i < node.confidence ? dc : 'var(--bdr)'}
+      opacity=".5"
     />
   {/each}
 </g>

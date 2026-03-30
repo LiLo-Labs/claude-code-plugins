@@ -1,36 +1,32 @@
 <script>
   /**
-   * ViewTabs — tab bar for switching between canvas views/lenses.
-   * Each tab is a filtered projection of the graph.
+   * ViewTabs — tab strip matching the study-tutor canvas style.
+   * Each tab is an authored diagram, not a filter.
    */
-  let { views = [], activeViewId = 'all', onswitch } = $props();
+  let { views = [], activeViewId = '', onswitch } = $props();
 </script>
 
-<div class="view-tabs">
-  <button
-    class="vtab" class:active={activeViewId === 'all'}
-    onclick={() => onswitch?.('all')}
-  >All</button>
-  {#each views as view}
+<div class="tab-bar">
+  {#each views as view, i}
     <button
-      class="vtab" class:active={activeViewId === view.id}
+      class="tab-btn" class:active={activeViewId === view.id}
       onclick={() => onswitch?.(view.id)}
-    >{view.name}</button>
+    >{i + 1}. {view.name}</button>
   {/each}
 </div>
 
 <style>
-  .view-tabs {
-    display: flex; gap: 2px; padding: 6px 12px 0;
+  .tab-bar {
+    display: flex; gap: 2px; background: var(--bg-s);
     border-bottom: 1px solid var(--bdr);
-    overflow-x: auto; flex-shrink: 0;
+    padding: 8px 12px 0; overflow-x: auto; flex-shrink: 0;
   }
-  .vtab {
-    padding: 7px 14px; border: 1px solid transparent; border-bottom: none;
+  .tab-btn {
+    padding: 8px 16px; border: 1px solid transparent; border-bottom: none;
     border-radius: 6px 6px 0 0; background: transparent;
-    color: var(--tx-d); font-size: 12px; font-weight: 500;
+    color: var(--tx-m); font-size: 13px; font-weight: 500;
     cursor: pointer; white-space: nowrap; transition: all 0.15s;
   }
-  .vtab:hover { background: var(--bg-e); color: var(--tx-m); }
-  .vtab.active { background: var(--bg); color: var(--ac); border-color: var(--bdr); font-weight: 600; }
+  .tab-btn:hover { background: var(--bg-e); color: var(--tx); }
+  .tab-btn.active { background: var(--bg); color: var(--ac); border-color: var(--bdr); font-weight: 600; }
 </style>

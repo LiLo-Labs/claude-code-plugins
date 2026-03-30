@@ -149,8 +149,13 @@ export class EventStore {
         this._views.push({
           id: d.viewId,
           name: d.name,
+          story: d.story || '',
           description: d.description || '',
-          filter: d.filter || {},
+          // Per-tab authored diagram data (study-tutor model)
+          tabNodes: d.tabNodes || [],        // [{ nodeId, row, col, cols, color?, textColor? }]
+          tabConnections: d.tabConnections || [], // [{ from, to, label, color }]
+          // Legacy filter (for backwards compat)
+          filter: d.filter || null,
         });
         break;
 

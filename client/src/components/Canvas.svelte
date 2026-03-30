@@ -60,8 +60,8 @@
   >
     <!-- Background grid rendered in SVG for proper pan/zoom -->
     <defs>
-      <pattern id="grid" width="28" height="28" patternUnits="userSpaceOnUse">
-        <circle cx="1" cy="1" r="0.8" fill="var(--gd)" />
+      <pattern id="grid" width="24" height="24" patternUnits="userSpaceOnUse">
+        <circle cx="1" cy="1" r="1.2" fill="var(--gd)" opacity=".4" />
       </pattern>
     </defs>
     <rect class="canvas-bg-rect" x="-5000" y="-5000" width="10000" height="10000" fill="url(#grid)" />
