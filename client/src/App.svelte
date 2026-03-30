@@ -25,27 +25,29 @@
     expandedNodes = new Set(expandedNodes);
   });
 
-  // Depend on storeVersion to trigger re-derivation when events are applied
-  const graphState = $derived((appState.storeVersion, appState.store.getState()));
-  // Synchronous layout for immediate render
-  const positions = $derived(computeLayout(graphState.nodes, expandedNodes));
-  // Async ELK layout with proper edge routing (updates after computation)
-  let edgeRoutes = $state(new Map());
-  let elkPositions = $state(null);
+  // Reactive graph state — reads storeVersion to trigger re-derivation
+  function getGraphState() {
+    const _v = appState.storeVersion; // touch for reactivity
+    return appState.store.getState();
+  }
+  const graphState = $derived(getGraphState());
 
-  // Trigger ELK layout when graph or expanded state changes
+  // Layout positions (synchronous, always a Map, never null)
+  const activePositions = $derived(computeLayout(graphState.nodes, expandedNodes));
+
+  // Async ELK edge routing
+  let edgeRoutes = $state(new Map());
+
   $effect(() => {
-    const _nodes = graphState.nodes;
-    const _edges = graphState.edges;
-    const _expanded = expandedNodes;
-    computeLayoutAsync(_nodes, _edges, _expanded).then(result => {
+    const nodes = graphState.nodes;
+    const edges = graphState.edges;
+    const expanded = expandedNodes;
+    computeLayoutAsync(nodes, edges, expanded).then(result => {
       edgeRoutes = result.edgeRoutes;
-      elkPositions = result.positions;
+    }).catch(err => {
+      console.error('ELK layout failed:', err);
     });
   });
-
-  // Use ELK positions when available, fall back to sync
-  const activePositions = $derived(elkPositions || positions);
   const unresolvedCount = $derived(graphState.comments.filter(c => !c.resolved).length);
   const selectedNode = $derived(
     appState.selectedIds.size === 1
@@ -180,7 +182,7 @@
       {#each [...graphState.edges.values()] as edge}
         {@const visFrom = findVisibleEndpoint(edge.from, graphState.nodes, activePositions)}
         {@const visTo = findVisibleEndpoint(edge.to, graphState.nodes, activePositions)}
-        {#if visFrom && visTo && visFrom !== visTo && positions.has(visFrom) && positions.has(visTo)}
+        {#if visFrom && visTo && visFrom !== visTo && activePositions.has(visFrom) && activePositions.has(visTo)}
           <EdgeLine {edge} fromPos={activePositions.get(visFrom)} toPos={activePositions.get(visTo)} route={edgeRoutes.get(edge.id)} />
         {/if}
       {/each}

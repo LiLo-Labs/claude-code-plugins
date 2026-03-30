@@ -90,12 +90,8 @@ function buildElkGraph(nodes, edges, expandedSet) {
     elkNodes.push(buildNode(root));
   }
 
-  // Build edges — only between visible nodes (or their visible ancestors)
+  // Build edges — ELK handles routing around nodes
   for (const edge of edges.values()) {
-    const fromVisible = findVisibleEndpoint(edge.from, nodes, null);
-    const toVisible = findVisibleEndpoint(edge.to, nodes, null);
-    // For ELK, we need to reference nodes that exist in the graph
-    // We'll add all edges and ELK will route them
     elkEdges.push({
       id: edge.id,
       sources: [edge.from],
