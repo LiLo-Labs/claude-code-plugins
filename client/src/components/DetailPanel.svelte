@@ -60,6 +60,16 @@
         <p class="desc">{node.subtitle}</p>
       </div>
 
+      <!-- File Patterns -->
+      {#if node.files && node.files.length > 0}
+        <div class="section">
+          <div class="sec-title">Files</div>
+          {#each node.files as pattern}
+            <div class="file-pattern">{pattern}</div>
+          {/each}
+        </div>
+      {/if}
+
       <!-- Comments for this node -->
       <div class="section">
         <div class="sec-title">
@@ -180,4 +190,5 @@
   .dec-reason { font-size: 11px; color: var(--tx-m); font-style: italic; }
 
   .empty { font-size: 12px; color: var(--tx-d); text-align: center; padding: 20px 0; }
+  .file-pattern { font-size: 11px; font-family: monospace; color: var(--tx-m); padding: 2px 6px; background: var(--bg); border: 1px solid var(--bdr); border-radius: 3px; margin-bottom: 3px; }
 </style>

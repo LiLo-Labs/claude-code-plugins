@@ -41,6 +41,7 @@ export class EventStore {
           depth: d.depth || 'module',
           category: d.category || 'arch',
           confidence: d.confidence ?? 1,
+          files: d.files || [],
           row: d.row ?? 0,
           col: d.col ?? 0,
           cols: d.cols ?? 3,

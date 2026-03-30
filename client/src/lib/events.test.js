@@ -93,6 +93,24 @@ describe('EventStore', () => {
     expect(store.getState().comments[0].resolved).toBe(false);
   });
 
+  it('stores files field on node.created', () => {
+    const store = new EventStore();
+    store.apply({
+      id: 'ev_1', ts: '2026-03-30T00:00:00Z', type: 'node.created', actor: 'claude',
+      data: { nodeId: 'n1', label: 'Auth', subtitle: '', parent: null, depth: 'domain', category: 'arch', confidence: 2, files: ['src/auth/**'] },
+    });
+    expect(store.getState().nodes.get('n1').files).toEqual(['src/auth/**']);
+  });
+
+  it('defaults files to empty array', () => {
+    const store = new EventStore();
+    store.apply({
+      id: 'ev_1', ts: '2026-03-30T00:00:00Z', type: 'node.created', actor: 'claude',
+      data: { nodeId: 'n1', label: 'Auth', subtitle: '', parent: null, depth: 'domain', category: 'arch', confidence: 2 },
+    });
+    expect(store.getState().nodes.get('n1').files).toEqual([]);
+  });
+
   it('getUnresolvedComments filters resolved', () => {
     const store = new EventStore();
     store.apply({ id: 'ev_1', ts: '2026-03-29T00:00:00Z', type: 'comment.added', actor: 'user', data: { commentId: 'c1', target: 'n1', targetLabel: 'A', text: 'Open', actor: 'user' } });
