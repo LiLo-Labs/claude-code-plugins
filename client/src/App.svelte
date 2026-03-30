@@ -136,7 +136,25 @@
         {/each}
       </defs>
 
-      <!-- Edges (drawn first, behind nodes) -->
+      <!-- Parent-child structural edges (subtle, behind everything) -->
+      {#each [...graphState.nodes.values()] as node}
+        {#if node.parent && activePositions.has(node.id) && activePositions.has(node.parent)}
+          {@const parentPos = activePositions.get(node.parent)}
+          {@const childPos = activePositions.get(node.id)}
+          {@const px = parentPos.x + parentPos.w / 2}
+          {@const py = parentPos.y + parentPos.h}
+          {@const cx = childPos.x + childPos.w / 2}
+          {@const cy = childPos.y}
+          {@const my = (py + cy) / 2}
+          <path
+            d="M{px},{py} C{px},{my} {cx},{my} {cx},{cy}"
+            fill="none" stroke="var(--bdr)" stroke-width="1.5"
+            stroke-dasharray="4 4" opacity=".4"
+          />
+        {/if}
+      {/each}
+
+      <!-- Data/flow edges (drawn behind nodes) -->
       {#each [...graphState.edges.values()] as edge}
         {#if activePositions.has(edge.from) && activePositions.has(edge.to)}
           <EdgeLine {edge} fromPos={activePositions.get(edge.from)} toPos={activePositions.get(edge.to)} />

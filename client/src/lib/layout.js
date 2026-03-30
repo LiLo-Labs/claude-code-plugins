@@ -9,8 +9,8 @@
  */
 
 export const GRID = {
-  nodeW: 300,
-  nodeH: 80,
+  nodeW: 260,
+  nodeH: 60,
   colGap: 120,
   rowGap: 100,
   pad: 100,

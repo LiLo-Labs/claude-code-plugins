@@ -17,8 +17,7 @@
 
   const dc = $derived(depthColor(node.depth));
   const sc = $derived(statusColor(node.status));
-  const bgColor = $derived(node.color || dc + '20'); // node-specific or depth tint
-  const textColor = $derived(node.textColor || 'var(--tx)');
+  const textColor = $derived(node.textColor || '#e2e8f0'); // always light for readability on dark nodes
   const hasComments = $derived(comments.length > 0);
   const strokeColor = $derived(
     hasComments ? '#3b82f6'
@@ -62,18 +61,18 @@
 
   <!-- Title (centered) -->
   <text
-    x={pos.x + pos.w / 2} y={pos.y + 26}
+    x={pos.x + pos.w / 2} y={node.subtitle ? pos.y + 22 : pos.y + pos.h / 2 + 5}
     text-anchor="middle" fill={textColor}
-    font-size="14" font-weight="600"
+    font-size="13" font-weight="600"
   >{node.label}</text>
 
   <!-- Subtitle (centered, below title) -->
   {#if node.subtitle}
     <text
-      x={pos.x + pos.w / 2} y={pos.y + 44}
+      x={pos.x + pos.w / 2} y={pos.y + 38}
       text-anchor="middle" fill={textColor}
-      font-size="11" opacity=".7"
-    >{node.subtitle.length > 40 ? node.subtitle.slice(0, 38) + '...' : node.subtitle}</text>
+      font-size="10" opacity=".7"
+    >{node.subtitle.length > 36 ? node.subtitle.slice(0, 34) + '...' : node.subtitle}</text>
   {/if}
 
   <!-- Status checkmark for done -->
@@ -91,12 +90,12 @@
     <circle cx={pos.x + pos.w - 10} cy={pos.y + 10} r="5" fill="#3b82f6" />
   {/if}
 
-  <!-- Confidence dots (bottom right) -->
+  <!-- Confidence dots (bottom right, compact) -->
   {#each [0, 1, 2] as i}
     <circle
-      cx={pos.x + pos.w - 24 + i * 9}
-      cy={pos.y + pos.h - 10}
-      r="3" fill={i < node.confidence ? dc : 'var(--bdr)'}
+      cx={pos.x + pos.w - 18 + i * 7}
+      cy={pos.y + pos.h - 8}
+      r="2.5" fill={i < node.confidence ? dc : 'var(--bdr)'}
       opacity=".6"
     />
   {/each}
