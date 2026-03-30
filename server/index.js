@@ -56,6 +56,53 @@ function readEvents() {
   return events;
 }
 
+function replayEventsToState(events) {
+  const nodes = new Map();
+  const edges = new Map();
+  let comments = [];
+  const decisions = [];
+  const views = [];
+  for (const event of events) {
+    const d = event.data;
+    switch (event.type) {
+      case 'node.created':
+        nodes.set(d.nodeId, { id: d.nodeId, label: d.label || '', subtitle: d.subtitle || '', parent: d.parent || null, status: d.status || 'planned', depth: d.depth || 'module', category: d.category || 'arch', confidence: d.confidence ?? 1, files: d.files || [] });
+        break;
+      case 'node.updated': if (nodes.has(d.nodeId)) Object.assign(nodes.get(d.nodeId), d.changes || {}); break;
+      case 'node.deleted': nodes.delete(d.nodeId); break;
+      case 'node.status': if (nodes.has(d.nodeId)) nodes.get(d.nodeId).status = d.status; break;
+      case 'edge.created': edges.set(d.edgeId, { id: d.edgeId, from: d.from, to: d.to, label: d.label || '', edgeType: d.edgeType || 'dependency', color: d.color || '#64748b' }); break;
+      case 'edge.updated': if (edges.has(d.edgeId)) Object.assign(edges.get(d.edgeId), d.changes || {}); break;
+      case 'edge.deleted': edges.delete(d.edgeId); break;
+      case 'decision.recorded': decisions.push({ nodeId: d.nodeId, type: d.type || 'decision', chosen: d.chosen, alternatives: d.alternatives || [], reason: d.reason || '', ts: event.ts, actor: event.actor }); break;
+      case 'comment.added': comments.push({ id: d.commentId, target: d.target, targetLabel: d.targetLabel || '', text: d.text, actor: d.actor || event.actor, resolved: false, ts: event.ts }); break;
+      case 'comment.resolved': { const c = comments.find(c => c.id === d.commentId); if (c) c.resolved = true; break; }
+      case 'comment.reopened': { const c = comments.find(c => c.id === d.commentId); if (c) c.resolved = false; break; }
+      case 'comment.deleted': comments = comments.filter(c => c.id !== d.commentId); break;
+      case 'view.created': views.push({ id: d.viewId, name: d.name, description: d.description || '', tabNodes: d.tabNodes || [], tabConnections: d.tabConnections || [] }); break;
+      case 'view.updated': { const v = views.find(v => v.id === d.viewId); if (v) Object.assign(v, d.changes || {}); break; }
+    }
+  }
+  return { nodes, edges, comments, decisions, views, lastEvent: events[events.length - 1] || null };
+}
+
+function formatL0(state) {
+  const nodeArr = [...state.nodes.values()];
+  const sc = {}; for (const n of nodeArr) sc[n.status] = (sc[n.status] || 0) + 1;
+  const sp = Object.entries(sc).map(([s, c]) => `${c} ${s}`).join(', ');
+  const uc = state.comments.filter(c => !c.resolved).length;
+  return [`Nodes: ${nodeArr.length}${sp ? ` (${sp})` : ''}`, `Edges: ${state.edges.size} connections`, `Views: ${state.views.map(v => v.name).join(', ') || 'none'}`, `Comments: ${uc} unresolved`, `Decisions: ${state.decisions.length} recorded`, `Last activity: ${state.lastEvent ? state.lastEvent.ts : 'none'}`].join('\n');
+}
+
+function formatL1(state) {
+  const lines = ['Nodes:'];
+  for (const [id, n] of state.nodes) { const fp = n.files.length > 0 ? ` files: ${n.files.join(', ')}` : ''; lines.push(`- ${id}: ${n.label} [${n.status}] (${n.depth})${fp}`); }
+  if (state.edges.size > 0) { lines.push('', 'Edges:'); for (const [, e] of state.edges) lines.push(`- ${e.from} \u2192 ${e.to}: ${e.label}`); }
+  if (state.views.length > 0) { lines.push('', 'Views:'); for (const v of state.views) lines.push(`- ${v.name}: ${v.tabNodes.length} nodes, ${v.tabConnections.length} connections`); }
+  const ur = state.comments.filter(c => !c.resolved); if (ur.length > 0) { lines.push('', 'Unresolved comments:'); for (const c of ur) lines.push(`- ${c.targetLabel || c.target}: "${c.text}" (${c.actor})`); }
+  return lines.join('\n');
+}
+
 let eventCount = readEvents().length; // initialize from file
 function appendEvent(event) {
   fs.appendFileSync(eventsFile, JSON.stringify(event) + '\n');
@@ -132,6 +179,36 @@ const server = http.createServer(async (req, res) => {
     body.ts = body.ts || new Date().toISOString();
     appendEvent(body);
     return sendJSON(res, { saved: true });
+  }
+
+  // POST /api/events/batch
+  if (p === '/api/events/batch' && req.method === 'POST') {
+    const body = await readBody(req);
+    if (!Array.isArray(body)) return sendJSON(res, { error: 'Expected JSON array' }, 400);
+    for (const event of body) {
+      if (!event || !event.type) return sendJSON(res, { error: 'Each event must have a type' }, 400);
+    }
+    const lines = body.map(e => { e.ts = e.ts || new Date().toISOString(); return JSON.stringify(e); }).join('\n') + '\n';
+    fs.appendFileSync(eventsFile, lines);
+    eventCount += body.length;
+    return sendJSON(res, { appended: body.length });
+  }
+
+  // GET /api/state
+  if (p === '/api/state' && req.method === 'GET') {
+    const events = readEvents();
+    const state = replayEventsToState(events);
+    const level = url.searchParams.get('level');
+    if (level === 'L0' || level === 'L1') {
+      return sendJSON(res, { summary: level === 'L0' ? formatL0(state) : formatL1(state) });
+    }
+    return sendJSON(res, {
+      nodes: Object.fromEntries(state.nodes),
+      edges: Object.fromEntries(state.edges),
+      comments: state.comments,
+      decisions: state.decisions,
+      views: state.views,
+    });
   }
 
   // GET /api/layouts/:viewId
