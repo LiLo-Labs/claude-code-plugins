@@ -139,9 +139,9 @@
         {/if}
       {/each}
 
-      <!-- Edges -->
+      <!-- Edges — only render when BOTH endpoints are visible on canvas -->
       {#each [...graphState.edges.values()] as edge}
-        {#if positions.has(edge.from) && positions.has(edge.to)}
+        {#if positions.has(edge.from) && positions.has(edge.to) && (positions.get(edge.from).isContainer || !positions.get(edge.from).hidden) && (positions.get(edge.to).isContainer || !positions.get(edge.to).hidden)}
           <EdgeLine {edge} fromPos={positions.get(edge.from)} toPos={positions.get(edge.to)} />
         {/if}
       {/each}
