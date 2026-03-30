@@ -10,17 +10,19 @@ Visual design knowledge graph. Maps architecture, flows, pipelines, and decision
 
 ## Bootstrap
 
-The plugin auto-creates `.code-canvas/` and starts the server at session start. To populate an empty canvas:
+When `/canvas generate` is called and no `.code-canvas/` exists yet:
 
-1. Read the project's specs, docs, or codebase structure
-2. Design nodes (components/modules), edges (dependencies/data flows), and at least one view
-3. POST all events via the batch endpoint: `curl -X POST http://localhost:<port>/api/events/batch -H 'Content-Type: application/json' -d '[...events...]'`
-4. Open the canvas: `open http://localhost:<port>`
+1. Create the directory: `mkdir -p .code-canvas`
+2. Create empty events file: `touch .code-canvas/events.jsonl`
+3. Start the server: `node "${CLAUDE_PLUGIN_ROOT}/server/index.js" --project-dir .`
+   - The server auto-discovers a free port (9100-9299) and writes `.code-canvas/.server-info`
+   - Run in background: append `&` or use `disown`
+4. Read the project's specs, docs, or codebase structure
+5. Design nodes, edges, and views (see "Generating a Canvas" below)
+6. POST all events: `curl -X POST http://localhost:<port>/api/events/batch -H 'Content-Type: application/json' -d '[...events...]'`
+7. Open the canvas: `open http://localhost:<port>`
 
-The server URL is provided in the session context above. If you need to restart it manually:
-```
-node "${CLAUDE_PLUGIN_ROOT}/server/index.js" --project-dir .
-```
+If `.code-canvas/` already exists, the server URL is in the session context above.
 
 ## Commands
 

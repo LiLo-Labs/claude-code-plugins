@@ -1,25 +1,33 @@
 #!/usr/bin/env node
 import {
-  findProjectDir, findGitRoot, initCanvasDir,
+  findProjectDir,
   readEvents, replayState, generateL0, ensureServer,
 } from './lib/canvas-client.js';
 
 const pluginRoot = process.env.CLAUDE_PLUGIN_ROOT || new URL('..', import.meta.url).pathname;
 
 async function main() {
-  // Find existing .code-canvas/ or bootstrap one at git root
-  let projectDir = findProjectDir();
+  // Only activate if this project already has a .code-canvas/ directory.
+  // Don't auto-create — let /canvas generate handle bootstrap.
+  const projectDir = findProjectDir();
+
   if (!projectDir) {
-    const gitRoot = findGitRoot();
-    if (!gitRoot) { process.stdout.write('{}'); return; }
-    projectDir = initCanvasDir(gitRoot);
+    // No canvas yet — just tell Claude the commands exist
+    const context = `## Code Canvas Available
+
+Use \`/canvas generate\` to create a design canvas for this project. The canvas maps architecture, decisions, and progress as an interactive diagram.`;
+
+    process.stdout.write(JSON.stringify({
+      hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: context },
+    }));
+    return;
   }
 
+  // Canvas exists — full context injection
   const events = readEvents(projectDir);
   const state = replayState(events);
   const isEmpty = state.nodes.size === 0;
 
-  // Always start the server
   let serverUrl = '';
   try {
     const url = await ensureServer(projectDir, pluginRoot);
@@ -33,7 +41,7 @@ async function main() {
     : generateL0(state);
 
   const bootstrap = isEmpty
-    ? `\n\n### Getting Started\nThis project has an empty design canvas. Use \`/canvas generate\` to analyze the codebase and create an architecture diagram.\n\nWhen generating:\n- Each tab tells a story (data flow, components, deployment) — don't dump everything on one tab\n- Every node on a tab MUST have at least one edge — no floating nodes\n- Include a \`description\` on each view explaining what the diagram shows\n- Set real statuses with node.status events (default is "planned")\n- Include \`files\` glob patterns on nodes so edits auto-track progress\n- Keep tabs focused: 4-8 nodes ideal, connected nodes adjacent`
+    ? `\n\n### Getting Started\nUse \`/canvas generate\` to analyze the codebase and create an architecture diagram.\n\nWhen generating:\n- Each tab tells a story (data flow, components, deployment) — don't dump everything on one tab\n- Every node on a tab MUST have at least one edge — no floating nodes\n- Include a \`description\` on each view explaining what the diagram shows\n- Set real statuses with node.status events (default is "planned")\n- Include \`files\` glob patterns on nodes so edits auto-track progress\n- Keep tabs focused: 4-8 nodes ideal, connected nodes adjacent`
     : '';
 
   const context = `## Code Canvas Active
