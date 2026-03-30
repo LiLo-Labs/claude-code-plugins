@@ -37,6 +37,7 @@
   // Status badge text
   const badgeText = $derived(node.status === 'in-progress' ? 'in prog' : node.status);
   const badgeW = $derived(badgeText.length * 6.5 + 16);
+  const depthLabel = $derived((node.depth || 'module')[0].toUpperCase());
 </script>
 
 <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
@@ -104,9 +105,13 @@
     font-size="10" font-weight="600"
   >{badgeText}</text>
 
+  <!-- Depth badge (top left) -->
+  <rect x={pos.x + 8} y={pos.y + 6} width="18" height="16" rx="4" fill={dc} opacity=".25" />
+  <text x={pos.x + 17} y={pos.y + 17} text-anchor="middle" fill={dc} font-size="10" font-weight="600">{depthLabel}</text>
+
   <!-- Workaround warning -->
   {#if node.hasWorkaround}
-    <text x={pos.x + 12} y={pos.y + 16} fill="#f97316" font-size="13">&#9888;</text>
+    <text x={pos.x + 32} y={pos.y + 17} fill="#f97316" font-size="12">&#9888;</text>
   {/if}
 
   <!-- Status pill already shows "done" — no redundant checkmark needed -->

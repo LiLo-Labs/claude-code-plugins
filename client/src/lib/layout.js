@@ -44,10 +44,10 @@ export function computeLayout(tabNodes, savedPositions = {}) {
     const rowOffset = (totalW - rowW) / 2;
     const autoX = GRID.pad + rowOffset + col * (GRID.nodeW + GRID.colGap);
 
-    // Node can span multiple columns for wider cards
+    // Node size — span for width, height override, or depth-based default
     const span = tn.span || 1;
     const nodeW = span > 1 ? span * GRID.nodeW + (span - 1) * GRID.colGap : GRID.nodeW;
-    const nodeH = tn.height || GRID.nodeH;
+    const nodeH = tn.height || GRID.nodeH;  // tabs can override per-node
 
     const saved = savedPositions[tn.nodeId || tn.id];
     const x = saved ? saved.x : autoX;

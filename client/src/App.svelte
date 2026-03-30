@@ -156,6 +156,16 @@
       />
 
       <Canvas>
+        <!-- Tab story overlay — visible context for what this diagram shows -->
+        {#if activeTab?.story}
+          <foreignObject x="12" y="12" width="420" height="60">
+            <div xmlns="http://www.w3.org/1999/xhtml" style="background: var(--bg-s); border: 1px solid var(--bdr); border-radius: 8px; padding: 8px 14px; font-size: 12px; color: var(--tx-m); font-family: system-ui;">
+              <strong style="color: var(--tx); font-size: 13px;">{activeTab.name}</strong><br/>
+              {activeTab.story}
+            </div>
+          </foreignObject>
+        {/if}
+
         <!-- Arrow markers -->
         <defs>
           {#each edgeColors as color}
