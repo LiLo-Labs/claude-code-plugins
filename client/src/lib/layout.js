@@ -10,10 +10,10 @@
 
 export const GRID = {
   nodeW: 300,
-  nodeH: 70,
-  colGap: 80,
-  rowGap: 80,
-  pad: 80,
+  nodeH: 80,
+  colGap: 120,
+  rowGap: 100,
+  pad: 100,
 };
 
 /**

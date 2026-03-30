@@ -4,6 +4,7 @@
   import { getInitialTheme, setTheme, toggleTheme } from './lib/theme.js';
   import { appState, loadFromServer } from './lib/state.svelte.js';
   import { computeLayout, getAncestors } from './lib/layout.js';
+  import { createDragState, toSvgPoint } from './lib/drag.js';
   import Canvas from './components/Canvas.svelte';
   import NodeLeaf from './components/NodeLeaf.svelte';
   import EdgeLine from './components/EdgeLine.svelte';
@@ -11,6 +12,9 @@
   import DetailPanel from './components/DetailPanel.svelte';
 
   let theme = $state('dark');
+  let savedPositions = $state({}); // user drag overrides: { nodeId: {x, y} }
+  let drag = $state(createDragState());
+  let canvasComponent = $state(null);
 
   onMount(async () => {
     theme = getInitialTheme();
@@ -25,8 +29,35 @@
   }
   const graphState = $derived(getGraphState());
 
-  // Grid-based layout from node row/col data
-  const activePositions = $derived(computeLayout(graphState.nodes));
+  // Grid layout + user drag overrides
+  const activePositions = $derived(computeLayout(graphState.nodes, savedPositions));
+
+  // Drag handlers
+  function startDrag(nodeId, e) {
+    const svgEl = canvasComponent?.getSvgEl?.() || document.querySelector('.canvas-svg');
+    if (!svgEl) return;
+    const pt = toSvgPoint(e, svgEl);
+    const pos = activePositions.get(nodeId);
+    if (!pos) return;
+    drag = { active: true, nodeId, startX: pt.x, startY: pt.y, origX: pos.x, origY: pos.y };
+  }
+
+  function handleMouseMove(e) {
+    if (!drag.active) return;
+    const svgEl = document.querySelector('.canvas-svg');
+    if (!svgEl) return;
+    const pt = toSvgPoint(e, svgEl);
+    const dx = pt.x - drag.startX;
+    const dy = pt.y - drag.startY;
+    savedPositions = { ...savedPositions, [drag.nodeId]: { x: drag.origX + dx, y: drag.origY + dy } };
+  }
+
+  function handleMouseUp() {
+    if (drag.active) {
+      drag = createDragState();
+      // TODO: persist savedPositions to server layout API
+    }
+  }
   const unresolvedCount = $derived(graphState.comments.filter(c => !c.resolved).length);
   const selectedNode = $derived(
     appState.selectedIds.size === 1
@@ -55,6 +86,8 @@
 
   const viewModes = ['Canvas', 'Timeline', 'Diff', 'Story'];
 </script>
+
+<svelte:window onmousemove={handleMouseMove} onmouseup={handleMouseUp} />
 
 <div class="layout">
   <!-- Topbar -->
@@ -118,6 +151,7 @@
           isSelected={appState.selectedIds.has(nodeId)}
           comments={graphState.comments.filter(c => c.target === nodeId && !c.resolved)}
           onselect={selectNode}
+          onstartdrag={startDrag}
         />
       {/each}
     </Canvas>
