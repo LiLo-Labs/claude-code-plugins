@@ -13,7 +13,7 @@ function main() {
     const l1 = generateL1(state);
     context = `## Design Canvas — Current Structure\n\n${l1}\n\nReview this structure before planning. Use \`/canvas\` to open in browser.`;
   } else {
-    context = 'This project has a design canvas but it\'s empty. Use `/canvas generate` to populate it from a spec or codebase analysis.';
+    context = '## Design Canvas — Empty\n\nA design canvas exists but has no nodes yet. Use `/canvas generate` to analyze the codebase and create an architecture diagram before planning.';
   }
 
   process.stdout.write(JSON.stringify({

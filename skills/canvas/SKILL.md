@@ -8,6 +8,20 @@ user-invocable: true
 
 Visual design knowledge graph. Maps architecture, flows, pipelines, and decisions as an interactive node-and-edge diagram in the browser. Event-sourced — every change is an immutable event in `.code-canvas/events.jsonl`.
 
+## Bootstrap
+
+The plugin auto-creates `.code-canvas/` and starts the server at session start. To populate an empty canvas:
+
+1. Read the project's specs, docs, or codebase structure
+2. Design nodes (components/modules), edges (dependencies/data flows), and at least one view
+3. POST all events via the batch endpoint: `curl -X POST http://localhost:<port>/api/events/batch -H 'Content-Type: application/json' -d '[...events...]'`
+4. Open the canvas: `open http://localhost:<port>`
+
+The server URL is provided in the session context above. If you need to restart it manually:
+```
+node "${CLAUDE_PLUGIN_ROOT}/server/index.js" --project-dir .
+```
+
 ## Commands
 
 | Command | Behavior |

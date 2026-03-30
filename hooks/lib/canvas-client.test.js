@@ -5,6 +5,7 @@ import os from 'node:os';
 import {
   readEvents, replayState, generateL0, generateL1,
   findNodesForFile, getServerUrl, findProjectDir,
+  findGitRoot, initCanvasDir,
 } from './canvas-client.js';
 
 let tmpDir;
@@ -196,5 +197,38 @@ describe('findProjectDir', () => {
     const noCanvas = fs.mkdtempSync(path.join(os.tmpdir(), 'no-canvas-'));
     expect(findProjectDir(noCanvas)).toBeNull();
     fs.rmSync(noCanvas, { recursive: true, force: true });
+  });
+});
+
+describe('initCanvasDir', () => {
+  it('creates .code-canvas/ and events.jsonl when missing', () => {
+    const bare = fs.mkdtempSync(path.join(os.tmpdir(), 'canvas-bare-'));
+    initCanvasDir(bare);
+    expect(fs.existsSync(path.join(bare, '.code-canvas'))).toBe(true);
+    expect(fs.existsSync(path.join(bare, '.code-canvas', 'events.jsonl'))).toBe(true);
+    expect(fs.readFileSync(path.join(bare, '.code-canvas', 'events.jsonl'), 'utf-8')).toBe('');
+    fs.rmSync(bare, { recursive: true, force: true });
+  });
+
+  it('does not overwrite existing events.jsonl', () => {
+    const existing = path.join(tmpDir, '.code-canvas', 'events.jsonl');
+    fs.writeFileSync(existing, '{"type":"node.created"}\n');
+    initCanvasDir(tmpDir);
+    expect(fs.readFileSync(existing, 'utf-8')).toBe('{"type":"node.created"}\n');
+  });
+});
+
+describe('findGitRoot', () => {
+  it('finds .git in parent dir', () => {
+    // We're running from code-canvas-plugin which is a git repo
+    const root = findGitRoot(path.join(process.cwd(), 'hooks', 'lib'));
+    expect(root).toBeTruthy();
+    expect(fs.existsSync(path.join(root, '.git'))).toBe(true);
+  });
+
+  it('returns null when no .git found', () => {
+    const noGit = fs.mkdtempSync(path.join(os.tmpdir(), 'no-git-'));
+    expect(findGitRoot(noGit)).toBeNull();
+    fs.rmSync(noGit, { recursive: true, force: true });
   });
 });

@@ -21,6 +21,33 @@ export function findProjectDir(startDir = process.cwd()) {
   }
 }
 
+/**
+ * Find the git root of the current project (for bootstrapping .code-canvas/).
+ * Falls back to cwd if not in a git repo.
+ */
+export function findGitRoot(startDir = process.cwd()) {
+  let dir = path.resolve(startDir);
+  while (true) {
+    if (fs.existsSync(path.join(dir, '.git'))) return dir;
+    const parent = path.dirname(dir);
+    if (parent === dir) return null;
+    dir = parent;
+  }
+}
+
+/**
+ * Initialize .code-canvas/ in a project directory.
+ * Creates the directory and empty events.jsonl if they don't exist.
+ * Returns the project directory.
+ */
+export function initCanvasDir(projectDir) {
+  const canvasDir = path.join(projectDir, '.code-canvas');
+  if (!fs.existsSync(canvasDir)) fs.mkdirSync(canvasDir, { recursive: true });
+  const eventsFile = path.join(canvasDir, 'events.jsonl');
+  if (!fs.existsSync(eventsFile)) fs.writeFileSync(eventsFile, '');
+  return projectDir;
+}
+
 // ── Event Reading (file-based, no server needed) ──
 
 export function readEvents(projectDir) {
