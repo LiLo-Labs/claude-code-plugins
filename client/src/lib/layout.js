@@ -90,12 +90,35 @@ function buildElkGraph(nodes, edges, expandedSet) {
     elkNodes.push(buildNode(root));
   }
 
-  // Build edges — ELK handles routing around nodes
+  // Collect all node IDs that exist in the ELK graph
+  const elkNodeIds = new Set();
+  function collectIds(elkNode) {
+    elkNodeIds.add(elkNode.id);
+    if (elkNode.children) elkNode.children.forEach(collectIds);
+  }
+  elkNodes.forEach(collectIds);
+
+  // Find nearest ancestor that's in the ELK graph
+  function remapToVisible(nodeId) {
+    if (elkNodeIds.has(nodeId)) return nodeId;
+    const node = nodes.get(nodeId);
+    if (!node || !node.parent) return null;
+    return remapToVisible(node.parent);
+  }
+
+  // Build edges — remap endpoints to visible ancestors, skip self-loops
+  const seenEdges = new Set();
   for (const edge of edges.values()) {
+    const from = remapToVisible(edge.from);
+    const to = remapToVisible(edge.to);
+    if (!from || !to || from === to) continue;
+    const key = `${from}->${to}`;
+    if (seenEdges.has(key)) continue; // deduplicate remapped edges
+    seenEdges.add(key);
     elkEdges.push({
       id: edge.id,
-      sources: [edge.from],
-      targets: [edge.to],
+      sources: [from],
+      targets: [to],
       labels: edge.label ? [{ text: edge.label, width: edge.label.length * 7 + 28, height: 22 }] : [],
     });
   }
