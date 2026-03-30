@@ -47,11 +47,19 @@ async function findFreePort(start) {
 function readEvents() {
   const content = fs.readFileSync(eventsFile, 'utf-8').trim();
   if (!content) return [];
-  return content.split('\n').map(line => JSON.parse(line));
+  const events = [];
+  for (const line of content.split('\n')) {
+    if (!line.trim()) continue;
+    try { events.push(JSON.parse(line)); }
+    catch { /* skip malformed lines */ }
+  }
+  return events;
 }
 
+let eventCount = readEvents().length; // initialize from file
 function appendEvent(event) {
   fs.appendFileSync(eventsFile, JSON.stringify(event) + '\n');
+  eventCount++;
 }
 
 function sendJSON(res, data, status = 200) {
@@ -59,10 +67,14 @@ function sendJSON(res, data, status = 200) {
   res.end(JSON.stringify(data));
 }
 
+const MAX_BODY = 1024 * 1024; // 1 MB limit
 function readBody(req) {
   return new Promise(resolve => {
     let body = '';
-    req.on('data', chunk => { body += chunk; });
+    req.on('data', chunk => {
+      body += chunk;
+      if (body.length > MAX_BODY) { req.destroy(); resolve(null); }
+    });
     req.on('end', () => {
       try { resolve(JSON.parse(body)); }
       catch { resolve(null); }
@@ -96,16 +108,17 @@ const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${host}`);
   const p = url.pathname;
 
-  // CORS
+  // CORS — same-origin only (localhost). Static files served from same origin so CORS
+  // headers are only needed for dev mode (Vite proxy on different port).
   if (req.method === 'OPTIONS') {
     res.writeHead(204, {
-      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Origin': 'http://localhost:5173',
       'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
       'Access-Control-Allow-Headers': 'Content-Type',
     });
     res.end(); return;
   }
-  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Origin', 'http://localhost:5173');
 
   // GET /api/events
   if (p === '/api/events' && req.method === 'GET') {
@@ -124,7 +137,7 @@ const server = http.createServer(async (req, res) => {
   // GET /api/layouts/:viewId
   const layoutMatch = p.match(/^\/api\/layouts\/([a-zA-Z0-9_-]+)$/);
   if (layoutMatch && req.method === 'GET') {
-    const file = path.join(layoutsDir, layoutMatch[1] + '.json');
+    const file = path.resolve(layoutsDir, layoutMatch[1] + '.json');
     if (!file.startsWith(path.resolve(layoutsDir))) return sendJSON(res, { error: 'Invalid' }, 400);
     if (fs.existsSync(file)) {
       return sendJSON(res, JSON.parse(fs.readFileSync(file, 'utf-8')));
@@ -134,19 +147,18 @@ const server = http.createServer(async (req, res) => {
 
   // PUT /api/layouts/:viewId
   if (layoutMatch && req.method === 'PUT') {
-    const file = path.join(layoutsDir, layoutMatch[1] + '.json');
+    const file = path.resolve(layoutsDir, layoutMatch[1] + '.json');
     if (!file.startsWith(path.resolve(layoutsDir))) return sendJSON(res, { error: 'Invalid' }, 400);
     const body = await readBody(req);
     fs.writeFileSync(file, JSON.stringify(body, null, 2));
     return sendJSON(res, { saved: true });
   }
 
-  // GET /api/health
+  // GET /api/health — lightweight, no file read
   if (p === '/api/health' && req.method === 'GET') {
-    const events = readEvents();
     return sendJSON(res, {
       status: 'ok',
-      eventCount: events.length,
+      eventCount,
       project: path.basename(path.resolve(projectDir)),
     });
   }

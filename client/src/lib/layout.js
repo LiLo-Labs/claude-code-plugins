@@ -100,3 +100,14 @@ export function getAncestors(nodeId, nodes) {
   }
   return result;
 }
+
+/**
+ * Find the nearest visible ancestor for a node that has a position.
+ * Used for edge re-routing when an endpoint is collapsed.
+ */
+export function findVisibleEndpoint(nodeId, nodes, positions) {
+  if (positions.has(nodeId)) return nodeId;
+  const node = nodes.get(nodeId);
+  if (!node || !node.parent) return null;
+  return findVisibleEndpoint(node.parent, nodes, positions);
+}

@@ -45,7 +45,7 @@
     {#if node.hasWorkaround}
       <span class="warn">&#9888;</span>
     {/if}
-    <span class="dep" style="border-color: {dc}; color: {dc}">{node.depth[0].toUpperCase()}</span>
+    <span class="dep" style="border-color: {dc}; color: {dc}">{(node.depth?.[0] || '?').toUpperCase()}</span>
   </div>
 
   {#if isExpanded}
@@ -62,7 +62,7 @@
   .ti { display: flex; align-items: center; padding: 5px 12px; gap: 5px; cursor: pointer; font-size: 12px; min-height: 32px; transition: background 0.1s; }
   .ti:hover { background: rgba(59,130,246,.06); }
   .ti.selected { background: rgba(59,130,246,.12); }
-  .chev { width: 14px; font-size: 9px; color: var(--tx-d); text-align: center; flex-shrink: 0; transition: transform 0.15s; cursor: pointer; }
+  .chev { width: 14px; font-size: 10px; color: var(--tx-d); text-align: center; flex-shrink: 0; transition: transform 0.15s; cursor: pointer; }
   .chev.exp { transform: rotate(90deg); }
   .chev.leaf { visibility: hidden; }
   .dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }

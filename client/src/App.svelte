@@ -3,7 +3,7 @@
   import { onMount } from 'svelte';
   import { getInitialTheme, setTheme, toggleTheme } from './lib/theme.js';
   import { appState, loadFromServer } from './lib/state.svelte.js';
-  import { computeLayout, getAncestors } from './lib/layout.js';
+  import { computeLayout, getAncestors, findVisibleEndpoint } from './lib/layout.js';
   import Canvas from './components/Canvas.svelte';
   import NodeLeaf from './components/NodeLeaf.svelte';
   import NodeContainer from './components/NodeContainer.svelte';
@@ -25,7 +25,8 @@
     expandedNodes = new Set(expandedNodes);
   });
 
-  const graphState = $derived(appState.store.getState());
+  // Depend on storeVersion to trigger re-derivation when events are applied
+  const graphState = $derived((appState.storeVersion, appState.store.getState()));
   const positions = $derived(computeLayout(graphState.nodes, expandedNodes));
   const unresolvedCount = $derived(graphState.comments.filter(c => !c.resolved).length);
   const selectedNode = $derived(
@@ -33,10 +34,11 @@
       ? graphState.nodes.get([...appState.selectedIds][0]) || null
       : null
   );
-  const selectedAncestorIds = $derived(() => {
-    if (!selectedNode) return new Set();
-    return new Set(getAncestors(selectedNode.id, graphState.nodes).map(n => n.id));
-  });
+  const selectedAncestorIds = $derived(
+    selectedNode
+      ? new Set(getAncestors(selectedNode.id, graphState.nodes).map(n => n.id))
+      : new Set()
+  );
 
   // Unique edge colors for arrow markers
   const edgeColors = $derived([...new Set([...graphState.edges.values()].map(e => e.color))]);
@@ -131,7 +133,7 @@
             node={graphState.nodes.get(nodeId)}
             {pos}
             isSelected={appState.selectedIds.has(nodeId)}
-            isAncestor={selectedAncestorIds().has(nodeId)}
+            isAncestor={selectedAncestorIds.has(nodeId)}
             ontoggle={toggleExpand}
             ondeeptoggle={deepToggle}
             onselect={selectNode}
@@ -146,7 +148,7 @@
             node={graphState.nodes.get(nodeId)}
             {pos}
             isSelected={appState.selectedIds.has(nodeId)}
-            isAncestor={selectedAncestorIds().has(nodeId)}
+            isAncestor={selectedAncestorIds.has(nodeId)}
             children={[...graphState.nodes.values()].filter(n => n.parent === nodeId)}
             comments={graphState.comments.filter(c => c.target === nodeId && !c.resolved)}
             onselect={selectNode}
@@ -156,10 +158,12 @@
         {/if}
       {/each}
 
-      <!-- Edges — rendered on top of nodes so they're always visible -->
+      <!-- Edges — re-routed to nearest visible ancestor when endpoints are collapsed -->
       {#each [...graphState.edges.values()] as edge}
-        {#if positions.has(edge.from) && positions.has(edge.to)}
-          <EdgeLine {edge} fromPos={positions.get(edge.from)} toPos={positions.get(edge.to)} />
+        {@const visFrom = findVisibleEndpoint(edge.from, graphState.nodes, positions)}
+        {@const visTo = findVisibleEndpoint(edge.to, graphState.nodes, positions)}
+        {#if visFrom && visTo && visFrom !== visTo && positions.has(visFrom) && positions.has(visTo)}
+          <EdgeLine {edge} fromPos={positions.get(visFrom)} toPos={positions.get(visTo)} />
         {/if}
       {/each}
     </Canvas>
@@ -186,7 +190,11 @@
 
   <!-- Status line -->
   <footer class="sl">
-    <span class="ok">&#9679; Synced</span>
+    {#if appState.syncError}
+      <span class="err">&#9888; Sync failed</span>
+    {:else}
+      <span class="ok">&#9679; Synced</span>
+    {/if}
     <span class="inf">{graphState.nodes.size} nodes</span>
     <span class="inf">{graphState.edges.size} edges</span>
     <span class="inf">{graphState.eventCount} events</span>
@@ -221,5 +229,6 @@
 
   .sl { height: 22px; background: var(--bg-s); border-top: 1px solid var(--bdr); display: flex; align-items: center; padding: 0 14px; gap: 14px; font-size: 10px; flex-shrink: 0; }
   .ok { color: var(--gr); }
+  .err { color: var(--or); }
   .inf { color: var(--tx-d); }
 </style>

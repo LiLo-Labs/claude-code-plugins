@@ -86,7 +86,7 @@
   <!-- Comment badge -->
   {#if comments.length > 0}
     <circle cx={pos.x + 16} cy={pos.y + NH - 14} r="7" fill="#3b82f6" />
-    <text x={pos.x + 16} y={pos.y + NH - 10.5} text-anchor="middle" fill="white" font-size="9" font-weight="700">{comments.length}</text>
+    <text x={pos.x + 16} y={pos.y + NH - 10.5} text-anchor="middle" fill="white" font-size="10" font-weight="700">{comments.length}</text>
   {/if}
 
   <!-- Collapsed child preview -->

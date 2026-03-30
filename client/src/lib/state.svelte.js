@@ -2,6 +2,7 @@ import { EventStore } from './events.js';
 
 export const appState = $state({
   store: new EventStore(),
+  storeVersion: 0,  // bumped on every event to trigger Svelte re-derivation
   selectedIds: new Set(),
   activeView: 'all',
   activePanel: 'details',
@@ -14,6 +15,7 @@ export const appState = $state({
   sidebarOpen: true,
   panelOpen: true,
   commentsOpen: true,
+  syncError: false,
 });
 
 export async function loadFromServer() {
@@ -21,20 +23,26 @@ export async function loadFromServer() {
     const res = await fetch('/api/events');
     const events = await res.json();
     appState.store = EventStore.fromEvents(events);
+    appState.storeVersion++;
+    appState.syncError = false;
   } catch (err) {
     console.error('Failed to load events:', err);
+    appState.syncError = true;
   }
 }
 
 export async function emitEvent(event) {
   appState.store.apply(event);
+  appState.storeVersion++;  // trigger reactivity
   try {
     await fetch('/api/events', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(event),
     });
+    appState.syncError = false;
   } catch (err) {
     console.error('Failed to save event:', err);
+    appState.syncError = true;
   }
 }
