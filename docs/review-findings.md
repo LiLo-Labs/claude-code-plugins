@@ -1,5 +1,21 @@
 # Code Canvas — Review Findings (2026-03-30)
 
+## PRIORITY ZERO: Layout & Visual Overhaul (2026-03-30 late)
+
+The canvas looks like a filing cabinet, not an architecture diagram. Compare with the reference architecture diagram (Image 4 in conversation) which uses horizontal layout, centered text, colored borders, subtitles on nodes, and generous whitespace.
+
+**What needs to change:**
+1. **Horizontal sibling layout** — children sit side-by-side by default, not stacked vertically
+2. **Show subtitle on nodes** — progressive disclosure was wrong. The description IS the value. Show title + subtitle on every node.
+3. **Colored borders per depth** — not just a thin left bar. Full border in depth color (green, orange, purple, blue).
+4. **Centered text** — title and subtitle centered in node, not left-aligned
+5. **Variable node width** — wider for longer content, not fixed 280px
+6. **Top-to-bottom flow** — visual hierarchy reads naturally: system → domain → module
+7. **Much more whitespace** — 40-60px between siblings, generous container padding
+8. **Full layout rewrite authorized** — user said "rewrite completely if needed"
+
+Reference images saved in conversation history (screenshot 3 = current state, screenshot 4 = target look).
+
 Consolidated from: code-reviewer agent, Codex council member, UX reviewer, visual inspection via Playwright.
 
 ## Critical (Fix First)
