@@ -122,12 +122,12 @@
     >{comments.length}</text>
   {/if}
 
-  <!-- Confidence dots (4px, 10px spacing per spec) -->
+  <!-- Confidence dots (inside card bounds) -->
   {#each [0, 1, 2] as i}
     <circle
-      cx={pos.x + pos.w - 22 + i * 10}
-      cy={pos.y + pos.h - 12}
-      r="4" fill={i < node.confidence ? dc : 'var(--bdr)'}
+      cx={pos.x + pos.w - 30 + i * 9}
+      cy={pos.y + pos.h - 10}
+      r="3" fill={i < node.confidence ? dc : 'var(--bdr)'}
       opacity=".5"
     />
   {/each}
