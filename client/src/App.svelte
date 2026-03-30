@@ -77,6 +77,16 @@
   );
 
   function selectNode(nodeId, e) {
+    // If in connect mode, complete the connection
+    if (connectMode.active) {
+      if (connectMode.fromId !== nodeId) {
+        const label = prompt('Connection label:') || '';
+        activeTab.tabConnections = [...activeTab.tabConnections, { from: connectMode.fromId, to: nodeId, label, color: '#64748b' }];
+        appState.storeVersion++;
+      }
+      connectMode = { active: false, fromId: null };
+      return;
+    }
     if (e?.shiftKey) {
       const next = new Set(appState.selectedIds);
       next.has(nodeId) ? next.delete(nodeId) : next.add(nodeId);
@@ -122,18 +132,56 @@
   }
 
   // Context menu state
-  let ctxMenu = $state({ visible: false, x: 0, y: 0, node: null });
+  let ctxMenu = $state({ visible: false, x: 0, y: 0, node: null, isCanvas: false });
+  let connectMode = $state({ active: false, fromId: null }); // for drawing connections
 
   function handleContextMenu(nodeId, e) {
     e.preventDefault();
+    if (connectMode.active) {
+      // Complete the connection
+      const label = prompt('Connection label:') || '';
+      if (connectMode.fromId !== nodeId) {
+        activeTab.tabConnections = [...activeTab.tabConnections, { from: connectMode.fromId, to: nodeId, label, color: '#64748b' }];
+        appState.storeVersion++;
+      }
+      connectMode = { active: false, fromId: null };
+      return;
+    }
     const node = graphState.nodes.get(nodeId);
     if (!node) return;
-    ctxMenu = { visible: true, x: e.clientX, y: e.clientY, node };
+    ctxMenu = { visible: true, x: e.clientX, y: e.clientY, node, isCanvas: false };
+  }
+
+  function handleCanvasContextMenu(e) {
+    // Only fire if clicking on the background, not on a node
+    if (e.target.closest('[data-node]')) return;
+    e.preventDefault();
+    ctxMenu = { visible: true, x: e.clientX, y: e.clientY, node: null, isCanvas: true };
   }
 
   function handleCtxAction(action) {
     const node = ctxMenu.node;
+    const isCanvas = ctxMenu.isCanvas;
     ctxMenu = { ...ctxMenu, visible: false };
+
+    // Canvas-level actions (no node)
+    if (isCanvas) {
+      if (action === 'new-node') {
+        const label = prompt('Node name:');
+        if (!label) return;
+        const subtitle = prompt('Description (optional):') || '';
+        const nodeId = genId('node');
+        // Create in registry
+        emitEvent({ id: genId(), type: 'node.created', actor: 'user', data: { nodeId, label, subtitle, parent: null, depth: 'module', category: 'arch', confidence: 1 } });
+        // Add to current tab
+        if (activeTab) {
+          const maxRow = activeTab.tabNodes.reduce((m, tn) => Math.max(m, tn.row || 0), -1);
+          activeTab.tabNodes = [...activeTab.tabNodes, { nodeId, row: maxRow + 1, col: 0, cols: 3 }];
+        }
+      }
+      return;
+    }
+
     if (!node) return;
 
     if (action === 'comment') {
@@ -144,6 +192,8 @@
     } else if (action === 'details') {
       appState.selectedIds = new Set([node.id]);
       appState.panelOpen = true;
+    } else if (action === 'connect') {
+      connectMode = { active: true, fromId: node.id };
     } else if (action === 'remove-from-tab') {
       // Remove node from current tab's tabNodes
       if (activeTab) {
@@ -263,6 +313,13 @@
         }}
       />
 
+      <!-- Connect mode indicator -->
+      {#if connectMode.active}
+        <div class="connect-hint">Click target node to connect from "{graphState.nodes.get(connectMode.fromId)?.label}" — right-click to cancel</div>
+      {/if}
+
+      <!-- svelte-ignore a11y_no_static_element_interactions -->
+      <div oncontextmenu={handleCanvasContextMenu}>
       <Canvas>
         <!-- Tab story overlay — visible context for what this diagram shows -->
         {#if activeTab?.story}
@@ -315,6 +372,7 @@
           {/if}
         {/each}
       </Canvas>
+      </div>
     </div>
 
     <!-- Right panel -->
@@ -348,6 +406,7 @@
     x={ctxMenu.x} y={ctxMenu.y}
     visible={ctxMenu.visible}
     node={ctxMenu.node}
+    isCanvas={ctxMenu.isCanvas}
     onaction={handleCtxAction}
     onclose={() => ctxMenu = { ...ctxMenu, visible: false }}
   />
@@ -396,6 +455,7 @@
   .sh { padding: 10px 12px; border-bottom: 1px solid var(--bdr); }
   .si { display: flex; background: var(--bg); border: 1px solid var(--bdr); border-radius: 6px; padding: 9px 12px; }
   .si input { background: none; border: none; color: var(--tx); font-size: 12px; outline: none; width: 100%; }
+  .connect-hint { position: absolute; top: 50px; left: 50%; transform: translateX(-50%); z-index: 20; background: var(--ac); color: white; padding: 6px 14px; border-radius: 6px; font-size: 12px; pointer-events: none; }
   .add-to-tab-hint { font-size: 10px; color: var(--tx-d); text-align: center; padding: 6px 12px; border-top: 1px solid var(--bdr); }
   .rp { width: 280px; background: var(--gl); backdrop-filter: blur(16px); border-left: 1px solid var(--gl-b); flex-shrink: 0; }
 
