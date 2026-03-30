@@ -1,5 +1,5 @@
 <script>
-  let { nodes, expandedNodes, selectedIds, onselect, ontoggle, ondeeptoggle } = $props();
+  let { nodes, expandedNodes, selectedIds, onselect, ontoggle, ondeeptoggle, ondblclick } = $props();
 
   const DEPTH_COLORS = { system: '#3b82f6', domain: '#a855f7', module: '#14b8a6', 'interface': '#f97316' };
   const STATUS_COLORS = { done: '#10b981', 'in-progress': '#eab308', planned: '#3b82f6', placeholder: '#64748b' };
@@ -29,6 +29,7 @@
     class="ti" class:selected={isSelected}
     style="padding-left: {10 + depth * 16}px"
     onclick={() => onselect?.(node.id)}
+    ondblclick={() => ondblclick?.(node.id)}
   >
     {#if children.length > 0}
       <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->

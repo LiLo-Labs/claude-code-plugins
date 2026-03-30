@@ -26,6 +26,8 @@
     </div>
     <div class="ctx-sep"></div>
     <div class="ctx-item" onclick={() => onaction?.('details')}>&#128196; View Details</div>
+    <div class="ctx-sep"></div>
+    <div class="ctx-item" onclick={() => onaction?.('remove-from-tab')}>&#10005; Remove from Tab</div>
   </div>
 {/if}
 

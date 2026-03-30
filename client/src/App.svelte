@@ -144,6 +144,14 @@
     } else if (action === 'details') {
       appState.selectedIds = new Set([node.id]);
       appState.panelOpen = true;
+    } else if (action === 'remove-from-tab') {
+      // Remove node from current tab's tabNodes
+      if (activeTab) {
+        activeTab.tabNodes = activeTab.tabNodes.filter(tn => (tn.nodeId || tn.id) !== node.id);
+        activeTab.tabConnections = activeTab.tabConnections.filter(c => c.from !== node.id && c.to !== node.id);
+        // Force re-render
+        appState.storeVersion++;
+      }
     }
   }
 
@@ -200,7 +208,21 @@
           selectedIds={appState.selectedIds}
           onselect={(id) => selectNode(id)}
           ontoggle={toggleTreeNode}
+          ondblclick={(nodeId) => {
+            if (!activeTab) return;
+            // Don't add if already in tab
+            if (activeTab.tabNodes.some(tn => (tn.nodeId || tn.id) === nodeId)) return;
+            // Add to next available grid position
+            const maxRow = activeTab.tabNodes.reduce((m, tn) => Math.max(m, tn.row || 0), -1);
+            activeTab.tabNodes = [...activeTab.tabNodes, { nodeId, row: maxRow + 1, col: 0, cols: 3 }];
+            appState.storeVersion++;
+          }}
         />
+        {#if activeTab}
+          <div class="add-to-tab-hint">
+            Double-click a tree node to add it to this tab
+          </div>
+        {/if}
       </aside>
     {/if}
 
@@ -217,6 +239,20 @@
       <ViewTabs
         views={tabs}
         activeViewId={activeTab?.id || ''}
+        oncreate={() => {
+          const name = prompt('Tab name:');
+          if (!name) return;
+          const viewId = 'tab-' + Date.now();
+          emitEvent({
+            id: genId(), type: 'view.created', actor: 'user',
+            data: { viewId, name, story: '', tabNodes: [], tabConnections: [] },
+          });
+          // Switch to new tab after a tick
+          setTimeout(() => {
+            const newIdx = graphState.views.findIndex(v => v.id === viewId);
+            if (newIdx >= 0) activeTabIdx = newIdx;
+          }, 100);
+        }}
         onswitch={(id) => {
           activeTabIdx = tabs.findIndex(t => t.id === id);
           if (activeTabIdx < 0) activeTabIdx = 0;
@@ -360,6 +396,7 @@
   .sh { padding: 10px 12px; border-bottom: 1px solid var(--bdr); }
   .si { display: flex; background: var(--bg); border: 1px solid var(--bdr); border-radius: 6px; padding: 9px 12px; }
   .si input { background: none; border: none; color: var(--tx); font-size: 12px; outline: none; width: 100%; }
+  .add-to-tab-hint { font-size: 10px; color: var(--tx-d); text-align: center; padding: 6px 12px; border-top: 1px solid var(--bdr); }
   .rp { width: 280px; background: var(--gl); backdrop-filter: blur(16px); border-left: 1px solid var(--gl-b); flex-shrink: 0; }
 
   /* CommentBar component handles its own styling */

@@ -3,7 +3,7 @@
    * ViewTabs — tab strip matching the study-tutor canvas style.
    * Each tab is an authored diagram, not a filter.
    */
-  let { views = [], activeViewId = '', onswitch } = $props();
+  let { views = [], activeViewId = '', onswitch, oncreate } = $props();
 </script>
 
 <div class="tab-bar">
@@ -13,6 +13,7 @@
       onclick={() => onswitch?.(view.id)}
     >{i + 1}. {view.name}</button>
   {/each}
+  <button class="tab-btn add-tab" onclick={oncreate}>+</button>
 </div>
 
 <style>
@@ -29,4 +30,6 @@
   }
   .tab-btn:hover { background: var(--bg-e); color: var(--tx); }
   .tab-btn.active { background: var(--bg); color: var(--ac); border-color: var(--bdr); font-weight: 600; }
+  .add-tab { color: var(--tx-d); font-size: 16px; padding: 6px 14px; }
+  .add-tab:hover { color: var(--ac); }
 </style>
