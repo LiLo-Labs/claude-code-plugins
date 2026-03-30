@@ -192,7 +192,7 @@
     {#if appState.sidebarOpen}
       <aside class="sb">
         <div class="sh">
-          <div class="si"><input type="text" placeholder="Search... (\u2318K)" bind:value={appState.searchQuery} /></div>
+          <div class="si"><input type="text" placeholder="Search... (⌘K)" bind:value={appState.searchQuery} /></div>
         </div>
         <TreeView
           nodes={graphState.nodes}
@@ -298,9 +298,10 @@
   <!-- Comment bar -->
   <CommentBar
     comments={graphState.comments}
+    nodes={graphState.nodes}
     onresolve={handleResolveComment}
     ondelete={handleDeleteComment}
-    onnavigate={(nodeId) => { appState.selectedIds = new Set([nodeId]); }}
+    onnavigate={(nodeId) => { appState.selectedIds = new Set([nodeId]); appState.panelOpen = true; }}
   />
 
   <!-- Context menu -->
