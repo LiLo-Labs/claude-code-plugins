@@ -74,11 +74,28 @@ All events use envelope: `{ id, ts, type, actor, data }`
 | `/api/layouts/:viewId` | GET/PUT | Node positions per view |
 | `/api/health` | GET | Server health |
 
+## Generating a Canvas
+
+When running `/canvas generate`, analyze the codebase and create a meaningful architecture map:
+
+**Nodes:** Each node is an architectural component. Include `files` glob patterns so the plugin can auto-track edits.
+
+**Edges:** Every node on a tab MUST have at least one connection. If a node has no edges, it doesn't belong on that tab. Edges show real relationships: data flows, dependencies, API calls.
+
+**Views/Tabs:** Each tab tells a different story about the system. Don't dump everything on one tab.
+- Think about what perspectives matter: data flow, component hierarchy, deployment, domain boundaries
+- Each tab has a `description` explaining what this diagram shows (displayed as a header overlay)
+- A node can appear on multiple tabs with different connections
+- Keep tabs focused: 4-8 nodes per tab is ideal, 10+ gets cluttered
+
+**Layout:** Use `row`/`col` grid coordinates. Column 0 is leftmost. Keep columns 0-2 for most diagrams (wider spreads require zooming out). Place connected nodes adjacent to each other.
+
+**Status:** Use `node.status` events after creation to set the real status. The default is `planned` — explicitly set `done`, `in-progress`, etc.
+
 ## Guidelines
 
 - Use `actor: "claude"` when posting events
 - Generate meaningful IDs: `n_<slug>`, `e_<from>_<to>`, `v_<slug>`
-- When generating from a spec, create at least one view/tab with positioned `tabNodes` (row/col grid) and `tabConnections`
 - Populate `files` patterns on nodes when the file mapping is clear
 - Prefer updating existing nodes over creating duplicates
 - After completing significant work, proactively update the canvas: change node statuses, record decisions with `decision.recorded`, update file patterns, add comments noting deviations

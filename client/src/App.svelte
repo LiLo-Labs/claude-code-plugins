@@ -322,11 +322,11 @@
       <div oncontextmenu={handleCanvasContextMenu}>
       <Canvas>
         <!-- Tab story overlay — visible context for what this diagram shows -->
-        {#if activeTab?.story}
+        {#if activeTab?.story || activeTab?.description}
           <foreignObject x="12" y="12" width="440" height="80">
             <div xmlns="http://www.w3.org/1999/xhtml" style="background: var(--bg-s); border: 1px solid var(--bdr); border-radius: 8px; padding: 10px 14px; font-size: 12px; color: var(--tx-m); font-family: system-ui; line-height: 1.4; max-width: 420px;">
               <strong style="color: var(--tx); font-size: 13px; display: block; margin-bottom: 3px;">{activeTab.name}</strong>
-              {activeTab.story}
+              {activeTab.story || activeTab.description}
             </div>
           </foreignObject>
         {/if}

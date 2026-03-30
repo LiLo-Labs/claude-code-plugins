@@ -33,7 +33,7 @@ async function main() {
     : generateL0(state);
 
   const bootstrap = isEmpty
-    ? `\n\n### Getting Started\nThis project has an empty design canvas. To populate it:\n1. Use \`/canvas generate\` to analyze the codebase and create an architecture diagram\n2. Or start manually: POST node/edge/view events to the API below\n\nThe canvas will automatically track your work once nodes have \`files\` patterns mapped to source files.`
+    ? `\n\n### Getting Started\nThis project has an empty design canvas. Use \`/canvas generate\` to analyze the codebase and create an architecture diagram.\n\nWhen generating:\n- Each tab tells a story (data flow, components, deployment) — don't dump everything on one tab\n- Every node on a tab MUST have at least one edge — no floating nodes\n- Include a \`description\` on each view explaining what the diagram shows\n- Set real statuses with node.status events (default is "planned")\n- Include \`files\` glob patterns on nodes so edits auto-track progress\n- Keep tabs focused: 4-8 nodes ideal, connected nodes adjacent`
     : '';
 
   const context = `## Code Canvas Active
