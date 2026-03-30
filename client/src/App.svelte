@@ -139,13 +139,6 @@
         {/if}
       {/each}
 
-      <!-- Edges — only render when BOTH endpoints are visible on canvas -->
-      {#each [...graphState.edges.values()] as edge}
-        {#if positions.has(edge.from) && positions.has(edge.to) && (positions.get(edge.from).isContainer || !positions.get(edge.from).hidden) && (positions.get(edge.to).isContainer || !positions.get(edge.to).hidden)}
-          <EdgeLine {edge} fromPos={positions.get(edge.from)} toPos={positions.get(edge.to)} />
-        {/if}
-      {/each}
-
       <!-- Leaf nodes -->
       {#each [...positions.entries()] as [nodeId, pos]}
         {#if !pos.isContainer}
@@ -160,6 +153,13 @@
             ontoggle={toggleExpand}
             ondeeptoggle={deepToggle}
           />
+        {/if}
+      {/each}
+
+      <!-- Edges — rendered on top of nodes so they're always visible -->
+      {#each [...graphState.edges.values()] as edge}
+        {#if positions.has(edge.from) && positions.has(edge.to)}
+          <EdgeLine {edge} fromPos={positions.get(edge.from)} toPos={positions.get(edge.to)} />
         {/if}
       {/each}
     </Canvas>
