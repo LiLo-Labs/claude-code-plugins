@@ -48,7 +48,7 @@
 
   // Drag handlers
   function startDrag(nodeId, e) {
-    const svgEl = canvasComponent?.getSvgEl?.() || document.querySelector('.canvas-svg');
+    const svgEl = document.querySelector('.canvas-svg');
     if (!svgEl) return;
     const pt = toSvgPoint(e, svgEl);
     const pos = activePositions.get(nodeId);
