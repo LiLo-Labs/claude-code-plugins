@@ -93,7 +93,36 @@ Buttons change state but render path is Canvas-only. Search bound but not used.
 `node.depth[0].toUpperCase()` throws if depth is empty.
 **Fix:** Guard with `(node.depth?.[0] || '?').toUpperCase()`.
 
+### F19. Comment badge font 9px — below 10px minimum
+**File:** `NodeLeaf.svelte:89`, `TreeView.svelte:65`
+Tree chevron also 9px. Spec says nothing below 10px.
+
+### F20. Edge label pill 24px/rx12 — spec says 20px/rx10
+**File:** `EdgeLine.svelte:53,72`
+
+### F21. Container header label y-offset 4px too low
+**File:** `NodeContainer.svelte:34` — placed at y+24, should be y+20 for 40px header center.
+
+### F22. Workaround icon overlaps status badge
+**File:** `NodeLeaf.svelte:52,72` — both positioned at right edge, overlap for short status words.
+
+### F23. Bottom-row element crowding
+**File:** `NodeLeaf.svelte:82-98` — confidence dots, child preview dots, and comment badge all compete for the same y-band.
+
+### F24. Spec section 2.3 says 210x74 but section 6.1 says 280x90
+Internal spec conflict. Code follows 6.1 (correct). Strike section 2.3 node dimensions.
+
+### F25. Completeness bar not rendered on canvas nodes
+Spec 2.3 describes it, data exists in model and panel, but no SVG bar on nodes.
+
+### F26. Parent-child structural dotted edges not implemented
+Spec 2.4 mechanism 2 — light dotted lines from parent to children. Only data-flow edges render.
+
+### F27. Color banding (sibling tint inheritance) not implemented
+Spec 2.4 mechanism 3 — children should inherit parent's depth color tint. All use uniform `var(--bg-n)`.
+
 ## Low
 
-### F19. Port scan capped at 200, no stale server-info cleanup
-### F20. A11y warnings globally suppressed
+### F28. Port scan capped at 200, no stale server-info cleanup
+### F29. A11y warnings globally suppressed
+### F30. savedPositions parameter in layout.js never passed by caller
