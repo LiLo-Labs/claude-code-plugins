@@ -22,6 +22,14 @@
     theme = getInitialTheme();
     setTheme(theme);
     await loadFromServer();
+    // Load saved positions for first tab
+    const state = appState.store.getState();
+    if (state.views.length > 0) {
+      try {
+        const r = await fetch(`/api/layouts/${state.views[0].id}`);
+        savedPositions = await r.json() || {};
+      } catch {}
+    }
   });
 
   // Reactive graph state
@@ -91,7 +99,16 @@
     savedPositions = { ...savedPositions, [drag.nodeId]: { x: drag.origX + (pt.x - drag.startX), y: drag.origY + (pt.y - drag.startY) } };
   }
   function handleMouseUp() {
-    if (drag.active) drag = createDragState();
+    if (drag.active) {
+      drag = createDragState();
+      // Persist to server
+      const viewId = activeTab?.id || 'default';
+      fetch(`/api/layouts/${viewId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(savedPositions),
+      }).catch(() => {});
+    }
   }
 
   // Tree
@@ -152,15 +169,22 @@
       <ViewTabs
         views={tabs}
         activeViewId={activeTab?.id || ''}
-        onswitch={(id) => { activeTabIdx = tabs.findIndex(t => t.id === id); if (activeTabIdx < 0) activeTabIdx = 0; savedPositions = {}; }}
+        onswitch={(id) => {
+          activeTabIdx = tabs.findIndex(t => t.id === id);
+          if (activeTabIdx < 0) activeTabIdx = 0;
+          // Load saved positions for this tab
+          fetch(`/api/layouts/${id}`).then(r => r.json()).then(data => {
+            savedPositions = data || {};
+          }).catch(() => { savedPositions = {}; });
+        }}
       />
 
       <Canvas>
         <!-- Tab story overlay — visible context for what this diagram shows -->
         {#if activeTab?.story}
-          <foreignObject x="12" y="12" width="420" height="60">
-            <div xmlns="http://www.w3.org/1999/xhtml" style="background: var(--bg-s); border: 1px solid var(--bdr); border-radius: 8px; padding: 8px 14px; font-size: 12px; color: var(--tx-m); font-family: system-ui;">
-              <strong style="color: var(--tx); font-size: 13px;">{activeTab.name}</strong><br/>
+          <foreignObject x="12" y="12" width="440" height="80">
+            <div xmlns="http://www.w3.org/1999/xhtml" style="background: var(--bg-s); border: 1px solid var(--bdr); border-radius: 8px; padding: 10px 14px; font-size: 12px; color: var(--tx-m); font-family: system-ui; line-height: 1.4; max-width: 420px;">
+              <strong style="color: var(--tx); font-size: 13px; display: block; margin-bottom: 3px;">{activeTab.name}</strong>
               {activeTab.story}
             </div>
           </foreignObject>
