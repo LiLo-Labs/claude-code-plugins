@@ -139,8 +139,16 @@
       </aside>
     {/if}
 
-    <!-- Canvas with tab bar — single unified tab strip (G6) -->
+    <!-- Canvas with tab bar -->
     <div class="canvas-col">
+      <!-- Left edge toggle -->
+      <button class="edge-toggle left" onclick={() => appState.sidebarOpen = !appState.sidebarOpen}>
+        {appState.sidebarOpen ? '\u2039' : '\u203A'}
+      </button>
+      <!-- Right edge toggle -->
+      <button class="edge-toggle right" onclick={() => appState.panelOpen = !appState.panelOpen}>
+        {appState.panelOpen ? '\u203A' : '\u2039'}
+      </button>
       <ViewTabs
         views={tabs}
         activeViewId={activeTab?.id || ''}
@@ -236,7 +244,11 @@
   .zd { font-size: 11px; color: var(--tx-d); min-width: 36px; text-align: center; }
 
   .main { flex: 1; display: flex; min-height: 0; }
-  .canvas-col { flex: 1; display: flex; flex-direction: column; min-height: 0; min-width: 0; }
+  .canvas-col { flex: 1; display: flex; flex-direction: column; min-height: 0; min-width: 0; position: relative; }
+  .edge-toggle { position: absolute; top: 50%; z-index: 15; width: 16px; height: 44px; background: var(--bg-s); border: 1px solid var(--bdr); display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 11px; color: var(--tx-d); transition: .15s; }
+  .edge-toggle:hover { border-color: var(--ac); color: var(--ac); }
+  .edge-toggle.left { left: 0; border-radius: 0 4px 4px 0; border-left: none; transform: translateY(-50%); }
+  .edge-toggle.right { right: 0; border-radius: 4px 0 0 4px; border-right: none; transform: translateY(-50%); }
 
   .sb { width: 240px; background: var(--gl); backdrop-filter: blur(16px); border-right: 1px solid var(--gl-b); flex-shrink: 0; display: flex; flex-direction: column; }
   .sh { padding: 10px 12px; border-bottom: 1px solid var(--bdr); }
