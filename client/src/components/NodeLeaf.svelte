@@ -75,20 +75,20 @@
     rx="3" fill={dc} opacity=".6"
   />
 
-  <!-- Title (centered) -->
+  <!-- Title (centered, larger) -->
   <text
     x={pos.x + pos.w / 2} y={pos.y + 28}
     text-anchor="middle" fill={txtColor}
-    font-size="13" font-weight="600"
+    font-size="14" font-weight="600"
   >{node.label}</text>
 
-  <!-- Subtitle (centered, below — shown on node per study-tutor style) -->
+  <!-- Subtitle (centered, below — generous size) -->
   {#if node.subtitle}
     <text
       x={pos.x + pos.w / 2} y={pos.y + 46}
       text-anchor="middle" fill={txtColor}
-      font-size="10" opacity=".7"
-    >{node.subtitle.length > 38 ? node.subtitle.slice(0, 36) + '...' : node.subtitle}</text>
+      font-size="11" opacity=".7"
+    >{node.subtitle.length > 42 ? node.subtitle.slice(0, 40) + '...' : node.subtitle}</text>
   {/if}
 
   <!-- Status badge pill (G9) -->
@@ -108,10 +108,7 @@
     <text x={pos.x + 12} y={pos.y + 16} fill="#f97316" font-size="13">&#9888;</text>
   {/if}
 
-  <!-- Done checkmark -->
-  {#if node.status === 'done'}
-    <text x={pos.x + 12} y={pos.y + 16} fill="#10b981" font-size="13">&#10003;</text>
-  {/if}
+  <!-- Status pill already shows "done" — no redundant checkmark needed -->
 
   <!-- Comment badge with count -->
   {#if hasComments}
