@@ -53,4 +53,10 @@ post '{"id":"ev_41","ts":"2026-03-29T12:00:01Z","type":"decision.recorded","acto
 post '{"id":"ev_50","ts":"2026-03-29T13:00:00Z","type":"comment.added","actor":"user","data":{"commentId":"c1","target":"layout-e","targetLabel":"Layout Engine","text":"Grid-based from row/col — proven approach","actor":"user"}}'
 post '{"id":"ev_51","ts":"2026-03-29T13:00:01Z","type":"comment.added","actor":"claude","data":{"commentId":"c2","target":"hooks","targetLabel":"Hook System","text":"FileChanged hook needs filtering","actor":"claude"}}'
 
+# Views
+post '{"id":"ev_60","ts":"2026-03-29T14:00:00Z","type":"view.created","actor":"claude","data":{"viewId":"overview","name":"System Overview","description":"High-level architecture","filter":{"depths":["system","domain"]}}}'
+post '{"id":"ev_61","ts":"2026-03-29T14:00:01Z","type":"view.created","actor":"claude","data":{"viewId":"data-layer","name":"Data Layer","description":"Event store and graph engine","filter":{"nodeIds":["data","events","graph-e"]}}}'
+post '{"id":"ev_62","ts":"2026-03-29T14:00:02Z","type":"view.created","actor":"claude","data":{"viewId":"ui-layer","name":"UI Components","description":"Canvas rendering components","filter":{"nodeIds":["ui","nodes-r","edges-r","layout-e"]}}}'
+post '{"id":"ev_63","ts":"2026-03-29T14:00:03Z","type":"view.created","actor":"claude","data":{"viewId":"integration","name":"Integration","description":"Hooks, context, plugins","filter":{"nodeIds":["integ","hooks","ctx-lvl","views"]}}}'
+
 echo "Seeded $EVENTS_FILE with $(wc -l < "$EVENTS_FILE" | tr -d ' ') events"

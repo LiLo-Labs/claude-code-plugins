@@ -10,6 +10,7 @@
   import EdgeLine from './components/EdgeLine.svelte';
   import TreeView from './components/TreeView.svelte';
   import DetailPanel from './components/DetailPanel.svelte';
+  import ViewTabs from './components/ViewTabs.svelte';
 
   let theme = $state('dark');
   let savedPositions = $state({});
@@ -43,8 +44,42 @@
   }
   const graphState = $derived(getGraphState());
 
-  // Grid layout + user drag overrides
-  const activePositions = $derived(computeLayout(graphState.nodes, savedPositions));
+  // Active view filtering
+  let activeViewId = $state('all');
+
+  const activeView = $derived(
+    activeViewId === 'all' ? null : graphState.views.find(v => v.id === activeViewId)
+  );
+
+  // Filter nodes by active view
+  const visibleNodes = $derived(() => {
+    if (!activeView || !activeView.filter) return graphState.nodes;
+    const f = activeView.filter;
+    const filtered = new Map();
+    for (const [id, node] of graphState.nodes) {
+      if (f.nodeIds && !f.nodeIds.includes(id)) continue;
+      if (f.categories && !f.categories.includes(node.category)) continue;
+      if (f.depths && !f.depths.includes(node.depth)) continue;
+      if (f.statuses && !f.statuses.includes(node.status)) continue;
+      filtered.set(id, node);
+    }
+    return filtered;
+  });
+
+  // Filter edges — both endpoints must be visible
+  const visibleEdges = $derived(() => {
+    const nodes = visibleNodes();
+    const filtered = new Map();
+    for (const [id, edge] of graphState.edges) {
+      if (nodes.has(edge.from) && nodes.has(edge.to)) {
+        filtered.set(id, edge);
+      }
+    }
+    return filtered;
+  });
+
+  // Grid layout from visible nodes + user drag overrides
+  const activePositions = $derived(computeLayout(visibleNodes(), savedPositions));
 
   // Drag handlers
   function startDrag(nodeId, e) {
@@ -84,7 +119,7 @@
       : new Set()
   );
 
-  const edgeColors = $derived([...new Set([...graphState.edges.values()].map(e => e.color))]);
+  const edgeColors = $derived([...new Set([...visibleEdges().values()].map(e => e.color))]);
 
   function selectNode(nodeId, e) {
     if (e?.shiftKey) {
@@ -143,7 +178,13 @@
       </aside>
     {/if}
 
-    <!-- Canvas -->
+    <!-- Canvas area with view tabs -->
+    <div class="canvas-col">
+      <ViewTabs
+        views={graphState.views}
+        {activeViewId}
+        onswitch={(id) => activeViewId = id}
+      />
     <Canvas>
       <!-- Arrow markers -->
       <defs>
@@ -155,7 +196,7 @@
       </defs>
 
       <!-- Parent-child structural edges — only direct parent→child, very subtle -->
-      {#each [...graphState.nodes.values()] as node}
+      {#each [...visibleNodes().values()] as node}
         {#if node.parent && activePositions.has(node.id) && activePositions.has(node.parent)}
           {@const parentPos = activePositions.get(node.parent)}
           {@const childPos = activePositions.get(node.id)}
@@ -173,7 +214,7 @@
       {/each}
 
       <!-- Data/flow edges (drawn behind nodes) -->
-      {#each [...graphState.edges.values()] as edge}
+      {#each [...visibleEdges().values()] as edge}
         {#if activePositions.has(edge.from) && activePositions.has(edge.to)}
           <EdgeLine {edge} fromPos={activePositions.get(edge.from)} toPos={activePositions.get(edge.to)} />
         {/if}
@@ -191,6 +232,7 @@
         />
       {/each}
     </Canvas>
+    </div>
 
     <!-- Right panel -->
     {#if appState.panelOpen}
@@ -241,6 +283,7 @@
   .zd { font-size: 11px; color: var(--tx-d); min-width: 36px; text-align: center; }
 
   .main { flex: 1; display: flex; min-height: 0; }
+  .canvas-col { flex: 1; display: flex; flex-direction: column; min-height: 0; min-width: 0; }
   .sb { width: 260px; background: var(--gl); backdrop-filter: blur(16px); border-right: 1px solid var(--gl-b); flex-shrink: 0; display: flex; flex-direction: column; }
   .sh { padding: 10px 12px; border-bottom: 1px solid var(--bdr); }
   .si { display: flex; background: var(--bg); border: 1px solid var(--bdr); border-radius: 6px; padding: 9px 12px; }
