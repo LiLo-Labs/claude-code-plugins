@@ -115,7 +115,7 @@ Zero npm dependencies in hooks/. The server remains dependency-free.
 
 ### Server lifecycle
 
-- `ensureServer(projectDir, pluginRoot)` — Check `.code-canvas/.server-info` for PID, verify with `/api/health` ping. If dead or missing, spawn server as detached child process (`node <pluginRoot>/server/index.js` with cwd set to `projectDir`), poll health for up to 10s, return port. The server discovers its own port and writes `.server-info`.
+- `ensureServer(projectDir, pluginRoot)` — Check `.code-canvas/.server-info` for PID, verify with `GET /api/health` ping (canonical endpoint). If dead or missing, spawn server as detached child process (`node <pluginRoot>/server/index.js` with cwd set to `projectDir`), poll health for up to 10s, return port. The server discovers its own port and writes `.server-info`.
 - `getServerUrl(projectDir)` — Read `.server-info`, return `http://localhost:<port>` or null.
 - `stopServer(projectDir)` — Read PID from `.server-info`, send SIGTERM, delete file.
 
@@ -151,7 +151,7 @@ Zero npm dependencies in hooks/. The server remains dependency-free.
 
 ### File-to-node matching
 
-- `findNodesForFile(filePath, nodes)` — Iterate all nodes, check `filePath` against each node's `files` glob patterns using `glob-match.js`. Return array of matching node IDs.
+- `findNodesForFile(filePath, nodes)` — Iterate all nodes, check `filePath` against each node's `files` glob patterns using `glob-match.js`. Return array of matching node IDs. When a file matches multiple nodes, return all — a file can be relevant to multiple architectural components. Paths are normalized to forward slashes and matched relative to the project root.
 
 ### API helpers
 
@@ -210,8 +210,8 @@ After completing significant work, update the canvas:
 
 1. Find `.code-canvas/` — output `{}` and exit 0 if absent
 2. Read events, replay state
-3. If canvas has nodes:
-   > "A design canvas exists for this project with N nodes across M views. Consider reviewing it before planning. Use `/canvas` to open in browser."
+3. If canvas has nodes → inject L1 context (full structure) via `additionalContext`:
+   > "## Design Canvas — Current Structure\n\n<L1 listing of all nodes, edges, views, unresolved comments>\n\nReview this structure before planning. Use `/canvas` to open in browser."
 4. If canvas is empty:
    > "This project has a design canvas but it's empty. Use `/canvas generate` to populate it from a spec or codebase analysis."
 
@@ -222,7 +222,7 @@ After completing significant work, update the canvas:
 3. Find `.code-canvas/` — exit 0 silently if absent
 4. Read events.jsonl, replay state
 5. Match file path against node glob patterns via `findNodesForFile()`
-6. For each matching node where status is `planned`:
+6. For each matching node where status is `planned` (skip if already `in-progress` or `done` — idempotency):
    - Ensure server is running
    - POST `node.status` event: `{ nodeId, status: "in-progress", prev: "planned" }` with `actor: "system"`
 7. No stdout output (async hook, no context injection)
@@ -231,9 +231,10 @@ After completing significant work, update the canvas:
 
 1. Find `.code-canvas/.server-info` — exit if absent
 2. Read PID, verify process exists
-3. Send SIGTERM to server process
-4. Delete `.server-info`
-5. Exit cleanly
+3. Send SIGTERM to server process (server handles graceful shutdown)
+4. Exit cleanly (server removes `.server-info` on SIGTERM — don't race it)
+
+Note: The server is lightweight and idling is cheap. If multiple Claude sessions share the same project, the server stays alive until the last session's Stop fires. Since the server auto-starts on demand, killing it prematurely is harmless — the next session restarts it.
 
 ## SKILL.md
 
@@ -273,9 +274,12 @@ Code Canvas is a visual design knowledge graph. It maps architecture, flows, pip
 | `edge.created` | `edgeId, from, to, label, edgeType, color` |
 | `edge.updated` | `edgeId, ...changed fields` |
 | `edge.deleted` | `edgeId` |
-| `decision.recorded` | `nodeId, chosen, alternatives[], reason` |
+| `decision.recorded` | `nodeId, type (decision\|workaround), chosen, alternatives[], reason` |
 | `comment.added` | `commentId, target, targetLabel, text, actor` |
 | `comment.resolved` | `commentId` |
+| `comment.reopened` | `commentId` |
+| `comment.deleted` | `commentId` |
+| `layout.saved` | `viewId, positions: {nodeId: {x, y}}` |
 | `view.created` | `viewId, name, description, tabNodes[], tabConnections[]` |
 | `view.updated` | `viewId, ...changed fields` |
 
@@ -371,6 +375,13 @@ Add skills pointer to existing manifest:
   ...existing fields...
 }
 ```
+
+## Error Handling & Scale
+
+- **Server boot failure:** If `ensureServer()` fails (port conflict, build error), still output L0 context computed from the JSONL file. Log a warning in the context ("Canvas server failed to start — run `npm start` in the plugin directory to diagnose"). Don't block context injection.
+- **Missing events.jsonl:** If `.code-canvas/` exists but `events.jsonl` is absent or empty, treat as empty canvas (0 nodes). Don't error.
+- **Malformed events:** Skip unparseable JSONL lines with a warning count. Don't abort replay.
+- **Scale:** Current design replays the full JSONL on every hook invocation. This is fast for projects with <1000 events (typical). For larger projects, the `state.json` cache (already in the storage spec) can be used as a checkpoint — replay only events after the cached timestamp. This optimization is deferred to a future phase.
 
 ## Testing
 
