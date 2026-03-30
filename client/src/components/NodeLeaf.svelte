@@ -57,12 +57,12 @@
     oncontextmenu?.(node.id, e);
   }}
 >
-  <!-- Selection outline — bright and obvious -->
+  <!-- Selection outline — off-white, always visible -->
   {#if isSelected}
     <rect
       x={pos.x - 3} y={pos.y - 3}
       width={pos.w + 6} height={pos.h + 6}
-      rx="11" fill="none" stroke="#60a5fa"
+      rx="11" fill="none" stroke="#c8d8f0"
       stroke-width="3"
     />
   {/if}
@@ -75,11 +75,11 @@
     stroke={borderColor} stroke-width={borderW}
   />
 
-  <!-- Left depth color band (G10) -->
+  <!-- Subtle left edge accent -->
   <rect
     x={pos.x} y={pos.y + 1}
-    width="5" height={pos.h - 2}
-    rx="3" fill={dc} opacity=".6"
+    width="2" height={pos.h - 2}
+    rx="1" fill={txtColor} opacity=".3"
   />
 
   <!-- Title (centered, larger) -->

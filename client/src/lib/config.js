@@ -48,28 +48,28 @@ export const EDGE = {
   arrowHeight: 7,
 };
 
-// ── Depth Colors ──
+// ── Depth Colors (desaturated accents for badges, dots) ──
 export const DEPTH_COLORS = {
-  system: '#3b82f6',
-  domain: '#a855f7',
-  module: '#14b8a6',
-  'interface': '#f97316',
+  system: '#5580a8',
+  domain: '#7a5fa0',
+  module: '#3d8a85',
+  'interface': '#a06830',
 };
 
-// ── Depth Background Colors (very subtle tints, not saturated) ──
+// ── Depth Background Colors (barely off canvas #0f1117, subtle tint) ──
 export const DEPTH_BG_COLORS = {
-  system: '#1a1e2e',
-  domain: '#1e1a2a',
-  module: '#1a2228',
-  'interface': '#241e1a',
+  system: '#141928',
+  domain: '#1a1422',
+  module: '#121d1c',
+  'interface': '#1e1510',
 };
 
-// ── Depth Text Colors (tinted, readable on dark backgrounds) ──
+// ── Depth Text Colors (muted, readable, not neon) ──
 export const DEPTH_TEXT_COLORS = {
-  system: '#93c5fd',
-  domain: '#c9a8f5',
-  module: '#7ab8f5',
-  'interface': '#f5c87a',
+  system: '#7d9ec0',
+  domain: '#9e87c2',
+  module: '#6ba3a0',
+  'interface': '#b89060',
 };
 
 // ── Status Colors ──
