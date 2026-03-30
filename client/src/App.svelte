@@ -288,8 +288,12 @@
           node={selectedNode}
           nodes={graphState.nodes}
           store={appState.store}
+          comments={graphState.comments}
           onselect={(id) => selectNode(id)}
           onclose={() => appState.panelOpen = false}
+          onaddcomment={(node) => { commentModal = { visible: true, node }; }}
+          onresolve={handleResolveComment}
+          ondelete={handleDeleteComment}
         />
       </aside>
     {/if}
