@@ -1,48 +1,67 @@
 <script>
   /**
    * Container node — rendered when a parent is expanded.
-   * Shows: tinted background, header with label, status dot, collapse chevron.
+   * Shows a tinted background wrapping children, with a header bar
+   * containing the label, status dot, and collapse chevron.
+   *
+   * Border color matches the node's depth color.
    */
-  let { node, pos, isSelected = false, isAncestor = false, ontoggle, ondeeptoggle, onselect } = $props();
+  import { CONTAINER, depthColor, statusColor, depthTint } from '../lib/config.js';
 
-  const DEPTH_COLORS = { system: '#3b82f6', domain: '#a855f7', module: '#14b8a6', 'interface': '#f97316' };
-  const STATUS_COLORS = { done: '#10b981', 'in-progress': '#eab308', planned: '#3b82f6', placeholder: '#64748b' };
-  const TINTS = { system: 'rgba(59,130,246,', domain: 'rgba(168,85,247,', module: 'rgba(20,184,166,', 'interface': 'rgba(249,115,22,' };
+  let {
+    node,
+    pos,
+    isSelected = false,
+    isAncestor = false,
+    ontoggle,
+    ondeeptoggle,
+    onselect,
+  } = $props();
 
-  const dc = $derived(DEPTH_COLORS[node.depth] || '#64748b');
-  const sc = $derived(STATUS_COLORS[node.status] || '#64748b');
-  const tint = $derived(TINTS[node.depth] || 'rgba(100,100,100,');
+  const dc = $derived(depthColor(node.depth));
+  const sc = $derived(statusColor(node.status));
+  const bgTint = $derived(depthTint(node.depth, isAncestor ? CONTAINER.tintOpacityHighlight : CONTAINER.tintOpacity));
+  const borderOp = $derived(isAncestor ? CONTAINER.borderOpacityHighlight : CONTAINER.borderOpacity);
+  const headerCenterY = $derived(pos.y + CONTAINER.headerHeight / 2 + 5);
 </script>
 
 <!-- Container background -->
 <rect
-  x={pos.x} y={pos.y} width={pos.w} height={pos.h}
-  rx="14" fill="{tint}{isAncestor ? '.08)' : '.04)'}"
-  stroke={dc} stroke-width={isAncestor ? '2' : '1'}
-  stroke-opacity={isAncestor ? '.5' : '.2'}
+  x={pos.x} y={pos.y}
+  width={pos.w} height={pos.h}
+  rx={CONTAINER.borderRadius}
+  fill={bgTint}
+  stroke={dc}
+  stroke-width={isSelected ? '2.5' : isAncestor ? '2' : '1.5'}
+  stroke-opacity={borderOp}
 />
 
+<!-- Selection outline -->
 {#if isSelected}
   <rect
-    x={pos.x - 4} y={pos.y - 4} width={pos.w + 8} height={pos.h + 8}
-    rx="16" fill="none" stroke="#60a5fa" stroke-width="2" stroke-dasharray="6 3"
+    x={pos.x - 4} y={pos.y - 4}
+    width={pos.w + 8} height={pos.h + 8}
+    rx="16" fill="none" stroke="#60a5fa"
+    stroke-width="2.5" stroke-dasharray="6 3"
   />
 {/if}
 
-<!-- Header label -->
+<!-- Header label (left-aligned) -->
+<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
 <text
-  x={pos.x + 14} y={pos.y + 24}
-  fill={dc} font-size="14" font-weight="700" opacity=".9"
+  x={pos.x + 16} y={headerCenterY}
+  fill={dc} font-size={CONTAINER.headerFontSize} font-weight="700"
   style="cursor: pointer"
   onclick={(e) => onselect?.(node.id, e)}
 >{node.label}</text>
 
 <!-- Status dot -->
-<circle cx={pos.x + pos.w - 20} cy={pos.y + 20} r="4" fill={sc} />
+<circle cx={pos.x + pos.w - 22} cy={pos.y + CONTAINER.headerHeight / 2} r="5" fill={sc} />
 
 <!-- Collapse chevron -->
+<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
 <text
-  x={pos.x + pos.w - 36} y={pos.y + 24}
+  x={pos.x + pos.w - 38} y={headerCenterY}
   fill={dc} font-size="12" opacity=".6"
   style="cursor: pointer"
   onclick={() => ontoggle?.(node.id)}
