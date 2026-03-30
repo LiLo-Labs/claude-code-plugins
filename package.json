@@ -1,0 +1,11 @@
+{
+  "name": "code-canvas-plugin",
+  "private": true,
+  "workspaces": ["client", "server"],
+  "scripts": {
+    "dev": "npm run dev --workspace=client",
+    "build": "npm run build --workspace=client",
+    "server": "node server/index.js",
+    "start": "npm run build && npm run server"
+  }
+}
