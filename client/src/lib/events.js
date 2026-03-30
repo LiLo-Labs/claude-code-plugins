@@ -41,6 +41,11 @@ export class EventStore {
           depth: d.depth || 'module',
           category: d.category || 'arch',
           confidence: d.confidence ?? 1,
+          row: d.row ?? 0,
+          col: d.col ?? 0,
+          cols: d.cols ?? 3,
+          color: d.color || null,
+          textColor: d.textColor || null,
           hasWorkaround: false,
           completeness: 0,
         });

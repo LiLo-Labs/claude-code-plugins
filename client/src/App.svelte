@@ -3,51 +3,30 @@
   import { onMount } from 'svelte';
   import { getInitialTheme, setTheme, toggleTheme } from './lib/theme.js';
   import { appState, loadFromServer } from './lib/state.svelte.js';
-  import { computeLayout, computeLayoutAsync, getAncestors, findVisibleEndpoint } from './lib/layout.js';
+  import { computeLayout, getAncestors } from './lib/layout.js';
   import Canvas from './components/Canvas.svelte';
   import NodeLeaf from './components/NodeLeaf.svelte';
-  import NodeContainer from './components/NodeContainer.svelte';
   import EdgeLine from './components/EdgeLine.svelte';
   import TreeView from './components/TreeView.svelte';
   import DetailPanel from './components/DetailPanel.svelte';
 
   let theme = $state('dark');
-  let expandedNodes = $state(new Set());
 
   onMount(async () => {
     theme = getInitialTheme();
     setTheme(theme);
     await loadFromServer();
-    // Auto-expand root nodes
-    for (const [id, node] of appState.store.getState().nodes) {
-      if (!node.parent) expandedNodes.add(id);
-    }
-    expandedNodes = new Set(expandedNodes);
   });
 
-  // Reactive graph state — reads storeVersion to trigger re-derivation
+  // Reactive graph state
   function getGraphState() {
-    const _v = appState.storeVersion; // touch for reactivity
+    const _v = appState.storeVersion;
     return appState.store.getState();
   }
   const graphState = $derived(getGraphState());
 
-  // Layout positions (synchronous, always a Map, never null)
-  const activePositions = $derived(computeLayout(graphState.nodes, expandedNodes));
-
-  // Async ELK edge routing
-  let edgeRoutes = $state(new Map());
-
-  $effect(() => {
-    const nodes = graphState.nodes;
-    const edges = graphState.edges;
-    const expanded = expandedNodes;
-    computeLayoutAsync(nodes, edges, expanded).then(result => {
-      edgeRoutes = result.edgeRoutes;
-    }).catch(err => {
-      console.error('ELK layout failed:', err);
-    });
-  });
+  // Grid-based layout from node row/col data
+  const activePositions = $derived(computeLayout(graphState.nodes));
   const unresolvedCount = $derived(graphState.comments.filter(c => !c.resolved).length);
   const selectedNode = $derived(
     appState.selectedIds.size === 1
@@ -60,23 +39,7 @@
       : new Set()
   );
 
-  // Unique edge colors for arrow markers
   const edgeColors = $derived([...new Set([...graphState.edges.values()].map(e => e.color))]);
-
-  function toggleExpand(nodeId) {
-    expandedNodes.has(nodeId) ? expandedNodes.delete(nodeId) : expandedNodes.add(nodeId);
-    expandedNodes = new Set(expandedNodes);
-  }
-
-  function deepToggle(nodeId) {
-    const expand = !expandedNodes.has(nodeId);
-    function recurse(id) {
-      expand ? expandedNodes.add(id) : expandedNodes.delete(id);
-      [...graphState.nodes.values()].filter(n => n.parent === id).forEach(c => recurse(c.id));
-    }
-    recurse(nodeId);
-    expandedNodes = new Set(expandedNodes);
-  }
 
   function selectNode(nodeId, e) {
     if (e?.shiftKey) {
@@ -122,69 +85,40 @@
         </div>
         <TreeView
           nodes={graphState.nodes}
-          expandedNodes={expandedNodes}
+          expandedNodes={new Set()}
           selectedIds={appState.selectedIds}
           onselect={(id) => selectNode(id)}
-          ontoggle={toggleExpand}
-          ondeeptoggle={deepToggle}
         />
       </aside>
     {/if}
 
     <!-- Canvas -->
     <Canvas>
-      <!-- SVG defs -->
+      <!-- Arrow markers -->
       <defs>
         {#each edgeColors as color}
-          <marker id="arrow-{color.replace('#', '')}" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
-            <polygon points="0 0, 10 3.5, 0 7" fill={color} />
+          <marker id="arrow-{color.replace('#', '')}" markerWidth="12" markerHeight="8" refX="11" refY="4" orient="auto">
+            <polygon points="0 0, 12 4, 0 8" fill={color} />
           </marker>
         {/each}
-        <pattern id="hatch" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
-          <rect width="8" height="8" fill="var(--bg-n)" />
-          <line x1="0" y1="0" x2="0" y2="8" stroke="var(--bdr)" stroke-width="2" />
-        </pattern>
       </defs>
 
-      <!-- Containers (rendered first, behind everything) -->
-      {#each [...activePositions.entries()] as [nodeId, pos]}
-        {#if pos.isContainer}
-          <NodeContainer
-            node={graphState.nodes.get(nodeId)}
-            {pos}
-            isSelected={appState.selectedIds.has(nodeId)}
-            isAncestor={selectedAncestorIds.has(nodeId)}
-            ontoggle={toggleExpand}
-            ondeeptoggle={deepToggle}
-            onselect={selectNode}
-          />
-        {/if}
-      {/each}
-
-      <!-- Leaf nodes -->
-      {#each [...activePositions.entries()] as [nodeId, pos]}
-        {#if !pos.isContainer}
-          <NodeLeaf
-            node={graphState.nodes.get(nodeId)}
-            {pos}
-            isSelected={appState.selectedIds.has(nodeId)}
-            isAncestor={selectedAncestorIds.has(nodeId)}
-            children={[...graphState.nodes.values()].filter(n => n.parent === nodeId)}
-            comments={graphState.comments.filter(c => c.target === nodeId && !c.resolved)}
-            onselect={selectNode}
-            ontoggle={toggleExpand}
-            ondeeptoggle={deepToggle}
-          />
-        {/if}
-      {/each}
-
-      <!-- Edges — re-routed to nearest visible ancestor when endpoints are collapsed -->
+      <!-- Edges (drawn first, behind nodes) -->
       {#each [...graphState.edges.values()] as edge}
-        {@const visFrom = findVisibleEndpoint(edge.from, graphState.nodes, activePositions)}
-        {@const visTo = findVisibleEndpoint(edge.to, graphState.nodes, activePositions)}
-        {#if visFrom && visTo && visFrom !== visTo && activePositions.has(visFrom) && activePositions.has(visTo)}
-          <EdgeLine {edge} fromPos={activePositions.get(visFrom)} toPos={activePositions.get(visTo)} route={edgeRoutes.get(edge.id)} />
+        {#if activePositions.has(edge.from) && activePositions.has(edge.to)}
+          <EdgeLine {edge} fromPos={activePositions.get(edge.from)} toPos={activePositions.get(edge.to)} />
         {/if}
+      {/each}
+
+      <!-- Nodes -->
+      {#each [...activePositions.entries()] as [nodeId, pos]}
+        <NodeLeaf
+          node={graphState.nodes.get(nodeId)}
+          {pos}
+          isSelected={appState.selectedIds.has(nodeId)}
+          comments={graphState.comments.filter(c => c.target === nodeId && !c.resolved)}
+          onselect={selectNode}
+        />
       {/each}
     </Canvas>
 
