@@ -30,10 +30,10 @@ export const CONTAINER = {
 
 // ── Spacing ──
 export const SPACING = {
-  siblingGapH: 48,    // horizontal gap between siblings
-  siblingGapV: 28,    // vertical gap between siblings (inside containers)
-  topLevelGap: 60,    // gap between top-level nodes
-  edgePadding: 50,    // canvas edge padding
+  siblingGapH: 64,    // horizontal gap between siblings (generous)
+  siblingGapV: 36,    // vertical gap between siblings (inside containers)
+  topLevelGap: 80,    // gap between top-level nodes
+  edgePadding: 60,    // canvas edge padding
 };
 
 // ── Edge Rendering ──

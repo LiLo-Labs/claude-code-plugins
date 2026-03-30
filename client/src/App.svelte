@@ -3,7 +3,7 @@
   import { onMount } from 'svelte';
   import { getInitialTheme, setTheme, toggleTheme } from './lib/theme.js';
   import { appState, loadFromServer } from './lib/state.svelte.js';
-  import { computeLayout, getAncestors, findVisibleEndpoint } from './lib/layout.js';
+  import { computeLayout, computeLayoutAsync, getAncestors, findVisibleEndpoint } from './lib/layout.js';
   import Canvas from './components/Canvas.svelte';
   import NodeLeaf from './components/NodeLeaf.svelte';
   import NodeContainer from './components/NodeContainer.svelte';
@@ -27,7 +27,25 @@
 
   // Depend on storeVersion to trigger re-derivation when events are applied
   const graphState = $derived((appState.storeVersion, appState.store.getState()));
+  // Synchronous layout for immediate render
   const positions = $derived(computeLayout(graphState.nodes, expandedNodes));
+  // Async ELK layout with proper edge routing (updates after computation)
+  let edgeRoutes = $state(new Map());
+  let elkPositions = $state(null);
+
+  // Trigger ELK layout when graph or expanded state changes
+  $effect(() => {
+    const _nodes = graphState.nodes;
+    const _edges = graphState.edges;
+    const _expanded = expandedNodes;
+    computeLayoutAsync(_nodes, _edges, _expanded).then(result => {
+      edgeRoutes = result.edgeRoutes;
+      elkPositions = result.positions;
+    });
+  });
+
+  // Use ELK positions when available, fall back to sync
+  const activePositions = $derived(elkPositions || positions);
   const unresolvedCount = $derived(graphState.comments.filter(c => !c.resolved).length);
   const selectedNode = $derived(
     appState.selectedIds.size === 1
@@ -127,7 +145,7 @@
       </defs>
 
       <!-- Containers (rendered first, behind everything) -->
-      {#each [...positions.entries()] as [nodeId, pos]}
+      {#each [...activePositions.entries()] as [nodeId, pos]}
         {#if pos.isContainer}
           <NodeContainer
             node={graphState.nodes.get(nodeId)}
@@ -142,7 +160,7 @@
       {/each}
 
       <!-- Leaf nodes -->
-      {#each [...positions.entries()] as [nodeId, pos]}
+      {#each [...activePositions.entries()] as [nodeId, pos]}
         {#if !pos.isContainer}
           <NodeLeaf
             node={graphState.nodes.get(nodeId)}
@@ -160,10 +178,10 @@
 
       <!-- Edges — re-routed to nearest visible ancestor when endpoints are collapsed -->
       {#each [...graphState.edges.values()] as edge}
-        {@const visFrom = findVisibleEndpoint(edge.from, graphState.nodes, positions)}
-        {@const visTo = findVisibleEndpoint(edge.to, graphState.nodes, positions)}
+        {@const visFrom = findVisibleEndpoint(edge.from, graphState.nodes, activePositions)}
+        {@const visTo = findVisibleEndpoint(edge.to, graphState.nodes, activePositions)}
         {#if visFrom && visTo && visFrom !== visTo && positions.has(visFrom) && positions.has(visTo)}
-          <EdgeLine {edge} fromPos={positions.get(visFrom)} toPos={positions.get(visTo)} />
+          <EdgeLine {edge} fromPos={activePositions.get(visFrom)} toPos={activePositions.get(visTo)} route={edgeRoutes.get(edge.id)} />
         {/if}
       {/each}
     </Canvas>
