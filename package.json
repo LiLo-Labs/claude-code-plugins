@@ -1,11 +1,17 @@
 {
   "name": "code-canvas-plugin",
   "private": true,
+  "type": "module",
   "workspaces": ["client", "server"],
   "scripts": {
     "dev": "npm run dev --workspace=client",
     "build": "npm run build --workspace=client",
     "server": "node server/index.js",
-    "start": "npm run build && npm run server"
+    "start": "npm run build && npm run server",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "devDependencies": {
+    "vitest": "^3.0.0"
   }
 }
