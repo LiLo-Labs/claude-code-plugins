@@ -2,7 +2,8 @@
   import './app.css';
   import { onMount } from 'svelte';
   import { getInitialTheme, setTheme, toggleTheme } from './lib/theme.js';
-  import { appState, loadFromServer } from './lib/state.svelte.js';
+  import { appState, loadFromServer, emitEvent } from './lib/state.svelte.js';
+  import { genId } from './lib/events.js';
   import { computeLayout, getAncestors } from './lib/layout.js';
   import { createDragState, toSvgPoint } from './lib/drag.js';
   import Canvas from './components/Canvas.svelte';
@@ -11,6 +12,9 @@
   import ViewTabs from './components/ViewTabs.svelte';
   import TreeView from './components/TreeView.svelte';
   import DetailPanel from './components/DetailPanel.svelte';
+  import ContextMenu from './components/ContextMenu.svelte';
+  import CommentBar from './components/CommentBar.svelte';
+  import CommentModal from './components/CommentModal.svelte';
 
   let theme = $state('dark');
   let activeTabIdx = $state(0);
@@ -115,6 +119,50 @@
   function toggleTreeNode(nodeId) {
     treeExpanded.has(nodeId) ? treeExpanded.delete(nodeId) : treeExpanded.add(nodeId);
     treeExpanded = new Set(treeExpanded);
+  }
+
+  // Context menu state
+  let ctxMenu = $state({ visible: false, x: 0, y: 0, node: null });
+
+  function handleContextMenu(nodeId, e) {
+    e.preventDefault();
+    const node = graphState.nodes.get(nodeId);
+    if (!node) return;
+    ctxMenu = { visible: true, x: e.clientX, y: e.clientY, node };
+  }
+
+  function handleCtxAction(action) {
+    const node = ctxMenu.node;
+    ctxMenu = { ...ctxMenu, visible: false };
+    if (!node) return;
+
+    if (action === 'comment') {
+      commentModal = { visible: true, node };
+    } else if (action.startsWith('status-')) {
+      const status = action.replace('status-', '');
+      emitEvent({ id: genId(), type: 'node.status', actor: 'user', data: { nodeId: node.id, status, prev: node.status } });
+    } else if (action === 'details') {
+      appState.selectedIds = new Set([node.id]);
+      appState.panelOpen = true;
+    }
+  }
+
+  // Comment modal state
+  let commentModal = $state({ visible: false, node: null });
+
+  function handleSaveComment(nodeId, label, text) {
+    emitEvent({
+      id: genId(), type: 'comment.added', actor: 'user',
+      data: { commentId: genId('c'), target: nodeId, targetLabel: label, text, actor: 'user' },
+    });
+  }
+
+  function handleResolveComment(commentId) {
+    emitEvent({ id: genId(), type: 'comment.resolved', actor: 'user', data: { commentId, actor: 'user' } });
+  }
+
+  function handleDeleteComment(commentId) {
+    emitEvent({ id: genId(), type: 'comment.deleted', actor: 'user', data: { commentId } });
   }
 
   function handleToggleTheme() { theme = toggleTheme(); }
@@ -226,6 +274,7 @@
               comments={graphState.comments.filter(c => c.target === nodeId && !c.resolved)}
               onselect={selectNode}
               onstartdrag={startDrag}
+              oncontextmenu={handleContextMenu}
             />
           {/if}
         {/each}
@@ -247,10 +296,29 @@
   </div>
 
   <!-- Comment bar -->
-  <div class="cbar">
-    <span class="cl">Comments</span>
-    <span class="cb">{unresolvedCount}</span>
-  </div>
+  <CommentBar
+    comments={graphState.comments}
+    onresolve={handleResolveComment}
+    ondelete={handleDeleteComment}
+    onnavigate={(nodeId) => { appState.selectedIds = new Set([nodeId]); }}
+  />
+
+  <!-- Context menu -->
+  <ContextMenu
+    x={ctxMenu.x} y={ctxMenu.y}
+    visible={ctxMenu.visible}
+    node={ctxMenu.node}
+    onaction={handleCtxAction}
+    onclose={() => ctxMenu = { ...ctxMenu, visible: false }}
+  />
+
+  <!-- Comment modal -->
+  <CommentModal
+    visible={commentModal.visible}
+    node={commentModal.node}
+    onsave={handleSaveComment}
+    onclose={() => commentModal = { ...commentModal, visible: false }}
+  />
 
   <!-- Status line -->
   <footer class="sl">
@@ -290,9 +358,7 @@
   .si input { background: none; border: none; color: var(--tx); font-size: 12px; outline: none; width: 100%; }
   .rp { width: 280px; background: var(--gl); backdrop-filter: blur(16px); border-left: 1px solid var(--gl-b); flex-shrink: 0; }
 
-  .cbar { height: 28px; background: var(--gl); backdrop-filter: blur(16px); border-top: 1px solid var(--gl-b); display: flex; align-items: center; padding: 0 14px; gap: 6px; flex-shrink: 0; }
-  .cl { font-size: 10px; text-transform: uppercase; letter-spacing: .08em; color: var(--tx-d); }
-  .cb { font-size: 10px; background: var(--ac); color: white; padding: 0 5px; border-radius: 7px; font-weight: 600; }
+  /* CommentBar component handles its own styling */
 
   .sl { height: 22px; background: var(--bg-s); border-top: 1px solid var(--bdr); display: flex; align-items: center; padding: 0 14px; gap: 14px; font-size: 10px; flex-shrink: 0; }
   .ok { color: var(--gr); }

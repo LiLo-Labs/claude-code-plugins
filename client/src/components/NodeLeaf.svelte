@@ -14,6 +14,7 @@
     comments = [],
     onselect,
     onstartdrag,
+    oncontextmenu,
   } = $props();
 
   const dc = $derived(depthColor(node.depth));
@@ -49,6 +50,11 @@
     e.stopPropagation();
     onselect?.(node.id, e);
     onstartdrag?.(node.id, e);
+  }}
+  oncontextmenu={(e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    oncontextmenu?.(node.id, e);
   }}
 >
   <!-- Selection outline -->
