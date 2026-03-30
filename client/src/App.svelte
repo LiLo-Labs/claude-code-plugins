@@ -302,7 +302,6 @@
   <!-- Comment bar -->
   <CommentBar
     comments={graphState.comments}
-    nodes={graphState.nodes}
     onresolve={handleResolveComment}
     ondelete={handleDeleteComment}
     onnavigate={(nodeId) => { appState.selectedIds = new Set([nodeId]); appState.panelOpen = true; }}

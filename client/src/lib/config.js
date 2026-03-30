@@ -56,12 +56,12 @@ export const DEPTH_COLORS = {
   'interface': '#f97316',
 };
 
-// ── Depth Background Colors (dark, muted fills for nodes) ──
+// ── Depth Background Colors (very subtle tints, not saturated) ──
 export const DEPTH_BG_COLORS = {
-  system: '#1e293b',
-  domain: '#2a1a3c',
-  module: '#1a2a3c',
-  'interface': '#3a2a1c',
+  system: '#1a1e2e',
+  domain: '#1e1a2a',
+  module: '#1a2228',
+  'interface': '#241e1a',
 };
 
 // ── Depth Text Colors (tinted, readable on dark backgrounds) ──

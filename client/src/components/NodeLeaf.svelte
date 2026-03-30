@@ -57,13 +57,13 @@
     oncontextmenu?.(node.id, e);
   }}
 >
-  <!-- Selection outline -->
+  <!-- Selection outline — bright and obvious -->
   {#if isSelected}
     <rect
-      x={pos.x - 4} y={pos.y - 4}
-      width={pos.w + 8} height={pos.h + 8}
-      rx="12" fill="none" stroke="#60a5fa"
-      stroke-width="2.5" stroke-dasharray="6 3"
+      x={pos.x - 3} y={pos.y - 3}
+      width={pos.w + 6} height={pos.h + 6}
+      rx="11" fill="none" stroke="#60a5fa"
+      stroke-width="3"
     />
   {/if}
 
