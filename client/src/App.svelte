@@ -4,6 +4,7 @@
   import { getInitialTheme, setTheme, toggleTheme } from './lib/theme.js';
   import { appState, loadFromServer, emitEvent } from './lib/state.svelte.js';
   import { genId } from './lib/events.js';
+  import { statusColor } from './lib/config.js';
   import ViewTabs from './components/ViewTabs.svelte';
   import DetailPanel from './components/DetailPanel.svelte';
   import CommentBar from './components/CommentBar.svelte';
@@ -56,17 +57,8 @@
 
   function handleToggleTheme() { theme = toggleTheme(); }
 
-  function handleDrawioSelect(ids) {
-    if (ids.length === 1) {
-      // Check if the selected shape ID matches a node in our registry
-      const nodeId = ids[0];
-      if (graphState.nodes.has(nodeId)) {
-        appState.selectedIds = new Set([nodeId]);
-        appState.panelOpen = true;
-      }
-    } else if (ids.length === 0) {
-      appState.selectedIds = new Set();
-    }
+  function selectNode(nodeId) {
+    appState.selectedIds = new Set([nodeId]);
   }
 </script>
 
@@ -74,9 +66,11 @@
   <!-- Topbar -->
   <header class="topbar">
     <div class="tp"><span class="dot"></span> {activeTab?.name || 'Code Canvas'}</div>
-    <div class="tp-story">{activeTab?.story || ''}</div>
+    <div class="tp-story">{activeTab?.description || activeTab?.story || ''}</div>
     <div class="tr">
-      <button class="tb" onclick={() => appState.panelOpen = !appState.panelOpen}>&#9776;</button>
+      <button class="tb" onclick={() => appState.panelOpen = !appState.panelOpen}>
+        {appState.panelOpen ? 'Hide Panel' : 'Show Panel'}
+      </button>
       <div class="sep"></div>
       <button class="tb" onclick={handleToggleTheme}>{theme === 'dark' ? '\u2606' : '\u263E'}</button>
     </div>
@@ -132,24 +126,50 @@
             });
           }
         }}
-        onselect={handleDrawioSelect}
       />
     </div>
 
-    <!-- Detail panel — shows when a semantic node is selected -->
-    {#if appState.panelOpen && selectedNode}
+    <!-- Right panel — node browser + detail view -->
+    {#if appState.panelOpen}
       <aside class="rp">
-        <DetailPanel
-          node={selectedNode}
-          nodes={graphState.nodes}
-          store={appState.store}
-          comments={graphState.comments}
-          onselect={(id) => { appState.selectedIds = new Set([id]); }}
-          onclose={() => appState.panelOpen = false}
-          onaddcomment={(node) => { commentModal = { visible: true, node }; }}
-          onresolve={handleResolveComment}
-          ondelete={handleDeleteComment}
-        />
+        {#if selectedNode}
+          <!-- Detail view for selected node -->
+          <DetailPanel
+            node={selectedNode}
+            nodes={graphState.nodes}
+            store={appState.store}
+            comments={graphState.comments}
+            onselect={selectNode}
+            onclose={() => { appState.selectedIds = new Set(); }}
+            onaddcomment={(node) => { commentModal = { visible: true, node }; }}
+            onresolve={handleResolveComment}
+            ondelete={handleDeleteComment}
+          />
+        {:else}
+          <!-- Node browser — clickable list of all nodes -->
+          <div class="node-browser">
+            <div class="nb-hdr">
+              <span class="nb-title">Nodes</span>
+              <button class="close" onclick={() => appState.panelOpen = false}>&times;</button>
+            </div>
+            <div class="nb-list">
+              {#each [...graphState.nodes.values()] as node}
+                <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+                <div class="nb-item" onclick={() => selectNode(node.id)}>
+                  <span class="nb-dot" style="background: {statusColor(node.status)}"></span>
+                  <div class="nb-content">
+                    <span class="nb-label">{node.label}</span>
+                    <span class="nb-sub">{node.subtitle}</span>
+                  </div>
+                  <span class="nb-depth">{(node.depth || 'M')[0].toUpperCase()}</span>
+                  {#if graphState.comments.filter(c => c.target === node.id && !c.resolved).length > 0}
+                    <span class="nb-badge">{graphState.comments.filter(c => c.target === node.id && !c.resolved).length}</span>
+                  {/if}
+                </div>
+              {/each}
+            </div>
+          </div>
+        {/if}
       </aside>
     {/if}
   </div>
@@ -159,7 +179,7 @@
     comments={graphState.comments}
     onresolve={handleResolveComment}
     ondelete={handleDeleteComment}
-    onnavigate={(nodeId) => { appState.selectedIds = new Set([nodeId]); appState.panelOpen = true; }}
+    onnavigate={(nodeId) => { selectNode(nodeId); appState.panelOpen = true; }}
   />
 
   <!-- Comment modal -->
@@ -197,7 +217,35 @@
   .main { flex: 1; display: flex; min-height: 0; }
   .canvas-col { flex: 1; display: flex; flex-direction: column; min-height: 0; min-width: 0; position: relative; }
 
-  .rp { width: 280px; background: var(--gl); backdrop-filter: blur(16px); border-left: 1px solid var(--gl-b); flex-shrink: 0; overflow-y: auto; }
+  .rp { width: 300px; background: var(--bg-s); border-left: 1px solid var(--bdr); flex-shrink: 0; overflow-y: auto; }
+
+  /* Node browser */
+  .node-browser { display: flex; flex-direction: column; height: 100%; }
+  .nb-hdr { padding: 12px 14px; border-bottom: 1px solid var(--bdr); display: flex; align-items: center; justify-content: space-between; }
+  .nb-title { font-size: 14px; font-weight: 600; }
+  .close { border: none; background: transparent; color: var(--tx-d); font-size: 14px; cursor: pointer; }
+  .close:hover { color: var(--tx); }
+  .nb-list { flex: 1; overflow-y: auto; padding: 8px 0; }
+  .nb-item {
+    display: flex; align-items: center; gap: 8px;
+    padding: 8px 14px; cursor: pointer; transition: background 0.1s;
+  }
+  .nb-item:hover { background: var(--bg-e); }
+  .nb-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  .nb-content { flex: 1; min-width: 0; }
+  .nb-label { font-size: 13px; font-weight: 500; display: block; color: var(--tx); }
+  .nb-sub { font-size: 11px; color: var(--tx-d); display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .nb-depth {
+    font-size: 10px; font-weight: 600; color: var(--tx-d);
+    background: var(--bg); border: 1px solid var(--bdr);
+    width: 20px; height: 20px; border-radius: 4px;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+  }
+  .nb-badge {
+    font-size: 9px; background: var(--ac); color: white;
+    padding: 1px 5px; border-radius: 7px; font-weight: 600; flex-shrink: 0;
+  }
 
   .sl { height: 22px; background: var(--bg-s); border-top: 1px solid var(--bdr); display: flex; align-items: center; padding: 0 14px; gap: 14px; font-size: 10px; flex-shrink: 0; }
   .ok { color: var(--gr); }
