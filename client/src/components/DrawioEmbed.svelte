@@ -20,6 +20,11 @@
     noExitBtn: '1',
     saveAndExit: '0',
     noSaveBtn: '1',
+    // Minimal UI — hide chrome, keep essential tools
+    ui: 'min',
+    toolbar: '0',
+    pages: '0',
+    footer: '0',
   });
   if (dark) params.set('dark', '1');
 
