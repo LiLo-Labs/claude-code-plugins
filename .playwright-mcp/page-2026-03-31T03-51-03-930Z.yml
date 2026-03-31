@@ -1,0 +1,98 @@
+- generic [ref=e3]:
+  - banner [ref=e4]:
+    - generic [ref=e5]: Architecture
+    - button "☆" [ref=e8] [cursor=pointer]
+  - generic [ref=e10]:
+    - generic [ref=e11]:
+      - button "1. Architecture" [ref=e12] [cursor=pointer]
+      - button "2. Use Cases" [ref=e13] [cursor=pointer]
+      - button "+" [ref=e14] [cursor=pointer]
+    - iframe [ref=e16]:
+      - generic [active] [ref=f7e1]:
+        - img [ref=f7e3]:
+          - generic [ref=f7e5]:
+            - generic [ref=f7e10]: System
+            - generic [ref=f7e17]: Server
+            - generic [ref=f7e23]: Event Store
+            - generic [ref=f7e28]: Domain
+            - generic [ref=f7e35]: Plugin Hooks
+            - generic [ref=f7e40]: SKILL.md
+            - generic [ref=f7e45]: Canvas App
+            - generic [ref=f7e50]: Draw.io
+            - generic [ref=f7e55]: Module
+            - generic [ref=f7e62]: Canvas Client
+            - generic [ref=f7e67]: State Mgmt
+            - generic [ref=f7e72]: Config & Theme
+            - generic [ref=f7e77]: Glob Matcher
+            - generic [ref=f7e82]: reads/writes
+            - generic [ref=f7e87]: auto-starts
+            - generic [ref=f7e93]: teaches
+            - generic [ref=f7e98]: embeds
+            - generic [ref=f7e103]: imports
+            - generic [ref=f7e109]: replays
+            - generic [ref=f7e115]: reads/writes
+            - generic [ref=f7e120]: file matching
+        - generic [ref=f7e121]:
+          - generic "Diagram" [ref=f7e122] [cursor=pointer]
+          - generic "Delete" [ref=f7e123]
+          - generic "Undo" [ref=f7e124]
+          - generic "Redo" [ref=f7e125]
+        - generic [ref=f7e126]:
+          - generic "Zoom Out" [ref=f7e127] [cursor=pointer]
+          - textbox "Zoom (Alt+Mousewheel)" [ref=f7e128]: 100%
+          - generic "Zoom In" [ref=f7e129] [cursor=pointer]
+        - generic [ref=f7e130]:
+          - generic "Text (A)" [ref=f7e131]:
+            - img:
+              - generic:
+                - generic:
+                  - generic:
+                    - generic:
+                      - generic:
+                        - generic:
+                          - generic:
+                            - generic: Text
+            - generic [ref=f7e132]: A
+          - generic "Note (S)" [ref=f7e133]:
+            - img
+            - generic [ref=f7e134]: S
+          - generic "Rectangle (D)" [ref=f7e135]:
+            - img
+            - generic [ref=f7e136]: D
+          - generic "Ellipse (F)" [ref=f7e137]:
+            - img
+            - generic [ref=f7e138]: F
+          - generic "Line (C)" [ref=f7e139]:
+            - img
+            - generic [ref=f7e140]: C
+          - generic "Arrow" [ref=f7e141]:
+            - img
+          - generic "Freehand (X)" [ref=f7e142]:
+            - generic [ref=f7e143]: X
+          - generic "Generate" [ref=f7e144]
+          - generic "Shapes" [ref=f7e145]
+          - generic "Insert" [ref=f7e146] [cursor=pointer]
+          - generic "Collapse/Expand" [ref=f7e147] [cursor=pointer]
+        - generic [ref=f7e150]:
+          - table [ref=f7e151]:
+            - rowgroup [ref=f7e152]:
+              - row "Format MinimizeClose" [ref=f7e153]:
+                - cell "Format MinimizeClose" [ref=f7e154]:
+                  - text: Format
+                  - generic [ref=f7e155]:
+                    - img "Minimize" [ref=f7e156] [cursor=pointer]
+                    - img "Close" [ref=f7e157] [cursor=pointer]
+              - row [ref=f7e158]:
+                - cell [ref=f7e159]
+          - img [ref=f7e162]
+  - generic [ref=e17]:
+    - generic [ref=e18] [cursor=pointer]:
+      - heading "Comments" [level=3] [ref=e19]
+      - generic [ref=e20]: "0"
+      - generic [ref=e21]: ▼
+    - generic [ref=e22]: No open comments
+  - contentinfo [ref=e23]:
+    - generic [ref=e24]: ● Synced
+    - generic [ref=e25]: 29 nodes
+    - generic [ref=e26]: 2 tabs
+    - generic [ref=e27]: 616 events
