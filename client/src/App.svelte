@@ -24,7 +24,7 @@
   let theme = $state('dark');
   let activeTabIdx = $state(0);
   let savedPositions = $state({});
-  let storyVisible = $state(true);
+  let storyPos = $state({ x: 12, y: 12 });
   let drag = $state(createDragState());
   let treeExpanded = $state(new Set());
 
@@ -374,16 +374,26 @@
         <div class="connect-hint">Click target node to connect from "{graphState.nodes.get(connectMode.fromId)?.label}" — right-click to cancel</div>
       {/if}
 
-      <!-- Story overlay — HTML positioned, dismissible -->
-      {#if storyVisible && (activeTab?.story || activeTab?.description)}
-        <div class="story-overlay">
+      <!-- Story overlay — draggable -->
+      {#if activeTab?.story || activeTab?.description}
+        <!-- svelte-ignore a11y_no_static_element_interactions -->
+        <div
+          class="story-overlay"
+          style="left: {storyPos.x}px; top: {storyPos.y}px"
+          onmousedown={(e) => {
+            if (e.target.tagName === 'BUTTON') return;
+            e.preventDefault();
+            const startX = e.clientX - storyPos.x;
+            const startY = e.clientY - storyPos.y;
+            function onMove(ev) { storyPos = { x: ev.clientX - startX, y: ev.clientY - startY }; }
+            function onUp() { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); }
+            window.addEventListener('mousemove', onMove);
+            window.addEventListener('mouseup', onUp);
+          }}
+        >
           <strong>{activeTab.name}</strong>
           <span>{activeTab.story || activeTab.description}</span>
-          <button class="story-close" onclick={() => storyVisible = false}>&times;</button>
         </div>
-      {/if}
-      {#if !storyVisible && (activeTab?.story || activeTab?.description)}
-        <button class="story-show" onclick={() => storyVisible = true}>&#9432;</button>
       {/if}
 
       <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -535,24 +545,12 @@
   .inf { color: var(--tx-d); }
 
   .story-overlay {
-    position: absolute; top: 12px; left: 12px; z-index: 20;
+    position: absolute; z-index: 20;
     background: var(--bg-s); border: 1px solid var(--bdr); border-radius: 8px;
-    padding: 10px 32px 10px 14px; max-width: 420px;
+    padding: 10px 14px; max-width: 420px;
     font-size: 12px; color: var(--tx-m); line-height: 1.4;
-    pointer-events: auto; cursor: default;
+    pointer-events: auto; cursor: grab; user-select: none;
   }
+  .story-overlay:active { cursor: grabbing; }
   .story-overlay strong { color: var(--tx); font-size: 13px; display: block; margin-bottom: 3px; }
-  .story-close {
-    position: absolute; top: 6px; right: 8px;
-    background: none; border: none; color: var(--tx-d); font-size: 16px;
-    cursor: pointer; padding: 2px 6px; border-radius: 4px;
-  }
-  .story-close:hover { color: var(--tx); background: var(--bg-e); }
-  .story-show {
-    position: absolute; top: 12px; left: 12px; z-index: 20;
-    background: var(--bg-s); border: 1px solid var(--bdr); border-radius: 6px;
-    color: var(--tx-d); font-size: 14px; cursor: pointer;
-    padding: 4px 8px; pointer-events: auto;
-  }
-  .story-show:hover { color: var(--ac); border-color: var(--ac); }
 </style>
