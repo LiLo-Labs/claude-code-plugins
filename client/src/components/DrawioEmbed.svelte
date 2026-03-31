@@ -27,13 +27,8 @@
     footer: '0',
     'format-toolbar': '0',
     libraries: '0',
-    'config-json': JSON.stringify({
-      defaultFonts: [],
-      customFonts: [],
-      // Hide panels
-      formatPanel: false,
-      shapePanel: false,
-    }),
+    grid: '0',
+    'page-view': '0',
   });
   if (dark) params.set('dark', '1');
 

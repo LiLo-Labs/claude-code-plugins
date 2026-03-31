@@ -481,8 +481,8 @@
       {/if}
     </div>
 
-    <!-- Right panel -->
-    {#if appState.panelOpen}
+    <!-- Right panel — only for SVG backend -->
+    {#if appState.panelOpen && backend === 'svg'}
       <aside class="rp">
         <DetailPanel
           node={selectedNode}
