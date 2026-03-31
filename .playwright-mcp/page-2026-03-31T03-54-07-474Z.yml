@@ -1,0 +1,22 @@
+- generic [ref=e3]:
+  - banner [ref=e4]:
+    - generic [ref=e5]: Architecture
+    - button "☆" [ref=e8] [cursor=pointer]
+  - generic [ref=e10]:
+    - generic [ref=e11]:
+      - button "1. Architecture" [ref=e12] [cursor=pointer]
+      - button "2. Use Cases" [ref=e13] [cursor=pointer]
+      - button "+" [ref=e14] [cursor=pointer]
+    - iframe [ref=e16]:
+      
+  - generic [ref=e17]:
+    - generic [ref=e18] [cursor=pointer]:
+      - heading "Comments" [level=3] [ref=e19]
+      - generic [ref=e20]: "0"
+      - generic [ref=e21]: ▼
+    - generic [ref=e22]: No open comments
+  - contentinfo [ref=e23]:
+    - generic [ref=e24]: ● Synced
+    - generic [ref=e25]: 29 nodes
+    - generic [ref=e26]: 2 tabs
+    - generic [ref=e27]: 617 events
