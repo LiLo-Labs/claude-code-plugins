@@ -160,6 +160,7 @@ export class EventStore {
           // Backend-specific diagram data
           drawioXml: d.drawioXml || '',
           excalidrawElements: d.excalidrawElements || [],
+          excalidrawViewerUrl: d.excalidrawViewerUrl || '',
           // Legacy filter (for backwards compat)
           filter: d.filter || null,
         });

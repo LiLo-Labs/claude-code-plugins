@@ -1,0 +1,152 @@
+- generic [ref=e3]:
+  - banner [ref=e4]:
+    - generic [ref=e5]: Data Flow
+    - generic [ref=e7]:
+      - button "☰" [ref=e8] [cursor=pointer]
+      - button "-" [ref=e10] [cursor=pointer]
+      - generic [ref=e11]: 100%
+      - button "+" [ref=e12] [cursor=pointer]
+      - button "⌂" [ref=e13] [cursor=pointer]
+      - button "☆" [ref=e15] [cursor=pointer]
+  - generic [ref=e16]:
+    - complementary [ref=e17]:
+      - textbox "Search... (⌘K)" [ref=e20]
+      - generic [ref=e21]:
+        - generic [ref=e22] [cursor=pointer]:
+          - generic [ref=e24]: Server
+          - generic [ref=e25]: S
+        - generic [ref=e26] [cursor=pointer]:
+          - generic [ref=e28]: Event Store
+          - generic [ref=e29]: S
+        - generic [ref=e30] [cursor=pointer]:
+          - generic [ref=e31]: ▶
+          - generic [ref=e33]: Canvas
+          - generic [ref=e34]: D
+        - generic [ref=e35] [cursor=pointer]:
+          - generic [ref=e37]: Layout Engine
+          - generic [ref=e38]: M
+        - generic [ref=e39] [cursor=pointer]:
+          - generic [ref=e41]: Plugin Hooks
+          - generic [ref=e42]: D
+        - generic [ref=e43] [cursor=pointer]:
+          - generic [ref=e45]: Canvas Client
+          - generic [ref=e46]: M
+        - generic [ref=e47] [cursor=pointer]:
+          - generic [ref=e49]: SKILL.md
+          - generic [ref=e50]: I
+        - generic [ref=e51] [cursor=pointer]:
+          - generic [ref=e53]: Glob Matcher
+          - generic [ref=e54]: M
+        - generic [ref=e55] [cursor=pointer]:
+          - generic [ref=e57]: Test Suite
+          - generic [ref=e58]: M
+        - generic [ref=e59] [cursor=pointer]:
+          - generic [ref=e60]: ▶
+          - generic [ref=e62]: Rendering Hints
+          - generic [ref=e63]: D
+        - generic [ref=e64] [cursor=pointer]:
+          - generic [ref=e66]: Architecture Advisor
+          - generic [ref=e67]: D
+        - generic [ref=e68] [cursor=pointer]:
+          - generic [ref=e70]: Living Documentation
+          - generic [ref=e71]: D
+        - generic [ref=e72] [cursor=pointer]:
+          - generic [ref=e74]: Design-First Sketching
+          - generic [ref=e75]: D
+        - generic [ref=e76] [cursor=pointer]:
+          - generic [ref=e78]: Actor-Aware Merge
+          - generic [ref=e79]: M
+        - generic [ref=e80] [cursor=pointer]:
+          - generic [ref=e82]: Developer
+          - generic [ref=e83]: S
+        - generic [ref=e84] [cursor=pointer]:
+          - generic [ref=e86]: Claude
+          - generic [ref=e87]: S
+        - generic [ref=e88] [cursor=pointer]:
+          - generic [ref=e90]: /canvas generate
+          - generic [ref=e91]: D
+        - generic [ref=e92] [cursor=pointer]:
+          - generic [ref=e94]: Browse Canvas
+          - generic [ref=e95]: D
+        - generic [ref=e96] [cursor=pointer]:
+          - generic [ref=e98]: Edit Canvas
+          - generic [ref=e99]: D
+        - generic [ref=e100] [cursor=pointer]:
+          - generic [ref=e102]: Sketch Before Coding
+          - generic [ref=e103]: D
+        - generic [ref=e104] [cursor=pointer]:
+          - generic [ref=e106]: Auto-Update on Code Changes
+          - generic [ref=e107]: D
+        - generic [ref=e108] [cursor=pointer]:
+          - generic [ref=e110]: Record Decisions
+          - generic [ref=e111]: D
+        - generic [ref=e112] [cursor=pointer]:
+          - generic [ref=e114]: Comment & Discuss
+          - generic [ref=e115]: D
+        - generic [ref=e116] [cursor=pointer]:
+          - generic [ref=e118]: Consult Canvas Before Changes
+          - generic [ref=e119]: D
+      - generic [ref=e120]: Double-click a tree node to add it to this tab
+    - generic [ref=e121]:
+      - button "‹" [ref=e122] [cursor=pointer]
+      - button "›" [ref=e123] [cursor=pointer]
+      - generic [ref=e124]:
+        - button "1. Data Flow" [ref=e125] [cursor=pointer]
+        - button "2. Plugin Integration" [ref=e126] [cursor=pointer]
+        - button "3. Client Architecture" [ref=e127] [cursor=pointer]
+        - button "4. Data Flow" [ref=e128] [cursor=pointer]
+        - button "5. Use Case Diagrams" [ref=e129] [cursor=pointer]
+        - button "6. Draw.io Test" [ref=e130] [cursor=pointer]
+        - button "7. Excalidraw Test" [ref=e131] [cursor=pointer]
+        - button "+" [ref=e132] [cursor=pointer]
+      - generic [ref=e133]:
+        - strong [ref=e134]: Data Flow
+        - text: How events flow from Claude through hooks to the event store and back to the canvas UI
+      - img [ref=e137]:
+        - generic [ref=e141]: auto-starts + posts
+        - generic [ref=e144]: reads/writes JSONL
+        - generic [ref=e147]: reads JSONL directly
+        - generic [ref=e150]: replays state
+        - generic [ref=e153]: imports
+        - generic [ref=e154]:
+          - generic [ref=e157]: Plugin Hooks
+          - generic [ref=e158]: SessionStart, PreToolUse, PostTool...
+          - generic [ref=e160]: done
+          - generic [ref=e162]: D
+        - generic [ref=e166]:
+          - generic [ref=e169]: Server
+          - generic [ref=e170]: Node.js HTTP API — events, state, ...
+          - generic [ref=e172]: done
+          - generic [ref=e174]: S
+        - generic [ref=e178]:
+          - generic [ref=e181]: Event Store
+          - generic [ref=e182]: JSONL append-only log with replay
+          - generic [ref=e184]: done
+          - generic [ref=e186]: S
+        - generic [ref=e190]:
+          - generic [ref=e193]: Canvas Client
+          - generic [ref=e194]: "Shared lib: replay, context gen, f..."
+          - generic [ref=e196]: done
+          - generic [ref=e198]: M
+        - generic [ref=e202]:
+          - generic [ref=e205]: Canvas
+          - generic [ref=e206]: SVG pan/zoom with node + edge rend...
+          - generic [ref=e208]: done
+          - generic [ref=e210]: D
+    - complementary [ref=e214]:
+      - generic [ref=e215]:
+        - generic [ref=e216]:
+          - generic [ref=e217]: Details
+          - button "×" [ref=e218] [cursor=pointer]
+        - paragraph [ref=e220]: Select a node to view details
+  - generic [ref=e221]:
+    - generic [ref=e222] [cursor=pointer]:
+      - heading "Comments" [level=3] [ref=e223]
+      - generic [ref=e224]: "0"
+      - generic [ref=e225]: ▼
+    - generic [ref=e226]: No open comments
+  - contentinfo [ref=e227]:
+    - generic [ref=e228]: ● Synced
+    - generic [ref=e229]: 29 nodes
+    - generic [ref=e230]: 7 tabs
+    - generic [ref=e231]: 139 events

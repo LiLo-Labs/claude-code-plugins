@@ -416,18 +416,10 @@
           }}
         />
       {:else if backend === 'excalidraw'}
-        <!-- Excalidraw embedded editor -->
+        <!-- Excalidraw via interactive-drawer viewer -->
         <ExcalidrawEmbed
-          elements={activeTab?.excalidrawElements || []}
+          viewerUrl={activeTab?.excalidrawViewerUrl || 'http://localhost:3001'}
           dark={theme === 'dark'}
-          onchange={(els) => {
-            if (activeTab) {
-              emitEvent({
-                id: genId(), type: 'view.updated', actor: 'user',
-                data: { viewId: activeTab.id, changes: { excalidrawElements: els } },
-              });
-            }
-          }}
         />
       {:else}
         <!-- Default SVG canvas -->
