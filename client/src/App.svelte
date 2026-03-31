@@ -13,6 +13,8 @@
 
   let theme = $state('dark');
   let activeTabIdx = $state(0);
+  // Panel open by default — it's the primary way to browse nodes
+  appState.panelOpen = true;
 
   onMount(async () => {
     theme = getInitialTheme();
