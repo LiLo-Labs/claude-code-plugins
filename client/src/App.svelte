@@ -17,6 +17,8 @@
   import CommentModal from './components/CommentModal.svelte';
   import NodeEllipse from './components/NodeEllipse.svelte';
   import NodeActor from './components/NodeActor.svelte';
+  import NodeRounded from './components/NodeRounded.svelte';
+  import NodePill from './components/NodePill.svelte';
   import { resolveHints } from './lib/rendering.js';
 
   let theme = $state('dark');
@@ -60,6 +62,8 @@
     card: NodeLeaf,
     ellipse: NodeEllipse,
     actor: NodeActor,
+    rounded: NodeRounded,
+    pill: NodePill,
   };
 
   // Tab's authored node list + connection list
