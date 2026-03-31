@@ -219,7 +219,7 @@
   .main { flex: 1; display: flex; min-height: 0; }
   .canvas-col { flex: 1; display: flex; flex-direction: column; min-height: 0; min-width: 0; position: relative; }
 
-  .rp { width: 300px; background: var(--bg-s); border-left: 1px solid var(--bdr); flex-shrink: 0; overflow-y: auto; }
+  .rp { width: 300px; background: var(--bg-s); border-left: 1px solid var(--bdr); flex-shrink: 0; overflow-y: auto; position: relative; z-index: 10; }
 
   /* Node browser */
   .node-browser { display: flex; flex-direction: column; height: 100%; }

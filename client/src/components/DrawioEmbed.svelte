@@ -105,6 +105,7 @@
     height: 100%;
     min-height: 400px;
     position: relative;
+    overflow: hidden;
   }
   iframe {
     width: 100%;
