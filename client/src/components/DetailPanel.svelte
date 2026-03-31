@@ -3,13 +3,11 @@
    * DetailPanel — right sidebar showing full node context:
    * properties, description, decisions, comments (with resolve/add).
    */
-  import { getAncestors } from '../lib/layout.js';
-
   let { node = null, nodes, store, comments = [], onselect, onclose, onaddcomment, onresolve, ondelete } = $props();
 
   const STATUS_COLORS = { done: '#10b981', 'in-progress': '#eab308', planned: '#3b82f6', placeholder: '#64748b' };
 
-  const ancestors = $derived(node ? getAncestors(node.id, nodes) : []);
+  const ancestors = $derived(node ? store.getAncestors(node.id) : []);
   const decisions = $derived(node ? store.getNodeDecisions(node.id) : []);
   const nodeComments = $derived(node ? comments.filter(c => c.target === node.id) : []);
   const openComments = $derived(nodeComments.filter(c => !c.resolved));

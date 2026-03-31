@@ -202,6 +202,20 @@ export class EventStore {
     }
   }
 
+  /**
+   * Get ancestors of a node from the registry.
+   */
+  getAncestors(nodeId) {
+    const result = [];
+    let current = this._nodes.get(nodeId);
+    while (current && current.parent) {
+      const parent = this._nodes.get(current.parent);
+      if (parent) result.unshift(parent);
+      current = parent;
+    }
+    return result;
+  }
+
   getState() {
     return {
       nodes: new Map(this._nodes),
