@@ -404,10 +404,12 @@
             {@const toNode = graphState.nodes.get(toId)}
             {@const fromShape = fromNode?.category === 'actor' ? 'card' : hints.nodeShape}
             {@const toShape = toNode?.category === 'actor' ? 'card' : hints.nodeShape}
+            {@const fromPos = activePositions.get(fromId)}
+            {@const toPos = activePositions.get(toId)}
             <EdgeLine
               edge={{ id: fromId + '-' + toId, ...conn }}
-              fromPos={activePositions.get(fromId)}
-              toPos={activePositions.get(toId)}
+              fromPos={fromNode?.category === 'actor' ? { x: fromPos.x + fromPos.w / 2 - 20, y: fromPos.y, w: 40, h: fromPos.h } : fromPos}
+              toPos={toNode?.category === 'actor' ? { x: toPos.x + toPos.w / 2 - 20, y: toPos.y, w: 40, h: toPos.h } : toPos}
               shapes={{ fromShape, toShape }}
             />
           {/if}
