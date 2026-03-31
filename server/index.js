@@ -271,13 +271,22 @@ async function start() {
     fs.writeFileSync(serverInfoFile, JSON.stringify(info, null, 2));
     console.log(JSON.stringify(info));
   });
+
+  // Keep alive: don't exit on stdin close
+  process.stdin.resume();
+  process.stdin.on('error', () => {});
 }
 start();
 
-// ── Cleanup ──
-function cleanup() {
+// ── Cleanup — only on explicit SIGINT (Ctrl+C), not SIGTERM/SIGHUP ──
+process.on('SIGINT', () => {
   try { fs.unlinkSync(serverInfoFile); } catch {}
   process.exit(0);
-}
-process.on('SIGTERM', cleanup);
-process.on('SIGINT', cleanup);
+});
+// Ignore SIGHUP (terminal close) and SIGTERM (process manager signals)
+process.on('SIGHUP', () => {});
+process.on('SIGTERM', () => {});
+// Don't crash on errors
+process.on('uncaughtException', (err) => {
+  console.error('Uncaught:', err.message);
+});
