@@ -52,7 +52,7 @@
           defaultLibraries: '',
           enabledLibraries: [],
           libraries: [],
-          css: '.geFooterContainer { display: none !important; } .geFormatContainer { display: none !important; }',
+          css: '.geFooterContainer, .geFormatContainer, .geMenubarContainer, .mxWindow { display: none !important; }',
           // Inject plugin that posts selection changes to parent
           plugins: [],
           customInit: `
