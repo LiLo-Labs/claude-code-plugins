@@ -128,4 +128,42 @@ describe('EventStore', () => {
     expect(store.getUnresolvedComments()).toHaveLength(1);
     expect(store.getUnresolvedComments()[0].text).toBe('Open');
   });
+
+  it('view.created stores rendering hints', () => {
+    const store = new EventStore();
+    store.apply({
+      type: 'view.created',
+      data: {
+        viewId: 'v1', name: 'Test',
+        tabNodes: [], tabConnections: [],
+        rendering: { nodeShape: 'ellipse', layout: 'grid' },
+      },
+    });
+    const state = store.getState();
+    expect(state.views[0].rendering).toEqual({ nodeShape: 'ellipse', layout: 'grid' });
+  });
+
+  it('view.created defaults rendering to empty object', () => {
+    const store = new EventStore();
+    store.apply({
+      type: 'view.created',
+      data: { viewId: 'v1', name: 'Test', tabNodes: [], tabConnections: [] },
+    });
+    const state = store.getState();
+    expect(state.views[0].rendering).toEqual({});
+  });
+
+  it('view.updated can change rendering hints', () => {
+    const store = new EventStore();
+    store.apply({
+      type: 'view.created',
+      data: { viewId: 'v1', name: 'Test', tabNodes: [], tabConnections: [] },
+    });
+    store.apply({
+      type: 'view.updated',
+      data: { viewId: 'v1', changes: { rendering: { nodeShape: 'rounded' } } },
+    });
+    const state = store.getState();
+    expect(state.views[0].rendering).toEqual({ nodeShape: 'rounded' });
+  });
 });

@@ -79,7 +79,7 @@ function replayEventsToState(events) {
       case 'comment.resolved': { const c = comments.find(c => c.id === d.commentId); if (c) c.resolved = true; break; }
       case 'comment.reopened': { const c = comments.find(c => c.id === d.commentId); if (c) c.resolved = false; break; }
       case 'comment.deleted': comments = comments.filter(c => c.id !== d.commentId); break;
-      case 'view.created': views.push({ id: d.viewId, name: d.name, description: d.description || '', tabNodes: d.tabNodes || [], tabConnections: d.tabConnections || [] }); break;
+      case 'view.created': views.push({ id: d.viewId, name: d.name, description: d.description || '', rendering: d.rendering || {}, tabNodes: d.tabNodes || [], tabConnections: d.tabConnections || [] }); break;
       case 'view.updated': { const v = views.find(v => v.id === d.viewId); if (v) Object.assign(v, d.changes || {}); break; }
       case 'view.deleted': { const idx = views.findIndex(v => v.id === d.viewId); if (idx !== -1) views.splice(idx, 1); break; }
     }

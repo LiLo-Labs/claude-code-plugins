@@ -153,6 +153,7 @@ export class EventStore {
           name: d.name,
           story: d.story || '',
           description: d.description || '',
+          rendering: d.rendering || {},
           // Per-tab authored diagram data (study-tutor model)
           tabNodes: d.tabNodes || [],        // [{ nodeId, row, col, cols, color?, textColor? }]
           tabConnections: d.tabConnections || [], // [{ from, to, label, color }]
