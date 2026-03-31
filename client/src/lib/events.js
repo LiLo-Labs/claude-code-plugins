@@ -157,6 +157,9 @@ export class EventStore {
           // Per-tab authored diagram data (study-tutor model)
           tabNodes: d.tabNodes || [],        // [{ nodeId, row, col, cols, color?, textColor? }]
           tabConnections: d.tabConnections || [], // [{ from, to, label, color }]
+          // Backend-specific diagram data
+          drawioXml: d.drawioXml || '',
+          excalidrawElements: d.excalidrawElements || [],
           // Legacy filter (for backwards compat)
           filter: d.filter || null,
         });
