@@ -170,6 +170,14 @@
             });
           }
         }}
+        onselect={(ids) => {
+          if (ids.length === 1 && graphState.nodes.has(ids[0])) {
+            selectNode(ids[0]);
+            appState.panelOpen = true;
+          } else if (ids.length === 0) {
+            appState.selectedIds = new Set();
+          }
+        }}
       />
     </div>
 

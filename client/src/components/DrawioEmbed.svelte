@@ -49,11 +49,30 @@
       iframeEl?.contentWindow?.postMessage(JSON.stringify({
         action: 'configure',
         config: {
-          // Hide shape library and format panels
           defaultLibraries: '',
           enabledLibraries: [],
           libraries: [],
           css: '.geFooterContainer { display: none !important; } .geFormatContainer { display: none !important; }',
+          // Inject plugin that posts selection changes to parent
+          plugins: [],
+          customInit: `
+            try {
+              var graph = editorUi.editor.graph;
+              graph.getSelectionModel().addListener(mxEvent.CHANGE, function() {
+                var cells = graph.getSelectionCells();
+                var ids = [];
+                for (var i = 0; i < cells.length; i++) {
+                  if (cells[i].id && cells[i].id !== '0' && cells[i].id !== '1') {
+                    ids.push(cells[i].id);
+                  }
+                }
+                window.parent.postMessage(JSON.stringify({
+                  event: 'select',
+                  selected: ids
+                }), '*');
+              });
+            } catch(e) {}
+          `,
         },
       }), '*');
     }
