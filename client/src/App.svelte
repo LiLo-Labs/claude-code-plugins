@@ -15,6 +15,9 @@
   import ContextMenu from './components/ContextMenu.svelte';
   import CommentBar from './components/CommentBar.svelte';
   import CommentModal from './components/CommentModal.svelte';
+  import NodeEllipse from './components/NodeEllipse.svelte';
+  import NodeActor from './components/NodeActor.svelte';
+  import { resolveHints } from './lib/rendering.js';
 
   let theme = $state('dark');
   let activeTabIdx = $state(0);
@@ -48,6 +51,16 @@
   // Active tab — a DIAGRAM, not a filter
   const tabs = $derived(graphState.views);
   const activeTab = $derived(tabs[activeTabIdx] || tabs[0] || null);
+
+  // Resolve rendering hints for active view
+  const hints = $derived(resolveHints(activeTab?.rendering));
+
+  // Map nodeShape hint → component
+  const SHAPE_COMPONENTS = {
+    card: NodeLeaf,
+    ellipse: NodeEllipse,
+    actor: NodeActor,
+  };
 
   // Tab's authored node list + connection list
   const tabNodes = $derived(activeTab?.tabNodes || []);
@@ -397,7 +410,9 @@
           {@const node = getNodeWithOverrides(tabNode)}
           {@const pos = activePositions.get(nodeId)}
           {#if node && pos}
-            <NodeLeaf
+            {@const shape = tabNode.shape || (node.category === 'actor' ? 'actor' : hints.nodeShape)}
+            {@const NodeComponent = SHAPE_COMPONENTS[shape] || NodeLeaf}
+            <NodeComponent
               {node}
               {tabNode}
               {pos}
