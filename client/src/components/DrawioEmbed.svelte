@@ -16,15 +16,24 @@
     embed: '1',
     proto: 'json',
     spin: '1',
-    libraries: '1',
+    // Strip everything — just canvas + floating toolbar
+    ui: 'min',
     noExitBtn: '1',
     saveAndExit: '0',
     noSaveBtn: '1',
-    // Minimal UI — hide chrome, keep essential tools
-    ui: 'min',
     toolbar: '0',
+    'toolbar-position': 'top',
     pages: '0',
     footer: '0',
+    'format-toolbar': '0',
+    libraries: '0',
+    'config-json': JSON.stringify({
+      defaultFonts: [],
+      customFonts: [],
+      // Hide panels
+      formatPanel: false,
+      shapePanel: false,
+    }),
   });
   if (dark) params.set('dark', '1');
 
