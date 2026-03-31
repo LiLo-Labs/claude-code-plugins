@@ -55,6 +55,19 @@
   }
 
   function handleToggleTheme() { theme = toggleTheme(); }
+
+  function handleDrawioSelect(ids) {
+    if (ids.length === 1) {
+      // Check if the selected shape ID matches a node in our registry
+      const nodeId = ids[0];
+      if (graphState.nodes.has(nodeId)) {
+        appState.selectedIds = new Set([nodeId]);
+        appState.panelOpen = true;
+      }
+    } else if (ids.length === 0) {
+      appState.selectedIds = new Set();
+    }
+  }
 </script>
 
 <div class="layout">
@@ -63,6 +76,8 @@
     <div class="tp"><span class="dot"></span> {activeTab?.name || 'Code Canvas'}</div>
     <div class="tp-story">{activeTab?.story || ''}</div>
     <div class="tr">
+      <button class="tb" onclick={() => appState.panelOpen = !appState.panelOpen}>&#9776;</button>
+      <div class="sep"></div>
       <button class="tb" onclick={handleToggleTheme}>{theme === 'dark' ? '\u2606' : '\u263E'}</button>
     </div>
   </header>
@@ -117,10 +132,26 @@
             });
           }
         }}
+        onselect={handleDrawioSelect}
       />
     </div>
 
-    <!-- Detail panel removed — draw.io has its own format panel -->
+    <!-- Detail panel — shows when a semantic node is selected -->
+    {#if appState.panelOpen && selectedNode}
+      <aside class="rp">
+        <DetailPanel
+          node={selectedNode}
+          nodes={graphState.nodes}
+          store={appState.store}
+          comments={graphState.comments}
+          onselect={(id) => { appState.selectedIds = new Set([id]); }}
+          onclose={() => appState.panelOpen = false}
+          onaddcomment={(node) => { commentModal = { visible: true, node }; }}
+          onresolve={handleResolveComment}
+          ondelete={handleDeleteComment}
+        />
+      </aside>
+    {/if}
   </div>
 
   <!-- Comment bar -->
@@ -165,11 +196,8 @@
 
   .main { flex: 1; display: flex; min-height: 0; }
   .canvas-col { flex: 1; display: flex; flex-direction: column; min-height: 0; min-width: 0; position: relative; }
-  .edge-toggle { position: absolute; top: 50%; z-index: 15; width: 16px; height: 44px; background: var(--bg-s); border: 1px solid var(--bdr); display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 11px; color: var(--tx-d); transition: .15s; }
-  .edge-toggle:hover { border-color: var(--ac); color: var(--ac); }
-  .edge-toggle.right { right: 0; border-radius: 4px 0 0 4px; border-right: none; transform: translateY(-50%); }
 
-  .rp { width: 280px; background: var(--gl); backdrop-filter: blur(16px); border-left: 1px solid var(--gl-b); flex-shrink: 0; }
+  .rp { width: 280px; background: var(--gl); backdrop-filter: blur(16px); border-left: 1px solid var(--gl-b); flex-shrink: 0; overflow-y: auto; }
 
   .sl { height: 22px; background: var(--bg-s); border-top: 1px solid var(--bdr); display: flex; align-items: center; padding: 0 14px; gap: 14px; font-size: 10px; flex-shrink: 0; }
   .ok { color: var(--gr); }

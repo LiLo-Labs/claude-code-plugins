@@ -6,7 +6,7 @@
    */
   import { onMount, onDestroy } from 'svelte';
 
-  let { xml = '', onchange, dark = true } = $props();
+  let { xml = '', onchange, onselect, dark = true } = $props();
 
   let iframeEl = $state(null);
   let ready = $state(false);
@@ -66,6 +66,12 @@
     if (msg.event === 'autosave' || msg.event === 'save') {
       loadedXml = msg.xml;
       onchange?.(msg.xml);
+    }
+
+    if (msg.event === 'select') {
+      // msg.selected is an array of cell IDs
+      const ids = msg.selected || [];
+      onselect?.(ids);
     }
   }
 
