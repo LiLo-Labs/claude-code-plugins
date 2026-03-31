@@ -54,8 +54,9 @@ All events use envelope: `{ id, ts, type, actor, data }`
 | `comment.resolved` | `commentId` |
 | `comment.reopened` | `commentId` |
 | `comment.deleted` | `commentId` |
-| `view.created` | `viewId, name, description, tabNodes[], tabConnections[]` |
+| `view.created` | `viewId, name, description, rendering, tabNodes[], tabConnections[]` |
 | `view.updated` | `viewId, changes: { ...changed fields }` |
+| `view.deleted` | `viewId` |
 
 ## Node Model
 
@@ -63,7 +64,36 @@ All events use envelope: `{ id, ts, type, actor, data }`
 - **status:** `done | in-progress | planned | placeholder`
 - **confidence:** `0-3`
 - **files:** Glob patterns for file-to-node tracking (e.g., `["src/lib/events.*", "server/index.js"]`)
-- **category:** User-defined grouping (e.g., `"arch"`, `"flow"`, `"data"`)
+- **category:** User-defined grouping (e.g., `"arch"`, `"flow"`, `"data"`, `"actor"` for UML actors)
+
+## Rendering Hints
+
+Views can carry a `rendering` object with composable hints that control how nodes and edges are drawn. Claude picks hints based on what the diagram is trying to communicate.
+
+| Hint | Values | Default | Purpose |
+|------|--------|---------|---------|
+| `nodeShape` | `card`, `ellipse`, `rounded`, `pill` | `card` | How nodes are drawn |
+| `nodeSize` | `compact`, `standard`, `expanded` | `standard` | Node dimensions |
+| `nodeContent` | Array: `label`, `subtitle`, `fields`, `status-badge` | `["label", "subtitle"]` | What to show on nodes |
+| `edgeStyle` | `curve`, `straight`, `step`, `ordered-arrows` | `curve` | How edges are drawn |
+| `edgeLabels` | `pill`, `inline`, `hidden` | `pill` | Edge label style |
+| `layout` | `grid`, `horizontal-lanes`, `vertical-lanes`, `layered-top-down` | `grid` | Layout algorithm |
+
+**Auto-detection:** Nodes with `category: "actor"` automatically render as UML stick figures regardless of the view's `nodeShape` hint.
+
+**Per-node override:** Individual nodes can override the view's shape via `tabNode.shape`.
+
+**Examples:**
+
+UML use case diagram:
+```json
+{ "rendering": { "nodeShape": "ellipse" } }
+```
+
+State machine:
+```json
+{ "rendering": { "nodeShape": "rounded" } }
+```
 
 ## API
 
