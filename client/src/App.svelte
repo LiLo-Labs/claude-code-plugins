@@ -400,10 +400,15 @@
           {@const fromId = conn.from}
           {@const toId = conn.to}
           {#if activePositions.has(fromId) && activePositions.has(toId)}
+            {@const fromNode = graphState.nodes.get(fromId)}
+            {@const toNode = graphState.nodes.get(toId)}
+            {@const fromShape = fromNode?.category === 'actor' ? 'card' : hints.nodeShape}
+            {@const toShape = toNode?.category === 'actor' ? 'card' : hints.nodeShape}
             <EdgeLine
               edge={{ id: fromId + '-' + toId, ...conn }}
               fromPos={activePositions.get(fromId)}
               toPos={activePositions.get(toId)}
+              shapes={{ fromShape, toShape }}
             />
           {/if}
         {/each}

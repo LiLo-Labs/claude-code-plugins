@@ -73,17 +73,36 @@ export function clipAtBorder(cx, cy, tx, ty, hw, hh) {
 }
 
 /**
- * Compute bezier edge path between two nodes.
- * Quadratic bezier with perpendicular offset.
+ * Clip a line from center toward target at ellipse border.
  */
-export function computeEdgePath(fromPos, toPos) {
+export function clipAtEllipse(cx, cy, tx, ty, rx, ry) {
+  const dx = tx - cx;
+  const dy = ty - cy;
+  if (dx === 0 && dy === 0) return { x: cx, y: cy };
+  const angle = Math.atan2(dy, dx);
+  return {
+    x: cx + rx * Math.cos(angle),
+    y: cy + ry * Math.sin(angle),
+  };
+}
+
+/**
+ * Compute bezier edge path between two nodes.
+ * @param {Object} fromPos - {x, y, w, h}
+ * @param {Object} toPos - {x, y, w, h}
+ * @param {Object} [options] - { fromShape: 'card'|'ellipse', toShape: 'card'|'ellipse' }
+ */
+export function computeEdgePath(fromPos, toPos, options = {}) {
   const fcx = fromPos.x + fromPos.w / 2;
   const fcy = fromPos.y + fromPos.h / 2;
   const tcx = toPos.x + toPos.w / 2;
   const tcy = toPos.y + toPos.h / 2;
 
-  const start = clipAtBorder(fcx, fcy, tcx, tcy, fromPos.w / 2, fromPos.h / 2);
-  const end = clipAtBorder(tcx, tcy, fcx, fcy, toPos.w / 2 + 6, toPos.h / 2 + 6);
+  const clipFrom = options.fromShape === 'ellipse' ? clipAtEllipse : clipAtBorder;
+  const clipTo = options.toShape === 'ellipse' ? clipAtEllipse : clipAtBorder;
+
+  const start = clipFrom(fcx, fcy, tcx, tcy, fromPos.w / 2, fromPos.h / 2);
+  const end = clipTo(tcx, tcy, fcx, fcy, toPos.w / 2 + 6, toPos.h / 2 + 6);
 
   const mx = (start.x + end.x) / 2;
   const my = (start.y + end.y) / 2;
@@ -93,7 +112,6 @@ export function computeEdgePath(fromPos, toPos) {
   const py = (end.x - start.x) * bf;
 
   const path = `M${start.x},${start.y} Q${mx + px},${my + py} ${end.x},${end.y}`;
-  // Label at the bezier midpoint (t=0.5), pulled further from the straight line
   const labelX = mx + px * 0.6;
   const labelY = my + py * 0.6;
 

@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import { computeLayout, computeEdgePath, clipAtBorder, getAncestors, GRID } from './layout.js';
+import { describe, it, test, expect } from 'vitest';
+import { computeLayout, computeEdgePath, clipAtBorder, clipAtEllipse, getAncestors, GRID } from './layout.js';
 
 describe('computeLayout', () => {
   it('positions tab nodes by row/col grid', () => {
@@ -68,6 +68,27 @@ describe('clipAtBorder', () => {
     const p = clipAtBorder(100, 100, 100, 200, 50, 30);
     expect(p.x).toBeCloseTo(100);
     expect(p.y).toBeCloseTo(130);
+  });
+});
+
+describe('clipAtEllipse', () => {
+  test('clips horizontal ray to ellipse edge', () => {
+    const p = clipAtEllipse(100, 100, 200, 100, 50, 30);
+    expect(p.x).toBeCloseTo(150);
+    expect(p.y).toBeCloseTo(100);
+  });
+
+  test('clips vertical ray to ellipse edge', () => {
+    const p = clipAtEllipse(100, 100, 100, 200, 50, 30);
+    expect(p.x).toBeCloseTo(100);
+    expect(p.y).toBeCloseTo(130);
+  });
+
+  test('clips diagonal ray to ellipse edge', () => {
+    const p = clipAtEllipse(100, 100, 200, 200, 50, 30);
+    const dx = (p.x - 100) / 50;
+    const dy = (p.y - 100) / 30;
+    expect(dx * dx + dy * dy).toBeCloseTo(1, 1);
   });
 });
 

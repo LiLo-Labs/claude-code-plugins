@@ -5,10 +5,10 @@
    */
   import { computeEdgePath } from '../lib/layout.js';
 
-  let { edge, fromPos, toPos } = $props();
+  let { edge, fromPos, toPos, shapes = {} } = $props();
 
   const color = $derived(edge.color || '#64748b');
-  const edgePath = $derived(computeEdgePath(fromPos, toPos));
+  const edgePath = $derived(computeEdgePath(fromPos, toPos, shapes));
   const labelW = $derived(edge.label ? edge.label.length * 7.5 + 24 : 0);
 </script>
 
