@@ -293,8 +293,8 @@
   </header>
 
   <div class="main">
-    <!-- Left sidebar -->
-    {#if appState.sidebarOpen}
+    <!-- Left sidebar — only shown for SVG backend -->
+    {#if appState.sidebarOpen && backend === 'svg'}
       <aside class="sb">
         <div class="sh">
           <div class="si"><input type="text" placeholder="Search... (⌘K)" bind:value={appState.searchQuery} /></div>
