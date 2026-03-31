@@ -12,6 +12,9 @@
   let excalidrawAPI = null;
 
   onMount(async () => {
+    // Load Excalidraw CSS
+    await import('@excalidraw/excalidraw/index.css');
+
     const React = await import('react');
     const { createRoot } = await import('react-dom/client');
     const { Excalidraw } = await import('@excalidraw/excalidraw');
