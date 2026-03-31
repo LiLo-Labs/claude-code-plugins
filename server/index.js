@@ -81,7 +81,12 @@ function replayEventsToState(events) {
       case 'comment.deleted': comments = comments.filter(c => c.id !== d.commentId); break;
       case 'view.created': views.push({ id: d.viewId, name: d.name, description: d.description || '', tabNodes: d.tabNodes || [], tabConnections: d.tabConnections || [] }); break;
       case 'view.updated': { const v = views.find(v => v.id === d.viewId); if (v) Object.assign(v, d.changes || {}); break; }
+      case 'view.deleted': { const idx = views.findIndex(v => v.id === d.viewId); if (idx !== -1) views.splice(idx, 1); break; }
     }
+  }
+  // Clean up orphaned edges (endpoints referencing deleted nodes)
+  for (const [edgeId, edge] of edges) {
+    if (!nodes.has(edge.from) || !nodes.has(edge.to)) edges.delete(edgeId);
   }
   return { nodes, edges, comments, decisions, views, lastEvent: events[events.length - 1] || null };
 }

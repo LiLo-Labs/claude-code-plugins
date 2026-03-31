@@ -335,6 +335,20 @@
             savedPositions = data || {};
           }).catch(() => { savedPositions = {}; });
         }}
+        onrename={(viewId, name) => {
+          emitEvent({
+            id: genId(), type: 'view.updated', actor: 'user',
+            data: { viewId, changes: { name } },
+          });
+        }}
+        ondelete={(viewId) => {
+          emitEvent({
+            id: genId(), type: 'view.deleted', actor: 'user',
+            data: { viewId },
+          });
+          // Switch to first tab if we deleted the active one
+          if (activeTab?.id === viewId) activeTabIdx = 0;
+        }}
       />
 
       <!-- Connect mode indicator -->

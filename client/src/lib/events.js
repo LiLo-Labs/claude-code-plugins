@@ -62,6 +62,7 @@ export class EventStore {
 
       case 'node.deleted':
         this._nodes.delete(d.nodeId);
+        this._cleanOrphanedEdges();
         this._recomputeCompleteness();
         break;
 
@@ -166,8 +167,21 @@ export class EventStore {
         break;
       }
 
+      case 'view.deleted':
+        this._views = this._views.filter(v => v.id !== d.viewId);
+        break;
+
       case 'layout.saved':
         break;
+    }
+  }
+
+  /** Remove edges whose endpoints no longer exist */
+  _cleanOrphanedEdges() {
+    for (const [edgeId, edge] of this._edges) {
+      if (!this._nodes.has(edge.from) || !this._nodes.has(edge.to)) {
+        this._edges.delete(edgeId);
+      }
     }
   }
 
