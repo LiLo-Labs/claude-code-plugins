@@ -69,7 +69,6 @@
     }
 
     if (msg.event === 'select') {
-      // msg.selected is an array of cell IDs
       const ids = msg.selected || [];
       onselect?.(ids);
     }
