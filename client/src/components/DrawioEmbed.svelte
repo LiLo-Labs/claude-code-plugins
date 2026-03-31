@@ -53,7 +53,7 @@
           defaultLibraries: '',
           enabledLibraries: [],
           libraries: [],
-          css: '.geFooterContainer { display: none !important; }',
+          css: '.geFooterContainer { display: none !important; } .geFormatContainer { display: none !important; }',
         },
       }), '*');
     }
