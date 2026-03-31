@@ -1,0 +1,399 @@
+- generic [ref=e3]:
+  - banner [ref=e4]:
+    - generic [ref=e5]: Architecture
+    - generic [ref=e7]:
+      - button "☰" [ref=e8] [cursor=pointer]
+      - button "☆" [ref=e10] [cursor=pointer]
+  - generic [ref=e11]:
+    - generic [ref=e12]:
+      - button "›" [ref=e13] [cursor=pointer]
+      - generic [ref=e14]:
+        - button "1. Architecture" [ref=e15] [cursor=pointer]
+        - button "2. Use Cases" [ref=e16] [cursor=pointer]
+        - button "+" [ref=e17] [cursor=pointer]
+      - iframe [ref=e19]:
+        - generic [active] [ref=f1e1]:
+          - img [ref=f1e4]:
+            - generic [ref=f1e6]:
+              - generic [ref=f1e11]: System
+              - generic [ref=f1e18]: Server
+              - generic [ref=f1e24]: Event Store
+              - generic [ref=f1e29]: Domain
+              - generic [ref=f1e36]: Plugin Hooks
+              - generic [ref=f1e41]: SKILL.md
+              - generic [ref=f1e46]: Canvas App
+              - generic [ref=f1e51]: Draw.io Embed
+              - generic [ref=f1e56]: Module
+              - generic [ref=f1e63]: Canvas Client
+              - generic [ref=f1e68]: State Mgmt
+              - generic [ref=f1e73]: Config & Theme
+              - generic [ref=f1e78]: Glob Matcher
+              - generic [ref=f1e84]: reads/writes
+              - generic [ref=f1e89]: auto-starts
+              - generic [ref=f1e95]: teaches
+              - generic [ref=f1e100]: embeds
+              - generic [ref=f1e105]: imports
+              - generic [ref=f1e111]: replays
+              - generic [ref=f1e117]: reads/writes
+              - generic [ref=f1e122]: file matching
+          - generic [ref=f1e123]:
+            - table [ref=f1e124]:
+              - rowgroup [ref=f1e125]:
+                - row "Shapes MinimizeClose" [ref=f1e126]:
+                  - cell "Shapes MinimizeClose" [ref=f1e127]:
+                    - text: Shapes
+                    - generic [ref=f1e128]:
+                      - img "Minimize" [ref=f1e129] [cursor=pointer]
+                      - img "Close" [ref=f1e130] [cursor=pointer]
+                - row "Search General Misc Advanced Basic Arrows Flowchart Entity Relation UML + More Shapes" [ref=f1e131]:
+                  - cell "Search General Misc Advanced Basic Arrows Flowchart Entity Relation UML + More Shapes" [ref=f1e132]:
+                    - generic [ref=f1e134]:
+                      - generic [ref=f1e135]:
+                        - generic [ref=f1e138]:
+                          - textbox "Type / to search" [ref=f1e139]
+                          - img "Search" [ref=f1e140] [cursor=pointer]
+                        - generic "Click or drag and drop shapes. Shift+click to change selection. Alt+click to insert and connect." [ref=f1e141] [cursor=pointer]:
+                          - generic [ref=f1e142]: General
+                        - generic [ref=f1e144]:
+                          - generic [ref=f1e145] [cursor=pointer]:
+                            - img
+                          - generic [ref=f1e146] [cursor=pointer]:
+                            - img
+                          - generic [ref=f1e147] [cursor=pointer]:
+                            - img:
+                              - generic:
+                                - generic:
+                                  - generic:
+                                    - generic:
+                                      - generic:
+                                        - generic:
+                                          - generic:
+                                            - generic: Text
+                          - generic [ref=f1e148] [cursor=pointer]:
+                            - img:
+                              - generic:
+                                - generic:
+                                  - generic:
+                                    - generic:
+                                      - generic:
+                                        - generic:
+                                          - generic:
+                                            - generic:
+                                              - heading "Heading" [level=1]
+                                              - paragraph: Lorem ipsum dolor sit amet, consectetur adipisicing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.
+                          - generic [ref=f1e149] [cursor=pointer]:
+                            - img
+                          - generic [ref=f1e150] [cursor=pointer]:
+                            - img
+                          - generic [ref=f1e151] [cursor=pointer]:
+                            - img
+                          - generic [ref=f1e152] [cursor=pointer]:
+                            - img
+                          - generic [ref=f1e153] [cursor=pointer]:
+                            - img
+                          - generic [ref=f1e154] [cursor=pointer]:
+                            - img
+                          - generic [ref=f1e155] [cursor=pointer]:
+                            - img
+                          - generic [ref=f1e156] [cursor=pointer]:
+                            - img
+                          - generic [ref=f1e157] [cursor=pointer]:
+                            - img
+                          - generic [ref=f1e158] [cursor=pointer]:
+                            - img
+                          - generic [ref=f1e159] [cursor=pointer]:
+                            - img
+                          - generic [ref=f1e160] [cursor=pointer]:
+                            - img
+                          - generic [ref=f1e161] [cursor=pointer]:
+                            - img
+                          - generic [ref=f1e162] [cursor=pointer]:
+                            - img
+                          - generic [ref=f1e163] [cursor=pointer]:
+                            - img
+                          - generic [ref=f1e164] [cursor=pointer]:
+                            - img
+                          - generic [ref=f1e165] [cursor=pointer]:
+                            - img
+                          - generic [ref=f1e166] [cursor=pointer]:
+                            - img
+                          - generic [ref=f1e167] [cursor=pointer]:
+                            - img
+                          - generic [ref=f1e168] [cursor=pointer]:
+                            - img
+                          - generic [ref=f1e169] [cursor=pointer]:
+                            - img
+                          - generic [ref=f1e170] [cursor=pointer]:
+                            - img
+                          - generic [ref=f1e171] [cursor=pointer]:
+                            - img
+                          - generic [ref=f1e172] [cursor=pointer]:
+                            - img
+                          - generic [ref=f1e173] [cursor=pointer]:
+                            - img:
+                              - generic:
+                                - generic:
+                                  - generic:
+                                    - generic:
+                                      - generic:
+                                        - generic:
+                                          - generic:
+                                            - generic: Vertical Container
+                          - generic [ref=f1e174] [cursor=pointer]:
+                            - img:
+                              - generic:
+                                - generic:
+                                  - generic:
+                                    - generic:
+                                      - generic:
+                                        - generic:
+                                          - generic:
+                                            - generic: Horizontal Container
+                          - generic [ref=f1e175] [cursor=pointer]:
+                            - img:
+                              - generic:
+                                - generic:
+                                  - generic:
+                                    - generic:
+                                      - generic:
+                                        - generic:
+                                          - generic:
+                                            - generic: List
+                                  - generic:
+                                    - generic:
+                                      - generic:
+                                        - generic:
+                                          - generic:
+                                            - generic: Item 1
+                                  - generic:
+                                    - generic:
+                                      - generic:
+                                        - generic:
+                                          - generic:
+                                            - generic: Item 2
+                                  - generic:
+                                    - generic:
+                                      - generic:
+                                        - generic:
+                                          - generic:
+                                            - generic: Item 3
+                          - generic [ref=f1e176] [cursor=pointer]:
+                            - img:
+                              - generic:
+                                - generic:
+                                  - generic:
+                                    - generic:
+                                      - generic:
+                                        - generic:
+                                          - generic:
+                                            - generic: List Item
+                          - generic [ref=f1e177] [cursor=pointer]:
+                            - img
+                          - generic [ref=f1e178] [cursor=pointer]:
+                            - img
+                          - generic [ref=f1e179] [cursor=pointer]:
+                            - img
+                          - generic [ref=f1e180] [cursor=pointer]:
+                            - img
+                          - generic [ref=f1e181] [cursor=pointer]:
+                            - img
+                          - generic [ref=f1e182] [cursor=pointer]:
+                            - img
+                          - generic [ref=f1e183] [cursor=pointer]:
+                            - img
+                          - generic [ref=f1e184] [cursor=pointer]:
+                            - img
+                          - generic [ref=f1e185] [cursor=pointer]:
+                            - img
+                          - generic [ref=f1e186] [cursor=pointer]:
+                            - img:
+                              - generic:
+                                - generic:
+                                  - generic:
+                                    - generic:
+                                      - generic:
+                                        - generic:
+                                          - generic:
+                                            - generic: Label
+                          - generic [ref=f1e187] [cursor=pointer]:
+                            - img:
+                              - generic:
+                                - generic:
+                                  - generic:
+                                    - generic:
+                                      - generic:
+                                        - generic:
+                                          - generic:
+                                            - generic: Label
+                                  - generic:
+                                    - generic:
+                                      - generic:
+                                        - generic:
+                                          - generic:
+                                            - generic: Source
+                          - generic [ref=f1e188] [cursor=pointer]:
+                            - img:
+                              - generic:
+                                - generic:
+                                  - generic:
+                                    - generic:
+                                      - generic:
+                                        - generic:
+                                          - generic:
+                                            - generic: Label
+                                  - generic:
+                                    - generic:
+                                      - generic:
+                                        - generic:
+                                          - generic:
+                                            - generic: Source
+                                  - generic:
+                                    - generic:
+                                      - generic:
+                                        - generic:
+                                          - generic:
+                                            - generic: Target
+                          - generic [ref=f1e189] [cursor=pointer]:
+                            - img
+                        - generic "Click or drag and drop shapes. Shift+click to change selection. Alt+click to insert and connect." [ref=f1e190] [cursor=pointer]:
+                          - generic [ref=f1e191]: Misc
+                        - generic "Click or drag and drop shapes. Shift+click to change selection. Alt+click to insert and connect." [ref=f1e192] [cursor=pointer]:
+                          - generic [ref=f1e193]: Advanced
+                        - generic "Click or drag and drop shapes. Shift+click to change selection. Alt+click to insert and connect." [ref=f1e194] [cursor=pointer]:
+                          - generic [ref=f1e195]: Basic
+                        - generic "Click or drag and drop shapes. Shift+click to change selection. Alt+click to insert and connect." [ref=f1e196] [cursor=pointer]:
+                          - generic [ref=f1e197]: Arrows
+                        - generic "Click or drag and drop shapes. Shift+click to change selection. Alt+click to insert and connect." [ref=f1e198] [cursor=pointer]:
+                          - generic [ref=f1e199]: Flowchart
+                        - generic "Click or drag and drop shapes. Shift+click to change selection. Alt+click to insert and connect." [ref=f1e200] [cursor=pointer]:
+                          - generic [ref=f1e201]: Entity Relation
+                        - generic "Click or drag and drop shapes. Shift+click to change selection. Alt+click to insert and connect." [ref=f1e202] [cursor=pointer]:
+                          - generic [ref=f1e203]: UML
+                      - button "+ More Shapes" [ref=f1e205]:
+                        - generic [ref=f1e206]: +
+                        - text: More Shapes
+            - img [ref=f1e207]
+          - generic [ref=f1e208]:
+            - table [ref=f1e209]:
+              - rowgroup [ref=f1e210]:
+                - row "Format MinimizeClose" [ref=f1e211]:
+                  - cell "Format MinimizeClose" [ref=f1e212]:
+                    - text: Format
+                    - generic [ref=f1e213]:
+                      - img "Minimize" [ref=f1e214] [cursor=pointer]
+                      - img "Close" [ref=f1e215] [cursor=pointer]
+                - row "Diagram Style View Grid Grid Page View Page View Background Change... Background Color Background Color Shadow Shadow Options Connection Arrows Connection Arrows Connection Points Connection Points Guides Guides Mathematical Typesetting Mathematical Typesetting Help (https://www.drawio.com/doc/faq/math-typesetting) Paper Size US-Letter (8,5\" x 11\") Portrait Landscape Edit Data... Clear Default Style" [ref=f1e216]:
+                  - cell "Diagram Style View Grid Grid Page View Page View Background Change... Background Color Background Color Shadow Shadow Options Connection Arrows Connection Arrows Connection Points Connection Points Guides Guides Mathematical Typesetting Mathematical Typesetting Help (https://www.drawio.com/doc/faq/math-typesetting) Paper Size US-Letter (8,5\" x 11\") Portrait Landscape Edit Data... Clear Default Style" [ref=f1e217]:
+                    - generic [ref=f1e219]:
+                      - generic [ref=f1e220]:
+                        - generic "Diagram" [ref=f1e221] [cursor=pointer]:
+                          - generic [ref=f1e222]: Diagram
+                        - generic "Style" [ref=f1e223] [cursor=pointer]:
+                          - generic [ref=f1e224]: Style
+                      - generic [ref=f1e225]:
+                        - generic [ref=f1e226]:
+                          - generic "View" [ref=f1e227]
+                          - generic [ref=f1e228]:
+                            - checkbox "Grid" [ref=f1e229]
+                            - generic "Grid" [ref=f1e230]
+                          - generic [ref=f1e231]:
+                            - checkbox "Page View" [checked] [ref=f1e232]
+                            - generic "Page View" [ref=f1e233]
+                          - generic [ref=f1e234]:
+                            - generic "Background" [ref=f1e235]
+                            - button "Change..." [ref=f1e236]
+                          - generic [ref=f1e237]:
+                            - checkbox "Background Color" [ref=f1e238]
+                            - generic "Background Color" [ref=f1e239]
+                          - generic [ref=f1e240]:
+                            - checkbox "Shadow" [ref=f1e241]
+                            - generic "Shadow" [ref=f1e242]
+                        - generic [ref=f1e243]:
+                          - generic "Options" [ref=f1e244]
+                          - generic [ref=f1e245]:
+                            - checkbox "Connection Arrows" [checked] [ref=f1e246]
+                            - generic "Connection Arrows" [ref=f1e247]
+                          - generic [ref=f1e248]:
+                            - checkbox "Connection Points" [checked] [ref=f1e249]
+                            - generic "Connection Points" [ref=f1e250]
+                          - generic [ref=f1e251]:
+                            - checkbox "Guides" [checked] [ref=f1e252]
+                            - generic "Guides" [ref=f1e253]
+                          - generic [ref=f1e254]:
+                            - checkbox "Mathematical Typesetting" [ref=f1e255]
+                            - generic "Mathematical Typesetting" [ref=f1e256]
+                            - img "Help (https://www.drawio.com/doc/faq/math-typesetting)" [ref=f1e257]
+                        - generic [ref=f1e258]:
+                          - generic "Paper Size" [ref=f1e259]
+                          - combobox [ref=f1e260]:
+                            - option "US-Letter (8,5\" x 11\")" [selected]
+                            - option "US-Legal (8,5\" x 14\")"
+                            - option "US-Tabloid (11\" x 17\")"
+                            - option "US-Executive (7\" x 10\")"
+                            - option "A0 (841 mm x 1189 mm)"
+                            - option "A1 (594 mm x 841 mm)"
+                            - option "A2 (420 mm x 594 mm)"
+                            - option "A3 (297 mm x 420 mm)"
+                            - option "A4 (210 mm x 297 mm)"
+                            - option "A5 (148 mm x 210 mm)"
+                            - option "A6 (105 mm x 148 mm)"
+                            - option "A7 (74 mm x 105 mm)"
+                            - option "B4 (250 mm x 353 mm)"
+                            - option "B5 (176 mm x 250 mm)"
+                            - option "16:9 (1600 x 900)"
+                            - option "16:10 (1920 x 1200)"
+                            - option "4:3 (1600 x 1200)"
+                            - option "Custom"
+                          - generic [ref=f1e261]:
+                            - radio [checked] [ref=f1e262]
+                            - text: Portrait
+                            - radio [ref=f1e263]
+                            - text: Landscape
+                        - generic [ref=f1e264]:
+                          - button "Edit Data..." [ref=f1e265]
+                          - button "Clear Default Style" [ref=f1e266]
+            - img [ref=f1e267]
+          - generic [ref=f1e268]:
+            - generic "Insert Page" [ref=f1e269]
+            - generic "Pages" [ref=f1e271]
+            - generic [ref=f1e273]:
+              - generic "Page-1 (xL004-3dtcK7bUiIo9Og) [1]" [ref=f1e274]:
+                - generic [ref=f1e275]: Page-1
+              - generic "Page-1 (uCn0yxEQsIkAkP2Tev6u) [2]" [ref=f1e277]:
+                - generic [ref=f1e278]: Page-1
+            - link "jgraph/drawio" [ref=f1e279] [cursor=pointer]:
+              - /url: https://github.com/jgraph/drawio
+              - img "jgraph/drawio" [ref=f1e280]
+            - textbox "Zoom (Alt+Mousewheel)" [ref=f1e281]: 100%
+          - generic [ref=f1e282]:
+            - generic [ref=f1e283]:
+              - generic "Diagram" [ref=f1e284] [cursor=pointer]
+              - generic "Shapes" [ref=f1e285] [cursor=pointer]
+              - generic "Format (⌘+⇧+P)" [ref=f1e286] [cursor=pointer]: Format
+            - generic [ref=f1e287]:
+              - generic "Insert" [ref=f1e288] [cursor=pointer]
+              - generic "Delete" [ref=f1e289]
+            - generic [ref=f1e290]:
+              - generic "Undo (⌘+Z)" [ref=f1e291]
+              - generic "Redo (⌘+⇧+Z)" [ref=f1e292]
+            - generic [ref=f1e293]:
+              - generic "Fit (⌘+H)" [ref=f1e294] [cursor=pointer]
+              - generic "Zoom In (⌘ +)" [ref=f1e295] [cursor=pointer]
+              - generic "Zoom Out (⌘ -)" [ref=f1e296] [cursor=pointer]
+    - complementary [ref=e20]:
+      - generic [ref=e21]:
+        - generic [ref=e22]:
+          - generic [ref=e23]: Details
+          - button "×" [ref=e24] [cursor=pointer]
+        - paragraph [ref=e26]: Select a node to view details
+  - generic [ref=e27]:
+    - generic [ref=e28] [cursor=pointer]:
+      - heading "Comments" [level=3] [ref=e29]
+      - generic [ref=e30]: "0"
+      - generic [ref=e31]: ▼
+    - generic [ref=e32]: No open comments
+  - contentinfo [ref=e33]:
+    - generic [ref=e34]: ● Synced
+    - generic [ref=e35]: 29 nodes
+    - generic [ref=e36]: 2 tabs
+    - generic [ref=e37]: 613 events

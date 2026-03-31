@@ -63,8 +63,6 @@
     <div class="tp"><span class="dot"></span> {activeTab?.name || 'Code Canvas'}</div>
     <div class="tp-story">{activeTab?.story || ''}</div>
     <div class="tr">
-      <button class="tb" onclick={() => appState.panelOpen = !appState.panelOpen}>&#9776;</button>
-      <div class="sep"></div>
       <button class="tb" onclick={handleToggleTheme}>{theme === 'dark' ? '\u2606' : '\u263E'}</button>
     </div>
   </header>
@@ -72,10 +70,6 @@
   <div class="main">
     <!-- Canvas with tab bar -->
     <div class="canvas-col">
-      <!-- Right edge toggle -->
-      <button class="edge-toggle right" onclick={() => appState.panelOpen = !appState.panelOpen}>
-        {appState.panelOpen ? '\u203A' : '\u2039'}
-      </button>
       <ViewTabs
         views={tabs}
         activeViewId={activeTab?.id || ''}
@@ -126,22 +120,7 @@
       />
     </div>
 
-    <!-- Right panel -->
-    {#if appState.panelOpen}
-      <aside class="rp">
-        <DetailPanel
-          node={selectedNode}
-          nodes={graphState.nodes}
-          store={appState.store}
-          comments={graphState.comments}
-          onselect={(id) => { appState.selectedIds = new Set([id]); }}
-          onclose={() => appState.panelOpen = false}
-          onaddcomment={(node) => { commentModal = { visible: true, node }; }}
-          onresolve={handleResolveComment}
-          ondelete={handleDeleteComment}
-        />
-      </aside>
-    {/if}
+    <!-- Detail panel removed — draw.io has its own format panel -->
   </div>
 
   <!-- Comment bar -->

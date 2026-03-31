@@ -2,7 +2,7 @@
   /**
    * DrawioEmbed — embeds draw.io editor in an iframe.
    * Communicates via postMessage protocol.
-   * Loads diagram XML, receives changes via autosave.
+   * Reloads diagram when xml prop changes (tab switch).
    */
   import { onMount, onDestroy } from 'svelte';
 
@@ -10,46 +10,61 @@
 
   let iframeEl = $state(null);
   let ready = $state(false);
+  let loadedXml = '';  // track what we last loaded to avoid re-sends
 
   const baseUrl = 'https://embed.diagrams.net/';
   const params = new URLSearchParams({
     embed: '1',
     proto: 'json',
     spin: '1',
-    // Strip everything — just canvas + floating toolbar
-    ui: 'min',
+    configure: '1',
+    // Sketch mode — minimal chrome, just canvas + floating toolbar
+    ui: 'sketch',
     noExitBtn: '1',
     saveAndExit: '0',
     noSaveBtn: '1',
-    toolbar: '0',
-    'toolbar-position': 'top',
     pages: '0',
-    footer: '0',
-    'format-toolbar': '0',
-    libraries: '0',
     grid: '0',
-    'page-view': '0',
   });
   if (dark) params.set('dark', '1');
 
   const src = `${baseUrl}?${params}`;
+
+  function loadDiagram(xmlContent) {
+    if (!iframeEl?.contentWindow) return;
+    loadedXml = xmlContent;
+    iframeEl.contentWindow.postMessage(JSON.stringify({
+      action: 'load',
+      xml: xmlContent || '<mxGraphModel><root><mxCell id="0"/><mxCell id="1" parent="0"/></root></mxGraphModel>',
+      autosave: 1,
+    }), '*');
+  }
 
   function handleMessage(event) {
     if (!event.data || typeof event.data !== 'string') return;
     let msg;
     try { msg = JSON.parse(event.data); } catch { return; }
 
-    if (msg.event === 'init') {
-      ready = true;
-      // Load the diagram
+    if (msg.event === 'configure') {
       iframeEl?.contentWindow?.postMessage(JSON.stringify({
-        action: 'load',
-        xml: xml || '<mxGraphModel><root><mxCell id="0"/><mxCell id="1" parent="0"/></root></mxGraphModel>',
-        autosave: 1,
+        action: 'configure',
+        config: {
+          // Hide shape library and format panels
+          defaultLibraries: '',
+          enabledLibraries: [],
+          libraries: [],
+          css: '.geFooterContainer { display: none !important; }',
+        },
       }), '*');
     }
 
+    if (msg.event === 'init') {
+      ready = true;
+      loadDiagram(xml);
+    }
+
     if (msg.event === 'autosave' || msg.event === 'save') {
+      loadedXml = msg.xml;
       onchange?.(msg.xml);
     }
   }
@@ -62,13 +77,10 @@
     window.removeEventListener('message', handleMessage);
   });
 
-  // Re-load when xml prop changes externally
+  // Reload when xml prop changes (tab switch)
   $effect(() => {
-    if (ready && xml && iframeEl?.contentWindow) {
-      iframeEl.contentWindow.postMessage(JSON.stringify({
-        action: 'merge',
-        xml,
-      }), '*');
+    if (ready && xml !== loadedXml) {
+      loadDiagram(xml);
     }
   });
 </script>
