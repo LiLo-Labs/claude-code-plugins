@@ -20,6 +20,8 @@
   import NodeRounded from './components/NodeRounded.svelte';
   import NodePill from './components/NodePill.svelte';
   import { resolveHints } from './lib/rendering.js';
+  import DrawioEmbed from './components/DrawioEmbed.svelte';
+  import ExcalidrawEmbed from './components/ExcalidrawEmbed.svelte';
 
   let theme = $state('dark');
   let activeTabIdx = $state(0);
@@ -57,6 +59,9 @@
 
   // Resolve rendering hints for active view
   const hints = $derived(resolveHints(activeTab?.rendering));
+
+  // Backend: 'svg' (default), 'excalidraw', or 'drawio'
+  const backend = $derived(activeTab?.rendering?.backend || 'svg');
 
   // Map nodeShape hint → component
   const SHAPE_COMPONENTS = {
@@ -396,61 +401,92 @@
         </div>
       {/if}
 
-      <!-- svelte-ignore a11y_no_static_element_interactions -->
-      <div oncontextmenu={handleCanvasContextMenu}>
-      <Canvas>
+      {#if backend === 'drawio'}
+        <!-- Draw.io embedded editor -->
+        <DrawioEmbed
+          xml={activeTab?.drawioXml || ''}
+          dark={theme === 'dark'}
+          onchange={(xml) => {
+            if (activeTab) {
+              emitEvent({
+                id: genId(), type: 'view.updated', actor: 'user',
+                data: { viewId: activeTab.id, changes: { drawioXml: xml } },
+              });
+            }
+          }}
+        />
+      {:else if backend === 'excalidraw'}
+        <!-- Excalidraw embedded editor -->
+        <ExcalidrawEmbed
+          elements={activeTab?.excalidrawElements || []}
+          dark={theme === 'dark'}
+          onchange={(els) => {
+            if (activeTab) {
+              emitEvent({
+                id: genId(), type: 'view.updated', actor: 'user',
+                data: { viewId: activeTab.id, changes: { excalidrawElements: els } },
+              });
+            }
+          }}
+        />
+      {:else}
+        <!-- Default SVG canvas -->
+        <!-- svelte-ignore a11y_no_static_element_interactions -->
+        <div oncontextmenu={handleCanvasContextMenu}>
+        <Canvas>
 
-        <!-- Arrow markers -->
-        <defs>
-          {#each edgeColors as color}
-            <marker id="arrow-{color.toLowerCase().replace('#', '')}" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
-              <polygon points="0 0, 10 3.5, 0 7" fill={color} />
-            </marker>
+          <!-- Arrow markers -->
+          <defs>
+            {#each edgeColors as color}
+              <marker id="arrow-{color.toLowerCase().replace('#', '')}" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+                <polygon points="0 0, 10 3.5, 0 7" fill={color} />
+              </marker>
+            {/each}
+          </defs>
+
+          <!-- Tab connections (authored edges for this diagram) -->
+          {#each tabConnections as conn}
+            {@const fromId = conn.from}
+            {@const toId = conn.to}
+            {#if activePositions.has(fromId) && activePositions.has(toId)}
+              {@const fromNode = graphState.nodes.get(fromId)}
+              {@const toNode = graphState.nodes.get(toId)}
+              {@const fromShape = fromNode?.category === 'actor' ? 'card' : hints.nodeShape}
+              {@const toShape = toNode?.category === 'actor' ? 'card' : hints.nodeShape}
+              {@const fromPos = activePositions.get(fromId)}
+              {@const toPos = activePositions.get(toId)}
+              <EdgeLine
+                edge={{ id: fromId + '-' + toId, ...conn }}
+                fromPos={fromNode?.category === 'actor' ? { x: fromPos.x + fromPos.w / 2 - 20, y: fromPos.y, w: 40, h: fromPos.h } : fromPos}
+                toPos={toNode?.category === 'actor' ? { x: toPos.x + toPos.w / 2 - 20, y: toPos.y, w: 40, h: toPos.h } : toPos}
+                shapes={{ fromShape, toShape }}
+              />
+            {/if}
           {/each}
-        </defs>
 
-        <!-- Tab connections (authored edges for this diagram) -->
-        {#each tabConnections as conn}
-          {@const fromId = conn.from}
-          {@const toId = conn.to}
-          {#if activePositions.has(fromId) && activePositions.has(toId)}
-            {@const fromNode = graphState.nodes.get(fromId)}
-            {@const toNode = graphState.nodes.get(toId)}
-            {@const fromShape = fromNode?.category === 'actor' ? 'card' : hints.nodeShape}
-            {@const toShape = toNode?.category === 'actor' ? 'card' : hints.nodeShape}
-            {@const fromPos = activePositions.get(fromId)}
-            {@const toPos = activePositions.get(toId)}
-            <EdgeLine
-              edge={{ id: fromId + '-' + toId, ...conn }}
-              fromPos={fromNode?.category === 'actor' ? { x: fromPos.x + fromPos.w / 2 - 20, y: fromPos.y, w: 40, h: fromPos.h } : fromPos}
-              toPos={toNode?.category === 'actor' ? { x: toPos.x + toPos.w / 2 - 20, y: toPos.y, w: 40, h: toPos.h } : toPos}
-              shapes={{ fromShape, toShape }}
-            />
-          {/if}
-        {/each}
-
-        <!-- Nodes -->
-        {#each tabNodes as tabNode}
-          {@const nodeId = tabNode.nodeId || tabNode.id}
-          {@const node = getNodeWithOverrides(tabNode)}
-          {@const pos = activePositions.get(nodeId)}
-          {#if node && pos}
-            {@const shape = tabNode.shape || (node.category === 'actor' ? 'actor' : hints.nodeShape)}
-            {@const NodeComponent = SHAPE_COMPONENTS[shape] || NodeLeaf}
-            <NodeComponent
-              {node}
-              {tabNode}
-              {pos}
-              isSelected={appState.selectedIds.has(nodeId)}
-              comments={graphState.comments.filter(c => c.target === nodeId && !c.resolved)}
-              onselect={selectNode}
-              onstartdrag={startDrag}
-              oncontextmenu={handleContextMenu}
-            />
-          {/if}
-        {/each}
-      </Canvas>
-      </div>
+          <!-- Nodes -->
+          {#each tabNodes as tabNode}
+            {@const nodeId = tabNode.nodeId || tabNode.id}
+            {@const node = getNodeWithOverrides(tabNode)}
+            {@const pos = activePositions.get(nodeId)}
+            {#if node && pos}
+              {@const shape = tabNode.shape || (node.category === 'actor' ? 'actor' : hints.nodeShape)}
+              {@const NodeComponent = SHAPE_COMPONENTS[shape] || NodeLeaf}
+              <NodeComponent
+                {node}
+                {tabNode}
+                {pos}
+                isSelected={appState.selectedIds.has(nodeId)}
+                comments={graphState.comments.filter(c => c.target === nodeId && !c.resolved)}
+                onselect={selectNode}
+                onstartdrag={startDrag}
+                oncontextmenu={handleContextMenu}
+              />
+            {/if}
+          {/each}
+        </Canvas>
+        </div>
+      {/if}
     </div>
 
     <!-- Right panel -->
