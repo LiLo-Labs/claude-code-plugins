@@ -53,10 +53,22 @@ async function main() {
     }
   }
 
-  // Tell Claude which canvas nodes this file edit touches
+  // Check for unresolved comments the user may have added
+  const unresolvedComments = state.comments.filter(c => !c.resolved);
+  const userComments = unresolvedComments.filter(c => c.actor === 'user');
+
+  // Build context
+  let context = '';
   if (matchingNodes.length > 0) {
-    const context = `Canvas: file "${relative}" touches nodes: ${touchedLabels.join(', ')}` +
-      (toUpdate.length > 0 ? `. Updated ${toUpdate.length} to in-progress.` : '');
+    context += `Canvas: file "${relative}" touches nodes: ${touchedLabels.join(', ')}`;
+    if (toUpdate.length > 0) context += `. Updated ${toUpdate.length} to in-progress.`;
+  }
+  if (userComments.length > 0) {
+    context += `\nCanvas user comments (${userComments.length}): ` +
+      userComments.map(c => `"${c.text}" on ${c.targetLabel || c.target}`).join('; ');
+  }
+
+  if (context) {
     process.stdout.write(JSON.stringify({
       hookSpecificOutput: { hookEventName: 'PostToolUse', additionalContext: context },
     }));
