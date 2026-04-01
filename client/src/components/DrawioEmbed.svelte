@@ -12,15 +12,21 @@
   let loadedXml = '';
 
   onMount(async () => {
-    const { Graph, InternalEvent, ModelXmlSerializer, xmlUtils } = await import('@maxgraph/core');
+    const { Graph, InternalEvent, ModelXmlSerializer, xmlUtils, Codec, registerAllCodecs } = await import('@maxgraph/core');
     await import('@maxgraph/core/css/common.css');
 
-    graph = new Graph(containerEl);
+    // Register all codecs so we can parse draw.io XML
+    registerAllCodecs();
+
+    try {
+      graph = new Graph(containerEl);
+    } catch(e) {
+      console.error('Graph creation failed:', e);
+      containerEl.textContent = 'Graph failed to load: ' + e.message;
+      return;
+    }
     graph.setEnabled(true);
     graph.setPanning(true);
-    if (graph.panningHandler) {
-      graph.panningHandler.useLeftButtonForPanning = true;
-    }
     graph.setTooltips(true);
     graph.setConnectable(false);
 
@@ -38,30 +44,20 @@
     });
 
     if (xml) {
-      loadXml(xml, graph, ModelXmlSerializer, xmlUtils);
+      loadXml(xml, graph, Codec, xmlUtils);
     }
 
-    window._canvasGraph = { graph, ModelXmlSerializer, xmlUtils };
+    window._canvasGraph = { graph, Codec, xmlUtils };
   });
 
-  function loadXml(xmlStr, g, Serializer, utils) {
+  function loadXml(xmlStr, g, CodecClass, utils) {
     if (!g || !xmlStr) return;
     loadedXml = xmlStr;
     try {
-      g.getDataModel().beginUpdate();
-      try {
-        const root = g.getDataModel().getRoot();
-        if (root) {
-          while (root.getChildCount() > 0) {
-            root.remove(root.getChildAt(0));
-          }
-        }
-        const doc = utils.parseXml(xmlStr);
-        const serializer = new Serializer(g.getDataModel());
-        serializer.import(doc.documentElement);
-      } finally {
-        g.getDataModel().endUpdate();
-      }
+      const doc = utils.parseXml(xmlStr);
+      const codec = new CodecClass(doc);
+      codec.decode(doc.documentElement, g.getDataModel());
+      g.refresh();
       g.fit();
       g.center();
     } catch (e) {
@@ -79,8 +75,8 @@
 
   $effect(() => {
     if (graph && xml !== loadedXml && window._canvasGraph) {
-      const { graph: g, ModelXmlSerializer, xmlUtils } = window._canvasGraph;
-      loadXml(xml, g, ModelXmlSerializer, xmlUtils);
+      const { graph: g, Codec: C, xmlUtils: u } = window._canvasGraph;
+      loadXml(xml, g, C, u);
     }
   });
 </script>
