@@ -2,7 +2,7 @@
   import './app.css';
   import { onMount } from 'svelte';
   import { getInitialTheme, setTheme, toggleTheme } from './lib/theme.js';
-  import { appState, loadFromServer, emitEvent } from './lib/state.svelte.js';
+  import { appState, loadFromServer, emitEvent, subscribeToEvents } from './lib/state.svelte.js';
   import { genId } from './lib/events.js';
   import { statusColor } from './lib/config.js';
   import ViewTabs from './components/ViewTabs.svelte';
@@ -18,7 +18,8 @@
     theme = getInitialTheme();
     setTheme(theme);
     await loadFromServer();
-    appState.panelOpen = true;
+    // Subscribe to real-time events — updates from Claude or other clients
+    subscribeToEvents();
   });
 
   function getGraphState() {

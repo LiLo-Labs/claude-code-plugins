@@ -12,7 +12,7 @@
   let loadedXml = '';
 
   onMount(async () => {
-    const { Graph, InternalEvent, ModelXmlSerializer, xmlUtils, Codec, registerAllCodecs, UndoManager, KeyHandler } = await import('@maxgraph/core');
+    const { Graph, InternalEvent, ModelXmlSerializer, xmlUtils, Codec, registerAllCodecs, UndoManager, KeyHandler, ObjectCodec, CodecRegistry } = await import('@maxgraph/core');
     await import('@maxgraph/core/css/common.css');
 
     registerAllCodecs();
@@ -65,6 +65,27 @@
     // Delete/Backspace = delete selected
     keyHandler.bindKey(46, () => graph.removeCells());
     keyHandler.bindKey(8, () => graph.removeCells());
+
+    // Auto-save: serialize graph to XML on changes (debounced)
+    let saveTimer = null;
+    const saveChanges = () => {
+      if (!graph || !onchange) return;
+      try {
+        const encoder = new Codec();
+        const result = encoder.encode(graph.getDataModel());
+        const xmlStr = xmlUtils.getXml(result);
+        if (xmlStr && xmlStr !== loadedXml) {
+          loadedXml = xmlStr;
+          onchange(xmlStr);
+        }
+      } catch(e) {
+        console.warn('Failed to serialize graph:', e);
+      }
+    };
+    graph.getDataModel().addListener(InternalEvent.CHANGE, () => {
+      clearTimeout(saveTimer);
+      saveTimer = setTimeout(saveChanges, 1000); // debounce 1s
+    });
 
     // Selection listener — click a shape, get its ID
     graph.getSelectionModel().addListener(InternalEvent.CHANGE, () => {

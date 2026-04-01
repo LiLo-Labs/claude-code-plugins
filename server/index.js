@@ -155,6 +155,16 @@ function serveStatic(res, urlPath) {
   return false;
 }
 
+// ── SSE: connected clients for real-time event push ──
+const sseClients = new Set();
+
+function broadcastEvent(event) {
+  const data = JSON.stringify(event);
+  for (const client of sseClients) {
+    try { client.write(`data: ${data}\n\n`); } catch { sseClients.delete(client); }
+  }
+}
+
 // ── Server (local-only, 127.0.0.1 — no TLS needed) ──
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${host}`);
@@ -172,6 +182,20 @@ const server = http.createServer(async (req, res) => {
   }
   res.setHeader('Access-Control-Allow-Origin', 'http://localhost:5173');
 
+  // SSE: real-time event stream
+  if (p === '/api/events/stream' && req.method === 'GET') {
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+      'Access-Control-Allow-Origin': '*',
+    });
+    res.write('data: {"type":"connected"}\n\n');
+    sseClients.add(res);
+    req.on('close', () => sseClients.delete(res));
+    return;
+  }
+
   // GET /api/events
   if (p === '/api/events' && req.method === 'GET') {
     return sendJSON(res, readEvents());
@@ -183,6 +207,7 @@ const server = http.createServer(async (req, res) => {
     if (!body || !body.type) return sendJSON(res, { error: 'Missing event type' }, 400);
     body.ts = body.ts || new Date().toISOString();
     appendEvent(body);
+    broadcastEvent(body);
     return sendJSON(res, { saved: true });
   }
 
@@ -196,6 +221,7 @@ const server = http.createServer(async (req, res) => {
     const lines = body.map(e => { e.ts = e.ts || new Date().toISOString(); return JSON.stringify(e); }).join('\n') + '\n';
     fs.appendFileSync(eventsFile, lines);
     eventCount += body.length;
+    for (const event of body) broadcastEvent(event);
     return sendJSON(res, { appended: body.length });
   }
 

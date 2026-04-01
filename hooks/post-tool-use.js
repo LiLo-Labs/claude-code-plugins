@@ -33,17 +33,33 @@ async function main() {
     const node = state.nodes.get(id);
     return node && node.status === 'planned';
   });
-  if (toUpdate.length === 0) return;
 
-  const serverUrl = await ensureServer(projectDir, pluginRoot);
-  if (!serverUrl) return;
+  // Build context about which nodes this file touches
+  const touchedLabels = matchingNodes.map(id => {
+    const node = state.nodes.get(id);
+    return node ? node.label : id;
+  });
 
-  for (const nodeId of toUpdate) {
-    await postEvent(serverUrl, {
-      type: 'node.status',
-      actor: 'system',
-      data: { nodeId, status: 'in-progress', prev: 'planned' },
-    });
+  if (toUpdate.length > 0) {
+    const serverUrl = await ensureServer(projectDir, pluginRoot);
+    if (serverUrl) {
+      for (const nodeId of toUpdate) {
+        await postEvent(serverUrl, {
+          type: 'node.status',
+          actor: 'system',
+          data: { nodeId, status: 'in-progress', prev: 'planned' },
+        });
+      }
+    }
+  }
+
+  // Tell Claude which canvas nodes this file edit touches
+  if (matchingNodes.length > 0) {
+    const context = `Canvas: file "${relative}" touches nodes: ${touchedLabels.join(', ')}` +
+      (toUpdate.length > 0 ? `. Updated ${toUpdate.length} to in-progress.` : '');
+    process.stdout.write(JSON.stringify({
+      hookSpecificOutput: { hookEventName: 'PostToolUse', additionalContext: context },
+    }));
   }
 }
 

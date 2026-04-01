@@ -46,3 +46,24 @@ export async function emitEvent(event) {
     appState.syncError = true;
   }
 }
+
+/**
+ * Subscribe to real-time events via SSE.
+ * Applies incoming events to the local store so the UI updates live.
+ */
+export function subscribeToEvents() {
+  const es = new EventSource('/api/events/stream');
+  es.onmessage = (msg) => {
+    try {
+      const event = JSON.parse(msg.data);
+      if (event.type === 'connected') return;
+      // Apply to local store (will be a no-op if we posted it ourselves)
+      appState.store.apply(event);
+      appState.storeVersion++;
+    } catch {}
+  };
+  es.onerror = () => {
+    // Reconnects automatically
+  };
+  return es;
+}
