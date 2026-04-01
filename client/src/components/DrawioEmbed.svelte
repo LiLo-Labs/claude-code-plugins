@@ -108,8 +108,19 @@
       const codec = new CodecClass(doc);
       codec.decode(doc.documentElement, g.getDataModel());
       g.refresh();
-      try { g.fit(); } catch {}
-      try { g.center(); } catch {}
+      // Zoom to fit content
+      try {
+        const bounds = g.getGraphBounds();
+        if (bounds && bounds.width > 0 && bounds.height > 0) {
+          const cw = containerEl.offsetWidth;
+          const ch = containerEl.offsetHeight;
+          const pad = 40;
+          const scale = Math.min((cw - pad * 2) / bounds.width, (ch - pad * 2) / bounds.height, 1.5);
+          g.getView().scaleAndTranslate(scale, -bounds.x + pad / scale, -bounds.y + pad / scale);
+        }
+      } catch(e) {
+        console.warn('Fit failed:', e);
+      }
     } catch (e) {
       console.warn('Failed to load XML:', e);
     }
@@ -124,9 +135,12 @@
   });
 
   $effect(() => {
-    if (graph && xml !== loadedXml && window._canvasGraph) {
+    // Force Svelte to track `xml` by reading it
+    const currentXml = xml;
+    console.log('Effect: xml changed, length:', currentXml?.length, 'loaded:', loadedXml?.length);
+    if (graph && currentXml !== loadedXml && window._canvasGraph) {
       const { graph: g, Codec: C, xmlUtils: u } = window._canvasGraph;
-      loadXml(xml, g, C, u);
+      loadXml(currentXml, g, C, u);
     }
   });
 
