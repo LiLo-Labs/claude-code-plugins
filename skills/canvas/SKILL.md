@@ -108,21 +108,52 @@ State machine:
 
 ## Generating a Canvas
 
-When running `/canvas generate`, analyze the codebase and create a meaningful architecture map:
+When running `/canvas generate`, analyze the codebase and create a meaningful architecture map.
 
-**Nodes:** Each node is an architectural component. Include `files` glob patterns so the plugin can auto-track edits.
+### Renderer
 
-**Edges:** Every node on a tab MUST have at least one connection. If a node has no edges, it doesn't belong on that tab. Edges show real relationships: data flows, dependencies, API calls.
+The canvas uses **maxGraph** (the engine behind draw.io) to render diagrams. Store draw.io XML in the view's `drawioXml` field. Use the draw.io MCP (`open_drawio_xml` or `open_drawio_mermaid`) for complex diagrams, or generate XML directly for simple updates.
 
-**Views/Tabs:** Each tab tells a different story about the system. Don't dump everything on one tab.
-- Think about what perspectives matter: data flow, component hierarchy, deployment, domain boundaries
-- Each tab has a `description` explaining what this diagram shows (displayed as a header overlay)
+**Cell IDs must match node IDs** (e.g., `n_server`). This enables click-to-detail: when a user clicks a shape, the detail panel shows that node's properties, comments, and decisions.
+
+### Nodes
+
+Each node is an architectural component. Include `files` glob patterns so the plugin can auto-track edits.
+
+### Views/Tabs — Reasoning About What To Show
+
+**The number and type of tabs should NOT be predetermined.** Analyze the codebase and decide what perspectives would help a developer understand it. Consider:
+
+- **Complexity** — A small utility needs 1 tab. A full-stack app might need 4-5.
+- **Audiences** — What would a new developer need to see first? What would a senior need for deep dives?
+- **Relationships** — If there are distinct subsystems that interact, each might deserve its own tab.
+- **Flow** — If there's a clear data/request flow, show it as a separate sequence or flow diagram.
+
+Examples of view types (pick what fits, don't use all):
+- Architecture layers (system → domain → module)
+- Data/request flow (how data moves through the system)
+- Domain model (entities and relationships)
+- Deployment topology (infrastructure, services)
+- Component interactions (who calls whom)
+- State machines (lifecycle of key entities)
+
+**Rules:**
+- Every node on a tab MUST have at least one connection
+- Keep tabs focused: 4-8 nodes per tab is ideal
+- Each tab has a `description` explaining what this diagram shows
 - A node can appear on multiple tabs with different connections
-- Keep tabs focused: 4-8 nodes per tab is ideal, 10+ gets cluttered
 
-**Layout:** Use `row`/`col` grid coordinates. Column 0 is leftmost. Keep columns 0-2 for most diagrams (wider spreads require zooming out). Place connected nodes adjacent to each other.
+### Draw.io XML Best Practices
 
-**Status:** Use `node.status` events after creation to set the real status. The default is `planned` — explicitly set `done`, `in-progress`, etc.
+- **Spacing:** Leave 60px+ gaps between shapes within swimlanes. Use 200px+ vertical gaps between swimlane layers.
+- **Edge labels:** Use separate `<mxCell>` text elements positioned near edges, NOT inline `value` on edge cells. Inline edge labels often overlap shapes.
+- **Edge routing:** Always specify `exitX/exitY` and `entryX/entryY` to control which side edges connect to. Use `<Array as="points">` waypoints for edges that cross between layers.
+- **Shapes:** Use `rounded=1` for components, `shape=cylinder3` for data stores, `shape=document` for docs, `shape=actor` for people/systems. All shapes should have two lines of text (name + description).
+- **Font:** Use fontSize=13 for shape text, fontSize=11 for edge labels. Edge label color should be `#888` or `#999`.
+
+### Status
+
+Use `node.status` events after creation to set the real status. The default is `planned` — explicitly set `done`, `in-progress`, etc.
 
 ## Guidelines
 
