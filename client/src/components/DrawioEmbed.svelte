@@ -28,13 +28,11 @@
     graph.setEnabled(true);
     graph.setPanning(true);
     graph.setTooltips(true);
-    graph.setConnectable(false);
-    graph.setCellsEditable(false);    // no inline text editing
-    graph.setCellsMovable(false);     // no dragging shapes
-    graph.setCellsResizable(false);   // no resize handles
-    graph.setCellsDeletable(false);   // no delete
+    graph.setConnectable(true);       // allow connecting shapes
+    graph.setCellsEditable(true);     // double-click to edit text
+    graph.setCellsMovable(true);      // drag to move
+    graph.setCellsResizable(true);    // resize handles
     graph.setCellsCloneable(false);   // no clone on drag
-    graph.setDropEnabled(false);      // no drop
 
     if (dark) {
       containerEl.style.background = '#1a1a2e';
