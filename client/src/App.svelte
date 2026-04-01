@@ -54,51 +54,25 @@
     <div class="tp"><span class="dot"></span> {activeTab?.name || 'Code Canvas'}</div>
     <div class="tp-story">{activeTab?.description || ''}</div>
     <div class="tr">
-      <button class="tb" onclick={() => appState.panelOpen = !appState.panelOpen}>
-        {appState.panelOpen ? 'Hide Panel' : 'Show Panel'}
-      </button>
-      <div class="sep"></div>
       <button class="tb" onclick={handleToggleTheme}>{theme === 'dark' ? '\u2606' : '\u263E'}</button>
     </div>
   </header>
 
   <div class="main">
     <!-- Left panel: node browser or detail view -->
-    {#if appState.panelOpen}
+    {#if selectedNode}
       <aside class="panel-left">
-        {#if selectedNode}
-          <DetailPanel
-            node={selectedNode}
-            nodes={graphState.nodes}
-            store={appState.store}
-            comments={graphState.comments}
-            onselect={selectNode}
-            onclose={() => { appState.selectedIds = new Set(); }}
-            onaddcomment={(node) => { commentModal = { visible: true, node }; }}
-            onresolve={handleResolveComment}
-            ondelete={handleDeleteComment}
-          />
-        {:else}
-          <div class="node-browser">
-            <div class="nb-hdr">
-              <span class="nb-title">Nodes</span>
-              <button class="nb-close" onclick={() => appState.panelOpen = false}>&times;</button>
-            </div>
-            <div class="nb-list">
-              {#each [...graphState.nodes.values()] as node}
-                <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-                <div class="nb-item" onclick={() => selectNode(node.id)}>
-                  <span class="nb-dot" style="background: {statusColor(node.status)}"></span>
-                  <div class="nb-content">
-                    <span class="nb-label">{node.label}</span>
-                    <span class="nb-sub">{node.subtitle}</span>
-                  </div>
-                  <span class="nb-depth">{(node.depth || 'M')[0].toUpperCase()}</span>
-                </div>
-              {/each}
-            </div>
-          </div>
-        {/if}
+        <DetailPanel
+          node={selectedNode}
+          nodes={graphState.nodes}
+          store={appState.store}
+          comments={graphState.comments}
+          onselect={selectNode}
+          onclose={() => { appState.selectedIds = new Set(); }}
+          onaddcomment={(node) => { commentModal = { visible: true, node }; }}
+          onresolve={handleResolveComment}
+          ondelete={handleDeleteComment}
+        />
       </aside>
     {/if}
 
