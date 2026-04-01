@@ -96,6 +96,14 @@
     if (!g || !xmlStr) return;
     loadedXml = xmlStr;
     try {
+      // Clear existing model before loading new XML
+      g.getDataModel().beginUpdate();
+      try {
+        g.getDataModel().clear();
+      } finally {
+        g.getDataModel().endUpdate();
+      }
+      // Parse and decode
       const doc = utils.parseXml(xmlStr);
       const codec = new CodecClass(doc);
       codec.decode(doc.documentElement, g.getDataModel());
