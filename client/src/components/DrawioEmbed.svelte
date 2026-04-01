@@ -17,11 +17,18 @@
 
     registerAllCodecs();
 
+    // Ensure container has dimensions before creating graph
+    if (containerEl.offsetHeight < 10) {
+      containerEl.style.height = '100%';
+      containerEl.style.minHeight = '600px';
+    }
+    console.log('Container size:', containerEl.offsetWidth, 'x', containerEl.offsetHeight);
+
     try {
       graph = new Graph(containerEl);
+      console.log('Graph created OK');
     } catch(e) {
       console.error('Graph creation failed:', e);
-      containerEl.textContent = 'Graph failed to load: ' + e.message;
       return;
     }
     graph.setEnabled(true);
@@ -33,9 +40,11 @@
     graph.setCellsResizable(true);
     graph.setCellsCloneable(false);
 
-    // Live preview during drag (move the actual shape, not an outline)
-    graph.graphHandler.livePreview = true;
-    graph.graphHandler.guidesEnabled = true;
+    // Live preview during drag if available
+    if (graph.graphHandler) {
+      graph.graphHandler.livePreview = true;
+      graph.graphHandler.guidesEnabled = true;
+    }
 
     containerEl.style.background = dark ? '#1a1a2e' : '#ffffff';
 
