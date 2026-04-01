@@ -29,6 +29,12 @@
     graph.setPanning(true);
     graph.setTooltips(true);
     graph.setConnectable(false);
+    graph.setCellsEditable(false);    // no inline text editing
+    graph.setCellsMovable(false);     // no dragging shapes
+    graph.setCellsResizable(false);   // no resize handles
+    graph.setCellsDeletable(false);   // no delete
+    graph.setCellsCloneable(false);   // no clone on drag
+    graph.setDropEnabled(false);      // no drop
 
     if (dark) {
       containerEl.style.background = '#1a1a2e';
