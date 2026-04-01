@@ -18,7 +18,6 @@
     proto: 'json',
     spin: '1',
     configure: '1',
-    // Sketch mode — minimal chrome, just canvas + floating toolbar
     ui: 'sketch',
     noExitBtn: '1',
     saveAndExit: '0',
@@ -52,30 +51,11 @@
           defaultLibraries: '',
           enabledLibraries: [],
           libraries: [],
-          css: '.geFooterContainer, .geFormatContainer, .geMenubarContainer, .mxWindow { display: none !important; }',
-          // Inject plugin that posts selection changes to parent
-          plugins: [],
-          customInit: `
-            try {
-              var graph = editorUi.editor.graph;
-              graph.getSelectionModel().addListener(mxEvent.CHANGE, function() {
-                var cells = graph.getSelectionCells();
-                var ids = [];
-                for (var i = 0; i < cells.length; i++) {
-                  if (cells[i].id && cells[i].id !== '0' && cells[i].id !== '1') {
-                    ids.push(cells[i].id);
-                  }
-                }
-                window.parent.postMessage(JSON.stringify({
-                  event: 'select',
-                  selected: ids
-                }), '*');
-              });
-            } catch(e) {}
-          `,
+          css: '.geFooterContainer, .geFormatContainer, .mxWindow { display: none !important; }',
         },
       }), '*');
     }
+
 
     if (msg.event === 'init') {
       ready = true;
