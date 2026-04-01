@@ -122,6 +122,13 @@
         xml={activeTab?.drawioXml || ''}
         dark={theme === 'dark'}
         onchange={(xml) => { if (activeTab) emitEvent({ id: genId(), type: 'view.updated', actor: 'user', data: { viewId: activeTab.id, changes: { drawioXml: xml } } }); }}
+        onselect={(ids) => {
+          if (ids.length >= 1 && graphState.nodes.has(ids[0])) {
+            selectNode(ids[0]);
+          } else if (ids.length === 0) {
+            appState.selectedIds = new Set();
+          }
+        }}
       />
     </div>
   </div>

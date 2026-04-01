@@ -46,7 +46,17 @@
       const ids = cells
         .filter(c => c.id && c.id !== '0' && c.id !== '1')
         .map(c => c.id);
+      console.log('SELECTION:', ids);
       onselect?.(ids);
+    });
+
+    // Also try direct click handler as backup
+    graph.addListener(InternalEvent.CLICK, (sender, evt) => {
+      const cell = evt.getProperty('cell');
+      if (cell && cell.id) {
+        console.log('CLICK on cell:', cell.id, cell.value);
+        onselect?.([cell.id]);
+      }
     });
 
     if (xml) {
@@ -64,8 +74,8 @@
       const codec = new CodecClass(doc);
       codec.decode(doc.documentElement, g.getDataModel());
       g.refresh();
-      g.fit();
-      g.center();
+      try { g.fit(); } catch {}
+      try { g.center(); } catch {}
     } catch (e) {
       console.warn('Failed to load XML:', e);
     }
