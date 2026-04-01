@@ -1,0 +1,101 @@
+- generic [ref=e3]:
+  - banner [ref=e4]:
+    - generic [ref=e5]: Architecture
+    - generic [ref=e7]: Layered system architecture — how Server, Event Store, Hooks, Canvas App, and Draw.io connect
+    - generic [ref=e8]:
+      - button "Hide Panel" [ref=e9] [cursor=pointer]
+      - button "☾" [ref=e11] [cursor=pointer]
+  - generic [ref=e12]:
+    - complementary [ref=e13]:
+      - generic [ref=e14]:
+        - generic [ref=e15]:
+          - generic [ref=e16]: Nodes
+          - button "×" [ref=e17] [cursor=pointer]
+        - generic [ref=e18]:
+          - generic [ref=e19] [cursor=pointer]:
+            - generic [ref=e21]:
+              - generic [ref=e22]: Server
+              - generic [ref=e23]: Node.js HTTP API for events, state, layouts
+            - generic [ref=e24]: S
+          - generic [ref=e25] [cursor=pointer]:
+            - generic [ref=e27]:
+              - generic [ref=e28]: Event Store
+              - generic [ref=e29]: JSONL append-only log with replay
+            - generic [ref=e30]: S
+          - generic [ref=e31] [cursor=pointer]:
+            - generic [ref=e33]:
+              - generic [ref=e34]: Canvas App
+              - generic [ref=e35]: Svelte 5 app shell with tabs and draw.io embed
+            - generic [ref=e36]: D
+          - generic [ref=e37] [cursor=pointer]:
+            - generic [ref=e39]:
+              - generic [ref=e40]: Draw.io Embed
+              - generic [ref=e41]: iframe to embed.diagrams.net with postMessage sync
+            - generic [ref=e42]: D
+          - generic [ref=e43] [cursor=pointer]:
+            - generic [ref=e45]:
+              - generic [ref=e46]: Plugin Hooks
+              - generic [ref=e47]: Claude Code lifecycle hooks for canvas integration
+            - generic [ref=e48]: D
+          - generic [ref=e49] [cursor=pointer]:
+            - generic [ref=e51]:
+              - generic [ref=e52]: SKILL.md
+              - generic [ref=e53]: Slash command documentation and API reference
+            - generic [ref=e54]: I
+          - generic [ref=e55] [cursor=pointer]:
+            - generic [ref=e57]:
+              - generic [ref=e58]: Canvas Client
+              - generic [ref=e59]: Shared lib for event reading, replay, server lifecycle
+            - generic [ref=e60]: M
+          - generic [ref=e61] [cursor=pointer]:
+            - generic [ref=e63]:
+              - generic [ref=e64]: State Management
+              - generic [ref=e65]: Svelte 5 runes reactive store
+            - generic [ref=e66]: M
+          - generic [ref=e67] [cursor=pointer]:
+            - generic [ref=e69]:
+              - generic [ref=e70]: Config & Theme
+              - generic [ref=e71]: Colors, status mappings, dark/light theme
+            - generic [ref=e72]: M
+          - generic [ref=e73] [cursor=pointer]:
+            - generic [ref=e75]:
+              - generic [ref=e76]: Glob Matcher
+              - generic [ref=e77]: Zero-dep pattern matching for file tracking
+            - generic [ref=e78]: M
+          - generic [ref=e79] [cursor=pointer]:
+            - generic [ref=e81]:
+              - generic [ref=e82]: View Tabs
+              - generic [ref=e83]: Tab bar with create, rename, delete, switch
+            - generic [ref=e84]: M
+          - generic [ref=e85] [cursor=pointer]:
+            - generic [ref=e87]:
+              - generic [ref=e88]: Comments System
+              - generic [ref=e89]: Comment bar, modal, resolve/delete
+            - generic [ref=e90]: M
+          - generic [ref=e91] [cursor=pointer]:
+            - generic [ref=e93]:
+              - generic [ref=e94]: Test Suite
+              - generic [ref=e95]: Vitest across client, server, hooks
+            - generic [ref=e96]: M
+          - generic [ref=e97] [cursor=pointer]:
+            - generic [ref=e99]:
+              - generic [ref=e100]: Draw.io MCP
+              - generic [ref=e101]: External MCP server for diagram generation
+            - generic [ref=e102]: S
+    - generic [ref=e103]:
+      - generic [ref=e104]:
+        - button "1. Architecture" [ref=e105] [cursor=pointer]
+        - button "2. Data Flow" [ref=e106] [cursor=pointer]
+        - button "+" [ref=e107] [cursor=pointer]
+      - img [ref=e109]
+  - generic [ref=e110]:
+    - generic [ref=e111] [cursor=pointer]:
+      - heading "Comments" [level=3] [ref=e112]
+      - generic [ref=e113]: "0"
+      - generic [ref=e114]: ▼
+    - generic [ref=e115]: No open comments
+  - contentinfo [ref=e116]:
+    - generic [ref=e117]: ● Synced
+    - generic [ref=e118]: 14 nodes
+    - generic [ref=e119]: 2 tabs
+    - generic [ref=e120]: 18 events

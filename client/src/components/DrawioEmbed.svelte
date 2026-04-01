@@ -1,116 +1,98 @@
 <script>
   /**
-   * DrawioEmbed — embeds draw.io editor in an iframe.
-   * Communicates via postMessage protocol.
-   * Reloads diagram when xml prop changes (tab switch).
+   * DrawioEmbed — renders draw.io XML using maxGraph (the engine behind draw.io).
+   * Same origin, no iframe, full click access.
    */
   import { onMount, onDestroy } from 'svelte';
 
   let { xml = '', onchange, onselect, dark = true } = $props();
 
-  let iframeEl = $state(null);
-  let ready = $state(false);
-  let loadedXml = '';  // track what we last loaded to avoid re-sends
+  let containerEl = $state(null);
+  let graph = null;
+  let loadedXml = '';
 
-  const baseUrl = 'https://embed.diagrams.net/';
-  const params = new URLSearchParams({
-    embed: '1',
-    proto: 'json',
-    spin: '1',
-    configure: '1',
-    ui: 'sketch',
-    noExitBtn: '1',
-    saveAndExit: '0',
-    noSaveBtn: '1',
-    pages: '0',
-    grid: '0',
-  });
-  if (dark) params.set('dark', '1');
+  onMount(async () => {
+    const { Graph, InternalEvent, ModelXmlSerializer, xmlUtils } = await import('@maxgraph/core');
+    await import('@maxgraph/core/css/common.css');
 
-  const src = `${baseUrl}?${params}`;
+    graph = new Graph(containerEl);
+    graph.setEnabled(true);
+    graph.setPanning(true);
+    if (graph.panningHandler) {
+      graph.panningHandler.useLeftButtonForPanning = true;
+    }
+    graph.setTooltips(true);
+    graph.setConnectable(false);
 
-  function loadDiagram(xmlContent) {
-    if (!iframeEl?.contentWindow) return;
-    loadedXml = xmlContent;
-    iframeEl.contentWindow.postMessage(JSON.stringify({
-      action: 'load',
-      xml: xmlContent || '<mxGraphModel><root><mxCell id="0"/><mxCell id="1" parent="0"/></root></mxGraphModel>',
-      autosave: 1,
-    }), '*');
-  }
-
-  function handleMessage(event) {
-    if (!event.data || typeof event.data !== 'string') return;
-    let msg;
-    try { msg = JSON.parse(event.data); } catch { return; }
-
-    if (msg.event === 'configure') {
-      iframeEl?.contentWindow?.postMessage(JSON.stringify({
-        action: 'configure',
-        config: {
-          defaultLibraries: '',
-          enabledLibraries: [],
-          libraries: [],
-          css: '.geFooterContainer, .geFormatContainer, .mxWindow { display: none !important; }',
-        },
-      }), '*');
+    if (dark) {
+      containerEl.style.background = '#1a1a2e';
     }
 
-
-    if (msg.event === 'init') {
-      ready = true;
-      loadDiagram(xml);
-    }
-
-    if (msg.event === 'autosave' || msg.event === 'save') {
-      loadedXml = msg.xml;
-      onchange?.(msg.xml);
-    }
-
-    if (msg.event === 'select') {
-      const ids = msg.selected || [];
+    // Selection listener — click a shape, get its ID
+    graph.getSelectionModel().addListener(InternalEvent.CHANGE, () => {
+      const cells = graph.getSelectionCells();
+      const ids = cells
+        .filter(c => c.id && c.id !== '0' && c.id !== '1')
+        .map(c => c.id);
       onselect?.(ids);
+    });
+
+    if (xml) {
+      loadXml(xml, graph, ModelXmlSerializer, xmlUtils);
+    }
+
+    window._canvasGraph = { graph, ModelXmlSerializer, xmlUtils };
+  });
+
+  function loadXml(xmlStr, g, Serializer, utils) {
+    if (!g || !xmlStr) return;
+    loadedXml = xmlStr;
+    try {
+      g.getDataModel().beginUpdate();
+      try {
+        const root = g.getDataModel().getRoot();
+        if (root) {
+          while (root.getChildCount() > 0) {
+            root.remove(root.getChildAt(0));
+          }
+        }
+        const doc = utils.parseXml(xmlStr);
+        const serializer = new Serializer(g.getDataModel());
+        serializer.import(doc.documentElement);
+      } finally {
+        g.getDataModel().endUpdate();
+      }
+      g.fit();
+      g.center();
+    } catch (e) {
+      console.warn('Failed to load XML:', e);
     }
   }
-
-  onMount(() => {
-    window.addEventListener('message', handleMessage);
-  });
 
   onDestroy(() => {
-    window.removeEventListener('message', handleMessage);
+    if (graph) {
+      graph.destroy();
+      graph = null;
+    }
+    delete window._canvasGraph;
   });
 
-  // Reload when xml prop changes (tab switch)
   $effect(() => {
-    if (ready && xml !== loadedXml) {
-      loadDiagram(xml);
+    if (graph && xml !== loadedXml && window._canvasGraph) {
+      const { graph: g, ModelXmlSerializer, xmlUtils } = window._canvasGraph;
+      loadXml(xml, g, ModelXmlSerializer, xmlUtils);
     }
   });
 </script>
 
-<div class="drawio-container">
-  <iframe
-    bind:this={iframeEl}
-    {src}
-    title="draw.io editor"
-    frameborder="0"
-  ></iframe>
-</div>
+<div class="graph-container" bind:this={containerEl}></div>
 
 <style>
-  .drawio-container {
+  .graph-container {
     width: 100%;
     height: 100%;
     min-height: 400px;
-    position: relative;
     overflow: hidden;
-  }
-  iframe {
-    width: 100%;
-    height: 100%;
-    border: none;
-    position: absolute;
-    inset: 0;
+    position: relative;
   }
 </style>
