@@ -1,5 +1,7 @@
-import { EventStore } from './store.js';
+import { EventStore, genId } from './store.js';
 import { fetchEvents, postEvent, subscribeSSE } from './api.js';
+
+const pendingIds = new Set();
 
 export const appState = $state({
   store: new EventStore(),
@@ -21,6 +23,8 @@ export async function loadFromServer() {
 }
 
 export async function emitEvent(event) {
+  event.id = event.id || genId();
+  pendingIds.add(event.id);
   appState.store.apply(event);
   appState.storeVersion++;
   try {
@@ -34,6 +38,10 @@ export async function emitEvent(event) {
 
 export function subscribeToEvents() {
   return subscribeSSE((event) => {
+    if (pendingIds.has(event.id)) {
+      pendingIds.delete(event.id);
+      return;
+    }
     appState.store.apply(event);
     appState.storeVersion++;
   });

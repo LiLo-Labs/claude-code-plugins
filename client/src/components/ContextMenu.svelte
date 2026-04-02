@@ -24,6 +24,9 @@
     <div class="ctx-item" onclick={() => { onaction?.('status-blocked'); onclose?.(); }}>
       <span class="dot" style="background: #f85149"></span> Blocked
     </div>
+    <div class="ctx-item" onclick={() => { onaction?.('status-cut'); onclose?.(); }}>
+      <span class="dot" style="background: #8b949e"></span> Cut
+    </div>
   </div>
 {/if}
 

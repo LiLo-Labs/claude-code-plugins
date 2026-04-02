@@ -1,5 +1,4 @@
 <script>
-  import './app.css';
   import { onMount } from 'svelte';
   import { getInitialTheme, setTheme, toggleTheme } from './lib/theme.js';
   import { appState, loadFromServer, emitEvent, subscribeToEvents } from './lib/store.svelte.js';
