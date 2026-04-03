@@ -166,6 +166,57 @@ test_show_pending_filter() {
   teardown
 }
 
+test_done_marks_note() {
+  echo "test: done marks a note as checked"
+  setup
+  bash "$NOTES_SH" add "first"
+  bash "$NOTES_SH" add "second"
+  bash "$NOTES_SH" done 1
+  local done_val
+  done_val=$(jq -r '.notes[0].done' "$CLAUDE_NOTES_PROJECT_FILE")
+  assert_eq "true" "$done_val" "note 1 done"
+  done_val=$(jq -r '.notes[1].done' "$CLAUDE_NOTES_PROJECT_FILE")
+  assert_eq "false" "$done_val" "note 2 still pending"
+  teardown
+}
+
+test_done_invalid_id() {
+  echo "test: done with invalid ID shows error"
+  setup
+  bash "$NOTES_SH" add "first"
+  local output
+  output=$(bash "$NOTES_SH" done 99 2>&1 || true)
+  assert_contains "not found" "$output" "error for invalid ID"
+  teardown
+}
+
+test_undo_unchecks_note() {
+  echo "test: undo unchecks a done note"
+  setup
+  bash "$NOTES_SH" add "first"
+  bash "$NOTES_SH" done 1
+  bash "$NOTES_SH" undo 1
+  local done_val
+  done_val=$(jq -r '.notes[0].done' "$CLAUDE_NOTES_PROJECT_FILE")
+  assert_eq "false" "$done_val" "note 1 unchecked"
+  teardown
+}
+
+test_show_done_filter() {
+  echo "test: show --done shows only checked notes"
+  setup
+  bash "$NOTES_SH" add "pending"
+  bash "$NOTES_SH" add "completed"
+  bash "$NOTES_SH" done 2
+  local output
+  output=$(bash "$NOTES_SH" show --done)
+  assert_contains "completed" "$output" "shows done note"
+  local count
+  count=$(echo "$output" | grep -c '\[x\]' || true)
+  assert_eq "1" "$count" "only one done note"
+  teardown
+}
+
 # --- Run ---
 
 test_add_creates_file_if_missing
@@ -177,6 +228,10 @@ test_show_empty
 test_show_global
 test_show_tag_filter
 test_show_pending_filter
+test_done_marks_note
+test_done_invalid_id
+test_undo_unchecks_note
+test_show_done_filter
 
 echo ""
 echo "Results: $TESTS_PASSED/$TESTS_RUN passed"

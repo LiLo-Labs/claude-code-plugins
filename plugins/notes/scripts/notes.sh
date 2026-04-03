@@ -191,6 +191,76 @@ cmd_show() {
   done < <(echo "$notes" | jq -c '.[]')
 }
 
+_set_note_done() {
+  local note_id="$1"
+  local done_val="$2"  # true or false
+  local global=false
+
+  # Check for --global in remaining args (already shifted out note_id)
+  # We receive the file directly for simplicity; caller sets it
+  local file="$3"
+
+  init_file "$file"
+
+  # Verify note exists
+  local exists
+  exists=$(jq --argjson id "$note_id" '.notes | any(.id == $id)' "$file")
+  if [[ "$exists" != "true" ]]; then
+    echo "Note #${note_id} not found." >&2
+    exit 1
+  fi
+
+  local tmp="${file}.tmp.$$"
+  jq --argjson id "$note_id" --argjson done "$done_val" \
+    '(.notes[] | select(.id == $id)).done = $done' "$file" > "$tmp" && mv "$tmp" "$file"
+}
+
+cmd_done() {
+  local global=false
+  local note_id=""
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --global) global=true; shift ;;
+      *) note_id="$1"; shift ;;
+    esac
+  done
+
+  if [[ -z "$note_id" ]]; then
+    echo "Usage: notes done [--global] <id>" >&2
+    exit 1
+  fi
+
+  local file="$PROJECT_FILE"
+  [[ "$global" == true ]] && file="$GLOBAL_FILE"
+
+  _set_note_done "$note_id" "true" "$file"
+  echo "Marked note #${note_id} as done."
+}
+
+cmd_undo() {
+  local global=false
+  local note_id=""
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --global) global=true; shift ;;
+      *) note_id="$1"; shift ;;
+    esac
+  done
+
+  if [[ -z "$note_id" ]]; then
+    echo "Usage: notes undo [--global] <id>" >&2
+    exit 1
+  fi
+
+  local file="$PROJECT_FILE"
+  [[ "$global" == true ]] && file="$GLOBAL_FILE"
+
+  _set_note_done "$note_id" "false" "$file"
+  echo "Marked note #${note_id} as pending."
+}
+
 # --- Main dispatch ---
 
 subcommand="${1:-help}"
@@ -199,6 +269,8 @@ shift || true
 case "$subcommand" in
   add)  cmd_add  "$@" ;;
   show) cmd_show "$@" ;;
+  done) cmd_done "$@" ;;
+  undo) cmd_undo "$@" ;;
   *)
     echo "Usage: notes <add|show|done|undo|clear> [args]" >&2
     exit 1
