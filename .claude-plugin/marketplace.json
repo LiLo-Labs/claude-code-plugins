@@ -1,0 +1,24 @@
+{
+  "name": "lilolabs-plugins",
+  "owner": {
+    "name": "LiLo Labs"
+  },
+  "metadata": {
+    "description": "Claude Code plugins by LiLo Labs",
+    "version": "1.0.0",
+    "pluginRoot": "./plugins"
+  },
+  "plugins": [
+    {
+      "name": "notes",
+      "source": "./plugins/notes",
+      "description": "Capture thoughts as a checklist during conversations and surface them to Claude at the right time",
+      "version": "1.0.0",
+      "author": {
+        "name": "LiLo Labs"
+      },
+      "category": "productivity",
+      "tags": ["notes", "checklist", "productivity", "workflow"]
+    }
+  ]
+}
