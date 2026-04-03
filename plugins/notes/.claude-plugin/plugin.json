@@ -1,0 +1,8 @@
+{
+  "name": "notes",
+  "description": "Capture thoughts as a checklist during conversations and surface them to Claude at the right time",
+  "version": "1.0.0",
+  "author": {
+    "name": "LiloLabs"
+  }
+}
