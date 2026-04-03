@@ -48,6 +48,32 @@ parse_tags() {
   fi
 }
 
+# Human-friendly relative time from an ISO-8601 UTC timestamp
+relative_time() {
+  local ts="$1"
+  local now_epoch ts_epoch diff
+
+  if [[ "$(uname)" == "Darwin" ]]; then
+    now_epoch=$(date -u +%s)
+    ts_epoch=$(date -j -f "%Y-%m-%dT%H:%M:%SZ" "$ts" +%s 2>/dev/null) || { echo "unknown"; return; }
+  else
+    now_epoch=$(date -u +%s)
+    ts_epoch=$(date -d "$ts" +%s 2>/dev/null) || { echo "unknown"; return; }
+  fi
+
+  diff=$(( now_epoch - ts_epoch ))
+
+  if (( diff < 60 )); then
+    echo "just now"
+  elif (( diff < 3600 )); then
+    echo "$(( diff / 60 ))m ago"
+  elif (( diff < 86400 )); then
+    echo "$(( diff / 3600 ))h ago"
+  else
+    echo "$(( diff / 86400 ))d ago"
+  fi
+}
+
 # --- Subcommands ---
 
 cmd_add() {
@@ -98,13 +124,81 @@ cmd_add() {
   echo "Added note #$(jq '.next_id - 1' "$file"): $clean_text"
 }
 
+cmd_show() {
+  local global=false
+  local filter_tag=""
+  local filter_done=""   # "true", "false", or "" (no filter)
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --global)  global=true; shift ;;
+      --tag)     filter_tag="$2"; shift 2 ;;
+      --done)    filter_done="true"; shift ;;
+      --pending) filter_done="false"; shift ;;
+      *) shift ;;
+    esac
+  done
+
+  local file="$PROJECT_FILE"
+  [[ "$global" == true ]] && file="$GLOBAL_FILE"
+
+  if [[ ! -f "$file" ]]; then
+    echo "No notes."
+    return 0
+  fi
+
+  # Build jq filter
+  local jq_filter='.notes[]'
+  if [[ -n "$filter_tag" ]]; then
+    local filter_tag_lc
+    filter_tag_lc=$(echo "$filter_tag" | tr '[:upper:]' '[:lower:]')
+    jq_filter+=" | select(.tags | map(ascii_downcase) | any(. == \"${filter_tag_lc}\"))"
+  fi
+  if [[ "$filter_done" == "true" ]]; then
+    jq_filter+=' | select(.done == true)'
+  elif [[ "$filter_done" == "false" ]]; then
+    jq_filter+=' | select(.done == false)'
+  fi
+
+  local notes
+  notes=$(jq -c "[$jq_filter]" "$file")
+
+  local count
+  count=$(echo "$notes" | jq 'length')
+  if [[ "$count" -eq 0 ]]; then
+    echo "No notes."
+    return 0
+  fi
+
+  # Format and print each note
+  while IFS= read -r note; do
+    local id text tags done_val created checkbox tags_str rel
+    id=$(echo "$note" | jq -r '.id')
+    text=$(echo "$note" | jq -r '.text')
+    done_val=$(echo "$note" | jq -r '.done')
+    created=$(echo "$note" | jq -r '.created')
+    tags_str=$(echo "$note" | jq -r '.tags | map("#" + .) | join(" ")')
+    rel=$(relative_time "$created")
+
+    if [[ "$done_val" == "true" ]]; then
+      checkbox="[x]"
+    else
+      checkbox="[ ]"
+    fi
+
+    printf "  %s #%-3s  %-40s  %-20s  (%s)\n" \
+      "$checkbox" "$id" "$text" "$tags_str" "$rel"
+  done < <(echo "$notes" | jq -c '.[]')
+}
+
 # --- Main dispatch ---
 
 subcommand="${1:-help}"
 shift || true
 
 case "$subcommand" in
-  add) cmd_add "$@" ;;
+  add)  cmd_add  "$@" ;;
+  show) cmd_show "$@" ;;
   *)
     echo "Usage: notes <add|show|done|undo|clear> [args]" >&2
     exit 1

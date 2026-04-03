@@ -105,12 +105,78 @@ test_add_multiple_increments_id() {
   teardown
 }
 
+test_show_displays_notes() {
+  echo "test: show displays notes with checkboxes and IDs"
+  setup
+  bash "$NOTES_SH" add "first note #api"
+  bash "$NOTES_SH" add "second note #arch"
+  local output
+  output=$(bash "$NOTES_SH" show)
+  assert_contains "[ ] #1" "$output" "shows unchecked #1"
+  assert_contains "first note" "$output" "shows first note text"
+  assert_contains "#api" "$output" "shows tag"
+  assert_contains "[ ] #2" "$output" "shows unchecked #2"
+  teardown
+}
+
+test_show_empty() {
+  echo "test: show with no notes shows nothing"
+  setup
+  local output
+  output=$(bash "$NOTES_SH" show 2>&1 || true)
+  assert_contains "No notes" "$output" "empty message"
+  teardown
+}
+
+test_show_global() {
+  echo "test: show --global shows global notes"
+  setup
+  bash "$NOTES_SH" add --global "global note"
+  bash "$NOTES_SH" add "project note"
+  local output
+  output=$(bash "$NOTES_SH" show --global)
+  assert_contains "global note" "$output" "shows global"
+  teardown
+}
+
+test_show_tag_filter() {
+  echo "test: show --tag filters by tag"
+  setup
+  bash "$NOTES_SH" add "api thought #api"
+  bash "$NOTES_SH" add "arch thought #architecture"
+  local output
+  output=$(bash "$NOTES_SH" show --tag api)
+  assert_contains "api thought" "$output" "shows matching"
+  local count
+  count=$(echo "$output" | grep -c '\[ \]' || true)
+  assert_eq "1" "$count" "only one note shown"
+  teardown
+}
+
+test_show_pending_filter() {
+  echo "test: show --pending shows only unchecked"
+  setup
+  bash "$NOTES_SH" add "pending one"
+  bash "$NOTES_SH" add "pending two"
+  local output
+  output=$(bash "$NOTES_SH" show --pending)
+  local count
+  count=$(echo "$output" | grep -c '\[ \]' || true)
+  assert_eq "2" "$count" "two pending notes"
+  teardown
+}
+
 # --- Run ---
 
 test_add_creates_file_if_missing
 test_add_with_tags
 test_add_global
 test_add_multiple_increments_id
+test_show_displays_notes
+test_show_empty
+test_show_global
+test_show_tag_filter
+test_show_pending_filter
 
 echo ""
 echo "Results: $TESTS_PASSED/$TESTS_RUN passed"
