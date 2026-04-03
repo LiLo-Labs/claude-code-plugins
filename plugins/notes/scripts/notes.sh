@@ -238,6 +238,49 @@ cmd_done() {
   echo "Marked note #${note_id} as done."
 }
 
+cmd_clear() {
+  local global=false
+  local mode="done"  # "done" | "id" | "all"
+  local note_id=""
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --global) global=true; shift ;;
+      --all)    mode="all"; shift ;;
+      [0-9]*)   mode="id"; note_id="$1"; shift ;;
+      *) shift ;;
+    esac
+  done
+
+  local file="$PROJECT_FILE"
+  [[ "$global" == true ]] && file="$GLOBAL_FILE"
+
+  init_file "$file"
+
+  local tmp="${file}.tmp.$$"
+
+  case "$mode" in
+    done)
+      jq '.notes = [.notes[] | select(.done == false)]' "$file" > "$tmp" && mv "$tmp" "$file"
+      echo "Cleared done notes."
+      ;;
+    all)
+      jq '.notes = []' "$file" > "$tmp" && mv "$tmp" "$file"
+      echo "Cleared all notes."
+      ;;
+    id)
+      local exists
+      exists=$(jq --argjson id "$note_id" '.notes | any(.id == $id)' "$file")
+      if [[ "$exists" != "true" ]]; then
+        echo "Note #${note_id} not found." >&2
+        exit 1
+      fi
+      jq --argjson id "$note_id" '.notes = [.notes[] | select(.id != $id)]' "$file" > "$tmp" && mv "$tmp" "$file"
+      echo "Removed note #${note_id}."
+      ;;
+  esac
+}
+
 cmd_undo() {
   local global=false
   local note_id=""
@@ -269,8 +312,9 @@ shift || true
 case "$subcommand" in
   add)  cmd_add  "$@" ;;
   show) cmd_show "$@" ;;
-  done) cmd_done "$@" ;;
-  undo) cmd_undo "$@" ;;
+  done)  cmd_done  "$@" ;;
+  undo)  cmd_undo  "$@" ;;
+  clear) cmd_clear "$@" ;;
   *)
     echo "Usage: notes <add|show|done|undo|clear> [args]" >&2
     exit 1

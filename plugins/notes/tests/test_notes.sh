@@ -166,6 +166,66 @@ test_show_pending_filter() {
   teardown
 }
 
+test_clear_removes_done() {
+  echo "test: clear removes all done notes"
+  setup
+  bash "$NOTES_SH" add "keep me"
+  bash "$NOTES_SH" add "remove me"
+  bash "$NOTES_SH" add "also keep"
+  bash "$NOTES_SH" done 2
+  bash "$NOTES_SH" clear
+  local count
+  count=$(jq '.notes | length' "$CLAUDE_NOTES_PROJECT_FILE")
+  assert_eq "2" "$count" "two notes remain"
+  local text1 text2
+  text1=$(jq -r '.notes[0].text' "$CLAUDE_NOTES_PROJECT_FILE")
+  text2=$(jq -r '.notes[1].text' "$CLAUDE_NOTES_PROJECT_FILE")
+  assert_eq "keep me" "$text1" "first note kept"
+  assert_eq "also keep" "$text2" "third note kept"
+  teardown
+}
+
+test_clear_specific_id() {
+  echo "test: clear N removes specific note"
+  setup
+  bash "$NOTES_SH" add "first"
+  bash "$NOTES_SH" add "second"
+  bash "$NOTES_SH" add "third"
+  bash "$NOTES_SH" clear 2
+  local count
+  count=$(jq '.notes | length' "$CLAUDE_NOTES_PROJECT_FILE")
+  assert_eq "2" "$count" "two notes remain"
+  local ids
+  ids=$(jq -r '.notes[].id' "$CLAUDE_NOTES_PROJECT_FILE" | tr '\n' ',')
+  assert_eq "1,3," "$ids" "notes 1 and 3 remain"
+  teardown
+}
+
+test_clear_all() {
+  echo "test: clear --all removes everything"
+  setup
+  bash "$NOTES_SH" add "first"
+  bash "$NOTES_SH" add "second"
+  bash "$NOTES_SH" clear --all
+  local count
+  count=$(jq '.notes | length' "$CLAUDE_NOTES_PROJECT_FILE")
+  assert_eq "0" "$count" "no notes remain"
+  local next_id
+  next_id=$(jq '.next_id' "$CLAUDE_NOTES_PROJECT_FILE")
+  assert_eq "3" "$next_id" "next_id preserved"
+  teardown
+}
+
+test_clear_invalid_id() {
+  echo "test: clear with invalid ID shows error"
+  setup
+  bash "$NOTES_SH" add "first"
+  local output
+  output=$(bash "$NOTES_SH" clear 99 2>&1 || true)
+  assert_contains "not found" "$output" "error for invalid ID"
+  teardown
+}
+
 test_done_marks_note() {
   echo "test: done marks a note as checked"
   setup
@@ -232,6 +292,10 @@ test_done_marks_note
 test_done_invalid_id
 test_undo_unchecks_note
 test_show_done_filter
+test_clear_removes_done
+test_clear_specific_id
+test_clear_all
+test_clear_invalid_id
 
 echo ""
 echo "Results: $TESTS_PASSED/$TESTS_RUN passed"
