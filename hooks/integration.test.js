@@ -377,4 +377,251 @@ describe('Hook Integration Tests', () => {
       expect(stopCtx).not.toContain('src/auth.js');
     });
   });
+
+  // ── SSE Real-Time Tests ──
+
+  describe('SSE real-time sync', () => {
+    it('SSE stream delivers events posted via API', async () => {
+      // Connect to SSE stream
+      const events = [];
+      const ssePromise = new Promise((resolve, reject) => {
+        const req = http.get(`${serverUrl}/api/events/stream`, res => {
+          let buffer = '';
+          res.on('data', chunk => {
+            buffer += chunk.toString();
+            // Parse SSE data lines
+            const lines = buffer.split('\n');
+            buffer = lines.pop(); // keep incomplete line
+            for (const line of lines) {
+              if (line.startsWith('data: ')) {
+                try {
+                  const event = JSON.parse(line.slice(6));
+                  events.push(event);
+                } catch {}
+              }
+            }
+          });
+          // Give it time to collect events
+          setTimeout(() => { req.destroy(); resolve(events); }, 500);
+        });
+        req.on('error', reject);
+      });
+
+      // Wait for connection message
+      await new Promise(r => setTimeout(r, 100));
+
+      // Post an event via the API
+      await postEvent({
+        id: 'ev_sse_test', type: 'comment.added', actor: 'user',
+        data: { commentId: 'c_sse', target: 'n_app', targetLabel: 'App', text: 'SSE test comment' },
+      });
+
+      const received = await ssePromise;
+
+      // Should have received the connected message + our event
+      const connected = received.find(e => e.type === 'connected');
+      expect(connected).toBeDefined();
+
+      const comment = received.find(e => e.type === 'comment.added' && e.data?.commentId === 'c_sse');
+      expect(comment).toBeDefined();
+      expect(comment.data.text).toBe('SSE test comment');
+    });
+
+    it('SSE delivers events to multiple simultaneous clients', async () => {
+      const collectEvents = () => new Promise((resolve) => {
+        const events = [];
+        const req = http.get(`${serverUrl}/api/events/stream`, res => {
+          let buffer = '';
+          res.on('data', chunk => {
+            buffer += chunk.toString();
+            const lines = buffer.split('\n');
+            buffer = lines.pop();
+            for (const line of lines) {
+              if (line.startsWith('data: ')) {
+                try { events.push(JSON.parse(line.slice(6))); } catch {}
+              }
+            }
+          });
+          setTimeout(() => { req.destroy(); resolve(events); }, 500);
+        });
+      });
+
+      // Two clients connect
+      const client1 = collectEvents();
+      const client2 = collectEvents();
+      await new Promise(r => setTimeout(r, 100));
+
+      // Post event
+      await postEvent({
+        id: 'ev_multi_sse', type: 'node.status', actor: 'user',
+        data: { nodeId: 'n_app', status: 'in-progress' },
+      });
+
+      const [events1, events2] = await Promise.all([client1, client2]);
+
+      // Both clients should receive the event
+      expect(events1.find(e => e.id === 'ev_multi_sse')).toBeDefined();
+      expect(events2.find(e => e.id === 'ev_multi_sse')).toBeDefined();
+    });
+  });
+
+  // ── Comment Interrupt Flow ──
+
+  describe('comment interrupt flow', () => {
+    it('user comment added via browser interrupts Claude on next Write', async () => {
+      // 1. Reset the last-seen marker to current event count
+      const eventsContent = fs.readFileSync(path.join(tmpDir, '.code-canvas', 'events.jsonl'), 'utf-8').trim();
+      const count = eventsContent.split('\n').filter(l => l.trim()).length;
+      fs.writeFileSync(path.join(tmpDir, '.code-canvas', '.claude-last-seen'), String(count));
+
+      // 2. User adds a comment via the canvas UI (simulated via API POST)
+      await postEvent({
+        id: 'ev_interrupt_comment', type: 'comment.added', actor: 'user',
+        data: { commentId: 'c_interrupt', target: 'n_routes', targetLabel: 'Routes', text: 'STOP: this approach is wrong, use express instead' },
+      });
+
+      // 3. Claude tries to Write a file — pre-tool-use fires FIRST
+      const preResult = runHook('pre-tool-use', '{}');
+      expect(preResult).not.toBeNull();
+      const preCtx = preResult.hookSpecificOutput.additionalContext;
+      expect(preCtx).toContain('STOP: this approach is wrong');
+      expect(preCtx).toContain('Routes');
+      expect(preCtx).toContain('Canvas Changes');
+
+      // 4. Claude proceeds to write routes.js — post-tool-use fires AFTER
+      const postResult = runHook('post-tool-use', JSON.stringify({
+        tool_input: { file_path: path.join(tmpDir, 'src', 'routes.js') },
+      }));
+      expect(postResult).not.toBeNull();
+      const postCtx = postResult.hookSpecificOutput.additionalContext;
+      // Post-tool-use also surfaces the unresolved comment
+      expect(postCtx).toContain('STOP: this approach is wrong');
+    });
+
+    it('resolved comments do NOT interrupt Claude', async () => {
+      // Reset marker
+      const eventsContent = fs.readFileSync(path.join(tmpDir, '.code-canvas', 'events.jsonl'), 'utf-8').trim();
+      const count = eventsContent.split('\n').filter(l => l.trim()).length;
+      fs.writeFileSync(path.join(tmpDir, '.code-canvas', '.claude-last-seen'), String(count));
+
+      // Resolve the interrupt comment
+      await postEvent({
+        id: 'ev_resolve_interrupt', type: 'comment.resolved', actor: 'claude',
+        data: { commentId: 'c_interrupt' },
+      });
+
+      // Reset marker again (since resolve was a claude event, not user)
+      const eventsContent2 = fs.readFileSync(path.join(tmpDir, '.code-canvas', 'events.jsonl'), 'utf-8').trim();
+      const count2 = eventsContent2.split('\n').filter(l => l.trim()).length;
+      fs.writeFileSync(path.join(tmpDir, '.code-canvas', '.claude-last-seen'), String(count2));
+
+      // No new user events → pre-tool-use should not interrupt
+      const preResult = runHook('pre-tool-use', '{}');
+      const hasContext = preResult?.hookSpecificOutput?.additionalContext;
+      expect(hasContext).toBeFalsy();
+
+      // Post-tool-use should NOT surface the resolved comment
+      const postResult = runHook('post-tool-use', JSON.stringify({
+        tool_input: { file_path: path.join(tmpDir, 'src', 'routes.js') },
+      }));
+      expect(postResult).not.toBeNull();
+      const postCtx = postResult.hookSpecificOutput.additionalContext;
+      expect(postCtx).not.toContain('STOP: this approach is wrong');
+    });
+
+    it('multiple rapid comments all surface before next action', async () => {
+      // Reset marker
+      const eventsContent = fs.readFileSync(path.join(tmpDir, '.code-canvas', 'events.jsonl'), 'utf-8').trim();
+      const count = eventsContent.split('\n').filter(l => l.trim()).length;
+      fs.writeFileSync(path.join(tmpDir, '.code-canvas', '.claude-last-seen'), String(count));
+
+      // User rapidly adds 3 comments
+      await postEvent({ id: 'ev_rapid1', type: 'comment.added', actor: 'user', data: { commentId: 'c_r1', target: 'n_app', targetLabel: 'App', text: 'Comment one' } });
+      await postEvent({ id: 'ev_rapid2', type: 'comment.added', actor: 'user', data: { commentId: 'c_r2', target: 'n_db', targetLabel: 'Database', text: 'Comment two' } });
+      await postEvent({ id: 'ev_rapid3', type: 'comment.added', actor: 'user', data: { commentId: 'c_r3', target: 'n_routes', targetLabel: 'Routes', text: 'Comment three' } });
+
+      // Pre-tool-use should surface ALL three
+      const result = runHook('pre-tool-use', '{}');
+      expect(result).not.toBeNull();
+      const ctx = result.hookSpecificOutput.additionalContext;
+      expect(ctx).toContain('Comment one');
+      expect(ctx).toContain('Comment two');
+      expect(ctx).toContain('Comment three');
+      expect(ctx).toContain('3');  // count
+    });
+
+    it('status change via canvas UI surfaces before next action', async () => {
+      // Reset marker
+      const eventsContent = fs.readFileSync(path.join(tmpDir, '.code-canvas', 'events.jsonl'), 'utf-8').trim();
+      const count = eventsContent.split('\n').filter(l => l.trim()).length;
+      fs.writeFileSync(path.join(tmpDir, '.code-canvas', '.claude-last-seen'), String(count));
+
+      // User marks a node as "done" via the context menu
+      await postEvent({
+        id: 'ev_user_done', type: 'node.status', actor: 'user',
+        data: { nodeId: 'n_routes', status: 'done', prev: 'in-progress' },
+      });
+
+      // Pre-tool-use should report this
+      const result = runHook('pre-tool-use', '{}');
+      expect(result).not.toBeNull();
+      const ctx = result.hookSpecificOutput.additionalContext;
+      expect(ctx).toContain('Status changes');
+      expect(ctx).toContain('n_routes');
+      expect(ctx).toContain('done');
+    });
+  });
+
+  // ── Edge Cases ──
+
+  describe('edge cases', () => {
+    it('hook handles empty events.jsonl gracefully', () => {
+      // Temporarily empty the events file
+      const eventsFile = path.join(tmpDir, '.code-canvas', 'events.jsonl');
+      const backup = fs.readFileSync(eventsFile);
+      fs.writeFileSync(eventsFile, '');
+
+      // All hooks should handle this without crashing
+      const sessionResult = runHook('session-start');
+      expect(sessionResult).not.toBeNull(); // Should show "Canvas Available" or empty state
+
+      const postResult = runHook('post-tool-use', JSON.stringify({
+        tool_input: { file_path: path.join(tmpDir, 'src', 'app.js') },
+      }));
+      // No nodes → nothing to match, nothing to report
+      expect(postResult).toBeNull();
+
+      const stopResult = runHook('stop');
+      // No nodes → nothing to report
+      expect(stopResult).toBeNull();
+
+      // Restore
+      fs.writeFileSync(eventsFile, backup);
+    });
+
+    it('hook handles malformed JSONL lines gracefully', () => {
+      const eventsFile = path.join(tmpDir, '.code-canvas', 'events.jsonl');
+      const backup = fs.readFileSync(eventsFile);
+
+      // Add a malformed line
+      fs.appendFileSync(eventsFile, 'this is not json\n');
+
+      // Hooks should not crash
+      const result = runHook('session-start');
+      expect(result).not.toBeNull();
+
+      // Restore
+      fs.writeFileSync(eventsFile, backup);
+    });
+
+    it('post-tool-use with missing file_path does nothing', () => {
+      const result = runHook('post-tool-use', JSON.stringify({ tool_input: {} }));
+      expect(result).toBeNull();
+    });
+
+    it('post-tool-use with invalid JSON does nothing', () => {
+      const result = runHook('post-tool-use', 'not json at all');
+      expect(result).toBeNull();
+    });
+  });
 });
