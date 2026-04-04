@@ -17,6 +17,13 @@ export default defineWorkspace([
   },
   {
     test: {
+      include: ['hooks/e2e.test.js'],
+      name: 'e2e',
+      testTimeout: 45000,
+    },
+  },
+  {
+    test: {
       include: ['server/**/*.test.js'],
       name: 'server',
     },
