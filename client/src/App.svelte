@@ -40,10 +40,11 @@
   function selectNode(nodeId) { appState.selectedIds = new Set([nodeId]); }
 
   function handleContextMenu({ x, y, cellId }) {
-    const node = graphState.nodes.get(cellId);
-    if (node) {
-      ctxMenu = { visible: true, x, y, nodeId: cellId };
-    }
+    ctxMenu = { visible: true, x, y, nodeId: cellId };
+  }
+
+  function getNodeOrStub(cellId) {
+    return graphState.nodes.get(cellId) || { id: cellId, label: cellId, subtitle: '', status: 'planned', depth: 'module', category: 'arch', completeness: 0, files: [] };
   }
 
   function handleContextAction(action) {
@@ -52,8 +53,7 @@
     if (action === 'details') {
       selectNode(nodeId);
     } else if (action === 'comment') {
-      const node = graphState.nodes.get(nodeId);
-      if (node) commentModal = { visible: true, node };
+      commentModal = { visible: true, node: getNodeOrStub(nodeId) };
     } else if (action.startsWith('status-')) {
       const status = action.replace('status-', '');
       emitEvent({ id: genId(), type: 'node.status', actor: 'user', data: { nodeId, status } });
@@ -99,12 +99,26 @@
             ondelete={handleDeleteComment}
           />
         {:else}
+          {@const cellComments = graphState.comments.filter(c => c.target === selectedNodeId)}
+          {@const openCellComments = cellComments.filter(c => !c.resolved)}
           <div class="panel-mini">
             <div class="pm-hdr">
               <span class="pm-id">{selectedNodeId}</span>
               <button class="pm-close" onclick={() => { appState.selectedIds = new Set(); }}>&times;</button>
             </div>
-            <p class="pm-note">This shape is not linked to a semantic node. It's a diagram-only element.</p>
+            <p class="pm-note">Diagram-only shape (not a semantic node).</p>
+            {#if openCellComments.length > 0}
+              <div class="pm-section">
+                {#each openCellComments as comment}
+                  <div class="pm-comment">
+                    <span class="pm-ctxt">{comment.text}</span>
+                    <button class="pm-btn" onclick={() => handleResolveComment(comment.id)}>&#10003;</button>
+                    <button class="pm-btn pm-del" onclick={() => handleDeleteComment(comment.id)}>&times;</button>
+                  </div>
+                {/each}
+              </div>
+            {/if}
+            <div class="pm-add" onclick={() => { commentModal = { visible: true, node: getNodeOrStub(selectedNodeId) }; }}>+ Add Comment</div>
           </div>
         {/if}
       </aside>
@@ -149,7 +163,7 @@
     visible={ctxMenu.visible}
     x={ctxMenu.x} y={ctxMenu.y}
     nodeId={ctxMenu.nodeId}
-    nodeLabel={ctxMenu.nodeId ? graphState.nodes.get(ctxMenu.nodeId)?.label || '' : ''}
+    nodeLabel={ctxMenu.nodeId ? (graphState.nodes.get(ctxMenu.nodeId)?.label || ctxMenu.nodeId) : ''}
     onaction={handleContextAction}
     onclose={() => { ctxMenu.visible = false; }}
   />
@@ -194,5 +208,13 @@
   .pm-id { font-size: 12px; font-family: monospace; color: var(--tx-m); }
   .pm-close { border: none; background: transparent; color: var(--tx-d); font-size: 14px; cursor: pointer; }
   .pm-close:hover { color: var(--tx); }
-  .pm-note { font-size: 11px; color: var(--tx-d); line-height: 1.4; }
+  .pm-note { font-size: 11px; color: var(--tx-d); line-height: 1.4; margin-bottom: 10px; }
+  .pm-section { margin-bottom: 8px; }
+  .pm-comment { display: flex; align-items: center; gap: 6px; padding: 4px 0; border-bottom: 1px solid var(--bdr); font-size: 12px; }
+  .pm-ctxt { color: var(--tx-m); flex: 1; }
+  .pm-btn { background: none; border: none; font-size: 13px; padding: 0 2px; cursor: pointer; color: var(--gr); }
+  .pm-btn.pm-del { color: var(--tx-d); }
+  .pm-btn.pm-del:hover { color: var(--rd); }
+  .pm-add { font-size: 11px; color: var(--ac); cursor: pointer; padding: 6px 0; text-align: center; border: 1px dashed var(--bdr); border-radius: 4px; transition: .15s; }
+  .pm-add:hover { border-color: var(--ac); background: rgba(59,130,246,.05); }
 </style>
