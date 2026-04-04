@@ -30,10 +30,11 @@
   const graphState = $derived(getGraphState());
   const tabs = $derived(graphState.views);
   const activeTab = $derived(tabs[activeTabIdx] || tabs[0] || null);
+  const selectedNodeId = $derived(
+    appState.selectedIds.size === 1 ? [...appState.selectedIds][0] : null
+  );
   const selectedNode = $derived(
-    appState.selectedIds.size === 1
-      ? graphState.nodes.get([...appState.selectedIds][0]) || null
-      : null
+    selectedNodeId ? graphState.nodes.get(selectedNodeId) || null : null
   );
 
   function selectNode(nodeId) { appState.selectedIds = new Set([nodeId]); }
@@ -84,18 +85,28 @@
   </header>
 
   <div class="main">
-    {#if selectedNode}
+    {#if selectedNodeId}
       <aside class="panel-left">
-        <DetailPanel
-          node={selectedNode}
-          store={appState.store}
-          comments={graphState.comments}
-          onselect={selectNode}
-          onclose={() => { appState.selectedIds = new Set(); }}
-          onaddcomment={(node) => { commentModal = { visible: true, node }; }}
-          onresolve={handleResolveComment}
-          ondelete={handleDeleteComment}
-        />
+        {#if selectedNode}
+          <DetailPanel
+            node={selectedNode}
+            store={appState.store}
+            comments={graphState.comments}
+            onselect={selectNode}
+            onclose={() => { appState.selectedIds = new Set(); }}
+            onaddcomment={(node) => { commentModal = { visible: true, node }; }}
+            onresolve={handleResolveComment}
+            ondelete={handleDeleteComment}
+          />
+        {:else}
+          <div class="panel-mini">
+            <div class="pm-hdr">
+              <span class="pm-id">{selectedNodeId}</span>
+              <button class="pm-close" onclick={() => { appState.selectedIds = new Set(); }}>&times;</button>
+            </div>
+            <p class="pm-note">This shape is not linked to a semantic node. It's a diagram-only element.</p>
+          </div>
+        {/if}
       </aside>
     {/if}
 
@@ -119,8 +130,8 @@
         dark={theme === 'dark'}
         onchange={(xml) => { if (activeTab) emitEvent({ id: genId(), type: 'view.updated', actor: 'user', data: { viewId: activeTab.id, changes: { drawioXml: xml } } }); }}
         onselect={(ids) => {
-          if (ids.length >= 1 && graphState.nodes.has(ids[0])) selectNode(ids[0]);
-          else if (ids.length === 0) appState.selectedIds = new Set();
+          if (ids.length >= 1) selectNode(ids[0]);
+          else appState.selectedIds = new Set();
         }}
         oncontextmenu={handleContextMenu}
       />
@@ -178,4 +189,10 @@
   .ok { color: var(--gr); }
   .err { color: var(--or); }
   .inf { color: var(--tx-d); }
+  .panel-mini { padding: 14px; }
+  .pm-hdr { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+  .pm-id { font-size: 12px; font-family: monospace; color: var(--tx-m); }
+  .pm-close { border: none; background: transparent; color: var(--tx-d); font-size: 14px; cursor: pointer; }
+  .pm-close:hover { color: var(--tx); }
+  .pm-note { font-size: 11px; color: var(--tx-d); line-height: 1.4; }
 </style>
