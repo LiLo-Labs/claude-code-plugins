@@ -1,6 +1,7 @@
 import { EventStore, genId } from './store.js';
 import { fetchEvents, postEvent, subscribeSSE } from './api.js';
 import { updateShapeStatus } from './diagram-sync.js';
+import { generateViewXml } from './auto-layout.js';
 
 const pendingIds = new Set();
 
@@ -11,18 +12,38 @@ export const appState = $state({
   syncError: false,
 });
 
+// Structural changes require full re-layout (new shapes, removed shapes)
+const STRUCTURAL_EVENTS = new Set([
+  'node.created', 'node.deleted',
+  'edge.created', 'edge.deleted',
+]);
+
+// Style-only changes just update colors in-place (preserves user-arranged positions)
+const STYLE_EVENTS = new Set([
+  'node.status',
+]);
+
 /**
- * After any event is applied, sync diagram XML if needed.
- * Status changes update shape colors in all views' drawioXml.
+ * Sync diagrams after an event.
+ * - Structural changes: full re-layout (auto-places new nodes)
+ * - Status changes: update shape colors in-place (preserves layout)
  */
-function syncDiagramsAfterEvent(event) {
-  if (event.type === 'node.status') {
+function syncDiagrams(event) {
+  if (STRUCTURAL_EVENTS.has(event.type)) {
+    // Full re-layout — new node or edge was added/removed
+    const state = appState.store.getState();
+    for (const view of state.views) {
+      const xml = generateViewXml(view, state.nodes, state.edges);
+      const v = appState.store._views.find(v => v.id === view.id);
+      if (v) v.drawioXml = xml;
+    }
+  } else if (STYLE_EVENTS.has(event.type)) {
+    // In-place color update — preserves user-arranged positions
     const state = appState.store.getState();
     for (const view of state.views) {
       if (view.drawioXml) {
         const updated = updateShapeStatus(view.drawioXml, event.data.nodeId, event.data.status);
         if (updated !== view.drawioXml) {
-          // Update the view's XML in the store directly (internal, no event needed)
           const v = appState.store._views.find(v => v.id === view.id);
           if (v) v.drawioXml = updated;
         }
@@ -47,7 +68,7 @@ export async function emitEvent(event) {
   event.id = event.id || genId();
   pendingIds.add(event.id);
   appState.store.apply(event);
-  syncDiagramsAfterEvent(event);
+  syncDiagrams(event);
   appState.storeVersion++;
   try {
     await postEvent(event);
@@ -65,7 +86,7 @@ export function subscribeToEvents() {
       return;
     }
     appState.store.apply(event);
-    syncDiagramsAfterEvent(event);
+    syncDiagrams(event);
     appState.storeVersion++;
   });
 }
