@@ -10,6 +10,13 @@ export default defineWorkspace([
   },
   {
     test: {
+      include: ['hooks/integration.test.js'],
+      name: 'integration',
+      testTimeout: 30000,
+    },
+  },
+  {
+    test: {
       include: ['server/**/*.test.js'],
       name: 'server',
     },

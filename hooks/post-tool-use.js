@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import fs from 'node:fs';
+import path from 'node:path';
 import { findProjectDir, readEvents, replayState, findNodesForFile, ensureServer, postEvent } from './lib/canvas-client.js';
 
 const pluginRoot = process.env.CLAUDE_PLUGIN_ROOT || new URL('..', import.meta.url).pathname;
@@ -16,18 +18,38 @@ async function main() {
     || null;
   if (!filePath) return;
 
-  const projectDir = findProjectDir();
+  // Find project dir — try from CWD first, then from the file's directory
+  const projectDir = findProjectDir() || findProjectDir(path.dirname(filePath));
   if (!projectDir) return;
 
   const events = readEvents(projectDir);
   const state = replayState(events);
 
-  const relative = filePath.startsWith(projectDir)
-    ? filePath.slice(projectDir.length + 1)
-    : filePath;
+  // Normalize to relative path (resolve symlinks for macOS /var → /private/var)
+  let absProject;
+  try { absProject = fs.realpathSync(path.resolve(projectDir)); } catch { absProject = path.resolve(projectDir); }
 
-  // Skip non-source files
-  if (relative.startsWith('.code-canvas/') || relative.startsWith('node_modules/')) return;
+  // Try realpath first, fall back to resolving against projectDir
+  let absFile;
+  try { absFile = fs.realpathSync(path.resolve(filePath)); } catch { absFile = path.resolve(filePath); }
+
+  let relative;
+  if (absFile.startsWith(absProject + path.sep)) {
+    relative = absFile.slice(absProject.length + 1);
+  } else {
+    // File might not exist yet (realpathSync failed) — try without symlink resolution
+    const rawFile = path.resolve(filePath);
+    const rawProject = path.resolve(projectDir);
+    if (rawFile.startsWith(rawProject + path.sep)) {
+      relative = rawFile.slice(rawProject.length + 1);
+    } else {
+      relative = filePath;
+    }
+  }
+
+  // Skip non-source files (check both relative and original path for robustness)
+  if (relative.startsWith('.code-canvas') || relative.startsWith('node_modules')
+    || filePath.includes('/node_modules/') || filePath.includes('/.code-canvas/')) return;
 
   const matchingNodes = findNodesForFile(relative, state.nodes);
 
