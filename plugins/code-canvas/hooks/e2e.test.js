@@ -37,8 +37,8 @@ const DIAGRAM_XML = [
   '<mxCell id="n_api" value="API Server" style="rounded=1;whiteSpace=wrap;fillColor=#1e3a5f;strokeColor=#4a90d9;fontColor=#e6edf3;fontSize=14;fontStyle=1;" vertex="1" parent="1"><mxGeometry x="60" y="40" width="200" height="60" as="geometry"/></mxCell>',
   '<mxCell id="n_db" value="Database" style="rounded=1;whiteSpace=wrap;fillColor=#1a3320;strokeColor=#3fb950;fontColor=#e6edf3;fontSize=14;fontStyle=1;" vertex="1" parent="1"><mxGeometry x="60" y="140" width="200" height="60" as="geometry"/></mxCell>',
   '<mxCell id="n_auth" value="Auth" style="rounded=1;whiteSpace=wrap;fillColor=#1e2a3a;strokeColor=#58a6ff;fontColor=#e6edf3;fontSize=14;fontStyle=1;" vertex="1" parent="1"><mxGeometry x="300" y="40" width="200" height="60" as="geometry"/></mxCell>',
-  '<mxCell id="e1" value="queries" style="rounded=1;curved=1;strokeColor=#8b949e;fontColor=#8b949e;fontSize=11;" edge="1" source="n_api" target="n_db" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>',
-  '<mxCell id="e2" value="uses" style="rounded=1;curved=1;strokeColor=#8b949e;fontColor=#8b949e;fontSize=11;" edge="1" source="n_api" target="n_auth" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>',
+  '<mxCell id="e1" value="queries" style="rounded=1;curved=1;strokeColor=#8b949e;fontColor=#f0f3f6;fontSize=11;" edge="1" source="n_api" target="n_db" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>',
+  '<mxCell id="e2" value="uses" style="rounded=1;curved=1;strokeColor=#8b949e;fontColor=#f0f3f6;fontSize=11;" edge="1" source="n_api" target="n_auth" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>',
   '</root></mxGraphModel>',
 ].join('');
 

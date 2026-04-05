@@ -54,7 +54,7 @@ function spliceEdgeIntoXml(xml, edge, edgeId) {
 
   const label = edge.label ? ` value="${esc(edge.label)}"` : '';
   const color = edge.color || '#8b949e';
-  const cell = `<mxCell id="${esc(edgeId)}"${label} style="rounded=1;curved=1;strokeColor=${color};fontColor=#8b949e;fontSize=11;" edge="1" source="${esc(edge.from)}" target="${esc(edge.to)}" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>`;
+  const cell = `<mxCell id="${esc(edgeId)}"${label} style="rounded=1;curved=1;strokeColor=${color};fontColor=#f0f3f6;fontSize=11;" edge="1" source="${esc(edge.from)}" target="${esc(edge.to)}" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>`;
 
   return xml.replace('</root>', cell + '</root>');
 }

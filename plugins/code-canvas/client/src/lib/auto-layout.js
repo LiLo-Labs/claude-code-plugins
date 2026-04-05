@@ -206,7 +206,7 @@ export function generateLayoutXml(nodes, edges, opts = {}) {
     const color = edge.color || '#8b949e';
     cells.push(
       `<mxCell id="${escapeXml(id)}"${label} ` +
-      `style="rounded=1;curved=1;strokeColor=${color};fontColor=#8b949e;fontSize=11;" ` +
+      `style="rounded=1;curved=1;strokeColor=${color};fontColor=#f0f3f6;fontSize=11;" ` +
       `edge="1" source="${escapeXml(edge.from)}" target="${escapeXml(edge.to)}" parent="1">` +
       `<mxGeometry relative="1" as="geometry"/>` +
       `</mxCell>`

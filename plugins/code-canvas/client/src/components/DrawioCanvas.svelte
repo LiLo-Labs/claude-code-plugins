@@ -20,7 +20,7 @@
     noExitBtn: '1',
     saveAndExit: '0',
     math: '0',
-    dark: dark ? '1' : '0',
+    dark: '0',
     grid: '0',
     configure: '1',
   });
@@ -45,13 +45,7 @@
     postToDrawio({
       action: 'configure',
       config: {
-        css: dark
-          ? `.geDiagramBackdrop { background: #0d1117 !important; }
-             .geDiagramContainer { background: #0d1117 !important; }
-             .geDiagramContainer svg { background: #0d1117 !important; }
-             .mxCellEditor { color: #e6edf3 !important; }
-             .geBackgroundPage { background: #0d1117 !important; border: none !important; box-shadow: none !important; }`
-          : '',
+        css: dark ? darkChromeCSS : '',
         defaultFonts: ['Inter', 'JetBrains Mono', 'Arial', 'Helvetica'],
       },
     });
@@ -76,6 +70,8 @@
           lastSentXml = xml;
           postToDrawio({ action: 'load', xml, autosave: 1 });
         }
+        // Start applying dark chrome as soon as draw.io initializes
+        if (dark) setTimeout(applyDarkChrome, 500);
         break;
 
       case 'load':
@@ -88,6 +84,8 @@
         }
         // Hook into selection model once draw.io is fully loaded
         setTimeout(hookDrawio, 300);
+        // Re-apply dark chrome after each load (UI may have been rebuilt)
+        if (dark) { chromeHidden = false; setTimeout(applyDarkChrome, 300); }
         break;
 
       case 'autosave':
@@ -189,6 +187,48 @@
 
   // Hook into draw.io's internals via Draw.loadPlugin (same-origin iframe)
   let selectionHooked = false;
+  let chromeHidden = false;
+
+  const darkChromeCSS = `
+    body, .geEditor { background: #0d1117 !important; }
+    .geMenubarContainer, .geToolbarContainer, .geTabContainer,
+    .geSidebarFooter, .geFormatContainer, .geHsplit { display: none !important; }
+    .geDiagramBackdrop { background: #0d1117 !important; }
+    .geDiagramContainer { background: #0d1117 !important; top: 0 !important; right: 0 !important; }
+    .geDiagramContainer svg { background: #0d1117 !important; }
+    .geBackgroundPage { background: #0d1117 !important; border: none !important; box-shadow: none !important; }
+    .mxCellEditor { color: #e6edf3 !important; }
+    .geSidebarContainer:not(.geFormatContainer) { background: #161b22 !important; border-color: #30363d !important; color: #c9d1d9 !important; }
+    .geSidebarContainer:not(.geFormatContainer) .geTitle { background: #0d1117 !important; border-color: #30363d !important; color: #c9d1d9 !important; }
+    .geSidebarContainer:not(.geFormatContainer) a { color: #c9d1d9 !important; }
+    .geSidebarContainer:not(.geFormatContainer) input { background: #21262d !important; color: #c9d1d9 !important; border-color: #30363d !important; }
+    .mxWindow { background: #161b22 !important; border-color: #30363d !important; }
+    .mxWindow * { color: #c9d1d9 !important; }
+    .mxWindowTitle { background: #21262d !important; color: #e6edf3 !important; }
+  `;
+
+  function applyDarkChrome() {
+    if (chromeHidden) return;
+    // Find iframe via DOM query (avoids Svelte binding timing issues)
+    const iframe = document.querySelector('iframe.drawio-frame');
+    if (!iframe) return;
+    let doc;
+    try { doc = iframe.contentDocument || iframe.contentWindow?.document; } catch { return; }
+    if (!doc?.head || !doc.querySelector('.geMenubarContainer')) return;
+
+    chromeHidden = true;
+
+    // Inject CSS + hide chrome elements via inline script in iframe
+    const script = doc.createElement('script');
+    script.textContent = '(function(){var css=document.createElement("style");css.textContent='
+      + JSON.stringify(darkChromeCSS)
+      + ';document.head.appendChild(css);'
+      + '[".geMenubarContainer",".geToolbarContainer",".geTabContainer",'
+      + '".geSidebarFooter",".geHsplit",".geFormatContainer"].forEach(function(s){'
+      + 'document.querySelectorAll(s).forEach(function(e){e.style.display="none"})});})();';
+    doc.head.appendChild(script);
+  }
+
   function hookDrawio() {
     if (selectionHooked) return;
     try {
@@ -218,17 +258,12 @@
           graph.background = '#0d1117';
           graph.gridEnabled = false;
           graph.container.style.backgroundColor = '#0d1117';
-          // Style the diagram backdrop and container
-          const backdrop = win.document.querySelector('.geDiagramBackdrop');
-          if (backdrop) backdrop.style.backgroundColor = '#0d1117';
-          const diagContainer = win.document.querySelector('.geDiagramContainer');
-          if (diagContainer) diagContainer.style.backgroundColor = '#0d1117';
-          // Main canvas SVG
-          const svg = graph.container.querySelector('svg');
-          if (svg) svg.style.backgroundColor = '#0d1117';
           graph.refresh();
         }
       });
+
+      // Apply dark chrome independently — don't wait for Draw.loadPlugin callback
+      if (dark) applyDarkChrome();
     } catch {
       setTimeout(hookDrawio, 500);
     }
@@ -258,6 +293,25 @@
   $effect(() => {
     const _dark = dark;
     if (ready && xml) loadXml(xml);
+  });
+
+  // Listen for iframe load event to apply dark chrome
+  $effect(() => {
+    const el = iframeEl;
+    if (!dark || !el) return;
+    const onLoad = () => {
+      let attempts = 0;
+      const poll = () => {
+        if (chromeHidden || attempts++ > 40) return;
+        applyDarkChrome();
+        if (!chromeHidden) setTimeout(poll, 500);
+      };
+      setTimeout(poll, 500);
+    };
+    el.addEventListener('load', onLoad);
+    // Also try immediately in case already loaded
+    onLoad();
+    return () => el.removeEventListener('load', onLoad);
   });
 </script>
 

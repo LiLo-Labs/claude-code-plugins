@@ -206,6 +206,88 @@ register('file', {
   match: (node) => node.category === 'file',
 });
 
+// ── UML Extended ──
+
+register('lifeline', {
+  style: 'shape=umlLifeline;perimeter=lifelinePerimeter;whiteSpace=wrap;fontSize=12;fontColor=#e6edf3;fillColor=#1e2a3a;strokeColor=#58a6ff;size=40;',
+  width: 100, height: 300,
+  tags: ['uml', 'sequence', 'lifeline'],
+  description: 'UML lifeline — participant in a sequence diagram',
+  match: (node) => node.category === 'lifeline',
+});
+
+register('activation', {
+  style: 'rounded=0;whiteSpace=wrap;fontSize=10;fontColor=#e6edf3;fillColor=#1e3a5f;strokeColor=#58a6ff;',
+  width: 16, height: 60,
+  tags: ['uml', 'sequence', 'activation'],
+  description: 'Activation bar — execution focus on a lifeline',
+  match: () => false,
+});
+
+register('note', {
+  style: 'shape=note;whiteSpace=wrap;fontSize=11;fontColor=#e6edf3;fillColor=#2a2a10;strokeColor=#d29922;backgroundOutline=1;size=14;',
+  width: 140, height: 60,
+  tags: ['uml', 'annotation', 'note'],
+  description: 'UML note — annotations and constraints',
+  match: (node) => node.category === 'note' || node.category === 'annotation',
+});
+
+register('component', {
+  style: 'shape=component;whiteSpace=wrap;fontSize=12;fontColor=#e6edf3;fillColor=#1e2a3a;strokeColor=#58a6ff;align=left;spacingLeft=36;',
+  width: 180, height: 60,
+  tags: ['uml', 'component', 'deployment'],
+  description: 'UML component — deployable units with lollipop interface',
+  match: (node) => node.category === 'component',
+});
+
+register('artifact', {
+  style: 'shape=document;whiteSpace=wrap;fontSize=12;fontColor=#e6edf3;fillColor=#21262d;strokeColor=#484f58;boundedLbl=1;size=0.12;',
+  width: 120, height: 65,
+  tags: ['uml', 'deployment', 'artifact'],
+  description: 'UML artifact — built/deployed files',
+  match: (node) => node.category === 'artifact',
+});
+
+register('node3d', {
+  style: 'shape=cube;whiteSpace=wrap;fontSize=12;fontColor=#e6edf3;fillColor=#1a3320;strokeColor=#3fb950;size=10;darkOpacity=0.05;darkOpacity2=0.1;',
+  width: 160, height: 100,
+  tags: ['uml', 'deployment', 'node'],
+  description: 'UML deployment node — servers, devices, execution environments',
+  match: (node) => node.category === 'deployment-node',
+});
+
+register('fork-join', {
+  style: 'rounded=0;whiteSpace=wrap;fillColor=#e6edf3;strokeColor=#e6edf3;fontColor=#e6edf3;fontSize=0;',
+  width: 200, height: 6,
+  tags: ['uml', 'activity', 'fork', 'join'],
+  description: 'Fork/join bar — parallel activity paths',
+  match: () => false,
+});
+
+register('signal-send', {
+  style: 'shape=mxgraph.uml25.sendSignal;whiteSpace=wrap;fontSize=12;fontColor=#e6edf3;fillColor=#1e2a3a;strokeColor=#58a6ff;',
+  width: 140, height: 45,
+  tags: ['uml', 'activity', 'signal'],
+  description: 'UML send signal — async event emission',
+  match: () => false,
+});
+
+register('signal-receive', {
+  style: 'shape=mxgraph.uml25.receiveSignal;whiteSpace=wrap;fontSize=12;fontColor=#e6edf3;fillColor=#1e2a3a;strokeColor=#58a6ff;',
+  width: 140, height: 45,
+  tags: ['uml', 'activity', 'signal'],
+  description: 'UML receive signal — async event reception',
+  match: () => false,
+});
+
+register('object', {
+  style: 'rounded=0;whiteSpace=wrap;fontSize=12;fontColor=#e6edf3;fillColor=#1e2a3a;strokeColor=#58a6ff;fontStyle=4;',
+  width: 160, height: 45,
+  tags: ['uml', 'object', 'instance'],
+  description: 'UML object — underlined instance of a class',
+  match: (node) => node.category === 'object',
+});
+
 // ── Swimlanes & Containers ──
 
 register('swimlane', {
@@ -276,7 +358,8 @@ export function getShapeForNode(node) {
 
   // 3. Auto-match (specific shapes first — database, queue, cache, etc.)
   const specific = ['database', 'queue', 'cache', 'cloud', 'actor', 'usecase',
-    'decision', 'start', 'end', 'process', 'state', 'document', 'class', 'package'];
+    'decision', 'start', 'end', 'process', 'state', 'document', 'class', 'package',
+    'lifeline', 'component', 'artifact', 'note', 'object'];
   for (const name of specific) {
     if (SHAPES[name].match(node)) return SHAPES[name];
   }
