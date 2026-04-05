@@ -1,7 +1,8 @@
 import { EventStore, genId } from './store.js';
-import { fetchEvents, postEvent, subscribeSSE } from './api.js';
+import { fetchEvents, postEvent, subscribeSSE, fetchUserShapes, fetchCustomShapes } from './api.js';
 import { updateShapeStatus } from './diagram-sync.js';
 import { generateViewXml } from './auto-layout.js';
+import { loadCustomShapes } from './shapes/registry.js';
 
 const pendingIds = new Set();
 
@@ -56,6 +57,16 @@ function syncDiagrams(event) {
 
 export async function loadFromServer() {
   try {
+    // Load shapes: user-level first, then project-level (project overrides user)
+    try {
+      const user = await fetchUserShapes();
+      if (user && Object.keys(user).length > 0) loadCustomShapes(user);
+    } catch {}
+    try {
+      const project = await fetchCustomShapes();
+      if (project && Object.keys(project).length > 0) loadCustomShapes(project);
+    } catch {}
+
     const events = await fetchEvents();
     appState.store = EventStore.fromEvents(events);
 

@@ -18,18 +18,30 @@
         "name": "LiLo Labs"
       },
       "category": "productivity",
-      "tags": ["notes", "checklist", "productivity", "workflow"]
+      "tags": [
+        "notes",
+        "checklist",
+        "productivity",
+        "workflow"
+      ]
     },
     {
       "name": "code-canvas",
       "source": "./plugins/code-canvas",
       "description": "Interactive visual architecture diagrams that stay in sync as Claude works. Auto-layout, live SSE updates, comment-driven interrupts.",
-      "version": "0.3.0",
+      "version": "0.4.0",
       "author": {
         "name": "LiLo Labs"
       },
       "category": "architecture",
-      "tags": ["architecture", "canvas", "diagram", "design", "knowledge-graph", "visual"]
+      "tags": [
+        "architecture",
+        "canvas",
+        "diagram",
+        "design",
+        "knowledge-graph",
+        "visual"
+      ]
     }
   ]
 }
