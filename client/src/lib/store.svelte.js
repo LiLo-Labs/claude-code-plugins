@@ -12,10 +12,11 @@ export const appState = $state({
   syncError: false,
 });
 
-// Structural changes require full re-layout (new shapes, removed shapes)
+// Structural changes require full re-layout (new shapes, removed shapes, new views)
 const STRUCTURAL_EVENTS = new Set([
   'node.created', 'node.deleted',
   'edge.created', 'edge.deleted',
+  'view.created',
 ]);
 
 // Style-only changes just update colors in-place (preserves user-arranged positions)
@@ -56,6 +57,15 @@ export async function loadFromServer() {
   try {
     const events = await fetchEvents();
     appState.store = EventStore.fromEvents(events);
+
+    // Generate diagrams for all views on initial load
+    const state = appState.store.getState();
+    for (const view of state.views) {
+      const xml = generateViewXml(view, state.nodes, state.edges);
+      const v = appState.store._views.find(v => v.id === view.id);
+      if (v) v.drawioXml = xml;
+    }
+
     appState.storeVersion++;
     appState.syncError = false;
   } catch (err) {

@@ -89,7 +89,13 @@ After completing significant work, update the canvas:
 - Add comments noting deviations from the plan
 - When making draw.io XML changes, use node IDs that match semantic node IDs (n_<slug>)
 
-**IMPORTANT: The post-tool-use hook will alert you when files are edited that don't match any canvas node. When you see "Canvas: untracked file" — you MUST create a node for it and add it to the relevant diagram view. Every source file should be tracked by a node.**`;
+**IMPORTANT: The post-tool-use hook will alert you when files are edited that don't match any canvas node. When you see "Canvas: untracked file" — you MUST create a node for it and add it to the relevant diagram view. Every source file should be tracked by a node.**
+
+### Status Line
+To show canvas status in your Claude Code prompt, add to \`.claude/settings.json\`:
+\`\`\`json
+{"statusLine":{"type":"command","command":"bash \\"${pluginRoot}/hooks/statusline.sh\\""}}
+\`\`\``;
 
   process.stdout.write(JSON.stringify({
     hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: context },
