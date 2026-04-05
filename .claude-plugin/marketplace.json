@@ -19,6 +19,17 @@
       },
       "category": "productivity",
       "tags": ["notes", "checklist", "productivity", "workflow"]
+    },
+    {
+      "name": "code-canvas",
+      "source": "./plugins/code-canvas",
+      "description": "Interactive visual architecture diagrams that stay in sync as Claude works. Auto-layout, live SSE updates, comment-driven interrupts.",
+      "version": "0.3.0",
+      "author": {
+        "name": "LiLo Labs"
+      },
+      "category": "architecture",
+      "tags": ["architecture", "canvas", "diagram", "design", "knowledge-graph", "visual"]
     }
   ]
 }

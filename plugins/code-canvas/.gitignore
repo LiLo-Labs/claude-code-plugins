@@ -1,0 +1,4 @@
+node_modules/
+.code-canvas/
+*.log
+.DS_Store
