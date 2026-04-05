@@ -90,44 +90,46 @@
   </header>
 
   <div class="main">
-    {#if selectedNodeId}
-      <aside class="panel-left">
-        {#if selectedNode}
-          <DetailPanel
-            node={selectedNode}
-            store={appState.store}
-            comments={graphState.comments}
-            onselect={selectNode}
-            onclose={() => { appState.selectedIds = new Set(); }}
-            onaddcomment={(node) => { commentModal = { visible: true, node }; }}
-            onresolve={handleResolveComment}
-            ondelete={handleDeleteComment}
-          />
-        {:else}
-          {@const cellComments = graphState.comments.filter(c => c.target === selectedNodeId)}
-          {@const openCellComments = cellComments.filter(c => !c.resolved)}
-          <div class="panel-mini">
-            <div class="pm-hdr">
-              <span class="pm-id">{selectedNodeId}</span>
-              <button class="pm-close" onclick={() => { appState.selectedIds = new Set(); }}>&times;</button>
-            </div>
-            <p class="pm-note">Diagram-only shape (not a semantic node).</p>
-            {#if openCellComments.length > 0}
-              <div class="pm-section">
-                {#each openCellComments as comment}
-                  <div class="pm-comment">
-                    <span class="pm-ctxt">{comment.text}</span>
-                    <button class="pm-btn" onclick={() => handleResolveComment(comment.id)}>&#10003;</button>
-                    <button class="pm-btn pm-del" onclick={() => handleDeleteComment(comment.id)}>&times;</button>
-                  </div>
-                {/each}
-              </div>
-            {/if}
-            <div class="pm-add" onclick={() => { commentModal = { visible: true, node: getNodeOrStub(selectedNodeId) }; }}>+ Add Comment</div>
+    <aside class="panel-left">
+      {#if selectedNode}
+        <DetailPanel
+          node={selectedNode}
+          store={appState.store}
+          comments={graphState.comments}
+          onselect={selectNode}
+          onclose={() => { appState.selectedIds = new Set(); }}
+          onaddcomment={(node) => { commentModal = { visible: true, node }; }}
+          onresolve={handleResolveComment}
+          ondelete={handleDeleteComment}
+        />
+      {:else if selectedNodeId}
+        {@const cellComments = graphState.comments.filter(c => c.target === selectedNodeId)}
+        {@const openCellComments = cellComments.filter(c => !c.resolved)}
+        <div class="panel-mini">
+          <div class="pm-hdr">
+            <span class="pm-id">{selectedNodeId}</span>
+            <button class="pm-close" onclick={() => { appState.selectedIds = new Set(); }}>&times;</button>
           </div>
-        {/if}
-      </aside>
-    {/if}
+          <p class="pm-note">Diagram-only shape (not a semantic node).</p>
+          {#if openCellComments.length > 0}
+            <div class="pm-section">
+              {#each openCellComments as comment}
+                <div class="pm-comment">
+                  <span class="pm-ctxt">{comment.text}</span>
+                  <button class="pm-btn" onclick={() => handleResolveComment(comment.id)}>&#10003;</button>
+                  <button class="pm-btn pm-del" onclick={() => handleDeleteComment(comment.id)}>&times;</button>
+                </div>
+              {/each}
+            </div>
+          {/if}
+          <div class="pm-add" onclick={() => { commentModal = { visible: true, node: getNodeOrStub(selectedNodeId) }; }}>+ Add Comment</div>
+        </div>
+      {:else}
+        <div class="panel-mini">
+          <p class="pm-note">Click a node to see details.</p>
+        </div>
+      {/if}
+    </aside>
 
     <div class="canvas-col">
       <ViewTabs

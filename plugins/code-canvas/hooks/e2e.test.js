@@ -86,6 +86,7 @@ describe('E2E Browser Tests', () => {
   it('page loads with header, tabs, status bar, comment bar', async () => {
     await page.goto(serverUrl);
     await page.waitForLoadState('load');
+    await page.waitForTimeout(500);
 
     const header = await page.textContent('.topbar');
     expect(header).toContain('Main');
