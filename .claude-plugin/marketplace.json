@@ -1,0 +1,47 @@
+{
+  "name": "lilo-labs-plugins",
+  "owner": {
+    "name": "LiLo Labs"
+  },
+  "metadata": {
+    "description": "Claude Code plugins by LiLo Labs",
+    "version": "1.0.0",
+    "pluginRoot": "./plugins"
+  },
+  "plugins": [
+    {
+      "name": "notes",
+      "source": "./plugins/notes",
+      "description": "Capture thoughts as a checklist during conversations and surface them to Claude at the right time",
+      "version": "1.0.0",
+      "author": {
+        "name": "LiLo Labs"
+      },
+      "category": "productivity",
+      "tags": [
+        "notes",
+        "checklist",
+        "productivity",
+        "workflow"
+      ]
+    },
+    {
+      "name": "code-canvas",
+      "source": "./plugins/code-canvas",
+      "description": "Interactive visual architecture diagrams that stay in sync as Claude works. Auto-layout, live SSE updates, comment-driven interrupts.",
+      "version": "0.6.3",
+      "author": {
+        "name": "LiLo Labs"
+      },
+      "category": "architecture",
+      "tags": [
+        "architecture",
+        "canvas",
+        "diagram",
+        "design",
+        "knowledge-graph",
+        "visual"
+      ]
+    }
+  ]
+}
