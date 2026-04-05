@@ -1,0 +1,63 @@
+- generic [ref=e3]:
+  - banner [ref=e4]:
+    - generic [ref=e5]: Architecture
+    - generic [ref=e7]: Core system — server, data model, rendering pipeline
+    - button "☾" [ref=e9] [cursor=pointer]
+  - generic [ref=e11]:
+    - generic [ref=e12]:
+      - button "1. Architecture" [ref=e13] [cursor=pointer]
+      - button "2. UI Components" [ref=e14] [cursor=pointer]
+      - button "3. Hook Lifecycle" [ref=e15] [cursor=pointer]
+      - button "4. Shape & Rendering" [ref=e16] [cursor=pointer]
+      - button "+" [ref=e17] [cursor=pointer]
+    - img [ref=e19]:
+      - generic [ref=e21]:
+        - generic [ref=e25]:
+          - generic [ref=e27]: Server
+          - generic [ref=e28]: HTTP API + SSE + persistence
+        - generic [ref=e32]:
+          - generic [ref=e34]: EventStore
+          - generic [ref=e35]: Event-sourced state machine
+        - generic [ref=e39]:
+          - generic [ref=e41]: Store (Svelte)
+          - generic [ref=e42]: Reactive wrapper + diagram sync
+        - generic [ref=e46]:
+          - generic [ref=e48]: Auto-Layout
+          - generic [ref=e49]: 4 layout algorithms
+        - generic [ref=e53]:
+          - generic [ref=e55]: Diagram Sync
+          - generic [ref=e56]: In-place status color updates
+        - generic [ref=e60]:
+          - generic [ref=e62]: Shape Registry
+          - generic [ref=e63]: 48 built-in + custom shapes
+        - generic [ref=e67]:
+          - generic [ref=e69]: maxGraph
+          - generic [ref=e70]: draw.io rendering engine
+        - generic [ref=e74]:
+          - generic [ref=e76]: API Client
+          - generic [ref=e77]: Fetch wrappers + SSE
+        - generic [ref=e81]:
+          - generic [ref=e83]: Config
+          - generic [ref=e84]: Colors, depth settings
+        - generic [ref=e88]:
+          - generic [ref=e90]: SKILL.md
+          - generic [ref=e91]: Claude generation guidance
+        - generic [ref=e98]: replays events
+        - generic [ref=e105]: HTTP/SSE
+        - generic [ref=e112]: wraps
+        - generic [ref=e119]: fetches/posts
+        - generic [ref=e126]: generates XML
+        - generic [ref=e133]: updates colors
+        - generic [ref=e140]: gets styles
+        - generic [ref=e147]: gets styles
+  - generic [ref=e148]:
+    - generic [ref=e149] [cursor=pointer]:
+      - heading "Comments" [level=3] [ref=e150]
+      - generic [ref=e151]: "0"
+      - generic [ref=e152]: ▼
+    - generic [ref=e153]: No open comments
+  - contentinfo [ref=e154]:
+    - generic [ref=e155]: ● Synced
+    - generic [ref=e156]: 23 nodes
+    - generic [ref=e157]: 4 tabs
+    - generic [ref=e158]: 54 events

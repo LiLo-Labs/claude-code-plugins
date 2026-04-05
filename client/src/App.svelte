@@ -4,7 +4,7 @@
   import { appState, loadFromServer, emitEvent, subscribeToEvents } from './lib/store.svelte.js';
   import { genId } from './lib/store.js';
   import ViewTabs from './components/ViewTabs.svelte';
-  import MaxGraphCanvas from './components/MaxGraphCanvas.svelte';
+  import SvgCanvas from './components/SvgCanvas.svelte';
   import DetailPanel from './components/DetailPanel.svelte';
   import ContextMenu from './components/ContextMenu.svelte';
   import CommentBar from './components/CommentBar.svelte';
@@ -139,7 +139,7 @@
         onrename={(viewId, name) => { emitEvent({ id: genId(), type: 'view.updated', actor: 'user', data: { viewId, changes: { name } } }); }}
         ondelete={(viewId) => { emitEvent({ id: genId(), type: 'view.deleted', actor: 'user', data: { viewId } }); if (activeTab?.id === viewId) activeTabIdx = 0; }}
       />
-      <MaxGraphCanvas
+      <SvgCanvas
         xml={activeTab?.drawioXml || ''}
         dark={theme === 'dark'}
         onchange={(xml) => { if (activeTab) emitEvent({ id: genId(), type: 'view.updated', actor: 'user', data: { viewId: activeTab.id, changes: { drawioXml: xml } } }); }}

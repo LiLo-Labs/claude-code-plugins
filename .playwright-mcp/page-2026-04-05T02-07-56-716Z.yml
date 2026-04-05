@@ -1,0 +1,50 @@
+- generic [ref=e3]:
+  - banner [ref=e4]:
+    - generic [ref=e5]: Hook Lifecycle
+    - generic [ref=e7]: How Claude stays informed — pre/post tool-use, session start
+    - button "☾" [ref=e9] [cursor=pointer]
+  - generic [ref=e11]:
+    - generic [ref=e12]:
+      - button "1. Architecture" [ref=e13] [cursor=pointer]
+      - button "2. UI Components" [ref=e14] [cursor=pointer]
+      - button "3. Hook Lifecycle" [active] [ref=e15] [cursor=pointer]
+      - button "4. Shape & Rendering" [ref=e16] [cursor=pointer]
+      - button "+" [ref=e17] [cursor=pointer]
+    - img [ref=e19]:
+      - generic [ref=e21]:
+        - generic [ref=e253]:
+          - generic [ref=e255]: Session Start
+          - generic [ref=e256]: Inject canvas status
+        - generic [ref=e260]:
+          - generic [ref=e262]: Pre-Tool-Use
+          - generic [ref=e263]: Surface user changes
+        - generic [ref=e267]:
+          - generic [ref=e269]: Post-Tool-Use
+          - generic [ref=e270]: Detect untracked files
+        - generic [ref=e274]:
+          - generic [ref=e276]: Stop
+          - generic [ref=e277]: Audit on session end
+        - generic [ref=e281]:
+          - generic [ref=e283]: Canvas Client
+          - generic [ref=e284]: Shared hook utilities
+        - generic [ref=e288]:
+          - generic [ref=e290]: Glob Match
+          - generic [ref=e291]: File pattern matching
+        - generic [ref=e298]: reads state
+        - generic [ref=e305]: reads events
+        - generic [ref=e312]: reads events
+        - generic [ref=e319]: matches files
+        - generic [ref=e326]: reads state
+        - generic [ref=e332]: before → after
+        - generic [ref=e339]: fires first
+  - generic [ref=e148]:
+    - generic [ref=e149] [cursor=pointer]:
+      - heading "Comments" [level=3] [ref=e150]
+      - generic [ref=e151]: "0"
+      - generic [ref=e152]: ▼
+    - generic [ref=e153]: No open comments
+  - contentinfo [ref=e154]:
+    - generic [ref=e155]: ● Synced
+    - generic [ref=e156]: 23 nodes
+    - generic [ref=e157]: 4 tabs
+    - generic [ref=e158]: 57 events
