@@ -59,7 +59,7 @@ describe('E2E Browser Tests', () => {
       serverProcess.stdout.on('data', data => {
         try {
           const info = JSON.parse(data.toString());
-          if (info.url) { clearTimeout(timeout); resolve(info.url); }
+          if (info.url) { clearTimeout(timeout); resolve(info.url + '?renderer=svg'); }
         } catch {}
       });
     });
@@ -146,13 +146,13 @@ describe('E2E Browser Tests', () => {
     expect(['dark', 'light']).toContain(initial);
 
     // Toggle
-    await freshPage.click('.tb');
+    await freshPage.click('.theme-toggle');
     await freshPage.waitForTimeout(200);
     const toggled = await freshPage.getAttribute('html', 'data-theme');
     expect(toggled).not.toBe(initial);
 
     // Toggle back
-    await freshPage.click('.tb');
+    await freshPage.click('.theme-toggle');
     await freshPage.waitForTimeout(200);
     const restored = await freshPage.getAttribute('html', 'data-theme');
     expect(restored).toBe(initial);

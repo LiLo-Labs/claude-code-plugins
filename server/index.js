@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import net from 'node:net';
 import os from 'node:os';
+import { execSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { EventStore } from '../client/src/lib/store.js';
 
@@ -25,6 +26,7 @@ const eventsFile = path.join(canvasDir, 'events.jsonl');
 const layoutsDir = path.join(canvasDir, 'layouts');
 const serverInfoFile = path.join(canvasDir, '.server-info');
 const clientDist = path.join(__dirname, '..', 'client', 'dist');
+const drawioDir = path.join(__dirname, '..', 'vendor', 'drawio');
 
 if (!fs.existsSync(canvasDir)) fs.mkdirSync(canvasDir, { recursive: true });
 if (!fs.existsSync(layoutsDir)) fs.mkdirSync(layoutsDir, { recursive: true });
@@ -125,7 +127,9 @@ function readBody(req) {
 const MIME = {
   '.html': 'text/html', '.css': 'text/css', '.js': 'application/javascript',
   '.json': 'application/json', '.svg': 'image/svg+xml', '.png': 'image/png',
-  '.woff2': 'font/woff2', '.woff': 'font/woff',
+  '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif',
+  '.woff2': 'font/woff2', '.woff': 'font/woff', '.ttf': 'font/ttf',
+  '.xml': 'application/xml', '.txt': 'text/plain',
 };
 
 function serveStatic(res, urlPath) {
@@ -270,6 +274,23 @@ const server = http.createServer(async (req, res) => {
     return sendJSON(res, { status: 'ok', eventCount, project: path.basename(path.resolve(projectDir)) });
   }
 
+  // Serve draw.io webapp at /drawio/
+  if (req.method === 'GET' && p.startsWith('/drawio/')) {
+    let subPath = p.slice('/drawio'.length);
+    if (!subPath || subPath === '/') subPath = '/index.html';
+    const resolved = path.resolve(drawioDir, '.' + subPath);
+    if (!resolved.startsWith(path.resolve(drawioDir))) {
+      res.writeHead(403); res.end('Forbidden'); return;
+    }
+    if (fs.existsSync(resolved) && fs.statSync(resolved).isFile()) {
+      const ext = path.extname(resolved);
+      res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream' });
+      fs.createReadStream(resolved).pipe(res);
+      return;
+    }
+    res.writeHead(404); res.end('Not found'); return;
+  }
+
   if (req.method === 'GET') {
     if (serveStatic(res, p)) return;
     if (serveStatic(res, '/')) return;
@@ -278,8 +299,25 @@ const server = http.createServer(async (req, res) => {
   res.writeHead(404); res.end('Not found');
 });
 
+// ── Draw.io vendor check ──
+function ensureDrawio() {
+  const versionFile = path.join(drawioDir, '.version');
+  if (fs.existsSync(versionFile)) return true;
+  const script = path.join(__dirname, '..', 'scripts', 'vendor-drawio.sh');
+  if (!fs.existsSync(script)) { console.error('vendor-drawio.sh not found'); return false; }
+  try {
+    console.error('draw.io not found, downloading...');
+    execSync(`bash "${script}"`, { stdio: 'inherit' });
+    return fs.existsSync(versionFile);
+  } catch (e) {
+    console.error('Failed to vendor draw.io:', e.message);
+    return false;
+  }
+}
+
 // ── Start ──
 async function start() {
+  ensureDrawio();
   const port = requestedPort || await findFreePort(9100);
   server.listen(port, host, () => {
     const addr = server.address();
