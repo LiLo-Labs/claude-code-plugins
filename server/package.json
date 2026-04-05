@@ -1,6 +1,0 @@
-{
-  "name": "code-canvas-server",
-  "private": true,
-  "type": "module",
-  "main": "index.js"
-}

@@ -1,6 +1,7 @@
-node_modules/
-client/dist/
-.code-canvas/
-vendor/
-*.log
 .DS_Store
+*.log
+.code-canvas/
+.playwright-mcp/
+*.png
+vendor/
+node_modules/
