@@ -170,6 +170,26 @@ When `/canvas regenerate` is called:
 1. Do all the reset steps above
 2. Then immediately run `/canvas generate` (fresh analysis of current codebase)
 
+## Custom Shapes
+
+The shape registry auto-selects shapes from node properties (database → cylinder, cache → hexagon, etc.). When a project needs shapes that don't exist in the registry:
+
+**Option 1: Inline style** — Set `shape` on the node to a raw draw.io style string:
+```json
+{"nodeId": "n_lambda", "label": "Lambda", "shape": "shape=mxgraph.aws4.lambda_function;fontColor=#e6edf3;fontSize=12;"}
+```
+
+**Option 2: Project-specific shapes** — Save reusable shapes to `.code-canvas/shapes.json` via the API:
+```bash
+curl -X PUT http://localhost:<port>/api/shapes -H 'Content-Type: application/json' -d '{
+  "lambda": {"style": "shape=mxgraph.aws4.lambda_function;whiteSpace=wrap;fontSize=12;fontColor=#e6edf3;", "width": 60, "height": 60, "tags": ["aws", "serverless"], "description": "AWS Lambda function"},
+  "s3-bucket": {"style": "shape=mxgraph.aws4.bucket;whiteSpace=wrap;fontSize=12;fontColor=#e6edf3;", "width": 60, "height": 60, "tags": ["aws", "storage"], "description": "S3 bucket"}
+}'
+```
+These are loaded on client startup and available for all diagrams in that project. Use the shape name on nodes: `"shape": "lambda"`.
+
+**Built-in shapes:** actor, server, database, queue, cache, cloud, domain, module, interface, usecase, package, class, decision, start, end, process, state, document, file, swimlane, group.
+
 ## Guidelines
 
 - Use `actor: "claude"` when posting events

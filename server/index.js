@@ -233,6 +233,21 @@ const server = http.createServer(async (req, res) => {
     return sendJSON(res, { saved: true });
   }
 
+  // GET/PUT /api/shapes — project-specific custom shapes
+  const shapesFile = path.join(canvasDir, 'shapes.json');
+  if (p === '/api/shapes' && req.method === 'GET') {
+    if (fs.existsSync(shapesFile)) {
+      return sendJSON(res, JSON.parse(fs.readFileSync(shapesFile, 'utf-8')));
+    }
+    return sendJSON(res, {});
+  }
+  if (p === '/api/shapes' && req.method === 'PUT') {
+    const body = await readBody(req);
+    if (!body) return sendJSON(res, { error: 'Invalid JSON' }, 400);
+    fs.writeFileSync(shapesFile, JSON.stringify(body, null, 2));
+    return sendJSON(res, { saved: true });
+  }
+
   if (p === '/api/health' && req.method === 'GET') {
     return sendJSON(res, { status: 'ok', eventCount, project: path.basename(path.resolve(projectDir)) });
   }

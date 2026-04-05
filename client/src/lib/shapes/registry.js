@@ -236,27 +236,57 @@ export function getShapeByName(name) {
 }
 
 /**
+ * Register a custom shape at runtime.
+ * Used for project-specific shapes loaded from .code-canvas/shapes.json.
+ */
+export function registerCustomShape(name, def) {
+  register(name, def);
+}
+
+/**
+ * Load custom shapes from a JSON object (from .code-canvas/shapes.json).
+ * Each key is a shape name, each value is { style, width, height, tags, description }.
+ */
+export function loadCustomShapes(shapesObj) {
+  for (const [name, def] of Object.entries(shapesObj)) {
+    register(name, { ...def, match: def.match || (() => false) });
+  }
+}
+
+/**
  * Auto-select the best shape for a node based on its properties.
- * Checks match() functions in priority order.
- * Falls back to depth-based default.
+ * Priority: explicit shape name → explicit style string → auto-match → depth fallback
  */
 export function getShapeForNode(node) {
-  // 1. Explicit shape override
+  // 1. Explicit shape name (registered or custom)
   if (node.shape && SHAPES[node.shape]) return SHAPES[node.shape];
 
-  // 2. Auto-match (specific shapes first — database, queue, cache, etc.)
+  // 2. Explicit style string (Claude defined a new shape inline)
+  if (node.shape && node.shape.includes('=')) {
+    return {
+      name: 'custom',
+      style: node.shape,
+      width: node.shapeWidth || 160,
+      height: node.shapeHeight || 60,
+      tags: ['custom'],
+      description: 'Custom inline shape',
+      match: () => false,
+    };
+  }
+
+  // 3. Auto-match (specific shapes first — database, queue, cache, etc.)
   const specific = ['database', 'queue', 'cache', 'cloud', 'actor', 'usecase',
     'decision', 'start', 'end', 'process', 'state', 'document', 'class', 'package'];
   for (const name of specific) {
     if (SHAPES[name].match(node)) return SHAPES[name];
   }
 
-  // 3. Fall back to depth-based
+  // 4. Fall back to depth-based
   const depthMap = { system: 'server', domain: 'domain', module: 'module', interface: 'interface' };
   const fallback = depthMap[node.depth];
   if (fallback && SHAPES[fallback]) return SHAPES[fallback];
 
-  // 4. Ultimate fallback
+  // 5. Ultimate fallback
   return SHAPES.module;
 }
 
