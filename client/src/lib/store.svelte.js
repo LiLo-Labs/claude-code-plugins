@@ -30,17 +30,18 @@ const STYLE_EVENTS = new Set([
  * - Status changes: update shape colors in-place (preserves layout)
  */
 function syncDiagrams(event) {
+  const state = appState.store.getState();
+
   if (STRUCTURAL_EVENTS.has(event.type)) {
-    // Full re-layout — new node or edge was added/removed
-    const state = appState.store.getState();
+    // Re-generate layout for all views.
+    // This produces clean hierarchical layouts from the current data.
     for (const view of state.views) {
       const xml = generateViewXml(view, state.nodes, state.edges);
       const v = appState.store._views.find(v => v.id === view.id);
       if (v) v.drawioXml = xml;
     }
   } else if (STYLE_EVENTS.has(event.type)) {
-    // In-place color update — preserves user-arranged positions
-    const state = appState.store.getState();
+    // In-place color update — preserves positions
     for (const view of state.views) {
       if (view.drawioXml) {
         const updated = updateShapeStatus(view.drawioXml, event.data.nodeId, event.data.status);

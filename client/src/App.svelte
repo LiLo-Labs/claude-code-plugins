@@ -148,6 +148,33 @@
           else appState.selectedIds = new Set();
         }}
         oncontextmenu={handleContextMenu}
+        oncelladded={(cell) => {
+          if (!cell.isEdge) {
+            // User drew a shape → create a node in the store
+            const nodeId = cell.id.startsWith('n_') ? cell.id : 'n_' + cell.id;
+            if (!graphState.nodes.has(nodeId) && !graphState.nodes.has(cell.id)) {
+              emitEvent({ id: genId(), type: 'node.created', actor: 'user', data: { nodeId, label: cell.label || 'New Node', subtitle: '', depth: 'module', category: 'arch', status: 'planned', files: [] } });
+            }
+          } else if (cell.from && cell.to) {
+            // User drew an edge → create an edge in the store
+            const edgeId = cell.id.startsWith('e_') ? cell.id : 'e_' + cell.id;
+            emitEvent({ id: genId(), type: 'edge.created', actor: 'user', data: { edgeId, from: cell.from, to: cell.to, label: cell.label || '' } });
+          }
+        }}
+        oncellremoved={(cell) => {
+          if (!cell.isEdge) {
+            // Check both with and without n_ prefix
+            const id = graphState.nodes.has(cell.id) ? cell.id : 'n_' + cell.id;
+            if (graphState.nodes.has(id)) {
+              emitEvent({ id: genId(), type: 'node.deleted', actor: 'user', data: { nodeId: id } });
+            }
+          } else {
+            const id = graphState.edges.has(cell.id) ? cell.id : 'e_' + cell.id;
+            if (graphState.edges.has(id)) {
+              emitEvent({ id: genId(), type: 'edge.deleted', actor: 'user', data: { edgeId: id } });
+            }
+          }
+        }}
       />
     </div>
   </div>
