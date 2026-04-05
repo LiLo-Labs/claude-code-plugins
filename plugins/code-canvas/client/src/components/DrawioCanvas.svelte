@@ -121,6 +121,72 @@
     }
   }
 
+  // Programmatic edge routing: set exit/entry points based on relative positions
+  function routeEdges(graph) {
+    const model = graph.getModel();
+
+    // Helper: get absolute center of a cell (walking parent chain)
+    function absCenter(cell) {
+      const g = graph.getCellGeometry(cell);
+      if (!g) return null;
+      let x = g.x + g.width / 2, y = g.y + g.height / 2;
+      let p = model.getParent(cell);
+      while (p && p.geometry) { x += p.geometry.x; y += p.geometry.y; p = model.getParent(p); }
+      return { x, y };
+    }
+
+    model.beginUpdate();
+    try {
+      for (const id of Object.keys(model.cells)) {
+        const cell = model.cells[id];
+        if (!cell.edge || !cell.source || !cell.target) continue;
+        if (cell.source === cell.target) continue;
+
+        let styleStr = model.getStyle(cell) || '';
+
+        // Skip edges that already have explicit exit/entry in the XML
+        if (styleStr.includes('exitX=') && styleStr.includes('entryX=')) continue;
+
+        const sc = absCenter(cell.source), tc = absCenter(cell.target);
+        if (!sc || !tc) continue;
+
+        const dx = tc.x - sc.x, dy = tc.y - sc.y;
+        const absDx = Math.abs(dx), absDy = Math.abs(dy);
+
+        // Check if source and target are in different parents (cross-boundary)
+        const sameParent = model.getParent(cell.source) === model.getParent(cell.target);
+
+        let exitX, exitY, entryX, entryY;
+        if (absDy > absDx * 0.5) {
+          if (dy > 0) { exitX = 0.5; exitY = 1; entryX = 0.5; entryY = 0; }
+          else        { exitX = 0.5; exitY = 0; entryX = 0.5; entryY = 1; }
+        } else if (absDx > absDy * 0.5) {
+          if (dx > 0) { exitX = 1; exitY = 0.5; entryX = 0; entryY = 0.5; }
+          else        { exitX = 0; exitY = 0.5; entryX = 1; entryY = 0.5; }
+        } else {
+          exitX = dx > 0 ? 1 : 0; exitY = dy > 0 ? 1 : 0;
+          entryX = dx > 0 ? 0 : 1; entryY = dy > 0 ? 0 : 1;
+        }
+
+        // Strip any partial exit/entry
+        styleStr = styleStr.replace(/exit[XY]=[^;]*(;|$)/g, '')
+                           .replace(/entry[XY]=[^;]*(;|$)/g, '')
+                           .replace(/;;+/g, ';').replace(/^;|;$/g, '');
+
+        styleStr += `;exitX=${exitX};exitY=${exitY};entryX=${entryX};entryY=${entryY}`;
+
+        // Only add orthogonal for same-parent edges; cross-boundary edges stay curved
+        if (sameParent && !styleStr.includes('edgeStyle=') && !styleStr.includes('curved=')) {
+          styleStr += ';edgeStyle=orthogonalEdgeStyle';
+        }
+
+        model.setStyle(cell, styleStr);
+      }
+    } finally {
+      model.endUpdate();
+    }
+  }
+
   // Hook into draw.io's internals via Draw.loadPlugin (same-origin iframe)
   let selectionHooked = false;
   function hookDrawio() {
@@ -142,6 +208,9 @@
           const ids = cells.map(c => c.id).filter(Boolean);
           onselect?.(ids);
         });
+
+        // Fix edge routing: compute exit/entry points from relative positions
+        routeEdges(graph);
 
         // Dark mode: dark canvas, no page outlines, no grid
         if (dark) {
