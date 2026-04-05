@@ -10,6 +10,12 @@ import { getStyledShape } from './shapes/registry.js';
 
 /**
  * Generate drawio XML for a set of nodes and edges using auto-layout.
+ *
+ * Supports layout hints via opts.layout:
+ *   - 'layered-top-down' (default) — topological sort, vertical hierarchy
+ *   - 'horizontal-flow' — topological sort, left-to-right flow
+ *   - 'grid' — simple grid, no hierarchy
+ *   - 'horizontal-lanes' — group by node depth property into swim lanes
  */
 export function generateLayoutXml(nodes, edges, opts = {}) {
   const nodeMap = nodes instanceof Map ? nodes : new Map(Object.entries(nodes));
@@ -19,55 +25,8 @@ export function generateLayoutXml(nodes, edges, opts = {}) {
 
   const interRankSpacing = opts.interRankSpacing || 80;
   const interNodeSpacing = opts.interNodeSpacing || 40;
-  const direction = opts.direction || 'north';
-
-  // Build adjacency for topological sorting
-  const inDegree = new Map();
-  const adjList = new Map();
-  for (const [id] of nodeMap) {
-    inDegree.set(id, 0);
-    adjList.set(id, []);
-  }
-  for (const [, edge] of edgeMap) {
-    if (nodeMap.has(edge.from) && nodeMap.has(edge.to)) {
-      adjList.get(edge.from).push(edge.to);
-      inDegree.set(edge.to, (inDegree.get(edge.to) || 0) + 1);
-    }
-  }
-
-  // Assign ranks using topological sort (Kahn's algorithm)
-  const ranks = new Map();
-  const queue = [];
-  for (const [id, deg] of inDegree) {
-    if (deg === 0) queue.push(id);
-  }
-
-  let rank = 0;
-  const rankGroups = [];
-  while (queue.length > 0) {
-    const currentRank = [...queue];
-    rankGroups.push(currentRank);
-    const nextQueue = [];
-    for (const id of currentRank) {
-      ranks.set(id, rank);
-      for (const child of (adjList.get(id) || [])) {
-        inDegree.set(child, inDegree.get(child) - 1);
-        if (inDegree.get(child) === 0) nextQueue.push(child);
-      }
-    }
-    queue.length = 0;
-    queue.push(...nextQueue);
-    rank++;
-  }
-
-  // Handle cycles: unranked nodes at the bottom
-  for (const [id] of nodeMap) {
-    if (!ranks.has(id)) {
-      if (!rankGroups[rank]) rankGroups[rank] = [];
-      rankGroups[rank].push(id);
-      ranks.set(id, rank);
-    }
-  }
+  const pad = 40;
+  const layout = opts.layout || 'layered-top-down';
 
   // Get shape dimensions for each node (shapes vary in size)
   const shapeDefs = new Map();
@@ -75,48 +34,133 @@ export function generateLayoutXml(nodes, edges, opts = {}) {
     shapeDefs.set(id, getStyledShape(node));
   }
 
-  // Calculate positions using actual shape widths
+  // Calculate positions based on layout algorithm
   const positions = new Map();
-  const isVertical = direction === 'north' || direction === 'south';
 
-  for (let r = 0; r < rankGroups.length; r++) {
-    const group = rankGroups[r];
-
-    // Calculate total width of this rank using actual shape widths
-    let totalWidth = 0;
-    for (const id of group) {
-      totalWidth += shapeDefs.get(id).width;
+  if (layout === 'grid') {
+    // Simple grid — no edge-based ordering
+    const cols = Math.ceil(Math.sqrt(nodeMap.size));
+    let maxWidth = 0, maxHeight = 0;
+    for (const shape of shapeDefs.values()) {
+      if (shape.width > maxWidth) maxWidth = shape.width;
+      if (shape.height > maxHeight) maxHeight = shape.height;
     }
-    totalWidth += (group.length - 1) * interNodeSpacing;
-    const startX = -totalWidth / 2;
-
-    // Find max height in this rank for consistent row spacing
-    let maxHeight = 0;
-    for (const id of group) {
-      const h = shapeDefs.get(id).height;
-      if (h > maxHeight) maxHeight = h;
+    let col = 0, row = 0;
+    for (const [id] of nodeMap) {
+      positions.set(id, {
+        x: col * (maxWidth + interNodeSpacing) + pad + maxWidth / 2,
+        y: row * (maxHeight + interRankSpacing) + pad,
+      });
+      col++;
+      if (col >= cols) { col = 0; row++; }
     }
-
-    // Calculate cumulative Y position based on previous ranks
-    let yPos = 0;
-    for (let pr = 0; pr < r; pr++) {
-      let prMaxH = 0;
-      for (const pid of rankGroups[pr]) {
-        const h = shapeDefs.get(pid).height;
-        if (h > prMaxH) prMaxH = h;
+  } else if (layout === 'horizontal-lanes') {
+    // Group nodes by depth property into horizontal swim lanes
+    const lanes = new Map();
+    for (const [id, node] of nodeMap) {
+      const depth = node.depth || 'default';
+      if (!lanes.has(depth)) lanes.set(depth, []);
+      lanes.get(depth).push(id);
+    }
+    let laneY = pad;
+    for (const [, ids] of lanes) {
+      let maxH = 0;
+      let x = pad;
+      for (const id of ids) {
+        const shape = shapeDefs.get(id);
+        positions.set(id, { x: x + shape.width / 2, y: laneY });
+        x += shape.width + interNodeSpacing;
+        if (shape.height > maxH) maxH = shape.height;
       }
-      yPos += prMaxH + interRankSpacing;
+      laneY += maxH + interRankSpacing;
+    }
+  } else {
+    // Topological sort layouts: layered-top-down (default) and horizontal-flow
+    const horizontal = layout === 'horizontal-flow';
+
+    // Build adjacency for topological sorting
+    const inDegree = new Map();
+    const adjList = new Map();
+    for (const [id] of nodeMap) {
+      inDegree.set(id, 0);
+      adjList.set(id, []);
+    }
+    for (const [, edge] of edgeMap) {
+      if (nodeMap.has(edge.from) && nodeMap.has(edge.to)) {
+        adjList.get(edge.from).push(edge.to);
+        inDegree.set(edge.to, (inDegree.get(edge.to) || 0) + 1);
+      }
     }
 
-    let xCursor = startX;
-    for (const id of group) {
-      const shape = shapeDefs.get(id);
-      if (isVertical) {
-        positions.set(id, { x: xCursor + shape.width / 2, y: yPos });
-      } else {
-        positions.set(id, { x: yPos, y: xCursor + shape.width / 2 });
+    // Assign ranks using topological sort (Kahn's algorithm)
+    const ranks = new Map();
+    const queue = [];
+    for (const [id, deg] of inDegree) {
+      if (deg === 0) queue.push(id);
+    }
+
+    let rank = 0;
+    const rankGroups = [];
+    while (queue.length > 0) {
+      const currentRank = [...queue];
+      rankGroups.push(currentRank);
+      const nextQueue = [];
+      for (const id of currentRank) {
+        ranks.set(id, rank);
+        for (const child of (adjList.get(id) || [])) {
+          inDegree.set(child, inDegree.get(child) - 1);
+          if (inDegree.get(child) === 0) nextQueue.push(child);
+        }
       }
-      xCursor += shape.width + interNodeSpacing;
+      queue.length = 0;
+      queue.push(...nextQueue);
+      rank++;
+    }
+
+    // Handle cycles: unranked nodes at the bottom
+    for (const [id] of nodeMap) {
+      if (!ranks.has(id)) {
+        if (!rankGroups[rank]) rankGroups[rank] = [];
+        rankGroups[rank].push(id);
+        ranks.set(id, rank);
+      }
+    }
+
+    for (let r = 0; r < rankGroups.length; r++) {
+      const group = rankGroups[r];
+
+      // Calculate total span of this rank using actual shape dimensions
+      let totalSpan = 0;
+      for (const id of group) {
+        totalSpan += horizontal ? shapeDefs.get(id).height : shapeDefs.get(id).width;
+      }
+      totalSpan += (group.length - 1) * interNodeSpacing;
+      const startCross = -totalSpan / 2;
+
+      // Calculate cumulative main-axis position based on previous ranks
+      let mainPos = 0;
+      for (let pr = 0; pr < r; pr++) {
+        let prMax = 0;
+        for (const pid of rankGroups[pr]) {
+          const dim = horizontal ? shapeDefs.get(pid).width : shapeDefs.get(pid).height;
+          if (dim > prMax) prMax = dim;
+        }
+        mainPos += prMax + interRankSpacing;
+      }
+
+      let crossCursor = startCross;
+      for (const id of group) {
+        const shape = shapeDefs.get(id);
+        if (horizontal) {
+          // Ranks flow left-to-right (X = main axis), nodes stack vertically
+          positions.set(id, { x: mainPos + shape.width / 2, y: crossCursor + shape.height / 2 });
+          crossCursor += shape.height + interNodeSpacing;
+        } else {
+          // Ranks flow top-to-bottom (Y = main axis), nodes spread horizontally
+          positions.set(id, { x: crossCursor + shape.width / 2, y: mainPos });
+          crossCursor += shape.width + interNodeSpacing;
+        }
+      }
     }
   }
 
@@ -127,7 +171,6 @@ export function generateLayoutXml(nodes, edges, opts = {}) {
     if (pos.x - shape.width / 2 < minX) minX = pos.x - shape.width / 2;
     if (pos.y < minY) minY = pos.y;
   }
-  const pad = 40;
   for (const pos of positions.values()) {
     pos.x = pos.x - minX + pad;
     pos.y = pos.y - minY + pad;
@@ -197,7 +240,7 @@ export function generateViewXml(view, allNodes, allEdges, opts = {}) {
     }
   }
 
-  return generateLayoutXml(viewNodes, viewEdges, opts);
+  return generateLayoutXml(viewNodes, viewEdges, { ...opts, layout: view.rendering?.layout });
 }
 
 function escapeXml(str) {
