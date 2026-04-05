@@ -34,9 +34,10 @@ function syncDiagrams(event) {
   const state = appState.store.getState();
 
   if (STRUCTURAL_EVENTS.has(event.type)) {
-    // Re-generate layout for all views.
-    // This produces clean hierarchical layouts from the current data.
+    // Only auto-generate layout for views that have no hand-crafted XML.
+    // Views with existing drawioXml (from events or user edits) are preserved.
     for (const view of state.views) {
+      if (view.drawioXml) continue;
       const xml = generateViewXml(view, state.nodes, state.edges);
       const v = appState.store._views.find(v => v.id === view.id);
       if (v) v.drawioXml = xml;
@@ -70,9 +71,10 @@ export async function loadFromServer() {
     const events = await fetchEvents();
     appState.store = EventStore.fromEvents(events);
 
-    // Generate diagrams for all views on initial load
+    // Generate diagrams only for views without existing XML (fallback auto-layout)
     const state = appState.store.getState();
     for (const view of state.views) {
+      if (view.drawioXml) continue;
       const xml = generateViewXml(view, state.nodes, state.edges);
       const v = appState.store._views.find(v => v.id === view.id);
       if (v) v.drawioXml = xml;
