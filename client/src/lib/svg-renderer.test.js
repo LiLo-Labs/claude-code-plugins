@@ -63,6 +63,32 @@ describe('parseDrawioXml', () => {
     expect(edge.target).toBe('n_db');
   });
 
+  test('parses maxGraph serialized format (Cell/Geometry/Object)', () => {
+    const mgXml = '<GraphDataModel><root>' +
+      '<Cell id="0"><Object as="style"/></Cell>' +
+      '<Cell id="1" parent="0"><Object as="style"/></Cell>' +
+      '<Cell id="n_srv" value="Server&#10;API" vertex="1" parent="1">' +
+      '<Geometry _x="100" _y="200" _width="160" _height="60" as="geometry"/>' +
+      '<Object rounded="1" fillColor="#1a3320" strokeColor="#3fb950" as="style"/>' +
+      '</Cell>' +
+      '<Cell id="e_1" value="calls" edge="1" source="n_srv" target="n_db" parent="1">' +
+      '<Geometry as="geometry"/>' +
+      '<Object curved="1" strokeColor="#8b949e" as="style"/>' +
+      '</Cell>' +
+      '</root></GraphDataModel>';
+    const { cells, edges } = parseDrawioXml(mgXml);
+    expect(cells.size).toBe(1);
+    const srv = cells.get('n_srv');
+    expect(srv.value).toBe('Server\nAPI');
+    expect(srv.x).toBe(100);
+    expect(srv.y).toBe(200);
+    expect(srv.width).toBe(160);
+    expect(srv.style.fillColor).toBe('#1a3320');
+    expect(srv.style.rounded).toBe('1');
+    expect(edges.size).toBe(1);
+    expect(edges.get('e_1').source).toBe('n_srv');
+  });
+
   test('returns empty maps for empty/invalid XML', () => {
     const { cells, edges } = parseDrawioXml('');
     expect(cells.size).toBe(0);

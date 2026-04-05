@@ -14,12 +14,33 @@
   let edgePreview = $state(null);
   let hoveredNodeId = $state(null);
 
-  $effect(() => {
-    if (xml && xml !== lastSerializedXml) {
-      const parsed = parseDrawioXml(xml);
-      cells = parsed.cells;
-      edges = parsed.edges;
-      zoomToFit();
+  // Synchronize xml prop → local cells/edges state.
+  // Uses a simple dirty check to avoid re-parsing our own serialized output.
+  function loadXml(xmlStr) {
+    if (!xmlStr || xmlStr === lastSerializedXml) return;
+    const parsed = parseDrawioXml(xmlStr);
+    cells = parsed.cells;
+    edges = parsed.edges;
+    if (parsed.cells.size > 0) {
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      for (const c of parsed.cells.values()) {
+        if (c.x < minX) minX = c.x;
+        if (c.y < minY) minY = c.y;
+        if (c.x + c.width > maxX) maxX = c.x + c.width;
+        if (c.y + c.height > maxY) maxY = c.y + c.height;
+      }
+      const pad = 60;
+      viewBox = { x: minX - pad, y: minY - pad, w: maxX - minX + pad * 2, h: maxY - minY + pad * 2 };
+    }
+  }
+
+  // Track previous xml to only reload on actual changes
+  let loadedXml = '';
+  $effect.pre(() => {
+    const currentXml = xml;
+    if (currentXml !== loadedXml) {
+      loadedXml = currentXml;
+      loadXml(currentXml);
     }
   });
 

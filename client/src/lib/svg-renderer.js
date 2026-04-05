@@ -103,12 +103,19 @@ export function parseDrawioXml(xmlStr) {
   const empty = { cells: new Map(), edges: new Map() };
   if (!xmlStr || !xmlStr.trim()) return empty;
 
+  // Detect format: maxGraph serialized (<GraphDataModel>/<Cell>) vs standard draw.io (<mxGraphModel>/<mxCell>)
+  if (xmlStr.includes('<Cell ') || xmlStr.includes('<GraphDataModel>')) {
+    return parseMaxGraphXml(xmlStr);
+  }
+
+  return parseStandardXml(xmlStr);
+}
+
+/** Parse standard draw.io XML (<mxGraphModel>/<mxCell>) */
+function parseStandardXml(xmlStr) {
   const cells = new Map();
   const edges = new Map();
 
-  // Match <mxCell … /> (self-closing) or <mxCell …>…</mxCell> (with children).
-  // Self-closing is listed first so the alternation resolves correctly.
-  // Attribute chars exclude '/' so a self-closing tag is not mis-parsed as open.
   const cellBlockRe = /<mxCell\b((?:[^>"'/]|"[^"]*")*)\s*\/>|<mxCell\b((?:[^>"'/]|"[^"]*")*)\s*>([\s\S]*?)<\/mxCell>/g;
 
   let m;
@@ -136,7 +143,6 @@ export function parseDrawioXml(xmlStr) {
       const source = attrs.source || '';
       const target = attrs.target || '';
 
-      // Collect waypoints from <Array as="points"><mxPoint …/></Array>
       const points = [];
       const arrayMatch = /<Array[^>]*as="points"[^>]*>([\s\S]*?)<\/Array>/.exec(innerXml);
       if (arrayMatch) {
@@ -152,6 +158,61 @@ export function parseDrawioXml(xmlStr) {
       }
 
       edges.set(id, { id, value, source, target, style, points });
+    }
+  }
+
+  return { cells, edges };
+}
+
+/**
+ * Parse maxGraph serialized XML (<GraphDataModel>/<Cell>).
+ * This format uses <Cell>, <Geometry _x/_y/_width/_height>, and <Object as="style"> for style properties.
+ */
+function parseMaxGraphXml(xmlStr) {
+  const cells = new Map();
+  const edges = new Map();
+
+  // Match <Cell …>…</Cell> or <Cell … />
+  const cellBlockRe = /<Cell\b((?:[^>"'/]|"[^"]*")*)\s*\/>|<Cell\b((?:[^>"'/]|"[^"]*")*)\s*>([\s\S]*?)<\/Cell>/g;
+
+  let m;
+  while ((m = cellBlockRe.exec(xmlStr)) !== null) {
+    const attrStr = m[1] !== undefined ? m[1] : m[2];
+    const innerXml = m[3] || '';
+
+    const attrs = parseAttrs(attrStr);
+    const id = attrs.id;
+    if (!id || id === '0' || id === '1') continue;
+
+    const value = decodeXmlAttr(attrs.value || '');
+
+    // Parse style from <Object ... as="style"/> — attributes ARE the style properties
+    const style = {};
+    const styleObjRe = /<Object\b((?:[^>"'/]|"[^"]*")*)\s*as="style"[^>]*\/?>|<Object\b((?:[^>"'/]|"[^"]*")*)\s*as="style"[^>]*>[\s\S]*?<\/Object>/g;
+    const styleMatch = styleObjRe.exec(innerXml);
+    if (styleMatch) {
+      const styleAttrStr = styleMatch[1] || styleMatch[2] || '';
+      const styleAttrs = parseAttrs(styleAttrStr);
+      for (const [k, v] of Object.entries(styleAttrs)) {
+        if (k !== 'as') style[k] = v;
+      }
+    }
+
+    if (attrs.vertex === '1') {
+      // Geometry: <Geometry _x="..." _y="..." _width="..." _height="..." as="geometry"/>
+      const geoMatch = /<Geometry\b((?:[^>"']|"[^"]*")*)\/?>/.exec(innerXml);
+      const geoAttrs = geoMatch ? parseAttrs(geoMatch[1]) : {};
+      // maxGraph uses _x, _y, _width, _height (underscore prefix)
+      const x = parseFloat(geoAttrs._x || geoAttrs.x || '0') || 0;
+      const y = parseFloat(geoAttrs._y || geoAttrs.y || '0') || 0;
+      const width = parseFloat(geoAttrs._width || geoAttrs.width || '120') || 120;
+      const height = parseFloat(geoAttrs._height || geoAttrs.height || '60') || 60;
+
+      cells.set(id, { id, value, x, y, width, height, style });
+    } else if (attrs.edge === '1') {
+      const source = attrs.source || '';
+      const target = attrs.target || '';
+      edges.set(id, { id, value, source, target, style, points: [] });
     }
   }
 

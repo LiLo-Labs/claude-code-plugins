@@ -1,0 +1,53 @@
+- generic [ref=e3]:
+  - banner [ref=e4]:
+    - generic [ref=e5]: Architecture
+    - generic [ref=e7]: Core system — server, data model, rendering pipeline
+    - button "☾" [ref=e9] [cursor=pointer]
+  - generic [ref=e11]:
+    - generic [ref=e12]:
+      - button "1. Architecture" [ref=e13] [cursor=pointer]
+      - button "2. UI Components" [ref=e14] [cursor=pointer]
+      - button "3. Hook Lifecycle" [ref=e15] [cursor=pointer]
+      - button "4. Shape & Rendering" [ref=e16] [cursor=pointer]
+      - button "+" [ref=e17] [cursor=pointer]
+    - application "SVG Canvas" [ref=e18]:
+      - img [ref=e19]:
+        - generic [ref=e22]: replays events
+        - generic [ref=e25]: HTTP/SSE
+        - generic [ref=e28]: wraps
+        - generic [ref=e31]: fetches/posts
+        - generic [ref=e34]: generates XML
+        - generic [ref=e37]: updates colors
+        - generic [ref=e40]: gets styles
+        - generic [ref=e43]: gets styles
+        - generic [ref=e44]:
+          - generic: ServerHTTP API + SSE + persistence
+        - generic [ref=e46]:
+          - generic: EventStoreEvent-sourced state machine
+        - generic [ref=e48]:
+          - generic: Store (Svelte)Reactive wrapper + diagram sync
+        - generic [ref=e50]:
+          - generic: Auto-Layout4 layout algorithms
+        - generic [ref=e52]:
+          - generic: Diagram SyncIn-place status color updates
+        - generic [ref=e54]:
+          - generic: Shape Registry48 built-in + custom shapes
+        - generic [ref=e56]:
+          - generic: maxGraphdraw.io rendering engine
+        - generic [ref=e58]:
+          - generic: API ClientFetch wrappers + SSE
+        - generic [ref=e60]:
+          - generic: ConfigColors, depth settings
+        - generic [ref=e62]:
+          - generic: SKILL.mdClaude generation guidance
+  - generic [ref=e64]:
+    - generic [ref=e65] [cursor=pointer]:
+      - heading "Comments" [level=3] [ref=e66]
+      - generic [ref=e67]: "0"
+      - generic [ref=e68]: ▼
+    - generic [ref=e69]: No open comments
+  - contentinfo [ref=e70]:
+    - generic [ref=e71]: ● Synced
+    - generic [ref=e72]: 23 nodes
+    - generic [ref=e73]: 4 tabs
+    - generic [ref=e74]: 57 events

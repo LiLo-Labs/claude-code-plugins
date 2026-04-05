@@ -1,0 +1,25 @@
+- generic [ref=e3]:
+  - banner [ref=e4]:
+    - generic [ref=e5]: Architecture
+    - generic [ref=e7]: Core system — server, data model, rendering pipeline
+    - button "☾" [ref=e9] [cursor=pointer]
+  - generic [ref=e11]:
+    - generic [ref=e12]:
+      - button "1. Architecture" [ref=e13] [cursor=pointer]
+      - button "2. UI Components" [ref=e14] [cursor=pointer]
+      - button "3. Hook Lifecycle" [ref=e15] [cursor=pointer]
+      - button "4. Shape & Rendering" [ref=e16] [cursor=pointer]
+      - button "+" [ref=e17] [cursor=pointer]
+    - application "SVG Canvas" [ref=e18]:
+      - img [ref=e19]
+  - generic [ref=e20]:
+    - generic [ref=e21] [cursor=pointer]:
+      - heading "Comments" [level=3] [ref=e22]
+      - generic [ref=e23]: "0"
+      - generic [ref=e24]: ▼
+    - generic [ref=e25]: No open comments
+  - contentinfo [ref=e26]:
+    - generic [ref=e27]: ● Synced
+    - generic [ref=e28]: 23 nodes
+    - generic [ref=e29]: 4 tabs
+    - generic [ref=e30]: 57 events
