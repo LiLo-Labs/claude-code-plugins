@@ -118,6 +118,8 @@ The canvas uses **maxGraph** (the engine behind draw.io) to render diagrams. Sto
 
 **Cell IDs must match node IDs** (e.g., `n_server`). This enables click-to-detail: when a user clicks a shape, the detail panel shows that node's properties, comments, and decisions.
 
+**NEVER send a `view.created` event with an empty `drawioXml` field. Always craft the XML yourself.** The auto-layout fallback produces generic hierarchical layouts that all look identical regardless of the view type. Each view MUST have distinct, hand-crafted `drawioXml` tailored to what the diagram is communicating.
+
 ### Nodes
 
 Each node is an architectural component. Include `files` glob patterns so the plugin can auto-track edits.
@@ -145,13 +147,72 @@ Examples of view types (pick what fits, don't use all):
 - Each tab has a `description` explaining what this diagram shows
 - A node can appear on multiple tabs with different connections
 
+### View-Type-Specific XML Patterns
+
+Each view type demands a different layout and shape vocabulary. Do NOT reuse the same top-down hierarchy for every view.
+
+**Architecture / Component diagrams** — Layered layout, top-to-bottom:
+- Group related nodes vertically by tier (e.g., clients at top, services in middle, data stores at bottom).
+- Use `rounded=1` rectangles for services, `shape=cylinder3` for databases, `shape=cloud` for external services.
+- Space layers 200px+ apart vertically. Space nodes 60px+ apart horizontally within a layer.
+- Example snippet:
+```xml
+<!-- Architecture: layered, vertical spacing between tiers -->
+<mxCell id="n_server" value="Server" style="rounded=1;whiteSpace=wrap;fillColor=#1a3320;strokeColor=#3fb950;fontColor=#c9d1d9;fontSize=13;" vertex="1" parent="1">
+  <mxGeometry x="200" y="40" width="160" height="60" as="geometry"/>
+</mxCell>
+<mxCell id="n_database" value="Database" style="shape=cylinder3;whiteSpace=wrap;fillColor=#1a3320;strokeColor=#3fb950;fontColor=#c9d1d9;fontSize=13;size=15;" vertex="1" parent="1">
+  <mxGeometry x="200" y="280" width="160" height="80" as="geometry"/>
+</mxCell>
+```
+
+**Flow / Lifecycle diagrams** — Horizontal layout, left-to-right:
+- Arrange nodes in a chain/sequence flowing left to right.
+- Use `rounded=1` rectangles or `shape=process`. Connect with orthogonal edges (`edgeStyle=orthogonalEdgeStyle`).
+- Include waypoints for clean routing. Space steps 200px apart horizontally.
+- Example snippet:
+```xml
+<!-- Flow: horizontal chain, left-to-right -->
+<mxCell id="n_step1" value="Session Start" style="rounded=1;whiteSpace=wrap;fillColor=#2a2a10;strokeColor=#d29922;fontColor=#c9d1d9;fontSize=13;" vertex="1" parent="1">
+  <mxGeometry x="40" y="100" width="140" height="50" as="geometry"/>
+</mxCell>
+<mxCell id="n_step2" value="Pre-Tool Hook" style="rounded=1;whiteSpace=wrap;fillColor=#1e2a3a;strokeColor=#58a6ff;fontColor=#c9d1d9;fontSize=13;" vertex="1" parent="1">
+  <mxGeometry x="240" y="100" width="140" height="50" as="geometry"/>
+</mxCell>
+<mxCell id="e_step1_step2" style="edgeStyle=orthogonalEdgeStyle;strokeColor=#58a6ff;fontColor=#999;fontSize=11;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" source="n_step1" target="n_step2" parent="1">
+  <mxGeometry relative="1" as="geometry"/>
+</mxCell>
+```
+
+**UI / Component tree diagrams** — Hierarchical tree, top-down:
+- Parent components at top, children indented below.
+- Use simple rounded rectangles. Indent child nodes 80-120px below and centered under their parent.
+- Keep node widths consistent. Use straight edges from parent bottom to child top.
+
+**Data flow / Sequence diagrams** — Participants across the top horizontally:
+- Arrange participants (actors, services) in a row at y=40, spaced 200px+ apart.
+- Use vertical dashed lines (lifelines) below each participant if appropriate.
+- Messages flow left-to-right or right-to-left between participants.
+- Use `edgeStyle=orthogonalEdgeStyle` for message arrows.
+
 ### Draw.io XML Best Practices
 
-- **Spacing:** Leave 60px+ gaps between shapes within swimlanes. Use 200px+ vertical gaps between swimlane layers.
+- **Spacing:** Leave 60px+ gaps between shapes within a layer. Use 200px+ vertical gaps between layers.
 - **Edge labels:** Use separate `<mxCell>` text elements positioned near edges, NOT inline `value` on edge cells. Inline edge labels often overlap shapes.
 - **Edge routing:** Always specify `exitX/exitY` and `entryX/entryY` to control which side edges connect to. Use `<Array as="points">` waypoints for edges that cross between layers.
 - **Shapes:** Use `rounded=1` for components, `shape=cylinder3` for data stores, `shape=document` for docs, `shape=actor` for people/systems. All shapes should have two lines of text (name + description).
 - **Font:** Use fontSize=13 for shape text, fontSize=11 for edge labels. Edge label color should be `#888` or `#999`.
+
+### XML Quality Checklist
+
+Before sending any `view.created` event, verify:
+
+- [ ] Cell IDs match node IDs (e.g., `n_server`, `e_server_db`)
+- [ ] Shapes vary by node type (cylinders for DBs, clouds for external services, rounded rects for internal services)
+- [ ] Status colors applied via `fillColor`/`strokeColor` (not all the same color)
+- [ ] Adequate spacing (60px+ between shapes, 200px+ between layers)
+- [ ] Edge routing uses `exitX`/`exitY` and `entryX`/`entryY` for clean connections
+- [ ] Each view has a visually distinct layout (not all top-down hierarchical)
 
 ### Status
 

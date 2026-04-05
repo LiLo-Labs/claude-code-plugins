@@ -7,12 +7,6 @@
     "email": "mark@lilolabs.com"
   },
   "license": "MIT",
-  "keywords": [
-    "architecture",
-    "canvas",
-    "design",
-    "knowledge-graph",
-    "visual"
-  ],
+  "keywords": ["architecture", "canvas", "design", "knowledge-graph", "visual"],
   "skills": "./skills/canvas"
 }

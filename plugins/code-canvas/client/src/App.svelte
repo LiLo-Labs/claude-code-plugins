@@ -4,7 +4,8 @@
   import { appState, loadFromServer, emitEvent, subscribeToEvents } from './lib/store.svelte.js';
   import { genId } from './lib/store.js';
   import ViewTabs from './components/ViewTabs.svelte';
-  import MaxGraphCanvas from './components/MaxGraphCanvas.svelte';
+  import DrawioCanvas from './components/DrawioCanvas.svelte';
+  import SvgCanvas from './components/SvgCanvas.svelte';
   import DetailPanel from './components/DetailPanel.svelte';
   import ContextMenu from './components/ContextMenu.svelte';
   import CommentBar from './components/CommentBar.svelte';
@@ -14,6 +15,9 @@
   let activeTabIdx = $state(0);
   let ctxMenu = $state({ visible: false, x: 0, y: 0, nodeId: null });
   let commentModal = $state({ visible: false, node: null });
+  // Default to draw.io unless ?renderer=svg is in the URL
+  const urlRenderer = new URLSearchParams(window.location.search).get('renderer');
+  let renderer = $state(urlRenderer === 'svg' ? 'svg' : 'drawio');
 
   onMount(async () => {
     theme = getInitialTheme();
@@ -80,7 +84,8 @@
     <div class="tp"><span class="dot"></span> {activeTab?.name || 'Code Canvas'}</div>
     <div class="tp-story">{activeTab?.description || ''}</div>
     <div class="tr">
-      <button class="tb" onclick={handleToggleTheme}>{theme === 'dark' ? '\u2606' : '\u263E'}</button>
+      <button class="tb renderer-toggle" onclick={() => { renderer = renderer === 'drawio' ? 'svg' : 'drawio'; }}>{renderer === 'drawio' ? 'SVG' : 'draw.io'}</button>
+      <button class="tb theme-toggle" onclick={handleToggleTheme}>{theme === 'dark' ? '\u2606' : '\u263E'}</button>
     </div>
   </header>
 
@@ -139,43 +144,53 @@
         onrename={(viewId, name) => { emitEvent({ id: genId(), type: 'view.updated', actor: 'user', data: { viewId, changes: { name } } }); }}
         ondelete={(viewId) => { emitEvent({ id: genId(), type: 'view.deleted', actor: 'user', data: { viewId } }); if (activeTab?.id === viewId) activeTabIdx = 0; }}
       />
-      <MaxGraphCanvas
-        xml={activeTab?.drawioXml || ''}
-        dark={theme === 'dark'}
-        onchange={(xml) => { if (activeTab) emitEvent({ id: genId(), type: 'view.updated', actor: 'user', data: { viewId: activeTab.id, changes: { drawioXml: xml } } }); }}
-        onselect={(ids) => {
-          if (ids.length >= 1) selectNode(ids[0]);
-          else appState.selectedIds = new Set();
-        }}
-        oncontextmenu={handleContextMenu}
-        oncelladded={(cell) => {
-          if (!cell.isEdge) {
-            // User drew a shape → create a node in the store
-            const nodeId = cell.id.startsWith('n_') ? cell.id : 'n_' + cell.id;
-            if (!graphState.nodes.has(nodeId) && !graphState.nodes.has(cell.id)) {
-              emitEvent({ id: genId(), type: 'node.created', actor: 'user', data: { nodeId, label: cell.label || 'New Node', subtitle: '', depth: 'module', category: 'arch', status: 'planned', files: [] } });
+      {#if renderer === 'drawio'}
+        <DrawioCanvas
+          xml={activeTab?.drawioXml || ''}
+          dark={theme === 'dark'}
+          onchange={(xml) => { if (activeTab) emitEvent({ id: genId(), type: 'view.updated', actor: 'user', data: { viewId: activeTab.id, changes: { drawioXml: xml } } }); }}
+          onselect={(ids) => {
+            if (ids.length >= 1) selectNode(ids[0]);
+            else appState.selectedIds = new Set();
+          }}
+          oncontextmenu={handleContextMenu}
+        />
+      {:else}
+        <SvgCanvas
+          xml={activeTab?.drawioXml || ''}
+          dark={theme === 'dark'}
+          onchange={(xml) => { if (activeTab) emitEvent({ id: genId(), type: 'view.updated', actor: 'user', data: { viewId: activeTab.id, changes: { drawioXml: xml } } }); }}
+          onselect={(ids) => {
+            if (ids.length >= 1) selectNode(ids[0]);
+            else appState.selectedIds = new Set();
+          }}
+          oncontextmenu={handleContextMenu}
+          oncelladded={(cell) => {
+            if (!cell.isEdge) {
+              const nodeId = cell.id.startsWith('n_') ? cell.id : 'n_' + cell.id;
+              if (!graphState.nodes.has(nodeId) && !graphState.nodes.has(cell.id)) {
+                emitEvent({ id: genId(), type: 'node.created', actor: 'user', data: { nodeId, label: cell.label || 'New Node', subtitle: '', depth: 'module', category: 'arch', status: 'planned', files: [] } });
+              }
+            } else if (cell.from && cell.to) {
+              const edgeId = cell.id.startsWith('e_') ? cell.id : 'e_' + cell.id;
+              emitEvent({ id: genId(), type: 'edge.created', actor: 'user', data: { edgeId, from: cell.from, to: cell.to, label: cell.label || '' } });
             }
-          } else if (cell.from && cell.to) {
-            // User drew an edge → create an edge in the store
-            const edgeId = cell.id.startsWith('e_') ? cell.id : 'e_' + cell.id;
-            emitEvent({ id: genId(), type: 'edge.created', actor: 'user', data: { edgeId, from: cell.from, to: cell.to, label: cell.label || '' } });
-          }
-        }}
-        oncellremoved={(cell) => {
-          if (!cell.isEdge) {
-            // Check both with and without n_ prefix
-            const id = graphState.nodes.has(cell.id) ? cell.id : 'n_' + cell.id;
-            if (graphState.nodes.has(id)) {
-              emitEvent({ id: genId(), type: 'node.deleted', actor: 'user', data: { nodeId: id } });
+          }}
+          oncellremoved={(cell) => {
+            if (!cell.isEdge) {
+              const id = graphState.nodes.has(cell.id) ? cell.id : 'n_' + cell.id;
+              if (graphState.nodes.has(id)) {
+                emitEvent({ id: genId(), type: 'node.deleted', actor: 'user', data: { nodeId: id } });
+              }
+            } else {
+              const id = graphState.edges.has(cell.id) ? cell.id : 'e_' + cell.id;
+              if (graphState.edges.has(id)) {
+                emitEvent({ id: genId(), type: 'edge.deleted', actor: 'user', data: { edgeId: id } });
+              }
             }
-          } else {
-            const id = graphState.edges.has(cell.id) ? cell.id : 'e_' + cell.id;
-            if (graphState.edges.has(id)) {
-              emitEvent({ id: genId(), type: 'edge.deleted', actor: 'user', data: { edgeId: id } });
-            }
-          }
-        }}
-      />
+          }}
+        />
+      {/if}
     </div>
   </div>
 
