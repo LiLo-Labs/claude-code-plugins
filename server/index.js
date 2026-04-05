@@ -2,6 +2,7 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import net from 'node:net';
+import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { EventStore } from '../client/src/lib/store.js';
 
@@ -245,6 +246,23 @@ const server = http.createServer(async (req, res) => {
     const body = await readBody(req);
     if (!body) return sendJSON(res, { error: 'Invalid JSON' }, 400);
     fs.writeFileSync(shapesFile, JSON.stringify(body, null, 2));
+    return sendJSON(res, { saved: true });
+  }
+
+  // GET/PUT /api/shapes/user — user-level shapes (~/.claude/shapes.json)
+  const userShapesFile = path.join(process.env.HOME || os.homedir(), '.claude', 'shapes.json');
+  if (p === '/api/shapes/user' && req.method === 'GET') {
+    if (fs.existsSync(userShapesFile)) {
+      return sendJSON(res, JSON.parse(fs.readFileSync(userShapesFile, 'utf-8')));
+    }
+    return sendJSON(res, {});
+  }
+  if (p === '/api/shapes/user' && req.method === 'PUT') {
+    const body = await readBody(req);
+    if (!body) return sendJSON(res, { error: 'Invalid JSON' }, 400);
+    const dir = path.dirname(userShapesFile);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(userShapesFile, JSON.stringify(body, null, 2));
     return sendJSON(res, { saved: true });
   }
 

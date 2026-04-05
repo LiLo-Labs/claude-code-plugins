@@ -179,14 +179,23 @@ The shape registry auto-selects shapes from node properties (database → cylind
 {"nodeId": "n_lambda", "label": "Lambda", "shape": "shape=mxgraph.aws4.lambda_function;fontColor=#e6edf3;fontSize=12;"}
 ```
 
-**Option 2: Project-specific shapes** — Save reusable shapes to `.code-canvas/shapes.json` via the API:
+**Option 2: Project-specific shapes** — Save to `.code-canvas/shapes.json` via `PUT /api/shapes`:
 ```bash
 curl -X PUT http://localhost:<port>/api/shapes -H 'Content-Type: application/json' -d '{
-  "lambda": {"style": "shape=mxgraph.aws4.lambda_function;whiteSpace=wrap;fontSize=12;fontColor=#e6edf3;", "width": 60, "height": 60, "tags": ["aws", "serverless"], "description": "AWS Lambda function"},
-  "s3-bucket": {"style": "shape=mxgraph.aws4.bucket;whiteSpace=wrap;fontSize=12;fontColor=#e6edf3;", "width": 60, "height": 60, "tags": ["aws", "storage"], "description": "S3 bucket"}
+  "lambda": {"style": "shape=mxgraph.aws4.lambda_function;whiteSpace=wrap;fontSize=12;fontColor=#e6edf3;", "width": 60, "height": 60, "tags": ["aws", "serverless"], "description": "AWS Lambda function"}
 }'
 ```
-These are loaded on client startup and available for all diagrams in that project. Use the shape name on nodes: `"shape": "lambda"`.
+
+**Option 3: User-level shapes** — Save to `~/.claude/shapes.json` via `PUT /api/shapes/user`. These are available in ALL projects for this user:
+```bash
+curl -X PUT http://localhost:<port>/api/shapes/user -H 'Content-Type: application/json' -d '{
+  "lambda": {"style": "shape=mxgraph.aws4.lambda_function;whiteSpace=wrap;fontSize=12;fontColor=#e6edf3;", "width": 60, "height": 60, "tags": ["aws", "serverless"], "description": "AWS Lambda function"}
+}'
+```
+
+**When creating custom shapes, save to BOTH user-level AND project-level** so they're available everywhere AND in this specific project.
+
+**Load order:** Built-in → user-level → project-level (later overrides earlier).
 
 **Built-in shapes:** actor, server, database, queue, cache, cloud, domain, module, interface, usecase, package, class, decision, start, end, process, state, document, file, swimlane, group.
 

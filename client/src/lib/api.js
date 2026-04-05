@@ -32,8 +32,22 @@ export async function fetchCustomShapes() {
   return res.json();
 }
 
+export async function fetchUserShapes() {
+  const res = await fetch('/api/shapes/user');
+  return res.json();
+}
+
 export async function saveCustomShapes(shapes) {
   const res = await fetch('/api/shapes', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(shapes),
+  });
+  return res.json();
+}
+
+export async function saveUserShapes(shapes) {
+  const res = await fetch('/api/shapes/user', {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(shapes),
