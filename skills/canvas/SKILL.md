@@ -30,7 +30,9 @@ If `.code-canvas/` already exists, the server URL is in the session context abov
 |---------|----------|
 | `/canvas` | Open canvas in browser (auto-start server if needed) |
 | `/canvas generate` | Read spec/codebase, POST node/edge/view events to build canvas |
+| `/canvas regenerate` | Wipe all events and regenerate from scratch (fresh analysis) |
 | `/canvas update` | Compare canvas state to codebase, update node statuses |
+| `/canvas reset` | Wipe all canvas data (events, layouts, server info). Clean slate. |
 | `/canvas diff [since]` | Read events after ISO timestamp, summarize what changed |
 | `/canvas comments` | List unresolved comments with targets |
 | `/canvas story` | Narrate decision history from `decision.recorded` events |
@@ -154,6 +156,19 @@ Examples of view types (pick what fits, don't use all):
 ### Status
 
 Use `node.status` events after creation to set the real status. The default is `planned` — explicitly set `done`, `in-progress`, etc.
+
+## Reset & Regenerate
+
+When `/canvas reset` is called:
+1. Stop any running server: kill the process from `.code-canvas/.server-info`
+2. Wipe: `> .code-canvas/events.jsonl`
+3. Remove layouts: `rm -f .code-canvas/layouts/*.json`
+4. Remove marker: `rm -f .code-canvas/.claude-last-seen`
+5. Confirm to user: "Canvas reset. Run `/canvas generate` to rebuild."
+
+When `/canvas regenerate` is called:
+1. Do all the reset steps above
+2. Then immediately run `/canvas generate` (fresh analysis of current codebase)
 
 ## Guidelines
 
