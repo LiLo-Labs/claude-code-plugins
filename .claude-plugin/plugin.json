@@ -1,7 +1,7 @@
 {
   "name": "code-canvas",
   "description": "Interactive visual design knowledge graph for software architecture. Generates canvases from specs, tracks decisions, captures comments, and keeps Claude informed of architectural state.",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "author": {
     "name": "lilolabs",
     "email": "mark@lilolabs.com"
