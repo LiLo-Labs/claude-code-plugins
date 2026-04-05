@@ -1,34 +1,15 @@
 /**
- * Auto-layout engine: generates drawio XML from node/edge data
- * using maxGraph's HierarchicalLayout for proper positioning.
+ * Auto-layout engine: generates drawio XML from node/edge data.
  *
- * This replaces static hand-crafted XML with data-driven diagrams
- * that re-layout automatically when nodes/edges change.
+ * Uses the shape registry for node shapes — databases get cylinders,
+ * queues get process shapes, actors get stick figures, etc.
+ *
+ * Layout is hierarchical: topological sort into ranks, center-aligned.
  */
-
-const STATUS_FILLS = {
-  done:          { fill: '#1a3320', stroke: '#3fb950' },
-  'in-progress': { fill: '#2a2a10', stroke: '#d29922' },
-  planned:       { fill: '#1e2a3a', stroke: '#58a6ff' },
-  blocked:       { fill: '#2a1010', stroke: '#f85149' },
-  cut:           { fill: '#1a1a1a', stroke: '#8b949e' },
-  placeholder:   { fill: '#1a1a1a', stroke: '#484f58' },
-};
-
-const DEPTH_ACCENTS = {
-  system:    { fill: '#1e3a5f', stroke: '#4a90d9' },
-  domain:    { fill: '#1a3320', stroke: '#3fb950' },
-  module:    { fill: '#1e2a3a', stroke: '#58a6ff' },
-  'interface': { fill: '#2a2020', stroke: '#8b949e' },
-};
+import { getStyledShape } from './shapes/registry.js';
 
 /**
  * Generate drawio XML for a set of nodes and edges using auto-layout.
- *
- * @param {Map|Object} nodes - nodeId → {id, label, subtitle, status, depth, ...}
- * @param {Map|Object} edges - edgeId → {id, from, to, label, ...}
- * @param {Object} opts - { direction: 'north'|'west', spacing: number }
- * @returns {string} drawio XML string
  */
 export function generateLayoutXml(nodes, edges, opts = {}) {
   const nodeMap = nodes instanceof Map ? nodes : new Map(Object.entries(nodes));
@@ -36,11 +17,9 @@ export function generateLayoutXml(nodes, edges, opts = {}) {
 
   if (nodeMap.size === 0) return '';
 
-  const direction = opts.direction || 'north';  // top-to-bottom
   const interRankSpacing = opts.interRankSpacing || 80;
   const interNodeSpacing = opts.interNodeSpacing || 40;
-  const nodeWidth = opts.nodeWidth || 200;
-  const nodeHeight = opts.nodeHeight || 60;
+  const direction = opts.direction || 'north';
 
   // Build adjacency for topological sorting
   const inDegree = new Map();
@@ -64,7 +43,7 @@ export function generateLayoutXml(nodes, edges, opts = {}) {
   }
 
   let rank = 0;
-  const rankGroups = []; // rank → [nodeIds]
+  const rankGroups = [];
   while (queue.length > 0) {
     const currentRank = [...queue];
     rankGroups.push(currentRank);
@@ -81,7 +60,7 @@ export function generateLayoutXml(nodes, edges, opts = {}) {
     rank++;
   }
 
-  // Handle cycles: unranked nodes get placed at the bottom
+  // Handle cycles: unranked nodes at the bottom
   for (const [id] of nodeMap) {
     if (!ranks.has(id)) {
       if (!rankGroups[rank]) rankGroups[rank] = [];
@@ -90,32 +69,62 @@ export function generateLayoutXml(nodes, edges, opts = {}) {
     }
   }
 
-  // Calculate positions
+  // Get shape dimensions for each node (shapes vary in size)
+  const shapeDefs = new Map();
+  for (const [id, node] of nodeMap) {
+    shapeDefs.set(id, getStyledShape(node));
+  }
+
+  // Calculate positions using actual shape widths
   const positions = new Map();
   const isVertical = direction === 'north' || direction === 'south';
 
   for (let r = 0; r < rankGroups.length; r++) {
     const group = rankGroups[r];
-    const groupWidth = group.length * nodeWidth + (group.length - 1) * interNodeSpacing;
-    const startOffset = -groupWidth / 2 + nodeWidth / 2;
 
-    for (let i = 0; i < group.length; i++) {
-      const id = group[i];
-      const crossPos = startOffset + i * (nodeWidth + interNodeSpacing);
-      const mainPos = r * (nodeHeight + interRankSpacing);
+    // Calculate total width of this rank using actual shape widths
+    let totalWidth = 0;
+    for (const id of group) {
+      totalWidth += shapeDefs.get(id).width;
+    }
+    totalWidth += (group.length - 1) * interNodeSpacing;
+    const startX = -totalWidth / 2;
 
-      if (isVertical) {
-        positions.set(id, { x: crossPos, y: mainPos });
-      } else {
-        positions.set(id, { x: mainPos, y: crossPos });
+    // Find max height in this rank for consistent row spacing
+    let maxHeight = 0;
+    for (const id of group) {
+      const h = shapeDefs.get(id).height;
+      if (h > maxHeight) maxHeight = h;
+    }
+
+    // Calculate cumulative Y position based on previous ranks
+    let yPos = 0;
+    for (let pr = 0; pr < r; pr++) {
+      let prMaxH = 0;
+      for (const pid of rankGroups[pr]) {
+        const h = shapeDefs.get(pid).height;
+        if (h > prMaxH) prMaxH = h;
       }
+      yPos += prMaxH + interRankSpacing;
+    }
+
+    let xCursor = startX;
+    for (const id of group) {
+      const shape = shapeDefs.get(id);
+      if (isVertical) {
+        positions.set(id, { x: xCursor + shape.width / 2, y: yPos });
+      } else {
+        positions.set(id, { x: yPos, y: xCursor + shape.width / 2 });
+      }
+      xCursor += shape.width + interNodeSpacing;
     }
   }
 
   // Normalize positions so minimum is at padding origin
   let minX = Infinity, minY = Infinity;
-  for (const pos of positions.values()) {
-    if (pos.x < minX) minX = pos.x;
+  for (const [id, pos] of positions) {
+    const shape = shapeDefs.get(id);
+    if (pos.x - shape.width / 2 < minX) minX = pos.x - shape.width / 2;
     if (pos.y < minY) minY = pos.y;
   }
   const pad = 40;
@@ -129,23 +138,21 @@ export function generateLayoutXml(nodes, edges, opts = {}) {
 
   for (const [id, node] of nodeMap) {
     const pos = positions.get(id) || { x: pad, y: pad };
-    const colors = STATUS_FILLS[node.status] || DEPTH_ACCENTS[node.depth] || STATUS_FILLS.planned;
+    const shape = shapeDefs.get(id);
+
     const label = node.subtitle
       ? `${escapeXml(node.label)}&#xa;${escapeXml(node.subtitle)}`
       : escapeXml(node.label);
 
-    const isSystem = node.depth === 'system' || node.depth === 'domain';
-    const fontSize = isSystem ? 13 : 12;
-    const fontStyle = isSystem ? 'fontStyle=1;' : '';
-    const w = isSystem ? 220 : nodeWidth;
-    const h = node.subtitle ? 60 : 45;
+    // Position is center-x, but mxGeometry wants top-left
+    const x = Math.round(pos.x - shape.width / 2);
+    const y = Math.round(pos.y);
 
     cells.push(
       `<mxCell id="${escapeXml(id)}" value="${label}" ` +
-      `style="rounded=1;whiteSpace=wrap;fillColor=${colors.fill};strokeColor=${colors.stroke};` +
-      `fontColor=#e6edf3;fontSize=${fontSize};${fontStyle}spacingTop=4;spacingBottom=4;" ` +
+      `style="${shape.style}" ` +
       `vertex="1" parent="1">` +
-      `<mxGeometry x="${Math.round(pos.x)}" y="${Math.round(pos.y)}" width="${w}" height="${h}" as="geometry"/>` +
+      `<mxGeometry x="${x}" y="${y}" width="${shape.width}" height="${shape.height}" as="geometry"/>` +
       `</mxCell>`
     );
   }
@@ -168,14 +175,12 @@ export function generateLayoutXml(nodes, edges, opts = {}) {
 }
 
 /**
- * Generate XML for a specific view, filtering to only nodes/edges that belong to it.
- * If view has tabNodes specified, use those. Otherwise, include all nodes.
+ * Generate XML for a specific view, filtering to only nodes/edges that belong.
  */
 export function generateViewXml(view, allNodes, allEdges, opts = {}) {
   const nodeMap = allNodes instanceof Map ? allNodes : new Map(Object.entries(allNodes));
   const edgeMap = allEdges instanceof Map ? allEdges : new Map(Object.entries(allEdges));
 
-  // Filter to view-specific nodes if tabNodes is specified
   let viewNodes = nodeMap;
   if (view.tabNodes && view.tabNodes.length > 0) {
     viewNodes = new Map();
@@ -185,7 +190,6 @@ export function generateViewXml(view, allNodes, allEdges, opts = {}) {
     }
   }
 
-  // Filter edges to only those connecting view nodes
   const viewEdges = new Map();
   for (const [id, edge] of edgeMap) {
     if (viewNodes.has(edge.from) && viewNodes.has(edge.to)) {
