@@ -77,6 +77,13 @@ function main() {
   let context = `## Canvas Changes Since You Last Looked\n\n`;
   let hasChanges = false;
 
+  // Unresolved comments from state — these are always surfaced, not just new ones
+  const unresolvedComments = [...state.comments].filter(c => !c.resolved);
+  if (unresolvedComments.length > 0) {
+    context += `**UNRESOLVED COMMENTS (${unresolvedComments.length}) — address these before other work:**\n`;
+    unresolvedComments.forEach(c => context += `- "${c.text}" on ${c.targetLabel || c.target} (${c.actor})\n`);
+    hasChanges = true;
+  }
   if (changes.comments.length > 0) {
     context += `**New comments (${changes.comments.length}):**\n`;
     changes.comments.forEach(c => context += `- ${c}\n`);

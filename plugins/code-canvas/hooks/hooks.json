@@ -25,7 +25,7 @@
     ],
     "PreToolUse": [
       {
-        "matcher": "EnterPlanMode|Write|Edit",
+        "matcher": "EnterPlanMode|Write|Edit|Bash|Skill",
         "hooks": [{
           "type": "command",
           "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/pre-tool-use.js\"",
