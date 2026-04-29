@@ -12,7 +12,7 @@ If `$ARGUMENTS` is a path, treat it as `<INPUT>` and run the pipeline below. Out
 
 ## Step 1 — Validate the input folder
 
-Run: `/bin/ls -la "<INPUT>"` and check that it exists and contains source documents (PDF, DOCX, XLSX, CSV, EML, VSDX). If the folder is missing or empty, report and stop.
+Run: `/bin/ls -la "<INPUT>"` and check that it exists and contains source documents (PDF, DOCX, XLSX, CSV, PPTX, EML, VSDX). If the folder is missing or empty, report and stop.
 
 ## Step 2 — Stages 1, 2, 3 (deterministic, scripted)
 

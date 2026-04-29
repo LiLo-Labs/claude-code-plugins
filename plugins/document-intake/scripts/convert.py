@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Stage 1 — Convert mixed-format documents to markdown.
 
-Supports: PDF, DOCX, XLSX, CSV, EML, VSDX. Extracts embedded images to a sibling
+Supports: PDF, DOCX, XLSX, CSV, PPTX, EML, VSDX. Extracts embedded images to a sibling
 `embedded_images/<safe-name>/` folder and writes inline placeholders:
 
     **Embedded image (page N, image M):** `embedded_images/<safe>/pageN_imgM.png`
@@ -243,6 +243,84 @@ def convert_eml(src: pathlib.Path, _img_dir: pathlib.Path) -> tuple[str, int]:
     return "\n".join(out), 0
 
 
+# ─── PPTX ────────────────────────────────────────────────────────────────────
+def convert_pptx(src: pathlib.Path, img_dir: pathlib.Path) -> tuple[str, int]:
+    out = [f"# {src.name}", "", f"**Source file:** `{src.name}`", "", "---", ""]
+    img_count = 0
+    try:
+        with zipfile.ZipFile(src) as z:
+            names = z.namelist()
+            slides = sorted(
+                (n for n in names if n.startswith("ppt/slides/slide") and n.endswith(".xml")),
+                key=lambda x: int(re.search(r"slide(\d+)\.xml$", x).group(1) if re.search(r"slide(\d+)\.xml$", x) else "0"),
+            )
+            notes_map = {}
+            for n in names:
+                m = re.match(r"ppt/notesSlides/notesSlide(\d+)\.xml$", n)
+                if m:
+                    notes_map[int(m.group(1))] = n
+
+            def text_runs(xml: str) -> list[str]:
+                # Each <a:t> holds one run of slide text; concatenate consecutive runs
+                # in the same <a:p> into one paragraph for readability.
+                paras = re.findall(r"<a:p\b[^>]*>(.*?)</a:p>", xml, flags=re.DOTALL)
+                lines = []
+                for p in paras:
+                    runs = re.findall(r"<a:t[^>]*>(.*?)</a:t>", p, flags=re.DOTALL)
+                    decoded = []
+                    for r in runs:
+                        # Strip any leftover inline tags, decode XML entities.
+                        r = re.sub(r"<[^>]+>", "", r)
+                        r = (r.replace("&amp;", "&").replace("&lt;", "<")
+                              .replace("&gt;", ">").replace("&quot;", "\"")
+                              .replace("&apos;", "'"))
+                        decoded.append(r)
+                    line = "".join(decoded).strip()
+                    if line:
+                        lines.append(line)
+                return lines
+
+            for slide_path in slides:
+                m = re.search(r"slide(\d+)\.xml$", slide_path)
+                slide_num = int(m.group(1)) if m else 0
+                xml = z.read(slide_path).decode("utf-8", errors="replace")
+                lines = text_runs(xml)
+                out.append(f"## Slide {slide_num}")
+                out.append("")
+                if lines:
+                    for ln in lines:
+                        out.append(ln)
+                else:
+                    out.append("_(no text on this slide)_")
+                out.append("")
+                if slide_num in notes_map:
+                    notes_xml = z.read(notes_map[slide_num]).decode("utf-8", errors="replace")
+                    notes = text_runs(notes_xml)
+                    # Drop the boilerplate slide number that PPTX puts in notes.
+                    notes = [n for n in notes if not re.match(r"^\d+\s*$", n)]
+                    if notes:
+                        out.append("### Speaker notes")
+                        out.append("")
+                        for n in notes:
+                            out.append(n)
+                        out.append("")
+
+            # Images from ppt/media/
+            for name in sorted(names):
+                if name.startswith("ppt/media/"):
+                    data = z.read(name)
+                    ext = pathlib.Path(name).suffix or ".bin"
+                    img_count += 1
+                    out_name = f"image{img_count}{ext}"
+                    (img_dir / out_name).write_bytes(data)
+                    rel = pathlib.Path(img_dir / out_name).relative_to(img_dir.parent.parent)
+                    out.append(f"**Embedded image (image {img_count}):** `{rel}`")
+            out.append("")
+    except zipfile.BadZipFile:
+        out.append("_(PPTX file unreadable — not a valid ZIP)_")
+    return "\n".join(out), img_count
+
+
 # ─── VSDX ────────────────────────────────────────────────────────────────────
 def convert_vsdx(src: pathlib.Path, img_dir: pathlib.Path) -> tuple[str, int]:
     out = [f"# {src.name}", "", f"**Source file:** `{src.name}`", "", "---", ""]
@@ -281,6 +359,7 @@ CONVERTERS = {
     ".docx": convert_docx,
     ".xlsx": convert_xlsx,
     ".csv":  convert_csv,
+    ".pptx": convert_pptx,
     ".eml":  convert_eml,
     ".vsdx": convert_vsdx,
 }

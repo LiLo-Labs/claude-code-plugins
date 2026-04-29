@@ -1,6 +1,6 @@
 ---
 name: document-intake
-description: Use when the user has a folder of mixed-format documents (PDF, DOCX, XLSX, CSV, EML, VSDX, etc.) and wants them converted into clean, LLM-ready markdown with embedded image descriptions, semantic cleanup, verification, and inline chunk boundaries for downstream RAG/search/review.
+description: Use when the user has a folder of mixed-format documents (PDF, DOCX, XLSX, CSV, PPTX, EML, VSDX, etc.) and wants them converted into clean, LLM-ready markdown with embedded image descriptions, semantic cleanup, verification, and inline chunk boundaries for downstream RAG/search/review.
 ---
 
 # Document Intake Pipeline
@@ -35,7 +35,7 @@ Just `.md` files, `embedded_images/`, and `_summary.md`. Chunk boundaries are in
 
 | Stage | Script | What it does |
 |-------|--------|--------------|
-| 1. Convert | `scripts/convert.py --input <source>` | PDF/DOCX/XLSX/CSV/EML/VSDX → markdown in `processed/`. Extracts embedded images to `processed/embedded_images/<safe-name>/` and writes `**Embedded image (page N, image M):** \`embedded_images/<safe>/pageN_imgM.png\`` placeholders inline. Image-extraction fallback: if pymupdf colorspace conversion fails, raw embedded bytes are saved with the native extension — no image is silently dropped. |
+| 1. Convert | `scripts/convert.py --input <source>` | PDF/DOCX/XLSX/CSV/PPTX/EML/VSDX → markdown in `processed/`. Extracts embedded images to `processed/embedded_images/<safe-name>/` and writes `**Embedded image (page N, image M):** \`embedded_images/<safe>/pageN_imgM.png\`` placeholders inline. Image-extraction fallback: if pymupdf colorspace conversion fails, raw embedded bytes are saved with the native extension — no image is silently dropped. |
 | 2. Embed images | `scripts/embed_images.py --dir <source>/processed` | Replaces image placeholders with descriptions. Tiny images (<15 KB) → terse `*[decorative icon]*` tags. 15–50 KB → `*[small graphic]*`. ≥50 KB → fallback size-tier tag. Accepts `--author-descriptions <json>` to inject hand-written descriptions for specific images (recommended for any image you want preserved verbatim). |
 | 3. Deterministic cleanup | `scripts/cleanup.py --dir <source>/processed` | Generic, document-agnostic rules (no hardcoded vendor strings): strip page headers/footers/copyright, auto-detect repeating running headers, join PDF column-wrap line breaks, structure OneTrust-style Q/A (`N.M` → `**Q**/**A:**`), restructure risk records, emit per-file audit trail to `_summary.md`. Also writes a snapshot to `processed/.snapshot/` so stage 6 (verify) can diff. Operates IN PLACE. |
 | 4. LLM polish | `prompts/polish_document.md` template | Dispatch one sub-agent per polished file with the polish prompt. Adds semantic `##` headings, reconstructs tables, resolves orphan content leaks, **flags sentence fragments** (rules 10 & 11), writes a per-file kept/restructured/dropped report to `processed/_polish_reports/`. Operates IN PLACE. |

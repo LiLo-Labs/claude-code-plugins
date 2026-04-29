@@ -1,6 +1,6 @@
 # Document Intake Plugin
 
-Converts a folder of mixed-format documents (PDF, DOCX, XLSX, CSV, EML, VSDX) into clean, polished, chunkable markdown — ready for RAG ingestion, semantic search, or human review.
+Converts a folder of mixed-format documents (PDF, DOCX, XLSX, CSV, PPTX, EML, VSDX) into clean, polished, chunkable markdown — ready for RAG ingestion, semantic search, or human review.
 
 ## What it does
 
@@ -40,7 +40,7 @@ Every source document gets a 1:1 `.md` sibling. All metadata (cleanup audit, ver
 
 ## Pipeline stages
 
-1. **Convert** (`convert.py`) — PDF/DOCX/XLSX/CSV/EML/VSDX → markdown + extracted images. Image extraction has a graceful fallback: exotic colorspaces fall back to raw bytes with native extension; truly broken images get an explicit `*[image extraction failed: …]*` placeholder so nothing silently disappears.
+1. **Convert** (`convert.py`) — PDF/DOCX/XLSX/CSV/PPTX/EML/VSDX → markdown + extracted images. Image extraction has a graceful fallback: exotic colorspaces fall back to raw bytes with native extension; truly broken images get an explicit `*[image extraction failed: …]*` placeholder so nothing silently disappears.
 2. **Embed images** (`embed_images.py`) — placeholder → description. Optional `--author-descriptions <json>` for hand-written descriptions of important images.
 3. **Cleanup** (`cleanup.py`) — generic, document-agnostic noise removal (no hardcoded vendor strings). Drops decorative-image placeholders, running page headers/footers, page counters, copyright. Heuristically structures Q/A and risk records. Saves a `.snapshot/` for the verify stage.
 4. **Polish** (LLM, agent-driven) — one sub-agent per file. Adds semantic `##` headings, reconstructs tables, resolves orphan content leaks, **flags & repairs sentence fragments** (quantifier-no-number, dangling preposition, echoed-context answer to a value-type question).

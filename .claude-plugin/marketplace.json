@@ -46,8 +46,8 @@
     {
       "name": "document-intake",
       "source": "./plugins/document-intake",
-      "description": "Convert a folder of mixed-format documents (PDF, DOCX, XLSX, CSV, EML, VSDX) into clean, polished, chunkable markdown — with embedded image descriptions, deterministic noise cleanup, LLM-driven semantic polish, and verification against snapshots to prove no content was lost.",
-      "version": "1.0.0",
+      "description": "Convert a folder of mixed-format documents (PDF, DOCX, XLSX, CSV, PPTX, EML, VSDX) into clean, polished, chunkable markdown — with embedded image descriptions, deterministic noise cleanup, LLM-driven semantic polish, and verification against snapshots to prove no content was lost.",
+      "version": "1.1.0",
       "author": {
         "name": "LiLo Labs"
       },
@@ -57,6 +57,7 @@
         "intake",
         "pdf",
         "docx",
+        "pptx",
         "rag",
         "markdown",
         "chunking",
