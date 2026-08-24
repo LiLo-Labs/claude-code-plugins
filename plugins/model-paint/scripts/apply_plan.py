@@ -206,10 +206,39 @@ def resolve_assignments(threemf, segments, assignments, keep_existing=False):
     those would print in a color nobody chose. The plan is the whole description
     of the finished model, so the output says exactly what the plan says.
     """
-    objects = {obj.object_id: obj for obj in threemf.mesh_objects()}
-    if not objects:
+    all_objects = threemf.mesh_objects()
+    if not all_objects:
         raise ApplyError("the model contains no mesh objects to paint")
-    sole = list(objects.values())[0] if len(objects) == 1 else None
+
+    # Real Bambu and Orca project files use the 3MF production extension, which
+    # puts objects in separate 3D/Objects/*.model parts. Object ids are only
+    # unique within a part, so keying on the id alone silently paints the wrong
+    # body when two parts happen to reuse an id.
+    by_key = {(obj.part, obj.object_id): obj for obj in all_objects}
+    by_id = {}
+    ambiguous = set()
+    for obj in all_objects:
+        if obj.object_id in by_id:
+            ambiguous.add(obj.object_id)
+        by_id[obj.object_id] = obj
+    objects = by_id
+    sole = all_objects[0] if len(all_objects) == 1 else None
+
+    def resolve_object(segment):
+        part = segment.get("part")
+        if part is not None and (part, segment["object_id"]) in by_key:
+            return by_key[(part, segment["object_id"])]
+        if segment["object_id"] in ambiguous:
+            raise ApplyError(
+                "segment %r names object %r, which exists in more than one model "
+                "part (%s). Re-run segment.py against this file so the segments "
+                "carry the part they came from."
+                % (segment["id"], segment["object_id"],
+                   ", ".join(sorted(str(key[0]) for key in by_key
+                                    if key[1] == segment["object_id"]))))
+        if segment["object_id"] in by_id:
+            return by_id[segment["object_id"]]
+        return None
 
     unknown = [entry["segment_id"] for entry in assignments
                if entry["segment_id"] not in segments]
@@ -225,11 +254,10 @@ def resolve_assignments(threemf, segments, assignments, keep_existing=False):
     for entry in assignments:
         segment = segments[entry["segment_id"]]
         object_id = segment["object_id"]
-        if object_id in objects:
-            obj = objects[object_id]
-        elif sole is not None:
+        obj = resolve_object(segment)
+        if obj is None and sole is not None:
             obj = sole
-        else:
+        if obj is None:
             raise ApplyError(
                 "segment %r names object %r, which is not in the model (it has "
                 "objects %s)" % (segment["id"], object_id,

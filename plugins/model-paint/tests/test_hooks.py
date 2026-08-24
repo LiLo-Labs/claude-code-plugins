@@ -255,6 +255,60 @@ class TestHookScripts(unittest.TestCase):
         self.assertEqual("", out.strip())
 
 
+class TestOverwriteAndBypass(unittest.TestCase):
+    """Holes found by adversarial review of the first guard implementation.
+
+    Every case here was ALLOWED before the fix. They share one shape: the harm
+    does not need trimesh in the command at all, or it hides behind a program
+    that only reads.
+    """
+
+    MODEL = "/home/user/models/dragon.stl"
+
+    def assertBlocked(self, command):
+        self.assertTrue(guard_lib.evaluate(command), "should block: %s" % command)
+
+    def assertAllowed(self, command):
+        findings = guard_lib.evaluate(command)
+        self.assertFalse(findings, "should allow: %s (%s)" % (
+            command, [f.rule for f in findings]))
+
+    def test_copying_over_the_model_is_blocked(self):
+        for program in ("cp", "mv", "rsync -a", "install"):
+            self.assertBlocked("%s /tmp/decimated.stl %s" % (program, self.MODEL))
+
+    def test_redirect_onto_the_model_is_blocked(self):
+        self.assertBlocked('python3 -c "print(1)" > %s' % self.MODEL)
+
+    def test_copying_the_model_to_scratch_is_allowed(self):
+        self.assertAllowed("cp %s /tmp/copy.stl" % self.MODEL)
+
+    def test_unbalanced_paren_cannot_smuggle_a_second_command(self):
+        """A stray '(' in a grep used to swallow the command after it."""
+        self.assertBlocked(
+            'grep -n "trimesh.load(" scripts/segment.py\n'
+            'python3 -c "import trimesh;m=trimesh.load(\'%s\');m.merge_vertices()"'
+            % self.MODEL)
+
+    def test_find_exec_payload_is_not_read_only(self):
+        self.assertBlocked(
+            "find /home/user/models -name '*.stl' -exec python3 -c "
+            "\"m.merge_vertices();m.export('%s')\" \\;" % self.MODEL)
+
+    def test_fixture_basename_is_not_a_free_pass(self):
+        """Matching on the basename made any file named creature.stl scratch."""
+        self.assertBlocked(
+            'python3 -c "m.merge_vertices(); m.export(\'/home/user/models/creature.stl\')"')
+
+    def test_real_scratch_work_still_runs(self):
+        self.assertAllowed('python3 -c "m.merge_vertices(); m.export(\'/tmp/scratch.stl\')"')
+        self.assertAllowed("grep -rn 'merge_vertices' scripts/")
+        self.assertAllowed("python3 scripts/segment.py --input %s --output /tmp/s.json"
+                           % self.MODEL)
+        self.assertAllowed(
+            'python3 -c "import trimesh;m=trimesh.load(\'%s\', process=False)"' % self.MODEL)
+
+
 class TestGeometryVerifier(unittest.TestCase):
 
     @classmethod
@@ -312,6 +366,29 @@ class TestGeometryVerifier(unittest.TestCase):
         })
         self.assertEqual(0, code, err)
         self.assertIn("PASS", json.loads(out)["systemMessage"])
+
+    def test_hook_stays_quiet_when_the_run_failed(self):
+        """A stale file from an earlier run must never be reported as a PASS.
+
+        apply_plan writes to --output only after its own check passes, so when it
+        aborts, anything sitting at that path came from a previous run and says
+        nothing about this one.
+        """
+        for response in ({"stdout": "", "stderr": "apply_plan: unknown segment 's99'"},
+                         {"stdout": "", "stderr": "", "exit_code": 1},
+                         {"stdout": "", "stderr": "", "interrupted": True}):
+            code, out, err = run_hook("verify_geometry.py", {
+                "hook_event_name": "PostToolUse",
+                "tool_name": "Bash",
+                "cwd": self.workdir,
+                "tool_input": {"command":
+                               "python3 scripts/apply_plan.py --input %s --segments s.json "
+                               "--plan p.json --output %s" % (SAMPLE, self.painted)},
+                "tool_response": response,
+            })
+            self.assertEqual(0, code, err)
+            self.assertEqual("", out.strip(),
+                             "reported on a failed run: %r" % response)
 
     def test_hook_exits_2_when_geometry_moved(self):
         moved = os.path.join(self.workdir, "moved2.3mf")

@@ -46,7 +46,7 @@
     {
       "name": "document-intake",
       "source": "./plugins/document-intake",
-      "description": "Convert a folder of mixed-format documents (PDF, DOCX, XLSX, CSV, PPTX, EML, VSDX) into clean, polished, chunkable markdown — with embedded image descriptions, deterministic noise cleanup, LLM-driven semantic polish, and verification against snapshots to prove no content was lost.",
+      "description": "Convert a folder of mixed-format documents (PDF, DOCX, XLSX, CSV, PPTX, EML, VSDX) into clean, polished, chunkable markdown \u2014 with embedded image descriptions, deterministic noise cleanup, LLM-driven semantic polish, and verification against snapshots to prove no content was lost.",
       "version": "1.1.0",
       "author": {
         "name": "LiLo Labs"
@@ -62,6 +62,26 @@
         "markdown",
         "chunking",
         "ocr-free"
+      ]
+    },
+    {
+      "name": "model-paint",
+      "source": "./plugins/model-paint",
+      "description": "Paint a 3D model for multi-filament printing from a single command. Segments the mesh into real features, iterates with you to confirm what they are, offers colour plans, and writes an Orca/Bambu-ready 3MF with the geometry preserved byte-for-byte.",
+      "version": "0.1.0",
+      "author": {
+        "name": "LiLo Labs"
+      },
+      "category": "3d-printing",
+      "tags": [
+        "3d-printing",
+        "3mf",
+        "stl",
+        "multicolor",
+        "orca-slicer",
+        "bambu",
+        "ams",
+        "painting"
       ]
     }
   ]

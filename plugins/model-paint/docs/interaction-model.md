@@ -10,15 +10,22 @@ So the loop is on identification, not on color.
 
 ## Stage 1 — detect (deterministic, no model reasoning)
 
-`segment.py` runs three independent signals and merges them:
+`segment.py` runs these signals and merges them:
 
 1. **Connected components.** Free and exact. On a flexi model each component is a
    link. 29 of them on the dragon.
 2. **Dihedral creases.** Finds anything meeting the surface at an angle: eyes in
    sockets, plates, scutes, a nose horn sitting proud of the snout.
 3. **Local thickness** (`paintlib/protrusion.py`). Finds smooth protrusions that
-   leave no crease: horns, spikes, claws, teeth, fins. Without this, both of the
-   dragon's head horns stayed buried in a 27,468-triangle skull region.
+   leave no crease: horns, spikes, claws, teeth, fins. Ray-casting inward from
+   each face gives the thickness of the solid; horns are thin and skulls are
+   thick, and the boundary between them is the neck of the protrusion.
+
+   **Not yet wired into `segment.py`.** The module is written and measured
+   against the dragon (`docs/segmentation-findings.md`), but `segment.py` still
+   runs only components and creases, so on that model both head horns remain
+   inside one 27,468-triangle skull region. Until it is connected, stage 3 below
+   is doing more work than it should have to.
 
 Mirror symmetry pairs the results. Paired features are the strongest anatomical
 signal available and pairing doubles as a check on the segmentation itself.

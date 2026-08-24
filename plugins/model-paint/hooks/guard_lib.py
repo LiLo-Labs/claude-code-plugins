@@ -39,9 +39,12 @@ _PATH_TOKEN_RE = re.compile(
 _SAFE_PATH_RE = re.compile(
     r"/tmp/|/var/tmp/|/dev/shm/|/private/var/folders/"
     r"|(?:^|[/\\])(?:tmp|temp|scratch|sample|samples|fixture|fixtures|testdata|test|tests)[/\\]"
-    r"|\$\{?TMPDIR\}?|%TEMP%"
-    r"|creature\.stl",
+    r"|\$\{?TMPDIR\}?|%TEMP%",
     re.IGNORECASE)
+
+# Overwriting the model by moving a file onto it is the same harm as exporting
+# onto it, and neither trimesh nor Python has to be involved.
+_COPY_COMMANDS = frozenset(("cp", "mv", "rsync", "install", "ditto", "scp"))
 
 # A command that makes its own temp directory is working on a copy by definition.
 _TEMP_CONTEXT_RE = re.compile(
@@ -128,7 +131,7 @@ _MESH_NAME_RE = re.compile(r"^(?:m|mesh\w*|model\w*|obj\w*|body\w*|part\w*|tm)$"
 _LOAD_RE = re.compile(r"\btrimesh\.(load|load_mesh|load_scene)\s*\(")
 
 
-def split_segments(command):
+def split_segments(command, rejoin=True):
     """Split a shell command on `;`, `&&`, `||`, `|` and newlines, quotes aside.
 
     Quote tracking is best-effort: a heredoc full of apostrophes can confuse it.
@@ -163,7 +166,8 @@ def split_segments(command):
         current.append(char)
         index += 1
     segments.append("".join(current))
-    return _rejoin_calls([segment.strip() for segment in segments if segment.strip()])
+    cleaned = [segment.strip() for segment in segments if segment.strip()]
+    return _rejoin_calls(cleaned) if rejoin else cleaned
 
 
 def _rejoin_calls(segments):
@@ -173,15 +177,21 @@ def _rejoin_calls(segments):
     `trimesh.load(\\n    path,\\n    process=False)` must be read as a whole or the
     keyword that makes it safe is invisible. Unbalanced parentheses are the tell.
     """
-    merged, pending = [], None
+    return ["\n".join(group) for group in _rejoin_groups(segments)]
+
+
+def _rejoin_groups(segments):
+    """Same merge, but keeping the pieces so each can still be judged alone."""
+    groups, pending = [], []
     for segment in segments:
-        pending = segment if pending is None else pending + "\n" + segment
-        if pending.count("(") <= pending.count(")"):
-            merged.append(pending)
-            pending = None
-    if pending is not None:
-        merged.append(pending)
-    return merged
+        pending.append(segment)
+        joined = "\n".join(pending)
+        if joined.count("(") <= joined.count(")"):
+            groups.append(pending)
+            pending = []
+    if pending:
+        groups.append(pending)
+    return groups
 
 
 def leading_command(segment):
@@ -197,7 +207,14 @@ def leading_command(segment):
     return ""
 
 
+# `find -exec ...` runs whatever follows, so the leading program says nothing
+# about what the command does.
+_CARRIES_PAYLOAD_RE = re.compile(r"(?<!\w)-(?:exec|execdir|ok|okdir)(?!\w)")
+
+
 def is_read_only(segment):
+    if _CARRIES_PAYLOAD_RE.search(segment):
+        return False
     return leading_command(segment) in _READ_ONLY
 
 
@@ -286,6 +303,36 @@ def scan_segment(segment):
     return findings
 
 
+def overwrite_findings(segment):
+    """Block writing over a user model with a plain file copy or a redirect."""
+    findings = []
+    program = leading_command(segment)
+    paths = mesh_paths(segment)
+
+    if program in _COPY_COMMANDS and len(paths) >= 2:
+        destination = paths[-1]
+        if not is_safe_path(destination):
+            findings.append(Finding(
+                rule="overwrite-model",
+                matched="%s ... %s" % (program, destination),
+                why="This replaces the user's model file with another file. "
+                    "Whatever produced the source may have re-meshed, repaired or "
+                    "re-oriented it, and the original would be gone.",
+                instead="Write to a new path next to the original and let the "
+                        "user compare them with scripts/verify.py."))
+
+    for match in re.finditer(r">>?\s*([\w./\\$~{}%%+-]*\.(?:%s))\b"
+                             % "|".join(MESH_SUFFIXES), segment, re.IGNORECASE):
+        if not is_safe_path(match.group(1)):
+            findings.append(Finding(
+                rule="overwrite-model",
+                matched=match.group(0).strip(),
+                why="Redirecting output onto a mesh file truncates it. If this is "
+                    "the user's model, the original is unrecoverable.",
+                instead="Redirect to a new path, or to a copy under /tmp."))
+    return findings
+
+
 def evaluate(command):
     """Findings that should block ``command``, most specific first.
 
@@ -293,13 +340,27 @@ def evaluate(command):
     remedy, so the caller only has to format them.
     """
     blocking = []
-    for segment in split_segments(command):
-        if is_read_only(segment):
+    for group in _rejoin_groups(split_segments(command, rejoin=False)):
+        merged = "\n".join(group)
+        if is_read_only(merged):
+            # A read-only leader must not launder what an unbalanced parenthesis
+            # glued onto it. Judge the pieces after it on their own.
+            for piece in group[1:]:
+                if is_read_only(piece) or scoped_to_scratch(piece):
+                    continue
+                blocking.extend(scan_segment(piece) + overwrite_findings(piece))
             continue
-        findings = scan_segment(segment)
-        if findings and not scoped_to_scratch(segment):
+        findings = scan_segment(merged) + overwrite_findings(merged)
+        if findings and not scoped_to_scratch(merged):
             blocking.extend(findings)
-    return blocking
+
+    seen, unique = set(), []
+    for finding in blocking:
+        key = (finding.rule, finding.matched)
+        if key not in seen:
+            seen.add(key)
+            unique.append(finding)
+    return unique
 
 
 def format_block(command, findings):

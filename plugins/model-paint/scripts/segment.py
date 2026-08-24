@@ -630,6 +630,7 @@ def analyze(path, options):
 
             entry = describe(vertices, triangles, graph, faces, reference, model)
             entry["object_id"] = obj["object_id"]
+            entry["part"] = obj["part"]
             entry["component"] = component
             entry["covers_component"] = len(faces) == len(faces_by_component[component])
             described.append(entry)
@@ -651,7 +652,7 @@ def analyze(path, options):
         segment["shape_hint"] = shape_hint(
             segment, segment["symmetry"] == "paired", model["diagonal"])
 
-    ordered_keys = ["id", "object_id", "component", "shape_hint", "face_count",
+    ordered_keys = ["id", "object_id", "part", "component", "shape_hint", "face_count",
                     "area", "centroid", "position", "extent", "bbox",
                     "bbox_diagonal", "principal_extent", "elongation", "flatness",
                     "taper", "protrusion", "surface_reach", "center_offset",

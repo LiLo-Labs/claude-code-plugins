@@ -18,6 +18,7 @@ surfaces anything at all on a successful exit.
 """
 
 import json
+import re
 import os
 import shlex
 import struct
@@ -220,6 +221,38 @@ def check_run(source, output, cwd):
     return ok, "%s: %s" % (os.path.basename(output), detail)
 
 
+# apply_plan's own error prefix. Its presence in captured stderr means the run
+# aborted, whatever the harness reported about exit status.
+_FAILURE_PREFIX = re.compile(r"(?m)^\s*apply_plan:")
+
+
+def run_succeeded(payload):
+    """False only on positive evidence that the apply_plan run did not complete.
+
+    A hook that cannot tell should still check the file, so ambiguity resolves to
+    True. What must never happen is reporting PASS for a stale file left at the
+    --output path by an earlier run, which is what an aborted apply_plan leaves
+    behind.
+    """
+    response = payload.get("tool_response")
+    if response is None:
+        return True
+
+    if isinstance(response, dict):
+        for key in ("exit_code", "exitCode", "returncode", "status_code"):
+            code = response.get(key)
+            if isinstance(code, int) and code != 0:
+                return False
+        if response.get("interrupted") or response.get("is_error"):
+            return False
+        text = " ".join(str(response.get(key) or "")
+                        for key in ("stdout", "stderr", "output", "content"))
+    else:
+        text = str(response)
+
+    return not _FAILURE_PREFIX.search(text)
+
+
 def main():
     try:
         payload = json.load(sys.stdin)
@@ -233,6 +266,12 @@ def main():
     if not isinstance(command, str) or "apply_plan.py" not in command:
         return 0
     cwd = payload.get("cwd") or os.getcwd()
+
+    if not run_succeeded(payload):
+        # apply_plan failed. Any file sitting at --output is left over from an
+        # earlier run, and checking it would report PASS for a file this command
+        # did not produce -- the most misleading thing this hook could say.
+        return 0
 
     failures, passes, skipped = [], [], []
     for source, output in apply_plan_runs(command):
