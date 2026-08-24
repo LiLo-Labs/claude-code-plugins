@@ -181,6 +181,24 @@ def set_filaments(threemf, filaments, default_filament=None):
     settings["extruder_colour"] = _merge(
         settings.get("extruder_colour"), colours, PLACEHOLDER_COLOUR)
 
+    # Verified against a real OrcaSlicer 2.6.32 project file: it carries a
+    # parallel `filament_multi_colour` array holding the same values. Left out of
+    # step, the slicer draws the plate in the previous colors even though the
+    # paint underneath is correct, which reads as the plugin having failed.
+    settings["filament_multi_colour"] = list(settings["filament_colour"])
+
+    # The same file keeps several companion arrays that must stay the same length
+    # as filament_colour, or Orca indexes off the end of one of them.
+    width = len(settings["filament_colour"])
+    for key, filler in (("filament_ids", ""),
+                        ("filament_colour_type", "1"),
+                        ("default_filament_colour", ""),
+                        ("filament_is_support", "0")):
+        values = settings.get(key)
+        if not isinstance(values, list) or not values:
+            continue
+        settings[key] = ([str(v) for v in values] + [values[-1]] * width)[:width]
+
     threemf.replace_entry(PROJECT_SETTINGS_PART, dumps_settings(settings))
 
     extruders = {}

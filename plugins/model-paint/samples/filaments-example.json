@@ -1,0 +1,10 @@
+{
+  "_comment": "Copy to ~/.config/model-paint/filaments.json and edit. nozzle is the slot on a multi-nozzle machine, or the AMS slot on a tool-changing one.",
+  "printer": "Flashforge Creator 5 Pro",
+  "filaments": [
+    {"name": "White PLA",  "hex": "#FFFFFF", "type": "PLA", "nozzle": 1},
+    {"name": "Black PLA",  "hex": "#000000", "type": "PLA", "nozzle": 2},
+    {"name": "Orange PLA", "hex": "#FF8000", "type": "PLA", "nozzle": 3},
+    {"name": "Grey PLA",   "hex": "#808080", "type": "PLA", "nozzle": 4}
+  ]
+}
