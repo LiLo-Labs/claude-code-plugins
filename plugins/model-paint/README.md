@@ -1,5 +1,10 @@
 # Model Paint Plugin
 
+> **Picking this work up?** Start with [HANDOFF.md](HANDOFF.md): current state,
+> what is measured to work, the open problem, and the dead ends not worth
+> repeating.
+
+
 Paints an STL or 3MF for multi-filament printing from one command. Segments the
 mesh into real features, names them (eyes, horns, spikes, claws, belly plates —
 or panels, trim, and text on a non-creature), plans colors against the filaments
