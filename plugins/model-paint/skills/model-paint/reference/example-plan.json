@@ -1,0 +1,14 @@
+{
+ "filaments": [
+  {"index": 1, "name": "Slate Grey PLA", "hex": "#4a5058"},
+  {"index": 2, "name": "Bone White PLA", "hex": "#e8e0cf"},
+  {"index": 3, "name": "Black PLA", "hex": "#1a1a1a"}
+ ],
+ "assignments": [
+  {"segment_id": "s02", "filament": 3, "reason": "left eye, darkest filament on the smallest feature"},
+  {"segment_id": "s03", "filament": 3, "reason": "right eye, matches its pair"},
+  {"segment_id": "s04", "filament": 2, "reason": "left horn, bone reads clearly against the slate body"},
+  {"segment_id": "s05", "filament": 2, "reason": "right horn, matches its pair"}
+ ],
+ "default_filament": 1
+}
