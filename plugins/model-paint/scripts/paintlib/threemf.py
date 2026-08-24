@@ -29,6 +29,8 @@ _VERTICES_BLOCK_RE = re.compile(r"<vertices\b[^>]*>(.*?)</vertices>", re.DOTALL)
 _TRIANGLE_RE = re.compile(r"<triangle\b[^>]*?/>", re.DOTALL)
 _VERTEX_RE = re.compile(r"<vertex\b[^>]*?/>", re.DOTALL)
 _PAINT_ATTR_RE = re.compile(r'\s*paint_color\s*=\s*"[^"]*"')
+_ITEM_RE = re.compile(r"<item\b[^>]*?/>", re.DOTALL)
+_COMPONENT_RE = re.compile(r"<component\b[^>]*?/>", re.DOTALL)
 
 
 def _attr(text, name):
@@ -174,6 +176,27 @@ class ThreeMF(object):
         """Objects that actually carry geometry, in archive order."""
         return list(self.objects.values())
 
+    def placement(self):
+        """Every build item and component reference, with its transform.
+
+        Placement is part of the guarantee, not a cosmetic detail. A model that
+        comes back rotated or re-arranged on the plate is a changed file even if
+        every triangle survived, because paint plans and print settings are
+        indexed against the original orientation.
+        """
+        found = []
+        for part in self.model_parts:
+            text = self._text_for(part)
+            for match in _ITEM_RE.finditer(text):
+                el = match.group(0)
+                found.append(("item", part, _attr(el, "objectid"),
+                              _attr(el, "transform"), _attr(el, "printable")))
+            for match in _COMPONENT_RE.finditer(text):
+                el = match.group(0)
+                found.append(("component", part, _attr(el, "objectid"),
+                              _attr(el, "transform"), None))
+        return found
+
     # -- mutation ---------------------------------------------------------
 
     def paint_object(self, obj, assignments):
@@ -251,4 +274,12 @@ def geometry_matches(path_a, path_b):
             return False, "vertices differ on object %s" % oa.object_id
         if oa.triangles != ob.triangles:
             return False, "triangle indices differ on object %s" % oa.object_id
-    return True, "%d object(s), geometry identical" % len(objects_a)
+
+    placement_a, placement_b = a.placement(), b.placement()
+    if placement_a != placement_b:
+        return False, "build placement differs (%d vs %d entries)" % (
+            len(placement_a), len(placement_b))
+
+    triangles = sum(o.triangle_count for o in objects_a)
+    return True, ("%d object(s), %d triangles, geometry and placement identical"
+                  % (len(objects_a), triangles))

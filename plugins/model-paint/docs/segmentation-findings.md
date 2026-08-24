@@ -66,3 +66,19 @@ They are not the same geometry. The original has 475,270 faces in 29 components;
 several components differ by tens of faces. The repair step altered the mesh and
 merged or dropped a component. It is also rotated (bbox 153x153 versus 108x187).
 Paint plans are not transferable between them by face index.
+
+## Decision: divergence is a failure, not a variation
+
+The difference between the two uploaded files was not intentional on the user's
+part. The rule the plugin follows from here:
+
+- Geometry in equals geometry out. Placement counts as geometry: a model that
+  comes back rotated or re-arranged on the plate is a changed file.
+- The plugin never repairs, re-orients, re-scales, or re-arranges anything, even
+  when it would "help". If a mesh is broken, say so and stop; do not fix it
+  silently.
+- `geometry_matches()` therefore compares build items and component transforms as
+  well as vertices and triangle indices, and `apply_plan.py` refuses to emit a
+  file that fails it.
+- `verify.py` exists so any two files can be checked against each other, which is
+  how the discrepancy above was found in the first place.

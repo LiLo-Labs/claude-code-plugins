@@ -102,6 +102,32 @@ class TestPaintPreservesGeometry(unittest.TestCase):
         out = model.save(os.path.join(self.tmp, "cleared.3mf"))
         self.assertNotIn("paint_color", threemf.ThreeMF(out)._text_for("3D/3dmodel.model"))
 
+    def test_placement_change_is_caught(self):
+        """A rotated or re-arranged model is a changed file, even if the mesh survived.
+
+        This is the failure mode that motivated verify.py: a repair step returned
+        the "same" model rotated on the plate, and nothing flagged it.
+        """
+        model = threemf.ThreeMF(self.source)
+        text = model._text_for("3D/3dmodel.model")
+        rotated = text.replace('transform="1 0 0 0 1 0 0 0 1 0 0 0"',
+                               'transform="0 -1 0 1 0 0 0 0 1 0 0 0"')
+        self.assertNotEqual(text, rotated, "fixture should contain a build transform")
+        model.replace_entry("3D/3dmodel.model", rotated)
+        out = model.save(os.path.join(self.tmp, "rotated.3mf"))
+
+        same, detail = threemf.geometry_matches(self.source, out)
+        self.assertFalse(same, "rotation should not pass as identical")
+        self.assertIn("placement", detail)
+
+    def test_paint_preserves_placement(self):
+        model = threemf.ThreeMF(self.source)
+        before = model.placement()
+        obj = model.mesh_objects()[0]
+        model.paint_object(obj, {0: 1, 1: 2, 2: 3})
+        out = model.save(os.path.join(self.tmp, "placed.3mf"))
+        self.assertEqual(threemf.ThreeMF(out).placement(), before)
+
     def test_rejects_out_of_range_triangle(self):
         model = threemf.ThreeMF(self.source)
         obj = model.mesh_objects()[0]

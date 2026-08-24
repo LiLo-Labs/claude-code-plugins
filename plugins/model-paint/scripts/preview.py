@@ -8,10 +8,11 @@ Rendering is a small orthographic z-buffer rasterizer built on numpy rather than
 a 3D toolkit, for three reasons. It needs no GPU, no display, and no GL context,
 so it runs anywhere the rest of the plugin runs. It resolves hidden surfaces per
 pixel, where matplotlib's Poly3DCollection sorts whole triangles by average depth
-and visibly tears interlocking flexi joints apart. And it stays fast on the
-meshes this plugin actually sees: a detailed flexi dragon is several hundred
-thousand triangles, most of them smaller than a pixel on screen, which the
-vectorized path below handles in one batch instead of one numpy call each.
+and visibly tears interlocking flexi joints apart. And it stays workable on the
+meshes this plugin actually sees -- a detailed flexi dragon runs to several
+hundred thousand triangles -- by culling back faces whenever the mesh proves
+itself closed, and by batching the sub-pixel triangles that dense models are
+mostly made of.
 
 This script only ever reads geometry. It never writes a mesh.
 """
@@ -486,9 +487,9 @@ def render_view(vertices, faces, colors, view, scale, size, cull=False):
     tri_y = py[faces]
     tri_z = z[faces]
 
-    # Normals are flipped toward the eye rather than back-face culled: a model
-    # with inconsistent winding would otherwise render with holes, and a hole in
-    # a preview reads as a defect in the user's own model.
+    # Flipping normals toward the eye is what makes the two-sided fallback shade
+    # correctly: a mesh that failed the cull test keeps its back faces, and they
+    # must be lit as the surface the viewer is actually looking at.
     normals = np.cross(vertices[faces][:, 1] - vertices[faces][:, 0],
                        vertices[faces][:, 2] - vertices[faces][:, 0])
     lengths = np.linalg.norm(normals, axis=1)
@@ -514,9 +515,9 @@ def render_view(vertices, faces, colors, view, scale, size, cull=False):
     hi_y = np.floor(tri_y.max(axis=1)).astype(np.int64)
     onscreen = (hi_x >= 0) & (lo_x < work) & (hi_y >= 0) & (lo_y < work)
 
-    # Triangles spanning at most a 2x2 pixel block dominate any detailed model.
-    # They are drawn in one vectorized pass; only the larger ones are worth a
-    # per-triangle barycentric fill.
+    # Sub-pixel triangles are common once a model is dense enough, and each one
+    # would otherwise cost a handful of numpy calls to fill a single pixel. They
+    # go through one batched pass; only the larger ones get a barycentric fill.
     tiny = alive & onscreen & (hi_x - lo_x <= 1) & (hi_y - lo_y <= 1)
     _draw_tiny(image, depth, np.nonzero(tiny)[0], lo_x, lo_y, hi_x, hi_y,
                tri_z, shaded, work)
