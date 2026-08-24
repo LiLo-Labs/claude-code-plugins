@@ -88,6 +88,102 @@ def local_thickness(vertices, triangles, normals, centroids, epsilon=1e-3):
     return thickness
 
 
+def relief(vertices, triangles, iterations=12, use_area_weight=True):
+    """Height of each face above the locally smoothed surface. A high-pass filter.
+
+    Roughness finds a field of many small bumps. Crease cutting finds anything
+    ringed by a hard edge. Neither finds a single smooth dome sitting on a smooth
+    surface -- a limpet on a shell, a rivet on a plate, a boss on a casting -- and
+    on a sculpted model that blends its details in, that is most of them. Measured
+    on the shell barricade: crease-bounded detection returned zero candidates,
+    because nothing on it has a crease ring at all.
+
+    Smoothing the surface and subtracting it does find them. Positive relief is a
+    bump standing proud, negative is a dent. Scale-free in the sense that it
+    responds to local deviation rather than absolute size, so the same threshold
+    behaves sensibly on a 55 mm terrain piece and a 200 mm creature.
+
+    The smoothed copy exists only in this function. Face count and order are never
+    touched, so index i still means triangle i.
+    """
+    from scipy.sparse import coo_matrix
+
+    vertices = np.asarray(vertices, dtype=np.float64)
+    triangles = np.asarray(triangles)
+    count = len(vertices)
+
+    edges = np.vstack([triangles[:, [0, 1]], triangles[:, [1, 2]], triangles[:, [2, 0]]])
+    both = np.vstack([edges, edges[:, ::-1]])
+    weights = np.ones(len(both))
+    graph = coo_matrix((weights, (both[:, 0], both[:, 1])), shape=(count, count)).tocsr()
+    degree = np.asarray(graph.sum(axis=1)).ravel()
+    degree[degree == 0] = 1.0
+
+    smoothed = vertices.copy()
+    for _ in range(max(1, int(iterations))):
+        smoothed = np.asarray(graph @ smoothed) / degree[:, None]
+
+    # Vertex normals from the original surface, area weighted so a dense patch
+    # does not drag the direction around.
+    face_normals = np.cross(vertices[triangles[:, 1]] - vertices[triangles[:, 0]],
+                            vertices[triangles[:, 2]] - vertices[triangles[:, 0]])
+    lengths = np.linalg.norm(face_normals, axis=1, keepdims=True)
+    areas = lengths.ravel() / 2.0
+    face_normals = face_normals / np.maximum(lengths, 1e-12)
+    normals = np.zeros_like(vertices)
+    weight = areas[:, None] if use_area_weight else 1.0
+    for column in range(3):
+        np.add.at(normals, triangles[:, column], face_normals * weight)
+    normals /= np.maximum(np.linalg.norm(normals, axis=1, keepdims=True), 1e-12)
+
+    displacement = np.einsum("ij,ij->i", vertices - smoothed, normals)
+    return displacement[triangles].mean(axis=1)
+
+
+def isolated_bumps(vertices, triangles, pairs, areas, relief_values=None,
+                   percentile=88.0, min_faces=120, max_faces=8000, max_span=None,
+                   claimed=None):
+    """Compact regions standing proud of the surface: domes, studs, rivets, warts.
+
+    Built on :func:`relief`. Returns a list of face-index arrays, largest first.
+    ``claimed`` lets a caller exclude what has already been selected, which is how
+    a coverage audit finds what a first pass missed rather than re-finding it.
+    """
+    from scipy.sparse import coo_matrix
+    from scipy.sparse.csgraph import connected_components
+
+    if relief_values is None:
+        relief_values = relief(vertices, triangles)
+    proud = relief_values >= np.percentile(relief_values, percentile)
+    if claimed is not None:
+        proud &= ~claimed
+    both = proud[pairs[:, 0]] & proud[pairs[:, 1]]
+    if not both.any():
+        return []
+
+    count = len(triangles)
+    graph = coo_matrix((np.ones(int(both.sum())), (pairs[both, 0], pairs[both, 1])),
+                       shape=(count, count))
+    total, labels = connected_components(graph, directed=False)
+    sizes = np.bincount(labels, weights=proud.astype(float)).astype(int)
+
+    vertices = np.asarray(vertices)
+    found = []
+    for cluster in np.argsort(-sizes):
+        size = sizes[cluster]
+        if size < min_faces or size > max_faces:
+            continue
+        idx = np.where((labels == cluster) & proud)[0]
+        if not len(idx):
+            continue
+        if max_span is not None:
+            span = np.ptp(vertices[triangles[idx]].reshape(-1, 3), axis=0).max()
+            if span > max_span:
+                continue
+        found.append(idx)
+    return found
+
+
 def _class_boundary(values, pairs, threshold, below=True):
     """Cut edges where the two faces sit on opposite sides of `threshold`."""
     if values is None or not len(pairs):
