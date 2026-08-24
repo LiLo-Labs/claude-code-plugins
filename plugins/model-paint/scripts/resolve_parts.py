@@ -106,6 +106,9 @@ def main():
     parser.add_argument("--output", required=True, help="path for the resolved parts.json")
     parser.add_argument("--fallback", default=None,
                         help="one part absorbs everything unclaimed (rarely right)")
+    parser.add_argument("--clean", type=int, default=250,
+                        help="absorb pieces smaller than this and smooth boundaries; "
+                             "0 disables")
     parser.add_argument("--fill", default="nearest", choices=["nearest", "none"],
                         help="nearest: unclaimed faces adopt the closest assigned "
                              "part across the surface. none: leave them unassigned")
@@ -167,6 +170,14 @@ def main():
             if not match:
                 parser.error("--fallback %r is not one of the parts" % args.fallback)
             labels[leftover] = match[0]
+
+    if args.clean and not (labels == UNASSIGNED).any():
+        from paintlib.signals import clean_labels
+        before = labels.copy()
+        labels = clean_labels(labels, session["pairs"], min_piece=args.clean)
+        moved = int((before != labels).sum())
+        print("  boundary cleanup           : %d faces reassigned (%.2f%% of area)"
+              % (moved, 100.0 * float(areas[before != labels].sum() / areas.sum())))
 
     print("resolved %d parts over %d triangles" % (len(parts), face_count))
     print("  unclaimed before fallback : %6.2f%% of area" % leftover_share)

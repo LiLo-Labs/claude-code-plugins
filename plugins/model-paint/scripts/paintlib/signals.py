@@ -229,6 +229,76 @@ def signal_cuts(pairs, angles, count, vertices=None, triangles=None, normals=Non
     return cuts, found
 
 
+def clean_labels(labels, pairs, min_piece=250, rounds=2):
+    """Tidy a partition: drop specks, fill pinholes, then smooth the boundary.
+
+    Threshold-grown selections have ragged edges. The boundary follows a contour
+    of whatever was measured rather than the silhouette of the thing, so a part
+    ends up with a fringe of stray faces smeared across its neighbour and a
+    scatter of pinholes inside it. On a printed model that reads as noise around
+    every feature, which is exactly what a person notices first.
+
+    Three passes, all on the face graph so they respect the surface:
+
+    1. Any connected piece of a part smaller than `min_piece` is absorbed by
+       whichever part surrounds it. A twelve-triangle island of "barnacle" in the
+       middle of the shell is not a barnacle.
+    2. Majority smoothing: a face whose neighbours mostly belong to another part
+       joins them. This is what pulls a ragged edge straight.
+    3. Repeat, because one pass leaves the corners.
+
+    Deliberately conservative: it never moves a face that sits inside a healthy
+    region, so a real feature cannot be eroded away by running it twice.
+    """
+    from scipy.sparse import coo_matrix
+    from scipy.sparse.csgraph import connected_components
+
+    labels = np.asarray(labels).copy()
+    count = len(labels)
+    if not len(pairs):
+        return labels
+
+    neighbours = [[] for _ in range(count)]
+    for left, right in pairs:
+        neighbours[left].append(right)
+        neighbours[right].append(left)
+
+    # 1. absorb specks
+    same = labels[pairs[:, 0]] == labels[pairs[:, 1]]
+    graph = coo_matrix((np.ones(int(same.sum())), (pairs[same, 0], pairs[same, 1])),
+                       shape=(count, count))
+    _, pieces = connected_components(graph, directed=False)
+    sizes = np.bincount(pieces)
+    for piece in np.where(sizes < min_piece)[0]:
+        members = np.where(pieces == piece)[0]
+        outside = [labels[n] for face in members for n in neighbours[face]
+                   if pieces[n] != piece]
+        if not outside:
+            continue
+        values, counts = np.unique(outside, return_counts=True)
+        labels[members] = values[np.argmax(counts)]
+
+    # 2 & 3. majority smoothing on boundary faces only
+    for _ in range(max(0, int(rounds))):
+        boundary = np.where(labels[pairs[:, 0]] != labels[pairs[:, 1]])[0]
+        touched = np.unique(pairs[boundary].ravel())
+        updates = {}
+        for face in touched:
+            near = neighbours[face]
+            if not near:
+                continue
+            values, counts = np.unique([labels[n] for n in near], return_counts=True)
+            best = int(np.argmax(counts))
+            # Only move when the neighbourhood clearly disagrees with this face.
+            if values[best] != labels[face] and counts[best] > len(near) / 2:
+                updates[int(face)] = values[best]
+        if not updates:
+            break
+        for face, value in updates.items():
+            labels[face] = value
+    return labels
+
+
 def coverage_report(labels, areas):
     """How concentrated the segmentation is -- the tell for a collapsed run.
 

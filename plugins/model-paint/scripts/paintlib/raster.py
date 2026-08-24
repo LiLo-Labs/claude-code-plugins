@@ -81,6 +81,61 @@ def render_view(mesh, colours, elevation, azimuth, size=800, centre=None,
     return (image * 255.0).astype(np.uint8), picks
 
 
+def render_channels(mesh, elevation, azimuth, size=800, centre=None, radius=None,
+                    extras=None):
+    """Geometry buffers for one view: picks, depth, normals, and any per-face field.
+
+    Segmenting in 3D means thresholding geometry and hoping the contour lands on
+    the feature's edge. It does not: the boundary follows the threshold, so a
+    selection ends up smeared across whatever the measurement happened to include.
+
+    In the image the edges are right there. Depth steps at a silhouette, the normal
+    swings at a crease, and shading dips in a crevice -- the same cues a person
+    uses. So render those as buffers, segment in image space where the boundaries
+    are visible, and carry the answer back to triangles through the pick map.
+
+    ``extras`` maps a name to a per-face array, each returned as an image.
+    """
+    forward, right, up = _camera(elevation, azimuth)
+    if centre is None:
+        centre = mesh.vertices.mean(axis=0)
+    if radius is None:
+        radius = float(np.ptp(mesh.vertices, axis=0).max()) / 2.0 * 1.05
+    centre = np.asarray(centre, dtype=float)
+
+    span = np.linspace(-radius, radius, size)
+    grid_x, grid_y = np.meshgrid(span, -span)
+    origins = (centre - forward * (radius * 4.0)
+               + right * grid_x.reshape(-1, 1) + up * grid_y.reshape(-1, 1))
+    directions = np.tile(forward, (origins.shape[0], 1))
+
+    locations, ray_ids, face_ids = mesh.ray.intersects_location(
+        ray_origins=origins, ray_directions=directions, multiple_hits=False)
+
+    picks = np.full(size * size, -1, dtype=np.int64)
+    depth = np.full(size * size, np.nan)
+    if len(ray_ids):
+        picks[ray_ids] = face_ids
+        depth[ray_ids] = np.einsum("ij,j->i", locations - centre, forward)
+
+    picks = picks.reshape(size, size)
+    depth = depth.reshape(size, size)
+    visible = picks >= 0
+
+    normals = np.zeros((size, size, 3))
+    if visible.any():
+        normals[visible] = mesh.face_normals[picks[visible]]
+
+    out = {"picks": picks.astype(np.int32), "depth": depth, "normals": normals,
+           "visible": visible}
+    for name, values in (extras or {}).items():
+        field = np.full((size, size), np.nan)
+        if visible.any():
+            field[visible] = np.asarray(values)[picks[visible]]
+        out[name] = field
+    return out
+
+
 def region_at(mesh, picks, x, y, radius=6):
     """Triangles under a pixel, tolerant of the agent's aim being a few px off."""
     height, width = picks.shape
