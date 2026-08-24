@@ -42,7 +42,7 @@ def _normalise(values):
 
 
 def edge_costs(centres, normals, pairs, fields=None, feature_weight=6.0,
-               normal_weight=4.0):
+               normal_weight=4.0, boundary_prior=None, prior_weight=8.0):
     """Cost of walking between two adjacent faces. Higher means a likelier edge."""
     spatial = np.linalg.norm(centres[pairs[:, 0]] - centres[pairs[:, 1]], axis=1)
     scale = float(np.median(spatial)) or 1.0
@@ -54,6 +54,16 @@ def edge_costs(centres, normals, pairs, fields=None, feature_weight=6.0,
     for values in (fields or {}).values():
         scaled = _normalise(values)
         difference = difference + np.abs(scaled[pairs[:, 0]] - scaled[pairs[:, 1]])
+
+    if boundary_prior is not None:
+        # How often an ensemble of runs put these two faces in DIFFERENT patches.
+        # Thresholding that agreement directly does not work: disagreements are
+        # scattered and never close into curves, so merging on them leaks until
+        # the model is one patch. As a cost it behaves properly -- a pair that
+        # runs keep separating becomes expensive to cross, and the final
+        # segmentation puts a boundary there because it is cheaper to go around.
+        difference = difference + prior_weight * np.clip(
+            1.0 - np.asarray(boundary_prior, dtype=float), 0.0, 1.0)
 
     return (spatial / scale) * (1.0 + feature_weight * difference) + 1e-6
 
@@ -97,9 +107,58 @@ def _assign(neighbours, weights, seeds, face_count):
     return owner, distance
 
 
+def consensus_patches(centres, normals, pairs, scales=(1200, 2000, 3200),
+                      repeats=2, fields=None, agreement=0.6, iterations=2,
+                      feature_weight=6.0, normal_weight=4.0, seed=7, progress=None):
+    """Run the segmentation many times and keep only the boundaries runs agree on.
+
+    A single run is one opinion. Its seeding is arbitrary, and where a patch
+    boundary lands in a smooth region depends on where the nearest seeds happened
+    to fall -- so a boundary can appear in one run and not the next. Real edges do
+    not behave that way: a crease separates the same two triangles no matter how
+    the surface was seeded, and no matter whether it was cut into 1,200 patches or
+    3,200.
+
+    So vary both the seeding and the scale, and count. For every pair of adjacent
+    triangles, how many runs put them in the same patch? Merge the pair only if
+    most runs did. What survives is the set of boundaries that are a property of
+    the geometry rather than of one arbitrary seeding, and the patches between
+    them are correspondingly more trustworthy.
+
+    Runs at different scales also disagree usefully: a fine run splits a barnacle
+    from its neighbour, a coarse run keeps a whole rib together, and the pairs they
+    agree on are the ones that matter at every scale.
+    """
+    from scipy.sparse import coo_matrix
+    from scipy.sparse.csgraph import connected_components
+
+    face_count = len(centres)
+    together = np.zeros(len(pairs), dtype=np.int32)
+    runs = 0
+
+    for scale in scales:
+        for repeat in range(max(1, int(repeats))):
+            labels = superpatches(centres, normals, pairs, target_patches=scale,
+                                  fields=fields, iterations=iterations,
+                                  feature_weight=feature_weight,
+                                  normal_weight=normal_weight,
+                                  seed=seed + runs * 101 + repeat)
+            together += labels[pairs[:, 0]] == labels[pairs[:, 1]]
+            runs += 1
+            if progress:
+                progress(runs, len(scales) * max(1, int(repeats)), scale,
+                         int(labels.max()) + 1)
+
+    merge = (together / float(runs)) >= agreement
+    graph = coo_matrix((np.ones(int(merge.sum())), (pairs[merge, 0], pairs[merge, 1])),
+                       shape=(face_count, face_count))
+    _, labels = connected_components(graph, directed=False)
+    return labels.astype(np.int32), together / float(runs)
+
+
 def superpatches(centres, normals, pairs, target_patches=3000, fields=None,
                  iterations=3, feature_weight=6.0, normal_weight=4.0, seed=7,
-                 progress=None):
+                 progress=None, boundary_prior=None, prior_weight=8.0):
     """Split the surface into roughly `target_patches` compact, edge-respecting pieces.
 
     Returns a label per face. Deterministic for a given mesh and seed.
@@ -107,7 +166,8 @@ def superpatches(centres, normals, pairs, target_patches=3000, fields=None,
     face_count = len(centres)
     target_patches = max(1, min(int(target_patches), face_count))
 
-    costs = edge_costs(centres, normals, pairs, fields, feature_weight, normal_weight)
+    costs = edge_costs(centres, normals, pairs, fields, feature_weight, normal_weight,
+                       boundary_prior, prior_weight)
     neighbours = [[] for _ in range(face_count)]
     weights = [[] for _ in range(face_count)]
     for (left, right), cost in zip(pairs, costs):
