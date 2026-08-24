@@ -11,11 +11,17 @@ input as one small JSON file.
 
 Plan JSON accepted here:
 
-    {"parts": {"<part id>": {"outside": "#RRGGBB",
-                             "inside": "#RRGGBB",     optional
-                             "cut": 0.6}},            optional, occlusion 0..1
+    {"default": "#RRGGBB",                            colour for unassigned faces
+     "parts": {"<part name or label>": {"outside": "#RRGGBB",
+                                        "inside": "#RRGGBB",   optional
+                                        "cut": 0.6}},          optional, occlusion 0..1
      "views": ["front", "iso"],                       optional
-     "crops": [{"name": "barnacle cluster", "centre": [x, y, z], "radius": 12}]}
+     "crops": [{"name": "detail", "centre": [x, y, z], "radius": 12}]}
+
+Parts are addressed by NAME when a parts.json from select_region.py is supplied,
+and by integer label when reading a features.npz from detect_features.py. Names are
+the norm: a reusable pipeline should not know what any particular model contains,
+only that a part called whatever the agent called it covers these triangles.
 
 `inside` paints the recessed part of a region -- inside a barnacle's opening, the
 floor of a crack, the shadow between coral tubes -- using the occlusion measured
@@ -45,15 +51,32 @@ def hex_to_rgb(text):
     return tuple(int(text[i:i + 2], 16) / 255.0 for i in (0, 2, 4))
 
 
-def face_colours(features, plan):
-    """Per-face RGB from the plan, splitting inside from outside where asked."""
-    labels = features["labels"]
+def face_colours(features, plan, named_parts=None):
+    """Per-face RGB from the plan, splitting inside from outside where asked.
+
+    ``named_parts`` maps a part name to its face indices, as written by
+    select_region.py. When present the plan is keyed by those names; otherwise it
+    falls back to the integer labels in a features.npz.
+    """
     occlusion = features["occlusion"]
-    colours = np.zeros((len(labels), 3))
-    covered = np.zeros(len(labels), dtype=bool)
+    count = len(occlusion)
+    labels = features["labels"] if "labels" in features.files else None
+    colours = np.zeros((count, 3))
+    covered = np.zeros(count, dtype=bool)
 
     for key, spec in plan["parts"].items():
-        mask = labels == int(key)
+        if named_parts is not None and key in named_parts:
+            mask = np.zeros(count, dtype=bool)
+            mask[named_parts[key]] = True
+        elif labels is not None:
+            try:
+                mask = labels == int(key)
+            except (TypeError, ValueError):
+                sys.stderr.write("render: plan names unknown part %r, skipping\n" % key)
+                continue
+        else:
+            sys.stderr.write("render: plan names unknown part %r, skipping\n" % key)
+            continue
         if not mask.any():
             continue
         outside = hex_to_rgb(spec["outside"])
@@ -67,7 +90,7 @@ def face_colours(features, plan):
         covered |= mask
 
     if not covered.all():
-        colours[~covered] = (0.75, 0.75, 0.78)
+        colours[~covered] = hex_to_rgb(plan.get("default", "#BFBFC2"))
     return colours
 
 
@@ -126,7 +149,11 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--features", required=True,
-                        help="features.npz from segment.py (labels, occlusion, mesh)")
+                        help="features.npz from detect_features.py, or session.npz "
+                             "from inspect_model.py")
+    parser.add_argument("--parts", default=None,
+                        help="parts.json from select_region.py; plan keys become "
+                             "part names instead of label integers")
     parser.add_argument("--plan", required=True, help="plan JSON, see module docstring")
     parser.add_argument("--output", required=True, help="directory for plan.png")
     parser.add_argument("--size", type=int, default=900, help="pixels per panel")
@@ -143,7 +170,19 @@ def main():
     if "parts" not in plan:
         parser.error("plan has no 'parts' object")
 
-    colours = face_colours(features, plan)
+    named_parts = None
+    if args.parts:
+        if not os.path.exists(args.parts):
+            parser.error("no such file: %s" % args.parts)
+        with open(args.parts) as handle:
+            named_parts = {part["name"]: np.asarray(part["face_indices"], dtype=np.int64)
+                           for part in json.load(handle).get("parts", [])}
+        missing = [key for key in plan["parts"] if key not in named_parts]
+        if missing:
+            sys.stderr.write("render: plan names %d part(s) not in %s: %s\n"
+                             % (len(missing), args.parts, ", ".join(missing[:6])))
+
+    colours = face_colours(features, plan, named_parts)
     path = render(features["vertices"], features["faces"], features["normals"],
                   colours, plan.get("views") or ["front", "iso"],
                   plan.get("crops"), args.output, args.size,
