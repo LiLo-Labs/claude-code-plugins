@@ -32,7 +32,7 @@ MESH_SUFFIXES = ("stl", "3mf", "obj", "ply", "off", "glb", "gltf")
 
 # What a mesh file path looks like as a shell/python token.
 _PATH_TOKEN_RE = re.compile(
-    r"[\w./\\$~{}%+-]*\.(?:%s)\b" % "|".join(MESH_SUFFIXES), re.IGNORECASE)
+    r"[\w./\\$~{}%%+-]*\.(?:%s)\b" % "|".join(MESH_SUFFIXES), re.IGNORECASE)
 
 # A path that is obviously not the user's model: system temp, a scratch dir, the
 # repository's own sample fixture, a test tree.
@@ -163,7 +163,25 @@ def split_segments(command):
         current.append(char)
         index += 1
     segments.append("".join(current))
-    return [segment.strip() for segment in segments if segment.strip()]
+    return _rejoin_calls([segment.strip() for segment in segments if segment.strip()])
+
+
+def _rejoin_calls(segments):
+    """Put back together a call the split cut in half.
+
+    A heredoc or a `-c` script can spread one call over several lines, and
+    `trimesh.load(\\n    path,\\n    process=False)` must be read as a whole or the
+    keyword that makes it safe is invisible. Unbalanced parentheses are the tell.
+    """
+    merged, pending = [], None
+    for segment in segments:
+        pending = segment if pending is None else pending + "\n" + segment
+        if pending.count("(") <= pending.count(")"):
+            merged.append(pending)
+            pending = None
+    if pending is not None:
+        merged.append(pending)
+    return merged
 
 
 def leading_command(segment):
@@ -289,10 +307,11 @@ def format_block(command, findings):
         lines.extend(_wrap("why", finding.why))
         lines.extend(_wrap("instead", finding.instead))
         lines.append("")
-    lines.append("Geometry must survive painting byte-for-byte: these are "
-                 "interlocking flexi prints, and a silent re-mesh is a wasted "
-                 "multi-hour print. If this really is scratch work, run it on a "
-                 "copy under /tmp and the same command is allowed.")
+    lines.extend(line.strip() for line in _wrap(
+        "", "Geometry must survive painting byte-for-byte: these are interlocking "
+            "flexi prints, and a silent re-mesh is a wasted multi-hour print. If "
+            "this really is scratch work, run it on a copy under /tmp and the same "
+            "command is allowed."))
     return "\n".join(lines)
 
 

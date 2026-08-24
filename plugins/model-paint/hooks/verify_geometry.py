@@ -22,6 +22,7 @@ import os
 import shlex
 import struct
 import sys
+import textwrap
 import xml.etree.ElementTree as ElementTree
 import zipfile
 
@@ -249,11 +250,12 @@ def main():
         sys.stderr.write(
             "model-paint independent geometry check FAILED.\n\n"
             + "".join("  %s\n" % line for line in failures)
-            + "\nThe painted file's mesh does not match the model it was made "
-              "from, so its geometry was modified somewhere in the pipeline. Do "
-              "not print or hand over this file. Treat apply_plan.py's own "
-              "'geometry unchanged' line as unproven until this disagreement is "
-              "explained.\n")
+            + "\n" + textwrap.fill(
+                "The painted file's mesh does not match the model it was made "
+                "from, so its geometry was modified somewhere in the pipeline. Do "
+                "not print or hand over this file, and treat apply_plan.py's own "
+                "'geometry unchanged' line as unproven until this disagreement is "
+                "explained.", width=76) + "\n")
         return 2
 
     notes = ["model-paint independent geometry check: PASS -- " + line for line in passes]
