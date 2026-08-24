@@ -1,0 +1,19 @@
+{
+  "name": "model-paint",
+  "description": "Paint a 3D model for multi-filament printing from a single command. Segments the mesh into real anatomical features (eyes, horns, spikes, claws), reasons about a color plan against your filament inventory, and writes an Orca/Bambu-ready 3MF with the geometry preserved byte-for-byte.",
+  "version": "0.1.0",
+  "author": {
+    "name": "LiloLabs"
+  },
+  "license": "MIT",
+  "keywords": [
+    "3d-printing",
+    "3mf",
+    "stl",
+    "multicolor",
+    "orca-slicer",
+    "bambu",
+    "ams",
+    "painting"
+  ]
+}
