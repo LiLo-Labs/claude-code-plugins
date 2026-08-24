@@ -414,7 +414,10 @@ def run(args):
     output_path = os.path.abspath(args.output)
     if not os.path.exists(input_path):
         raise ApplyError("no such input file: %s" % input_path)
-    if output_path == input_path:
+    # realpath, not abspath: a symlinked models directory (or a symlink to the
+    # model itself) makes two different-looking paths the same file, and this
+    # guard is the one standing between --force and the user's original.
+    if os.path.realpath(output_path) == os.path.realpath(input_path):
         raise ApplyError("--output would overwrite the input model; choose another path")
     if os.path.exists(output_path) and not args.force:
         raise ApplyError("%s already exists; pass --force to replace it" % output_path)

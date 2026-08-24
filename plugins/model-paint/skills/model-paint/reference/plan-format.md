@@ -33,9 +33,11 @@ assignment shows up as bare plastic six hours into a print.
 | `assignments[].reason` | Required. One clause, user-facing: feature name plus intent. No ids, no coordinates, no field names. |
 | `default_filament` | One of the listed indices. Unassigned triangles are left unpainted and fall back to this as the object's extruder. |
 
-Do not add fields. `apply_plan.py` also accepts `faces` on an assignment for
-hand-built plans; this skill never uses it - naming a segment is what keeps the
-plan reviewable and keeps face indices out of the reasoning.
+Do not add fields. `preview.py` will honor a raw `faces` list on an assignment,
+but `apply_plan.py` will not - it resolves every assignment through
+`segment_id`, so a plan built on `faces` renders and then fails at apply time.
+Always name a segment: it is what keeps the plan reviewable and keeps face
+indices out of the reasoning.
 
 ## Checklist before writing the file
 
@@ -51,8 +53,8 @@ plan reviewable and keeps face indices out of the reasoning.
 
 | Message | Cause | Fix |
 |---|---|---|
-| `plan assigns segments not in <segments.json>: …` | id typo, or the plan was written against a different segmentation run | Re-read `summary.segments`; ids are only stable within one run |
-| `assignment for 'sNN' names filament N, which the plan does not list` | assigned an index with no `filaments` entry | Add the filament or change the index |
+| `the plan assigns N segment(s) that the segments file does not contain` | id typo, or the plan was written against a different segmentation run | Re-read `summary.segments`; ids are only stable within one run |
+| `assignment for 'sNN' uses filament N, which the plan does not list` | assigned an index with no `filaments` entry | Add the filament or change the index |
 | `default_filament N is not one of the listed filaments` | default points at an unloaded slot | Set it to the base color's index |
 | `makes no assignments; nothing to paint` | every region fell through to the default | The plan says nothing; name at least one feature |
 | `segment 'sNN' names object 'X', which is not in the model` | segments.json and the model do not match | Re-run `segment.py` on the exact file being painted |

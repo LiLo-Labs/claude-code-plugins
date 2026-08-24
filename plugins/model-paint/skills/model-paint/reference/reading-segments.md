@@ -8,7 +8,7 @@ record from `objects[].segments[]` only to test a specific claim.
 
 | Field | Means | Use it for |
 |---|---|---|
-| `id` | `s01`, `s02`, … stable within one segments.json | the only thing `plan.json` may name |
+| `id` | `s01`, `s02`, ... stable within one segments.json | the only thing `plan.json` may name |
 | `object_id` | which mesh object the face indices belong to | multi-object 3MFs; ignore for STL |
 | `component` | connected component number | telling links of a flexi chain apart |
 | `shape_hint` | one generated sentence describing the region | first-pass reading; decoded below |

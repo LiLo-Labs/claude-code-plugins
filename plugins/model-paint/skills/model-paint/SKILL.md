@@ -21,15 +21,22 @@ Two rules that never bend:
 
 ## Pipeline position
 
-| Step | Command | This skill's part |
+| Stage | Command | This skill's part |
 |---|---|---|
-| 1 | `segment.py --input M --output segments.json` | none, deterministic |
-| 2 | `preview.py --input M --segments segments.json --output prev/` | look at the pictures |
-| 3 | — | **name the features, build 2-3 plans, ask once, write plan.json** |
-| 4 | `preview.py --input M --segments segments.json --plan plan.json --output prev/` | look again, then show the user |
-| 5 | `apply_plan.py --input M --segments segments.json --plan plan.json --output painted.3mf` | none, deterministic |
+| detect | `segment.py --input M --output segments.json` | none, deterministic |
+| render | `preview.py --input M --segments segments.json --output prev/` | look at the pictures |
+| propose | - | **name the parts and show the list with its evidence** |
+| iterate | - | **fix the list until the user says it is right** |
+| color | - | **2-3 plans, ask at most once, write plan.json** |
+| render | `preview.py --input M --segments segments.json --plan plan.json --output prev/` | look again, then show the user |
+| apply | `apply_plan.py --input M --segments segments.json --plan plan.json --output painted.3mf` | none, deterministic |
 
-Scripts run as `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/<name>.py" …`.
+Scripts run as `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/<name>.py" ...`.
+
+The order is not negotiable: **the part list is confirmed before any color is
+proposed.** Color argued in the abstract is wasted work if the parts underneath
+it are wrong, and a wrong part list is exactly what cost the user six hours.
+`${CLAUDE_PLUGIN_ROOT}/docs/interaction-model.md` has the full loop.
 
 ## Before naming anything
 
@@ -44,7 +51,8 @@ Scripts run as `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/<name>.py" …`.
 3. **Fix the orientation once, in one written sentence**, before any position
    reading (below).
 4. **Know the filament inventory.** Up to 4, in independent nozzles. If the user
-   has not said what is loaded, that is the one question you get to ask.
+   has not said what is loaded, roll that into the single color question later -
+   do not ask before the part list is settled.
 
 ## Orientation
 
@@ -113,6 +121,34 @@ panels, the base takes the base color.
 
 **Never hallucinate anatomy onto a bracket.** No eyes on a mounting plate.
 
+## Confirm the part list
+
+Before color, show the parts you named as a short indented list - names,
+evidence, and how sure you are. Evidence is what makes the claim checkable:
+paired, protruding, thin, where it sits, how big. Never ids, never coordinates.
+
+```
+  head
+    L eye / R eye        paired, small, recessed          confident
+    horns L / R          paired, tapering, top            confident
+    nose horn            on the midline, front            likely
+  body
+    links 1-14           one per chain segment            confident
+    two ribbed patches near the hips                      not identified
+```
+
+Regions you could not name are listed as "not identified" rather than folded
+into the body. An unlisted region is the one the user notices missing.
+
+Then iterate. The user corrects by name in plain language - "those aren't ears,
+they're fins", "you missed the spikes down the tail", "merge the jaw into the
+head". Answer every correction with an updated render, because a list read as
+text is not the same as a list seen on the model. The loop ends when the user
+says the list is right.
+
+If the user says "just go", stop iterating and proceed with the list as it
+stands, saying which parts you were unsure about.
+
 ## Color planning
 
 The user has up to 4 filaments in **independent nozzles**. There are no swaps
@@ -140,10 +176,10 @@ detail - "natural", "high contrast", "single accent" are three different
 answers to the same model. Contrast math, thin-wall behavior, and worked
 examples: `reference/color-planning.md`.
 
-## Asking the user
+## Asking about color
 
-Ask **once**, or not at all. One message, at most three named choices, each with
-a concrete option list. Then commit.
+Once the parts are settled, ask about color **once**, or not at all. One message,
+at most three named choices, each with a concrete option list. Then commit.
 
 > The horns can go bone-white or gold, and the belly plates can match the horns
 > or stay body color. Which do you want? If you have no preference I will use
@@ -151,7 +187,7 @@ a concrete option list. Then commit.
 
 Never:
 
-- ask more than once, or ask a follow-up to an answer;
+- ask a follow-up to an answer, or reopen the part list to fix a color;
 - put coordinates, face indices, segment ids, or field names in anything the
   user reads - they approve by feature name;
 - ask when the user has already told you the answer or said "just pick" - decide,
@@ -193,8 +229,19 @@ Field rules, the validation checklist, and what each `apply_plan` error means:
 
 ## After writing the plan
 
-Render it (`preview.py … --plan plan.json`), read the contact sheet yourself
-first, then show the user the render plus the plan as a short feature list -
-"horns and claws bone, eyes black, body slate" - and the reasons. Only then run
-`apply_plan.py`. If the render shows paint where you did not intend it, fix the
-plan; do not explain the discrepancy away.
+Write each offered plan to its own file and render it (`preview.py ...
+--plan plan-natural.json`). Read the contact sheets yourself first - they are how
+you catch a segment that covers more than you thought - then show the user the
+renders next to a one-line feature summary of each: "horns and claws bone, eyes
+black, body slate". Rendering all the options is cheap and is what makes the
+choice real; at the absolute minimum, render the one the user picks before
+applying it.
+
+Then run `apply_plan.py` on the chosen plan. If a render shows paint where you
+did not intend it, fix the plan; do not explain the discrepancy away.
+
+Later adjustments ("make the spikes filament 3") edit the plan and re-render.
+Never re-run `segment.py` for a color change - the answer would be identical.
+Re-run it only when the part list itself was wrong, and re-read the ids
+afterwards if you changed any segmentation flag: ids are stable for the same
+input and parameters, and only for those.

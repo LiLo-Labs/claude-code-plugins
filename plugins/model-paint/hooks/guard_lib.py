@@ -255,7 +255,12 @@ def scan_segment(segment):
                 "pass process=False explicitly: trimesh.load(path, process=False, "
                 "force=\"mesh\")"))
 
-    match = _CONVEX_HULL_RE.search(segment)
+    # The substring test is not an optimization detail: _CONVEX_HULL_RE has two
+    # adjacent \w-class quantifiers, so on a long alphanumeric run (a base64
+    # payload, a big inline script) it backtracks quadratically -- 40k characters
+    # cost ~14s, which is the PreToolUse timeout. A literal check first means the
+    # expensive pattern only ever runs on a segment that could match.
+    match = _CONVEX_HULL_RE.search(segment) if "convex_hull" in segment else None
     if match and (_MESH_NAME_RE.match(match.group(1)) or match.group(1) == match.group(3)):
         findings.append(Finding(
             "convex hull",

@@ -751,6 +751,12 @@ def main(argv=None):
     if not os.path.isfile(options.input):
         sys.stderr.write("segment: no such file: %s\n" % options.input)
         return 2
+    if os.path.realpath(options.output) == os.path.realpath(options.input):
+        # Writing JSON over the model would destroy it, and the whole plugin
+        # rests on the input file coming back byte for byte.
+        sys.stderr.write(
+            "segment: --output would overwrite the input model; choose another path\n")
+        return 2
     if options.max_segments is not None and options.max_segments < 1:
         sys.stderr.write("segment: --max-segments must be at least 1\n")
         return 2
