@@ -29,6 +29,13 @@ rather than against the whole model, and because a real feature is contiguous.
 Growth stopping at the edge of the field is a feature, not a limitation: it is
 what makes the selection something a person can predict and correct.
 
+When an ensemble's boundary support is available (support10x.npy beside the
+session), growth also refuses to cross an edge the scales agree on. That is what
+stops a runaway: descriptor similarity alone will happily walk from a barnacle
+field onto the rib beside it if the two happen to score alike, but the boundary
+between them is one that every zoom level draws, and an edge drawn at every scale
+is not one a selection should step over.
+
 Every run writes a verification render, because a selection nobody looked at is
 not a selection anyone should paint from.
 """
@@ -83,6 +90,9 @@ def main():
                         help="also require the patch to sit within this distance")
     parser.add_argument("--same-height", type=float, default=None,
                         help="also require a similar height, as a fraction 0..1")
+    parser.add_argument("--respect-support", type=float, default=0.5,
+                        help="refuse to grow across a patch edge whose ensemble "
+                             "support is below this; 0 disables")
     parser.add_argument("--max-share", type=float, default=0.35,
                         help="refuse a selection larger than this share of the model")
     parser.add_argument("--replace", action="store_true")
@@ -122,10 +132,23 @@ def main():
     similar = distance <= (args.tolerance * scale)
 
     if args.grow == "local":
-        # Which patches touch which, from the face graph.
+        # Which patches touch which, from the face graph, and how strongly the
+        # ensemble believes each contact is really a boundary.
         pairs = session["pairs"]
         left, right = labels[pairs[:, 0]], labels[pairs[:, 1]]
         crossing = left != right
+
+        support_path = os.path.join(args.session, "support10x.npy")
+        support = np.load(support_path) if os.path.exists(support_path) else None
+        contact_support = {}
+        if support is not None and args.respect_support > 0:
+            for a, b, value in zip(left[crossing], right[crossing], support[crossing]):
+                key = (int(min(a, b)), int(max(a, b)))
+                total, count = contact_support.get(key, (0.0, 0))
+                contact_support[key] = (total + float(value), count + 1)
+            contact_support = {key: total / count
+                               for key, (total, count) in contact_support.items()}
+
         touching = {}
         for a, b in zip(left[crossing], right[crossing]):
             touching.setdefault(int(a), set()).add(int(b))
@@ -138,6 +161,10 @@ def main():
             for neighbour in touching.get(patch, ()):
                 if neighbour in reached or not similar[neighbour]:
                     continue
+                if contact_support:
+                    key = (min(patch, neighbour), max(patch, neighbour))
+                    if contact_support.get(key, 1.0) < args.respect_support:
+                        continue        # every scale draws an edge here
                 reached.add(neighbour)
                 queue.append(neighbour)
         keep = np.zeros(len(similar), dtype=bool)
