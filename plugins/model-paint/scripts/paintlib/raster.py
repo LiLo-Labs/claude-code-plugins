@@ -136,6 +136,21 @@ def render_channels(mesh, elevation, azimuth, size=800, centre=None, radius=None
     return out
 
 
+def project(points, elevation, azimuth, size, centre, radius):
+    """World points to pixel coordinates for a view, inverse of the ray setup.
+
+    Lets a caller aim at something whose 3D position is known -- a patch centroid,
+    a part's centre -- instead of hunting for it by eye in a render.
+    """
+    forward, right, up = _camera(elevation, azimuth)
+    offset = np.atleast_2d(np.asarray(points, dtype=float)) - np.asarray(centre, float)
+    across = offset @ right
+    upward = offset @ up
+    x = (across + radius) / (2.0 * radius) * (size - 1)
+    y = (radius - upward) / (2.0 * radius) * (size - 1)
+    return np.stack([x, y], axis=1)
+
+
 def region_at(mesh, picks, x, y, radius=6):
     """Triangles under a pixel, tolerant of the agent's aim being a few px off."""
     height, width = picks.shape

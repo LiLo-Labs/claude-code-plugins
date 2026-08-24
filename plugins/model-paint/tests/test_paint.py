@@ -6,6 +6,8 @@ import sys
 import tempfile
 import unittest
 
+import numpy as np
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(HERE), "scripts"))
 
@@ -133,6 +135,45 @@ class TestPaintPreservesGeometry(unittest.TestCase):
         obj = model.mesh_objects()[0]
         with self.assertRaises(IndexError):
             model.paint_object(obj, {obj.triangle_count: 1})
+
+
+class TestProjection(unittest.TestCase):
+    """project() must invert the camera the renderer uses, or a click aimed from a
+    known 3D position lands on the wrong thing."""
+
+    def setUp(self):
+        import trimesh
+        from paintlib import raster
+        self.raster = raster
+        self.mesh = trimesh.creation.icosphere(subdivisions=3, radius=20.0)
+        self.centre = self.mesh.vertices.mean(axis=0)
+        self.radius = float(np.ptp(self.mesh.vertices, axis=0).max()) / 2 * 1.05
+
+    def test_a_projected_point_picks_its_own_face(self):
+        for view in ("front", "iso", "left"):
+            elevation, azimuth = self.raster.VIEWS[view]
+            colours = np.tile(np.array([0.8, 0.8, 0.8]), (len(self.mesh.faces), 1))
+            _image, picks = self.raster.render_view(
+                self.mesh, colours, elevation, azimuth, 400,
+                centre=self.centre, radius=self.radius)
+            visible = np.unique(picks[picks >= 0])
+            self.assertTrue(len(visible))
+            face = int(visible[len(visible) // 2])
+            point = self.mesh.triangles_center[face]
+            x, y = self.raster.project([point], elevation, azimuth, 400,
+                                       self.centre, self.radius)[0]
+            hit = self.raster.region_at(None, picks, int(round(x)), int(round(y)), radius=3)
+            self.assertIsNotNone(hit, "projected point missed the model in %s" % view)
+            gap = float(np.linalg.norm(
+                self.mesh.triangles_center[hit] - point))
+            self.assertLess(gap, 3.0, "%s: landed %.1fmm away" % (view, gap))
+
+    def test_centre_projects_to_the_middle(self):
+        elevation, azimuth = self.raster.VIEWS["front"]
+        x, y = self.raster.project([self.centre], elevation, azimuth, 400,
+                                   self.centre, self.radius)[0]
+        self.assertAlmostEqual(x, 199.5, delta=1.0)
+        self.assertAlmostEqual(y, 199.5, delta=1.0)
 
 
 if __name__ == "__main__":
