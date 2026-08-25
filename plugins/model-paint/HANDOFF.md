@@ -74,7 +74,53 @@ spread to touching patches that resemble it. One click selected an entire barnac
 colony — 49 patches, 2.08% of surface, stopping at the rib — and it is the first
 selection in this project whose boundary needed no cleanup afterwards.
 
-## Measured: Monte Carlo consensus, and what it did and did not fix
+## Measured: the scale ladder, and why one scale can never work
+
+**Different features need opposite ends of the ladder.** Same tolerance, same model,
+one click each, resolved at 400 / 800 / 1600 / 3200 / 6400 / 12800 patches
+(`scripts/scale_ladder.py`, one contact sheet per click):
+
+| feature | best rung | what the other end does |
+|---|---|---|
+| barnacle band, front left flank | **400** (coarsest) | 12800 shatters across the whole model |
+| barnacle colony, upper whorl | **12800** (finest) | 400 selects only part of the colony |
+
+That is a complete inversion, and it is the reason the fixed-scale trial gave seven
+clicks in ten. There is no single correct patch count: the default 2,500 was about
+six times too fine for the flank band, which is exactly why that click ran away to
+29.75%. At its own rung the same click gives **0.94%** and covers the band cleanly.
+
+**Area cannot pick the rung.** On the flank ladder 400 gives 0.94%, 1600 gives 0.32%
+and 6400 gives 0.30% — all inside the sensible band, and only 400 is the whole
+feature; the others are fragments of it. The rung has to be chosen by looking, which
+is what the contact sheet is for and what vision is genuinely better at than any
+statistic available here.
+
+**Monte Carlo consensus was the wrong instinct for the same reason.** It averaged
+over the ladder instead of choosing a rung, so a barnacle field and the rib beside it
+came out as something that is neither. It did clear the trial by area — both runaways
+gone, 13 of 13 sensible, 0 failures, from a baseline of 2 — but the renders showed
+the runaways had become *wrong and small* rather than right. Kept
+(`mc_select.py`, `mc_trial.sh`) because small-and-wrong is correctable by a human
+where 30% is not, and because its coherence statistic still flags bad selections.
+
+## Depth: absolute bands work, per-contact steps do not
+
+The worst leaks ran from a feature on the shell down onto the rock base. Blocking
+contacts with a large height step **did not stop them**: at 6,400 patches the largest
+height gap anywhere on the model is 4.07mm and the 99th percentile 2.15mm, so a 5mm
+gate blocked nothing and the selection walked down one small step at a time.
+
+This is the ensemble edge wall's failure again — *any* per-edge test is defeated by a
+gradual slope — and predicting otherwise was a mistake made twice in this project.
+The rule that survives both: **absolute constraints measured from the exemplar hold;
+per-edge constraints do not.** No chain of small steps can carry a patch outside a
+fixed distance.
+
+`--band-drop-mm 12` took the leaking rung from **9.64% to 1.80%**, removed the base
+rock from every rung, and left the already-clean rungs alone (12800: 1.61% → 1.55%).
+
+## Superseded: Monte Carlo consensus, and what it did and did not fix
 
 Run on the shell, 13 clicks, against the baseline below. Both runaways are gone —
 **29.75% → 2.76%** and **16.12% → 2.25%** — and by area the trial is **13 of 13

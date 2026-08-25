@@ -18,6 +18,16 @@ fourth has swallowed the rib" is an easy judgement from an image and a hard one 
 an area percentage. The numbers alongside each rung are there to describe what was
 picked, not to pick it.
 
+Depth belongs in this, but as an absolute band from the exemplar rather than a
+per-contact step. Measured on the shell: a selection leaked from a barnacle colony
+down onto the rock base, and blocking contacts with a large height step did not stop
+it, because at 6,400 patches the largest height gap anywhere on the model is 4.07mm
+-- the leak descends gradually, one small step at a time, and any per-edge test is
+defeated by a gradual slope exactly as the ensemble edge wall was. A band measured
+from the clicked patch has no such hole: no chain of small steps can carry a patch
+outside a fixed distance. `--band-drop-mm 12` took that rung from 9.64% of the
+surface to 1.80% and left the already-clean rungs alone.
+
 Build the ladder once per session (minutes, one segmentation per rung, cached), then
 every click is seconds.
 
@@ -113,7 +123,7 @@ def depth_gates(session, labels, centres, forward, max_depth, max_drop):
 
 
 def select_at(session, labels, fields, click_faces, tolerance, forward=None,
-              max_depth=0.0, max_drop=0.0):
+              max_depth=0.0, max_drop=0.0, band_drop=0.0, band_depth=0.0):
     """Grow from the click on one rung. Returns (face mask, patch count)."""
     faces = session["faces"]
     centres = session["vertices"][faces].mean(axis=1)
@@ -127,6 +137,27 @@ def select_at(session, labels, fields, click_faces, tolerance, forward=None,
                        for patch in chosen], axis=0)
     similar = distance <= (tolerance * float(np.sqrt(len(columns))))
     touching, _ = patch_contacts(labels, session["pairs"], None)
+
+    # Absolute bands, measured from the clicked patch rather than across a contact.
+    # A per-contact gap cannot hold a boundary at fine scales: measured on the shell
+    # at 6,400 patches the largest height gap anywhere on the model is 4.07mm and the
+    # 99th percentile 2.15mm, so a 5mm gate blocked nothing at all and the selection
+    # walked down onto the rock base one small step at a time. That is the same
+    # transitivity that defeated the ensemble edge wall -- any per-edge test is
+    # defeated by a gradual slope. A band from the exemplar is immune to it, because
+    # no chain of small steps can carry a patch outside a fixed distance.
+    if band_drop > 0 or band_depth > 0:
+        count = int(labels.max()) + 1
+        sizes = np.maximum(np.bincount(labels, minlength=count), 1)
+        if band_drop > 0:
+            mean_h = np.bincount(labels, weights=centres[:, 2], minlength=count) / sizes
+            seed_h = np.mean([mean_h[p] for p in chosen])
+            similar &= np.abs(mean_h - seed_h) <= band_drop
+        if band_depth > 0 and forward is not None:
+            along = centres @ forward
+            mean_d = np.bincount(labels, weights=along, minlength=count) / sizes
+            seed_d = np.mean([mean_d[p] for p in chosen])
+            similar &= np.abs(mean_d - seed_d) <= band_depth
 
     blocked = {}
     if forward is not None and (max_depth > 0 or max_drop > 0):
@@ -164,12 +195,19 @@ def main():
     parser.add_argument("--tolerance", type=float, default=0.30)
     parser.add_argument("--iterations", type=int, default=2)
     parser.add_argument("--seed", type=int, default=7)
+    # Measured ineffective at fine scales; kept only so the negative result is
+    # reproducible. Prefer the absolute bands below.
     parser.add_argument("--max-depth-mm", type=float, default=0.0,
-                        help="refuse to grow across a step this large along the "
-                             "view axis; 0 disables")
+                        help="per-contact step gate along the view axis. WEAK: at "
+                             "6400 patches the largest gap on the shell is 4mm, so "
+                             "any useful threshold blocks nothing")
     parser.add_argument("--max-drop-mm", type=float, default=0.0,
-                        help="refuse to grow across a step this large in world "
-                             "height; 0 disables")
+                        help="per-contact step gate in world height. Same weakness")
+    parser.add_argument("--band-drop-mm", type=float, default=0.0,
+                        help="keep only patches within this height of the clicked "
+                             "one; absolute, so a gradual slope cannot escape it")
+    parser.add_argument("--band-depth-mm", type=float, default=0.0,
+                        help="same, along the view axis")
     parser.add_argument("--size", type=int, default=460,
                         help="pixels per rung in the contact sheet")
     args = parser.parse_args()
@@ -223,7 +261,8 @@ def main():
         labels = np.load(ladder_path(args.session, scale))
         mask, patches = select_at(session, labels, fields, click_faces,
                                   args.tolerance, forward,
-                                  args.max_depth_mm, args.max_drop_mm)
+                                  args.max_depth_mm, args.max_drop_mm,
+                                  args.band_drop_mm, args.band_depth_mm)
         share = float(areas[mask].sum() / areas.sum())
         colours = np.tile(np.array(DIMMED), (len(faces), 1))
         colours[mask] = HIGHLIGHT
