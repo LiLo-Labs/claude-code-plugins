@@ -203,6 +203,10 @@ def main():
                              "any useful threshold blocks nothing")
     parser.add_argument("--max-drop-mm", type=float, default=0.0,
                         help="per-contact step gate in world height. Same weakness")
+    parser.add_argument("--rung", type=int, default=None,
+                        help="commit this rung as a part instead of surveying all "
+                             "of them; this is the second half of the loop")
+    parser.add_argument("--replace", action="store_true")
     parser.add_argument("--band-drop-mm", type=float, default=0.0,
                         help="keep only patches within this height of the clicked "
                              "one; absolute, so a gradual slope cannot escape it")
@@ -255,6 +259,55 @@ def main():
     view = args.at[0].split(":", 1)[0]
     elevation, azimuth = raster.VIEWS[view]
     forward, _right, _up = raster._camera(elevation, azimuth)
+
+    if args.rung is not None:
+        if not os.path.exists(ladder_path(args.session, args.rung)):
+            raise SystemExit("scale_ladder: rung %d not built" % args.rung)
+        labels = np.load(ladder_path(args.session, args.rung))
+        mask, patches = select_at(session, labels, fields, click_faces,
+                                  args.tolerance, forward, args.max_depth_mm,
+                                  args.max_drop_mm, args.band_drop_mm,
+                                  args.band_depth_mm)
+        share = float(areas[mask].sum() / areas.sum())
+
+        parts_path = os.path.join(args.session, "patch_parts.json")
+        document = {"parts": []}
+        if os.path.exists(parts_path):
+            with open(parts_path) as handle:
+                document = json.load(handle)
+        if (any(p["name"] == args.name for p in document.get("parts", []))
+                and not args.replace):
+            raise SystemExit("scale_ladder: %r already exists; pass --replace"
+                             % args.name)
+        document["parts"] = [p for p in document.get("parts", [])
+                             if p["name"] != args.name]
+        document["parts"].append({
+            "name": args.name, "rung": args.rung, "patches": patches,
+            "faces": int(mask.sum()), "area": round(share, 5),
+            "tolerance": args.tolerance, "band_drop_mm": args.band_drop_mm,
+            "exemplars": list(args.at),
+            "face_indices": [int(v) for v in np.flatnonzero(mask)]})
+        with open(parts_path, "w") as handle:
+            json.dump(document, handle, indent=2)
+
+        colours = np.tile(np.array(DIMMED), (len(faces), 1))
+        colours[mask] = HIGHLIGHT
+        for face in click_faces:
+            colours[face] = EXEMPLAR
+        checks = os.path.join(args.session, "selections")
+        os.makedirs(checks, exist_ok=True)
+        slug = "".join(c if c.isalnum() else "-" for c in args.name).strip("-").lower()
+        for name in dict.fromkeys([view, "iso"]):
+            if name in raster.VIEWS:
+                image, _ = raster.render_view(mesh, colours, *raster.VIEWS[name], 900)
+                raster.save_png(os.path.join(checks, "%s-%s.png" % (slug, name)), image)
+        print("%s: %d patches, %d triangles, %.2f%% of surface area"
+              % (args.name, patches, mask.sum(), 100 * share))
+        print("  rung %d, tolerance %.2f%s" % (args.rung, args.tolerance,
+              ", band %.0fmm" % args.band_drop_mm if args.band_drop_mm else ""))
+        print("  check %s/%s-*.png -- confirm the rung you picked is the rung you got"
+              % (checks, slug))
+        return 0
 
     images, rungs = [], []
     for scale in scales:
