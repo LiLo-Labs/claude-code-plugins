@@ -88,15 +88,28 @@ A small wrong selection is correctable by a human and a 30% one is not, so this 
 real progress — but it is not "one click gives the right feature".
 
 **The useful finding is a second statistic.** Area at p>=0.7 over area at p>=0.5 —
-*coherence* — separates what area cannot. Verified against the renders, n=5:
+*coherence* — separates what area cannot. Every one of the 13 was scored and 9 were
+then inspected, chosen to attack the claim: the highest unverified scores first
+(where a false positive would show) and the lowest (where a false negative would).
 
-| coherence | selection | looks like |
+| coherence | selection | what the render shows |
 |---|---|---|
 | 0.58 | mid flank rib band | one clean colony, boundary on its edge |
 | 0.56 | upper whorl colony | one clean colony, boundary on the rib |
+| 0.51 | barnacle boulder | core clean, but real spill onto the rock base |
+| 0.25 | crack-line network | one fragment of one plate, not the network |
 | 0.21 | front left flank | cracked plate *and* barnacles, ragged |
 | 0.20 | lower right of coil | speckle across three different features |
+| 0.18 | ribbed limpet caps | **inconclusive** — selection sits over the horizon |
 | 0.06 | torn break edges | fragments along crack lines |
+| 0.03 | cluster below coil | umbilicus plus speckle over base rock and coral |
+
+**No false negatives.** Nothing scoring low turned out to be a clean feature, which
+is the failure that would have sunk it. The separation is not perfectly sharp: 0.51
+is usable but spills, so the honest reading is a *ranking* — trust it above ~0.5,
+distrust it below ~0.25 — rather than a clean cut with a single correct threshold.
+Four were not inspected (0.16, 0.15, 0.07, and the 0.18 whose view was useless), so
+this is 9 of 13, not 13 of 13.
 
 So the pipeline can now tell a human *which selections not to trust*, before any
 paint — which is what the human-in-the-loop step in `docs/agentic-process.md` needs.
@@ -105,8 +118,9 @@ paint — which is what the human-in-the-loop step in `docs/agentic-process.md` 
 **Two things to be honest about.** The threshold does heavy lifting: the good colony
 covers 37.21% of the surface at p>=0.3 and 2.11% at p>=0.5, so the draws disagree a
 great deal and 0.5 is load-bearing. It is at least a principled default (a majority)
-rather than a tuned one. And n=5 renders is a hypothesis about coherence, not a
-result; the other 8 were scored but not inspected.
+rather than a tuned one. Coherence is now checked on 9 of the
+13 rather than assumed, but 4 were never looked at and one of those nine gave a
+useless view, so it is a supported ranking rather than a calibrated threshold.
 
 ## The earlier open problem, and the wall that did not fix it
 
