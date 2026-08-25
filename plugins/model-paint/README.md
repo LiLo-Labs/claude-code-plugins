@@ -72,10 +72,27 @@ Add the LiLo Labs marketplace, then install the plugin:
 ```
 
 Requires Python 3 with `numpy`, `trimesh`, `pillow` (`preview.py` writes its
-PNGs through it) and `scipy` (`verify.py` counts separate bodies with it):
-`pip install numpy trimesh pillow scipy`. Nothing beyond that — the previews
-are rendered by a small numpy rasterizer, so there is no GPU, display, or GL
-context to arrange.
+PNGs through it), `scipy` (`verify.py` counts separate bodies with it), `rtree`
+(trimesh needs it for the proximity queries behind local thickness) and
+`embreex`:
+
+```bash
+pip install numpy trimesh pillow scipy rtree embreex
+```
+
+There is still no GPU, display, or GL context to arrange. `embreex` is not a
+renderer — it is trimesh's fast ray-triangle backend, and every view is ray-traced
+one ray per pixel, so it is what makes rendering practical rather than optional.
+Without it trimesh silently falls back to a pure-numpy intersector: on this
+container that turned a seven-view session on a 2,016-triangle model from seconds
+into minutes, and made one test in the suite exhaust 16 GB of RAM and get killed.
+The fallback is silent and looks exactly like slowness, so if rendering seems
+inexplicably slow, check the backend first:
+
+```bash
+python3 -c "import trimesh; print(type(trimesh.creation.icosphere().ray).__module__)"
+# trimesh.ray.ray_pyembree = fast; trimesh.ray.ray_triangle = the slow fallback
+```
 
 ## Commands
 

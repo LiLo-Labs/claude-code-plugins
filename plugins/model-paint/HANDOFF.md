@@ -97,10 +97,12 @@ scratchpad that is now gone**. The scripts are preserved; re-run them.
 
 1. `experiments/ensemble10x.py` — 60 runs across 10 scales (400 → 13,000), six
    repeats each, accumulating per-adjacent-pair agreement. Reached run 35/60.
-   Writes `support10x.npy` incrementally.
+   Writes `support10x.npy` incrementally. **Superseded — see the statistic below.**
 2. `experiments/edgestrength.py` — 8 coarse scales (250 → 4,600), three repeats,
    recording **the coarsest scale at which each pair comes apart**. Reached 18/24.
-   Writes `edge_strength.npy`.
+   Writes `edge_strength.npy`. Now takes `--session`, so it no longer points at the
+   dead scratchpad path it was written against; it could not be re-run until that
+   was fixed.
 
 The second exists because the first's statistic is flawed, and this is the most
 important thing to understand before continuing:
@@ -119,15 +121,44 @@ important thing to understand before continuing:
 
 ## Next steps, in order
 
-1. **Re-run `experiments/edgestrength.py`** to completion. It is the cheaper of the
-   two and tests the better hypothesis.
-2. **Feed `edge_strength.npy` into `patch_select.py --respect-support`** in place of
-   `support10x.npy`, inverting the comparison (block growth across edges whose
-   strength is *below* a scale threshold, i.e. edges that appear early/coarse).
-   The wiring already exists in `patch_select.py`; only the statistic and the
-   direction of the test change.
+Steps 1 and 2 below are **built but unmeasured**: the code is written and unit
+tested, and neither has been run on the shell, because the model is not in the repo.
+Nothing here is evidence the approach works — that is step 3, and it is blocked on
+the user's file.
+
+1. ~~Re-run `experiments/edgestrength.py` to completion.~~ **Runnable now.** It took
+   a `--session` argument and lost the hardcoded scratchpad path. Not yet run on the
+   shell:
+
+   ```bash
+   python3 experiments/edgestrength.py --session work/
+   ```
+
+   It prints, and logs to `<session>/edgestrength.log`, what share of pairs separate
+   at each scale. **Read that before trusting anything downstream**: if nearly every
+   pair separates at 250, the sweep is too fine to be discriminating, which is the
+   same failure `support10x` had in the other direction.
+
+2. ~~Feed `edge_strength.npy` into `patch_select.py --respect-support`.~~ **Done.**
+   `--respect-support` (a 0..1 agreement fraction) is replaced by `--respect-edges`
+   (a patch count, default 1000), and the comparison is inverted: growth is blocked
+   across a contact whose strength is **at or below** the threshold, i.e. one a
+   coarse segmentation already draws. Low number = major edge.
+
+   The per-contact statistic is the **median** over that contact's face-pairs, not
+   the mean: pairs that never separate carry infinity and a mean would return
+   infinity for any contact with one. `support10x.npy` is no longer read at all.
+
+   The growth logic came out of `main()` into `patch_contacts()` and `grow_local()`
+   so it can be tested — `tests/test_select.py`, 12 tests, including one that pins
+   the direction of the comparison. That test exists because getting the direction
+   backwards fails silently: growth still works, selections still look plausible,
+   and the wall is simply never there.
+
 3. **Re-run `experiments/click_trial.sh`** and count failures. Success is fewer than
-   2 of 13, ideally 0. Report the number honestly either way.
+   2 of 13, ideally 0. Report the number honestly either way. **This is the step
+   that decides whether any of the above helped, and it needs the shell model.**
+   Nothing above has been measured on it.
 4. If that works, **re-run the visual agent workflow** (`workflows/visual-paint.js`)
    on this substrate. Every previous agent run was fighting ragged threshold blobs;
    agents can now click features by name with correct boundaries. This is also where
@@ -159,19 +190,32 @@ important thing to understand before continuing:
 
 ## Reproducing the working state
 
+First check the ray backend, because getting this wrong wastes an afternoon:
+
+```bash
+python3 -c "import trimesh; print(type(trimesh.creation.icosphere().ray).__module__)"
+```
+
+`trimesh.ray.ray_pyembree` is right. `trimesh.ray.ray_triangle` is the pure-numpy
+fallback trimesh drops to when `embreex` is missing, and it is silent — everything
+still works, just far slower. Views are ray-traced one ray per pixel, so on a fresh
+container without `embreex` a seven-view session on the 2,016-triangle fixture went
+from seconds to minutes, and `test_paint.TestProjection` ate 16 GB and was
+OOM-killed. `pip install embreex` fixes both. `rtree` is also needed, or the
+thickness tests error out.
+
 ```bash
 cd plugins/model-paint
-python3 -m unittest discover -s tests -p "test_*.py"     # 67 tests, all passing
+python3 -m unittest discover -s tests -p "test_*.py"     # 79 tests, all passing
 
 # Build a session for a model (renders 7 views, caches every signal, ~15s):
 python3 scripts/inspect_model.py --input <model.stl> --output work/
 
 # Over-segment the surface (~65s on 626k triangles):
-python3 -c "import sys;sys.path.insert(0,'scripts');\
-from paintlib.mesh_slic import superpatches; import numpy as np, os; \
-s=np.load('work/session.npz'); V,F=s['vertices'],s['faces']; \
-np.save('work/mesh_patches.npy', superpatches(V[F].mean(axis=1), s['normals'], \
-s['pairs'], target_patches=2500, iterations=2))"
+python3 scripts/oversegment.py --session work/ --patches 2500
+
+# Measure edge strengths, so growth can stop at major edges (slow -- 24 runs):
+python3 experiments/edgestrength.py --session work/
 
 # Click a feature:
 python3 scripts/patch_select.py --session work/ --at iso:562,247 \
@@ -179,7 +223,24 @@ python3 scripts/patch_select.py --session work/ --at iso:562,247 \
 # then LOOK at work/selections/*.png before trusting it
 ```
 
-`superpatches` has no CLI wrapper yet. Writing one is a reasonable first task.
+`oversegment.py` reports the patch count, median faces per patch and largest patch
+share it actually produced. A largest-patch share of more than a percent or two
+means the segmentation failed to divide something, and every selection built on it
+inherits that.
+
+The only end-to-end run of this chain so far was on `samples/creature.stl`, and it
+is worth being precise about what it did and did not show. Same click, same
+tolerance 0.50: with `--respect-edges 240` the selection was 5.09% of the surface;
+with `--respect-edges 0` it ran away to 48.4% and tripped the `--max-share` guard.
+So the wall is real and load-bearing, which is more than the old `support10x`
+statistic ever managed — it measurably blocked nothing.
+
+**That is a wiring check and nothing more.** The click landed on the fixture's bare
+sphere flank, where there is no feature to bound, so the boundary it stopped at is
+arbitrary rather than correct. Looking at `selections/t1-iso.png` shows a ragged
+blob on smooth surface, which is exactly what the fixture is expected to give and
+exactly why the fixture is not evidence. The method is unmeasured until the click
+trial runs on the shell.
 
 ## Test models
 
