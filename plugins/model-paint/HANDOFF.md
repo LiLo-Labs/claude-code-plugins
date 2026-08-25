@@ -535,3 +535,36 @@ divided along the ridges, which is correct rather than fragmentation.
 
 This is a substrate, not a part list. Naming, grouping into classes, and the hierarchy
 still sit on top -- but they now sit on boundaries that are the surface's own.
+
+### Classes on top of the substrate
+
+`index_classes.py` groups the deterministic regions into classes so a plan can address
+"the barnacles" rather than 43 individual cups. Three numbers per region and only
+three: its size in millimetres, its band-passed relief, and its area share. Shape
+descriptors are deliberately absent -- they were the measured noise last time (patch
+elongation r=0.26 under reseed, 22.3% of the force that shattered the panel), and the
+region boundaries already carry the shape that mattered.
+
+Shell, 6 classes over 368 regions, looked at rather than tabulated:
+
+| class | area | what it is |
+|---|---|---|
+| teal | 17.0% | every barnacle cup on the model, shell and reef both |
+| green | 5.0% | the faceted plates inside the crust breaks, and the rosette pleats |
+| red | 5.1% | the torn crust-break lips |
+| magenta | 4.0% | fine detail and cup throats |
+| orange | 1.8% | every coral whip |
+| blue | 67.1% | all the smooth large surface |
+
+Barnacles as one class everywhere and coral whips as one class everywhere is the thing
+every previous attempt failed at.
+
+**The honest flaw is blue.** It merges the shell body with the reef rock, and no
+geometric index can separate them: at this scale they are the same size and the same
+flatness, and they differ by material, which geometry does not measure. Splitting that
+class by height gives 39.14% reef and 27.98% shell body, so the separation is trivially
+available -- but height is a property of THIS model sitting this way up, not a general
+rule, and hardcoding it would be exactly the subject-specific shortcut the process doc
+forbids. The general answer is the one the pipeline was already built around: a class
+splits into connected instances, and a human names them. Geometry proposes; a person
+says which lump is rock.
