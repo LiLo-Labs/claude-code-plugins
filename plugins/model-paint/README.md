@@ -2,7 +2,8 @@
 
 > **Picking this work up?** Start with [HANDOFF.md](HANDOFF.md): current state,
 > what is measured to work, the open problem, and the dead ends not worth
-> repeating.
+> repeating. Then [docs/agentic-process.md](docs/agentic-process.md): the loop
+> this has to run as, and the failure that paid for each rule.
 
 
 Paints an STL or 3MF for multi-filament printing from one command. Segments the
