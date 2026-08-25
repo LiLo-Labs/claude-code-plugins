@@ -89,7 +89,10 @@ def _segment_entries(data, path):
                         segment["object_id"] = object_id
                     entries.append(segment)
             return entries
-        for key in ("segments", "regions", "features"):
+        # "parts" is what patch_select.py, resolve_parts.py and scale_ladder.py all
+        # write, so leaving it out sent every part map down the fallback branch below
+        # and failed with a type error rather than a readable message.
+        for key in ("segments", "regions", "features", "parts"):
             if isinstance(data.get(key), list):
                 return data[key]
         return [{"id": key, "faces": value} for key, value in data.items()]
