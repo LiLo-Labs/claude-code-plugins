@@ -91,13 +91,23 @@ def build(session, radii_mm=None, scales=14):
 
     operator = diffusion_operator(session["pairs"], count)
     dispersion = np.zeros((len(rounds), count), dtype=np.float32)
+    # Signed relief: how far the face sits outside its own smoothed neighbourhood,
+    # along its normal, in millimetres. Scale says how BIG a thing is; it cannot say
+    # whether the thing bulges or dips, and those are different features at identical
+    # size -- a whorl ridge and the flat band beside it are both ~15mm, which is
+    # exactly why a size-only index scored the ribs at 38% against the baseline's 80%.
+    offset = np.zeros((len(rounds), count), dtype=np.float32)
+    centres = triangles.mean(axis=1)
     field = normals.copy()
+    smoothed_centres = centres.copy()
     done = 0
     for index, target in enumerate(rounds):
         while done < target:
             field = operator @ field
+            smoothed_centres = operator @ smoothed_centres
             done += 1
         dispersion[index] = 1.0 - np.linalg.norm(field, axis=1)
+        offset[index] = np.einsum("ij,ij->i", centres - smoothed_centres, normals)
         sys.stdout.write("\r  radius %6.2fmm (%5d rounds)" % (radii_mm[index], target))
         sys.stdout.flush()
     sys.stdout.write("\n")
@@ -107,10 +117,15 @@ def build(session, radii_mm=None, scales=14):
     # flattens, which is what makes the peak a size rather than an amount of roughness.
     log_r = np.log(np.asarray(radii_mm))
     response = np.gradient(dispersion, log_r, axis=0)
-    characteristic = np.asarray(radii_mm)[np.argmax(response, axis=0)]
+    peak = np.argmax(response, axis=0)
+    characteristic = np.asarray(radii_mm)[peak]
+    # The sign at the face's OWN scale, normalised by that scale so it is a shape
+    # rather than a size: +1 is a ridge or a boss, -1 a groove or a throat, 0 flat.
+    signed = offset[peak, np.arange(count)] / np.maximum(characteristic, 1e-6)
     return {"radii_mm": np.asarray(radii_mm, dtype=np.float32),
             "dispersion": dispersion, "response": response.astype(np.float32),
             "characteristic_mm": characteristic.astype(np.float32),
+            "signed": signed.astype(np.float32),
             "mean_edge_mm": np.float32(edge)}
 
 
