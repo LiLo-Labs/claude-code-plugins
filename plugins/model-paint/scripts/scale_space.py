@@ -119,9 +119,17 @@ def build(session, radii_mm=None, scales=14):
     response = np.gradient(dispersion, log_r, axis=0)
     peak = np.argmax(response, axis=0)
     characteristic = np.asarray(radii_mm)[peak]
-    # The sign at the face's OWN scale, normalised by that scale so it is a shape
-    # rather than a size: +1 is a ridge or a boss, -1 a groove or a throat, 0 flat.
-    signed = offset[peak, np.arange(count)] / np.maximum(characteristic, 1e-6)
+    # Sign as a BAND-PASS, not a raw offset. The raw offset at a 15mm radius says a
+    # smooth panel on this shell bulges outward, because the shell as a whole does --
+    # measured, it labelled 89% of the panel a ridge and 58% of the ribs flat, exactly
+    # backwards, and found no grooves at all. Subtracting the offset at a coarser
+    # radius cancels whatever the object is doing globally and leaves only what this
+    # face does against its own surroundings. Normalised by the face's own scale, so
+    # it stays a shape rather than a size: +1 a ridge or boss, -1 a groove or throat.
+    rows = np.arange(count)
+    coarser = np.minimum(peak + 2, len(radii_mm) - 1)
+    local = offset[peak, rows] - offset[coarser, rows]
+    signed = local / np.maximum(characteristic, 1e-6)
     return {"radii_mm": np.asarray(radii_mm, dtype=np.float32),
             "dispersion": dispersion, "response": response.astype(np.float32),
             "characteristic_mm": characteristic.astype(np.float32),
