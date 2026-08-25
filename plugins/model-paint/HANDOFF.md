@@ -450,3 +450,46 @@ split by scale with nothing forcing every named feature to be labelled or explic
 abandoned. The lesson is that the residue render must be the DRIVER, not a cleanup
 phase: begin at 100% unlabelled and carve, and finishing while a coherent residue
 component remains must be impossible rather than merely discouraged.
+
+### Scored honestly, and a correction
+
+Dominant-class share of each class's area, on the 66 visually-verified ground-truth
+patches. Every row below is from a run that actually wrote its label file:
+
+| class | k=10 baseline | scale index (size) | size x form |
+|---|---|---|---|
+| smooth panel | 19% | **33%** | 25% |
+| rib | **80%** | 38% | 27% |
+| barnacle | 52% | **56%** | 25% |
+| coral | 43% | 48% | 30% |
+
+**The size axis is a real but partial gain.** It roughly doubles the panel — the
+surface that shattered across nine clusters with no k that could hold it — and costs
+more than half the ribs, because a whorl ridge and the flat band beside it are the
+same size and size alone cannot separate them.
+
+**The form axis, done correctly, makes everything worse.** Signed relief was first
+computed as a raw offset, which on a globally convex shell reads every face as a
+ridge: it labelled 89% of the panel a ridge, 58% of the ribs flat, and found no
+grooves at all. Band-passing it — the face's offset minus the offset two radii
+coarser — removes the global bulge and is the semantically right quantity, and it
+turns out to carry almost no class information at all: area-weighted mean by class is
+-0.025 panel, -0.027 rib, -0.015 barnacle, -0.019 coral, four numbers that are the
+same number. A clean ablation at fixed bands and floor gives 32/33/41/48 with the axis
+off and 25/27/25/30 with it on.
+
+**A correction, and the method error behind it.** An earlier version of this section
+claimed the panel reached 75% and that the failure was fixed. It was not. Those scores
+were read from a stale `scale_labels.npy`: the label build had been piped through
+`head`, which killed it with SIGPIPE before it wrote its output, so the scorer read the
+previous run's file. Two published numbers, both wrong, both flattering. Never pipe a
+script that writes files through `head`, and when a changed input produces byte-identical
+scores, that is the bug, not a robustness result.
+
+**Where this leaves the index.** The scale-space index is still the only quantity here
+that is reproducible by construction, and the characteristic-scale render still
+separates barnacle cups, coral whips and rosette pleats from the smooth body by eye.
+But as a basis for an automatic partition it is, measured, a trade rather than a fix:
+panel and rib remain in tension exactly as three earlier designs found, now from the
+other direction. What it is genuinely good for is `--peaks`: asking for one size and
+getting every instance of it on the model at once.
