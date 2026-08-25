@@ -493,3 +493,45 @@ But as a basis for an automatic partition it is, measured, a trade rather than a
 panel and rib remain in tension exactly as three earlier designs found, now from the
 other direction. What it is genuinely good for is `--peaks`: asking for one size and
 getting every instance of it on the model at once.
+
+## The foundation rework: boundaries from the index, not the tessellation
+
+Every selection this project made snapped to SLIC patches, and that is the defect under
+all the rest. SLIC seeds evenly and grows compactly, so on a sculpted surface its cell
+walls land wherever the seeding put them rather than on the edge of anything. Two
+consequences, both measured: cell-shape statistics reproduce at r=0.26 under a reseed
+so nothing built on them survives re-tessellation, and a selection can only be as clean
+as the cells it is assembled from -- which is why the painted renders show sawtooth
+colour edges running across the middle of a smooth surface.
+
+`scripts/index_regions.py` stops snapping to cells and segments the scale-space index
+itself. Edge weight between two touching faces is how differently the surface behaves
+at each: the gap in characteristic scale (in log-radius, since scale is
+multiplicative), the gap in band-passed relief, and the dihedral turn between them.
+All three are geometry in millimetres, so the graph is identical every time.
+
+The merge is Felzenszwalb-Huttenlocher, chosen for the reason it was invented: it
+adapts its threshold per region rather than applying one everywhere, so a smooth panel
+can be one large region while a barnacle field a millimetre away stays many small ones.
+That is precisely the panel-versus-rib tension that defeated every fixed-threshold
+attempt in this project. It is also seedless -- sorting edges is the only ordering it
+needs.
+
+**Measured on the shell, k=40.** 368 regions over 626,766 faces, median 698 faces,
+largest 8.91% of area, and 21 regions holding half the surface. Contrast SLIC, which
+forces near-equal areas (max/min 1.95) and so structurally forbids a large region -- the
+reason the smooth body was the thing that always shattered.
+
+**Bitwise deterministic, verified rather than argued**: two runs produce identical
+label arrays, 368 regions both times. The reseed test that killed three level-0 designs
+does not apply, because there is nothing to reseed.
+
+**What the render shows**, which is the part that matters: each whorl ridge is ONE
+continuous region along its whole sweep; every barnacle cup is individually bounded on
+its rim; each coral whip is one region along its full length; the faceted plates inside
+the crust breaks follow the actual facet edges; the rosette's pleats group as a fan.
+The boundaries are on the features. Inter-rib bands come out as separate regions
+divided along the ridges, which is correct rather than fragmentation.
+
+This is a substrate, not a part list. Naming, grouping into classes, and the hierarchy
+still sit on top -- but they now sit on boundaries that are the surface's own.
