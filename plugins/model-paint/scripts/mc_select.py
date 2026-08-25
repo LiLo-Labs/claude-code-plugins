@@ -52,6 +52,7 @@ HIGHLIGHT = (1.0, 0.30, 0.10)
 EXEMPLAR = (0.10, 0.85, 1.0)
 DIMMED = (0.86, 0.86, 0.88)
 PROFILE = (0.3, 0.5, 0.7, 0.9)
+COHERENT = 0.7
 
 
 def vote(session, mc_labels, fields, click_faces, tolerance, jitter, seed,
@@ -192,6 +193,23 @@ def main():
         "p>=%.1f %.2f%%" % (p, 100 * areas[probability >= p].sum() / areas.sum())
         for p in PROFILE)
     print(profile)
+
+    # Coherence: how much of the selection survives from the majority threshold to
+    # near-unanimity. This is the number that says whether the answer is a feature,
+    # and area is not -- measured on the shell, five selections whose areas all sat
+    # in the sensible band split cleanly on it. The two that looked like one clean
+    # thing scored 0.56 and 0.58; the mixture of cracked plate and barnacles scored
+    # 0.21, the speckle across three features 0.20, and the fragmentary crack slivers
+    # 0.06. A low score means the draws agreed only on where to start, not on what
+    # was being selected.
+    high = float(areas[probability >= COHERENT].sum())
+    kept = float(areas[mask].sum())
+    coherence = high / kept if kept > 0 else 0.0
+    print("  coherence %.2f  (area at p>=%.1f over area at p>=%.1f)"
+          % (coherence, COHERENT, args.threshold))
+    if coherence < 0.35:
+        print("  ^ low: the draws agree on the seed but not on the feature. "
+              "LOOK before painting -- this is usually a mixture or a fragment.")
     print("  check %s/mc-%s-*.png" % (checks, slug))
     return 0
 

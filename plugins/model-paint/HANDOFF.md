@@ -74,7 +74,41 @@ spread to touching patches that resemble it. One click selected an entire barnac
 colony — 49 patches, 2.08% of surface, stopping at the rib — and it is the first
 selection in this project whose boundary needed no cleanup afterwards.
 
-## What does NOT work yet — the open problem
+## Measured: Monte Carlo consensus, and what it did and did not fix
+
+Run on the shell, 13 clicks, against the baseline below. Both runaways are gone —
+**29.75% → 2.76%** and **16.12% → 2.25%** — and by area the trial is **13 of 13
+sensible, 0 failures**. `experiments/mc_trial.sh`, `scripts/mc_select.py`.
+
+**The area metric is not sufficient, and looking says so.** Of the five selections
+inspected, the two former runaways are now *wrong and small* rather than wrong and
+huge: one is a mixture of cracked plate and barnacles, the other speckle scattered
+across the umbilicus, the coral and the rock base. Both sit in the sensible band.
+A small wrong selection is correctable by a human and a 30% one is not, so this is
+real progress — but it is not "one click gives the right feature".
+
+**The useful finding is a second statistic.** Area at p>=0.7 over area at p>=0.5 —
+*coherence* — separates what area cannot. Verified against the renders, n=5:
+
+| coherence | selection | looks like |
+|---|---|---|
+| 0.58 | mid flank rib band | one clean colony, boundary on its edge |
+| 0.56 | upper whorl colony | one clean colony, boundary on the rib |
+| 0.21 | front left flank | cracked plate *and* barnacles, ragged |
+| 0.20 | lower right of coil | speckle across three different features |
+| 0.06 | torn break edges | fragments along crack lines |
+
+So the pipeline can now tell a human *which selections not to trust*, before any
+paint — which is what the human-in-the-loop step in `docs/agentic-process.md` needs.
+`mc_select.py` prints it and warns below 0.35.
+
+**Two things to be honest about.** The threshold does heavy lifting: the good colony
+covers 37.21% of the surface at p>=0.3 and 2.11% at p>=0.5, so the draws disagree a
+great deal and 0.5 is load-bearing. It is at least a principled default (a majority)
+rather than a tuned one. And n=5 renders is a hypothesis about coherence, not a
+result; the other 8 were scored but not inspected.
+
+## The earlier open problem, and the wall that did not fix it
 
 **A fixed tolerance does not generalise across feature types.** The trial:
 13 features, one click each, tolerance 0.30 (`experiments/click_trial.sh`).
@@ -127,6 +161,13 @@ Steps 1 and 2 below are **built but unmeasured**: the code is written and unit
 tested, and neither has been run on the shell, because the model is not in the repo.
 Nothing here is evidence the approach works — that is step 3, and it is blocked on
 the user's file.
+
+**Superseded by the Monte Carlo result above.** Steps 1 and 2 were built and are
+kept because the measurement they produced is what ruled the approach out: the edge
+wall blocked 339 of 7,281 contacts (4.66%) at its default against a patch graph of
+mean degree 5.8, and growth routed around it. Cutting a scattered subset of edges
+never closes a curve, so it cannot bound a region. Do not revisit it. Step 3 is
+done; the live question is now the coherence statistic and the threshold.
 
 1. ~~Re-run `experiments/edgestrength.py` to completion.~~ **Runnable now.** It took
    a `--session` argument and lost the hardcoded scratchpad path. Not yet run on the
