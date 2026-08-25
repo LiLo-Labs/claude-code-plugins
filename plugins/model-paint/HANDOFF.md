@@ -1,6 +1,8 @@
 # model-paint — handoff
 
-Read this first, then `docs/segmentation-findings.md` and `docs/orca-format.md`.
+Read this first, then **`docs/agentic-process.md`** — the loop this has to run as,
+with the failure behind each rule — then `docs/segmentation-findings.md` and
+`docs/orca-format.md`.
 Everything below was measured on real models, not assumed. Where a number appears,
 it came from a run; where something failed, the failure is recorded so it is not
 repeated.
