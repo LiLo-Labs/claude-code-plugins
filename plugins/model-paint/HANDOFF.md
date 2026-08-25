@@ -402,3 +402,51 @@ scores 3/4 at k=4 and 0/4 at k=10), and one new hard rule was paid for: a stabil
 metric is not evidence until a deliberately worthless control has lost to it — the
 reseed-ARI falsifier used to defend the best feature space is won by clustering
 patch-centroid XYZ, 0.487 to 0.293.
+
+## The scale-space index — a coordinate that is not the tessellation's
+
+Every descriptor this project clustered on was a statistic of the SLIC patch a face
+landed in, which is why nothing reproduced: patch elongation correlates 0.26 with
+itself under a mere reseed. `scripts/scale_space.py` replaces that with a quantity of
+the *surface*, measured in millimetres.
+
+Difference-of-Gaussians on the mesh. Diffusing the face-normal field is a random walk
+on the face graph, so t rounds of neighbour averaging reach a geodesic radius of about
+sqrt(t) x mean edge; dispersion of the smoothed normal says how much the surface turns
+inside that radius. Dispersion only ever rises with r, so it cannot state a size — its
+derivative across log-radius can, peaking at the radius where the ball first contains
+the whole feature. That is Lindeberg's characteristic scale, and the same reason SIFT
+seeks extrema across scale rather than within one.
+
+**It is reproducible by construction.** No seed, no patches, no rung anywhere in it —
+only vertices, faces, adjacency and normals. Two runs are bitwise identical, and two
+models are comparable because the radii are millimetres rather than patches. This is
+the property three separate level-0 designs failed to obtain by clustering.
+
+Measured on the shell (626,766 faces, mean edge 0.259mm, 14 radii from 0.39 to 22.04mm,
+about four minutes):
+
+- The characteristic-scale render separates what k-means could not. The smooth whorl
+  bands and ridges — the exact surface that shattered into confetti across nine
+  clusters — come out as **one coherent band**, with barnacle cups, coral whips and
+  rosette pleats each at their own scale. Looked at it; it is not subtle.
+- Asking for one size surfaces that size everywhere at once. `--peaks 1.0` selects
+  9.82% of the area and is, visually, every barnacle throat on the model — on the shell
+  and on the reef both — plus the crack network, the crust-break facet edges and the
+  rosette's pleat grooves. Nothing was clicked.
+
+**This is what makes rounds overlayable.** A face's characteristic scale is a number in
+millimetres attached to that face, not to a run, so passes at different rungs, with
+different clicks, in different sessions can be laid on top of each other and compared.
+A patch label can never do that: patch 40 of one run has nothing to do with patch 40 of
+the next.
+
+### The coverage failure this exposes is structural, not perceptual
+
+In the see-label-paint run the seeing agent DID name the umbilical rosette, with
+coordinates, and all three labelling crews still walked past it — it was recovered only
+by the residue sweep, which then needed three attempts to select it. The crews were
+split by scale with nothing forcing every named feature to be labelled or explicitly
+abandoned. The lesson is that the residue render must be the DRIVER, not a cleanup
+phase: begin at 100% unlabelled and carve, and finishing while a coherent residue
+component remains must be impossible rather than merely discouraged.
