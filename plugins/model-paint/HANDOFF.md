@@ -376,3 +376,29 @@ beats segmenting a picture of it.
 
 Show renders, not just numbers. State failures plainly with the measurement that
 revealed them. Do not claim something works because a metric improved — look at it.
+
+## The abstract method
+
+**`docs/labelling-method.md`** now states the labelling loop independently of any
+model: which steps are mechanical, which three judgements a human must make by
+looking, how a child level's rung is derived from the region's own scale profile
+rather than passed in, how the partition stays total and disjoint including the
+10.72% of shell faces no camera can see, and how a label gets a coordinate that is
+valid in the view that sees most of it.
+
+What changed: three independent implementations of level 0 were written and
+adversarially cross-checked, all three beat the recorded confetti failure on the
+shell (smooth-panel dominance 0.38 → 0.68 at k=6, touching-pair disagreement
+0.77 → 0.48, confirmed by looking), and subdividing a coherent parent at its own
+computed rung produced the best result in the project — the barnacle apertures
+isolated across the whole model at rung 12,800, chosen by the region rather than by
+a person.
+
+What is still open: nothing produces the same partition twice (reseed ARI 0.130 on
+the dragon, 0.193 on the shell, landmark grouping at chance), unifying the panel
+costs the ribs (panel/rib cluster overlap 0.54 → 0.88), region count is unsolved and
+dominates every comparison (on the repeated-part falsifier the *unmodified baseline*
+scores 3/4 at k=4 and 0/4 at k=10), and one new hard rule was paid for: a stability
+metric is not evidence until a deliberately worthless control has lost to it — the
+reseed-ARI falsifier used to defend the best feature space is won by clustering
+patch-centroid XYZ, 0.487 to 0.293.
