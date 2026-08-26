@@ -130,10 +130,18 @@ def build(session, radii_mm=None, scales=14):
     coarser = np.minimum(peak + 2, len(radii_mm) - 1)
     local = offset[peak, rows] - offset[coarser, rows]
     signed = local / np.maximum(characteristic, 1e-6)
+    # The whole offset ladder is kept, not just the value at each face's own scale,
+    # because the question "does this thing stand proud of what it sits on, or is it
+    # cut into it" needs the offset at the scale of the THING IT SITS ON. A barnacle
+    # cup is 1mm and stands above a 15mm shell; the exposed underlayer inside a break
+    # is the same material as the shell and the same size, and is recessed below it.
+    # No measurement at the cup's own scale can tell those apart -- only one taken at
+    # the parent's scale can.
     return {"radii_mm": np.asarray(radii_mm, dtype=np.float32),
             "dispersion": dispersion, "response": response.astype(np.float32),
             "characteristic_mm": characteristic.astype(np.float32),
             "signed": signed.astype(np.float32),
+            "offset": offset.astype(np.float32),
             "mean_edge_mm": np.float32(edge)}
 
 
