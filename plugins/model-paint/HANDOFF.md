@@ -689,3 +689,45 @@ triangles.
 the area in one class. The hierarchy is sound; the classing that sits on it is not, and
 was tuned for 368 regions rather than 121 objects. Do not paint from it until that is
 redone.
+
+### Objects choose their own scale: persistence over the merge tree
+
+Levels handed in by hand (k=15, 21, 60) are the same defect as a chosen segmentation
+rung, one level up. A cup, the colony it belongs to and the shell they sit on are
+objects at three different sizes; no single level holds all three, and a level tuned on
+one model means nothing on the next.
+
+`index_persist.py` chooses nothing. It merges every region from the weakest border to
+the strongest, keeps the whole tree, and asks of each node how long it SURVIVES: a cup
+forms when its rim joins its throat and lasts until the colony absorbs it, because
+nothing nearby is as similar to it as its own parts are, while a meaningless
+intermediate is born and absorbed almost at once. Persistence is measured in log of
+border strength, because these strengths are multiplicative exactly as the radii of the
+scale index are.
+
+Selection is the antichain problem -- a set with no ancestor among its members, so the
+result is a partition -- solved exactly, bottom up: take a node whole, or take the best
+selection among its children, whichever scores higher, scored by persistence times area.
+
+**Three assumptions had to be removed before it worked, each caught by the run.**
+- The root was given a hardcoded lifetime and beat every real object: **1 object, 100%
+  of the surface**. The root survives to the top by definition, so any persistence it
+  has is an artefact of the tree ending. It is now never selectable.
+- The floor was a percentile. It is now the weakest border actually present, and the
+  ceiling the strongest, both read off this model -- so persistence is measured against
+  the range of borders this surface has rather than a number meaning something else on
+  the next model.
+- Leaves were treated as born at zero, which made every leaf look immortal and returned
+  **1,776 objects of one leaf each**. A leaf is not born at zero: it was built by
+  merging faces, and its birth is its own internal variation, the strongest border
+  already inside it. That is FH's Int(C), read off the same weights.
+
+Shell: 1,797 leaves, 3,593 tree nodes, **963 objects at mixed scales**, up to 35 leaves
+each, 26 objects holding half the surface. Looked at it: whole whorl ridges are single
+objects in the same partition as individual barnacle cups, each cup whole with its rim
+and throat, the rosette one object, every coral whip its own.
+
+**Still hand-set, and named as such:** `--base-k` and `--min-faces` for the leaf regions.
+Everything above them is derived. And the classing that turns objects into named classes
+is still the layer that does not work -- 94.71% of area in one class at the previous
+level -- so this is not paintable yet.
