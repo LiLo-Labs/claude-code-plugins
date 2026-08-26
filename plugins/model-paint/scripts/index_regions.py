@@ -91,10 +91,16 @@ def edge_weights(session, index, evidence=None, camera_weight=2.0):
     return weight.astype(np.float64)
 
 
-def felzenszwalb(pairs, weights, count, k, min_faces):
-    """Adaptive-threshold agglomeration. Returns a label per face."""
+def felzenszwalb(pairs, weights, count, k, min_faces, sizes=None):
+    """Adaptive-threshold agglomeration. Returns a label per node.
+
+    `sizes` lets this run on a graph whose nodes are already groups: the size term is
+    what makes a small node resist absorption, so a node standing for 900 faces must
+    count as 900 rather than as one. That is what allows the same merge to be applied
+    a second time, over regions instead of faces, and get a hierarchy out of it.
+    """
     parent = np.arange(count)
-    size = np.ones(count, dtype=np.int64)
+    size = np.ones(count, dtype=np.int64) if sizes is None else np.asarray(sizes, dtype=np.int64).copy()
     internal = np.zeros(count)
 
     def find(a):

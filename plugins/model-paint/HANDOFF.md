@@ -644,3 +644,48 @@ colour.
 Demonstrated on the case that motivated it. One line drawn on the front view split the
 67% merged class into **reef rock 30.61%** and **shell body 36.52%**, verified by
 looking: blue covers the reef and every coral runner on it, orange the shell above.
+
+### The barnacle defect was a missing parent, and the fix is nesting
+
+Painted, the colonies came out looking damaged: rims one filament, the throats inside
+them another. Measured, **120 of the 254 regions touching the barnacle class were split
+between classes and only 53 sat wholly inside one** -- 47.2%.
+
+The boundaries were not the problem. A cup is genuinely a rim, a wall and a throat at
+different characteristic scales, and the region step is right to separate them. The
+defect was that classing assigned every region INDEPENDENTLY, so one cup's own parts
+scattered, with nothing in the data saying they were the same cup.
+
+`index_hierarchy.py` merges twice. The first pass groups faces into regions. The second
+runs the same adaptive agglomeration again over those regions, weighted by the strength
+of the border between them, and a cup falls out as one object -- because the border
+between a rim and its own throat is weak next to the border between the cup and the
+shell it sits on. A third pass groups objects into fields.
+
+Two details that were wrong before they were right:
+- `felzenszwalb` divides k by node size, so a node standing for hundreds of faces needs
+  k scaled by the mean node size at that level. Unscaled, k=60 against a 900-face region
+  is a threshold of 0.067 and NOTHING merged: level 1 came out with the same 1797 nodes
+  as level 0.
+- Border strength is the MEAN of the mesh edges crossing it, not the minimum. One weak
+  edge along a rim is not evidence the rim is not a boundary, and the minimum lets a
+  single soft pixel dissolve a clean edge.
+
+Shell, levels k=15/21/60: 1797 sub-features, 121 objects, 47 groups. **Nesting verified
+rather than assumed: 0 of 1797 children straddle a parent, at both steps.**
+
+**The repair, measured.** Class the OBJECTS instead of the regions and sub-features split
+across classes falls from 120 to **0** -- and by construction, not by tuning: a child is
+wholly inside its parent, so it inherits its parent's class and cannot be voted on
+separately. Looked at level 1: each barnacle colony is one solid object, rims and
+throats together, the shell body one object, the reef one, the rosette one, each coral
+whip its own.
+
+This is also what makes "all barnacles orange" and "their throats black" two statements
+about different levels of one tree rather than two claims competing for the same
+triangles.
+
+**Still broken at this level:** clustering 121 objects on three numbers puts 94.71% of
+the area in one class. The hierarchy is sound; the classing that sits on it is not, and
+was tuned for 368 regions rather than 121 objects. Do not paint from it until that is
+redone.
