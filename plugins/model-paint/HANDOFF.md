@@ -880,3 +880,37 @@ invariant: a disagreeing twin pair is pulled onto whichever class carries more s
 until nothing moves. **Four objects of 962 moved.** Nothing else changed.
 
 `enforce_twins()` in `object_classes.py`, on by default.
+
+### Stop partitioning. Point at one thing and find the rest.
+
+The colours in a class render are class ids from a palette and mean nothing else, which
+is why "some barnacle colonies are a different colour from others" was the right thing
+to notice. The cause, measured: the proud classes sit at 1.83, 2.14, 2.50, 3.42 and
+6.36mm, and real barnacle cones run about 1.5-4mm. **One population is cut across four
+classes by size.** It is the height defect again on a different axis.
+
+Every repair made it worse or moved it:
+- twin repair only compares TOUCHING objects, so identical cones in different colonies
+  are never compared and never fixed
+- adaptive merging reached 100% on the twin test by swallowing 51% of the model
+- dropping a feature traded the defect for another: same-kind-elsewhere agreement
+  97.4% -> 94.8%, largest class 38.7% -> 26.0%
+
+The pattern is not a bad algorithm. It is the wrong question. "How many kinds of thing
+are on this model and where are the boundaries between them" is not answerable from
+geometry, because it is semantic. A partition must put a boundary somewhere, and a real
+population is a continuum with nowhere good to put one.
+
+`object_select.py` asks a different question. Point at one barnacle; it returns every
+object like it, anywhere on the model, and renders the answer so the radius can be
+adjusted by looking. Nothing is partitioned. Objects nobody claims stay unclaimed and
+appear in the residue instead of being swept into a nearest class, and it reports the
+distance to the next unselected object so the next step is visible rather than guessed.
+
+Demonstrated on the shell from one click: radius 0.5 gives 30 objects (0.75%), 0.9 gives
+97 (2.88%), 1.4 gives 234 (7.48%). At 1.4 every colony on the shell and the reef is
+covered -- and it has begun leaking into crack lines on the rock, which is a judgement
+from the picture and not from any number in the table.
+
+This is the same shape as the rest of the pipeline: geometry proposes, vision decides.
+k-means is retained only as a proposal to look at, never as the answer.
