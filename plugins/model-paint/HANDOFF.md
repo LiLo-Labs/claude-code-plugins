@@ -768,3 +768,33 @@ The lesson is the same one this page keeps recording: the class layer proposes g
 and only looking says what a class contains. Three of four descriptions survived several
 rounds of being repeated here because nobody had opened the renders and checked them
 one class at a time.
+
+## End to end: three printable 3MFs, geometry verified
+
+The pipeline ran start to finish on the shell without a human choosing a name, a level,
+or a colour. `scale_space` -> `index_regions` -> `index_persist` (963 objects at mixed
+scales) -> classes -> an agent naming every class by opening its render alone -> a
+verified 12-part map -> three colour schemes -> `apply_plan` -> 3MF.
+
+**12 parts, exact partition**: 626,766 faces, 626,766 written, 0 claimed twice, 0
+missing, areas summing to 1.000000000000. The underside is its own part and takes the
+default filament: 17.89% of the surface that is never painted because no camera can
+ever see it.
+
+**Three files, each verified against the source STL by `verify.py`:**
+`shell-reef.3mf`, `shell-ink.3mf`, `shell-bone.3mf`, ~13.75 MB each, all reporting
+*IDENTICAL: same triangles, same bodies, same placement* -- 626,766 triangles,
+1,880,298 vertices, 1 body, bbox [75.6, 58.4, 55.0] mm.
+
+**The naming agent earned its place again.** It found that classes 0 and 1 are the same
+feature -- barnacle cones -- split by a hard height cut near z=22mm, and likewise 7 and
+2 (throats), and that the same cut divides the shell itself between class 4 and class 3,
+so no class equalled "the shell". None of that is visible in any metric in classes.json;
+it only appears when each class is isolated and looked at. It also refused a
+`design_cuts` plane on class 3, because rock, weed stalks and the shell's lower band
+interleave in height on every side, so no plane separates them.
+
+**The height cut is the next defect.** Clustering included normalised height as a
+feature, which splits every repeated feature into an upper and a lower copy. Removing
+it is the obvious next change, and the reason it was there -- to isolate the underside --
+is better served by the measured underside test that already exists.
