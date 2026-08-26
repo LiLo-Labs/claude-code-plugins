@@ -731,3 +731,40 @@ and throat, the rosette one object, every coral whip its own.
 Everything above them is derived. And the classing that turns objects into named classes
 is still the layer that does not work -- 94.71% of area in one class at the previous
 level -- so this is not paintable yet.
+
+### The naming agent corrected the class names, and most of them were wrong
+
+A naming agent read the class renders and overturned three of the four descriptions
+that had been carried forward on this page, plus found a fourth thing nobody had:
+
+| class | called | actually is |
+|---|---|---|
+| class-2 | "every barnacle cup" | **flat pocket faces** — break plates, the mouth fan, cup bowls AND smooth panels. At least four materials in one class. |
+| class-3 | "plates and the rosette" | **crease slivers** — thin strips down coral-whip flanks and along crack edges |
+| class-4 | "every coral whip" | **cup throats** — the open mouth inside each barnacle ring |
+| class-1 | "shell body + reef rock" | **three things**: shell 30.0%, reef 19.2%, and the flat underside 17.9% |
+
+**17.90% of this model is the flat, never-visible face it stands on** — verified
+independently here: normals below -0.9 in z, sitting at the minimum z. More than a sixth
+of the surface, which no render can ever show and which should never be painted at all.
+A hand-built part map called 100% of it "reef rock".
+
+**So the four colour schemes rendered earlier were painted on wrong labels.** What was
+coloured as "barnacle colonies, 17.01%" was flat pocket faces; the barnacles that looked
+broken in those renders were not a segmentation artefact in the colonies at all -- they
+were a class that was never the colonies. Those renders are not evidence of anything and
+the areas quoted with them are wrong.
+
+**A process failure caused a second problem.** `index_regions.npy` was rewritten from
+368 to 402 regions while the naming agent was reading it, so every region id in its
+split lists refers to the old file. The agent caught this itself, by noticing an area
+recomputation contradicted its own earlier table, and said so rather than reporting
+ids that no longer mean anything. Region 340 was 8.91% of the model before the rewrite
+and 0.065% after. Do not act on those ids without regenerating the classes against the
+current regions file. Shared session state must be treated as immutable while any agent
+is reading it.
+
+The lesson is the same one this page keeps recording: the class layer proposes geometry,
+and only looking says what a class contains. Three of four descriptions survived several
+rounds of being repeated here because nobody had opened the renders and checked them
+one class at a time.
