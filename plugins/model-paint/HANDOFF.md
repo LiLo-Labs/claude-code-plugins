@@ -798,3 +798,47 @@ interleave in height on every side, so no plane separates them.
 feature, which splits every repeated feature into an upper and a lower copy. Removing
 it is the obvious next change, and the reason it was there -- to isolate the underside --
 is better served by the measured underside test that already exists.
+
+### Classing by what a thing IS: height out, parent-relative elevation in
+
+Giving every feature type one colour and looking at all six views exposed three
+identification defects, all of them classification errors sitting on correct
+boundaries.
+
+**Height split every repeated feature in two.** It was a clustering feature, so the
+barnacle cones above z=22mm and the identical cones below became two classes, as did
+their throats, as did the shell itself -- no class equalled "the shell". Height is not a
+property of what a thing IS; a cup is a cup on the crown or at the foot. Removed. The
+one job it did, isolating the underside, is now done by measurement: downward normals at
+the model's lowest extent, invisible from every direction.
+
+**The underlayer exposed inside a break could not be separated from the outer shell.**
+Same material, same size, same flatness -- nothing measured at its own scale
+distinguishes them. What does is that one is a step BELOW its surroundings and the other
+IS the surroundings. `object_classes.py` adds **parent-relative elevation**: an object's
+offset measured at the scale of the thing it sits on (default 4x its own), normalised by
+its own size. Positive stands proud (a barnacle on a shell), negative is recessed (an
+underlayer revealed by a break, a groove floor), zero is the surface. That is the
+generic three-way split between applied, revealed and base, and no earlier feature set
+could express it. It required keeping the whole offset ladder in `scale_space.npz`
+rather than only the value at each face's own scale.
+
+**An over-reaching class cannot be fixed by choosing k**, since raising it re-cuts every
+good class too. `--split <class>` re-clusters within one class only.
+
+Measured on the shell, 963 objects into 8 classes plus the hidden underside:
+- **The height duplication is gone.** Barnacle cones are one class across the whole
+  model, crown and reef alike, in all six views. Same for their throats.
+- **The revealed underlayer separates**, as a class the algorithm itself labels
+  *recessed*.
+- **Shell and rock merged into one 53.30% class, exactly as predicted.** Height was the
+  only thing separating them. This is honest rather than broken: they differ by
+  material, which geometry does not measure, and `design_cuts.py` is the tool for it.
+  An honest merge plus a drawn boundary beats a fake separation that duplicates every
+  other feature.
+- **New defect: "recessed" over-merges.** One class holds both the break interiors and
+  the valleys between ribs. Both are genuinely recessed; they are not the same thing.
+  That is what `--split` is for.
+
+The remaining errors are now concentrated in two named classes instead of smeared
+across all of them.
