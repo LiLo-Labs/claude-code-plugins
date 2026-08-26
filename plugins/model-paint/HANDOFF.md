@@ -842,3 +842,41 @@ Measured on the shell, 963 objects into 8 classes plus the hidden underside:
 
 The remaining errors are now concentrated in two named classes instead of smeared
 across all of them.
+
+### Two opposing invariants, because one of them certifies nothing
+
+Eight agents each rendered one class alone across six views and found a defect no class
+map shows: **identical adjacent instances were landing in different classes.** Two
+barnacle cones in the same chain, one class 0 and the next class 2. Four neighbouring
+rosettes across three classes. Adjacent identical rib grooves alternating stripe by
+stripe. One continuous crack running through four classes. One agent's verdict: the
+class was "a fragment skimmed off five different feature populations".
+
+That is not a class holding two things, and no amount of splitting repairs it. It is a
+fixed-k cut passing through the middle of a dense population.
+
+**The obvious fix was measured and was worse.** Replacing k-means with adaptive
+merging in feature space took twin agreement from 92.6% to 100% -- and the render showed
+one class swallowing 51% of the model, barnacles and rock and coral together. A single
+all-consuming class scores 100% on a twin test. That is the same trap an earlier agent
+caught in this project when a worthless geographic-wedge space beat a real one on a
+stability metric: **a test a worthless answer passes cannot certify a good one.**
+
+So two invariants, always measured together, over pairs of objects that touch on the
+mesh:
+- **twins** -- near-identical in feature space -- MUST share a class (54 pairs)
+- **distinct neighbours** -- far apart in feature space -- MUST NOT (1,021 pairs)
+
+| | classes | twins | distinct | balance | largest |
+|---|---|---|---|---|---|
+| graph merge, s=4.0 | 27 | 100.0% | 63.9% | 0.779 | 51.0% |
+| graph merge, s=3.2 | 30 | 100.0% | 84.4% | 0.916 | 36.5% |
+| k-means k=12 | 12 | 92.6% | 99.6% | 0.960 | 38.4% |
+| **k-means + twin repair** | **12** | **100.0%** | **99.6%** | **0.998** | **38.7%** |
+
+Merging fixed four twin pairs and broke about a hundred and fifty distinct ones. The
+repair keeps the cut that separates well and fixes only where it violates the other
+invariant: a disagreeing twin pair is pulled onto whichever class carries more surface,
+until nothing moves. **Four objects of 962 moved.** Nothing else changed.
+
+`enforce_twins()` in `object_classes.py`, on by default.
