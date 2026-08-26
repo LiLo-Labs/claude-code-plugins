@@ -1027,3 +1027,39 @@ evidence is what rescues it; the dragon is crease-bounded, so `index_regions` re
 
 **Test on more than one body.** Print-in-place is a large share of what hobbyists print,
 and every assumption of connectivity in this pipeline is invisible until one is used.
+
+### A click must snap to a whole object, and the tree searched must be the real one
+
+Two defects in `hierarchy_select.py`, both found by running the dragon end to end and
+then re-running the shell as a regression. Neither was visible from the shell alone.
+
+**A click lands on a leaf, and a leaf is not a feature.** Walking up from the clicked
+leaf assumes the whole feature is somewhere on that leaf's chain, and often it is not: a
+leaf's first merge is frequently sideways into its neighbour. On the dragon the chain
+from a dorsal spike ran 0.045% of the surface (part of one spike) straight to 0.377%
+(about one and a half), so the whole spike was never a node on that chain. Matching from
+there matched flank to flank, and the render showed exactly that -- an orange patch on
+the side of 124 spikes, most spikes untouched.
+
+The whole features are in the tree; they are what persistence selects. A click now
+SNAPS to the smallest selected object containing it, and the chain is walked from there.
+Candidates for matching are the selected objects and their ancestors, never a raw leaf,
+so a fragment can no longer match a fragment. Same three exemplars, same model: **124
+flank patches -> 34 whole spikes at radius 0.9, 53 at 1.3.** The render is a clean run
+of complete dorsal spikes.
+
+**`build_tree` was searching a tree nothing else in the pipeline uses.** It hardcoded
+`edge_weights(session, index, None, 0.0)` -- camera evidence ignored regardless of what
+the caller passed. On a crease-bounded model that costs little. On the shell, whose
+boundaries are soft relief that geometry alone does not see, it is fatal: geometry-only
+weights give **1,477 leaves and a tree in which persistence finds 2 objects, one of them
+82% of the surface**. Every barnacle selection ever run through this script was searching
+that tree. With the evidence it is **1,797 leaves and 963 objects**, identical to
+`index_persist`, and the snap has real objects to land on. `--camera-weight` is now a
+flag, and it must match `index_persist` or the two disagree about what an object is.
+
+**Radius is per-model and must be swept while looking.** Dragon spikes: 0.9 gives the
+mid-back run, 1.3 the full dorsal ridge, 1.8 reaches neck and leg spikes but starts
+taking leg plates. Shell cups: 1.3 catches the colonies whole but over-reaches onto rock
+and a shell band. There is no single good value and there should not be one -- the
+number says how wide a population is, which is a fact about the model.

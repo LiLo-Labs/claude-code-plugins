@@ -43,7 +43,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from paintlib import raster                                          # noqa: E402
 from index_regions import edge_weights, felzenszwalb                 # noqa: E402
-from index_persist import merge_tree                                 # noqa: E402
+from index_persist import merge_tree, select                         # noqa: E402
 from object_classes import hidden_underside                          # noqa: E402
 
 HIGHLIGHT = (0.95, 0.25, 0.10)
@@ -51,9 +51,21 @@ EXEMPLAR = (0.10, 0.85, 1.0)
 DIMMED = (0.86, 0.86, 0.88)
 
 
-def build_tree(session, index, base_k, min_faces, camera_weight):
-    evidence_path = None
-    weights = edge_weights(session, index, None, 0.0)
+def build_tree(session, index, base_k, min_faces, camera_weight, session_dir):
+    """The same tree index_persist builds, and it has to be the SAME.
+
+    This used to hardcode `edge_weights(session, index, None, 0.0)` -- geometry only,
+    camera evidence ignored, whatever the caller passed. On a crease-bounded model that
+    is harmless; on the shell it is fatal, because the shell's boundaries are soft
+    relief that geometry alone does not see. Measured: geometry-only weights give the
+    shell 1,477 leaves and a tree in which persistence finds TWO objects, one of them
+    82% of the surface. With the evidence it is 1,797 leaves and 963 objects. Selection
+    was being run against a tree nothing else in the pipeline uses.
+    """
+    evidence_path = os.path.join(session_dir, "view_evidence.npz")
+    evidence = np.load(evidence_path) if (camera_weight > 0
+                                          and os.path.exists(evidence_path)) else None
+    weights = edge_weights(session, index, evidence, camera_weight)
     faces, areas, pairs = session["faces"], session["areas"], session["pairs"]
     base = felzenszwalb(pairs, weights, len(faces), base_k, min_faces)
     count = int(base.max()) + 1
@@ -69,9 +81,20 @@ def build_tree(session, index, base_k, min_faces, camera_weight):
     region_weights = totals / np.maximum(seen, 1)
     region_area = np.bincount(base, weights=areas, minlength=count)
 
+    # A leaf is not born at zero; see index_persist for why. The same correction has to
+    # be made here or the antichain computed below is not the one index_persist emits.
+    inside = base[pairs[:, 0]] == base[pairs[:, 1]]
+    leaf_birth = np.zeros(count)
+    np.maximum.at(leaf_birth, base[pairs[inside, 0]], weights[inside])
+
     children, birth, death, area, used = merge_tree(region_pairs, region_weights,
                                                     count, region_area)
-    return base, children, area, used, count
+    birth[:count] = leaf_birth
+    live = region_weights[region_weights > 0]
+    floor = float(live.min()) if len(live) else 1e-6
+    ceiling = float(region_weights.max())
+    whole = select(children, birth, death, area, used, floor, ceiling)
+    return base, children, area, used, count, np.asarray(whole, dtype=np.int64)
 
 
 def node_leaves(children, node, count):
@@ -98,6 +121,10 @@ def main():
                         help="how alike another node must be, in standard deviations")
     parser.add_argument("--name", default="selection")
     parser.add_argument("--base-k", type=float, default=15.0)
+    parser.add_argument("--camera-weight", type=float, default=2.0,
+                        help="weight on multi-angle boundary evidence, when a "
+                             "view_evidence.npz is present; must match index_persist "
+                             "or the tree searched is not the one that made the objects")
     parser.add_argument("--min-faces", type=int, default=60)
     parser.add_argument("--views", default="iso")
     args = parser.parse_args()
@@ -108,15 +135,41 @@ def main():
     total = float(areas.sum())
     corners = session["vertices"][faces]
 
-    base, children, area, used, count = build_tree(session, index, args.base_k,
-                                                   args.min_faces, 0.0)
-    print("merge tree: %d leaf regions, %d nodes" % (count, used))
+    base, children, area, used, count, whole = build_tree(session, index, args.base_k,
+                                                          args.min_faces,
+                                                          args.camera_weight,
+                                                          args.session)
+    print("merge tree: %d leaf regions, %d nodes, %d whole objects"
+          % (count, used, len(whole)))
 
     parent = np.full(used, -1, dtype=np.int64)
     for node in range(count, used):
         for kid in children[node]:
             if kid >= 0:
                 parent[kid] = node
+
+    # A click does not land on a feature, it lands on a LEAF -- a flank of a spike, a
+    # sliver of a cup wall. Walking up from there is not enough, because a leaf's first
+    # merge is often sideways into its neighbour: on the dragon the chain from a spike
+    # went 0.045% (part of one spike) straight to 0.377% (about one and a half), so the
+    # whole spike was never a node on that chain at all. Matching from the leaf then
+    # matched flank-to-flank -- it highlighted a patch on 124 spikes and missed the
+    # rest, which is exactly what the render showed.
+    #
+    # The whole features do exist in this tree; they are what persistence selects. So a
+    # click SNAPS to the smallest selected object containing it, and the chain is walked
+    # from there. The tree is still what lets a click go coarser -- spike, then row of
+    # spikes, then body -- but it no longer has to start from a fragment.
+    is_whole = np.zeros(used, dtype=bool)
+    is_whole[whole] = True
+
+    def snap(node):
+        walk = node
+        while walk >= 0:
+            if is_whole[walk]:
+                return int(walk)
+            walk = parent[walk]
+        return int(node)
 
     # Several exemplars, because one is never enough for a real population. A cup at
     # the crown, a cup on the reef and a cup in a crowded bed differ enough that a
@@ -182,9 +235,11 @@ def main():
                        float(areas[mask].sum() / total), bool(buried[mask].mean() > 0.5))
         return cache[node]
 
-    chain = [leaf]
+    chain = [snap(leaf)]
     while parent[chain[-1]] >= 0:
         chain.append(int(parent[chain[-1]]))
+    if chain[0] != leaf:
+        print("click snapped from leaf %d to whole object %d" % (leaf, chain[0]))
     print("ancestor chain from the click (%d steps):" % (len(chain) - 1))
     for step, node in enumerate(chain[:12]):
         _row, _m, extent, share, _h = describe(node)
@@ -202,7 +257,7 @@ def main():
     # size is used only to line the exemplars up with each other; it is not part of the
     # signature they are matched by, which stays scale-free.
     def chain_of(start):
-        walk = [start]
+        walk = [snap(start)]
         while parent[walk[-1]] >= 0:
             walk.append(int(parent[walk[-1]]))
         return walk
@@ -226,10 +281,21 @@ def main():
 
     # Every node in the tree, scored against the target. Maximal matches only, so a cup
     # and its own rim are never both returned.
+    # Candidates are whole objects and their ancestors -- never a raw leaf. Scoring
+    # every node in the tree meant a fragment could match a fragment, which is how the
+    # flank-patch selection happened. Anything below a selected object is a part of one
+    # and is reachable by asking for sub-parts, not by a similarity search.
+    candidate = np.zeros(used, dtype=bool)
+    for node in whole:
+        walk = int(node)
+        while walk >= 0 and not candidate[walk]:
+            candidate[walk] = True
+            walk = parent[walk]
+
     rows = np.zeros((used, 6))
     live = np.zeros(used, dtype=bool)
-    for node in range(used):
-        r, m, ext, sh, hid = describe(node)
+    for node in np.flatnonzero(candidate):
+        r, m, ext, sh, hid = describe(int(node))
         rows[node] = r
         live[node] = (not hid) and sh > 0
     scale = rows[live].std(axis=0)
