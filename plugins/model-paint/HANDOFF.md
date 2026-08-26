@@ -603,3 +603,44 @@ Measured on the shell, 32 directions at 900px:
 Geometry and the camera fail in different places -- geometry measures surfaces no camera
 can see, the camera notices edges geometry blurs across -- which is the only good reason
 to combine two signals rather than pick one.
+
+### More angles do not fix a boundary that emits no signal
+
+The claim worth testing was that enough rotations, scales and zooms would leave no
+segmentation error. Tested by tripling the camera directions, 32 to 96, at 1200px:
+
+| | regions | area in regions straddling rock and shell | largest such |
+|---|---|---|---|
+| 32 views | 402 | 11.51% | 3.23% |
+| 96 views | 454 | **16.14%** | **5.26%** |
+
+Detection improved exactly as predicted -- faces seen from no direction fell 10.72% to
+2.66%, pairs never observed 19.82% to 5.47%, median 28 views per pair. And the material
+merge got **worse**. Sharper evidence on the visible edges let the adaptive threshold
+tolerate more internal variation elsewhere, so regions merged more freely across the one
+junction that shows nothing. More angles photograph the same absence of an edge more
+times. Detection was never the problem.
+
+Two limits, and neither is fixed by looking harder:
+- **A boundary with no edge.** Shell meets reef tangent, same brightness, no crease.
+  Nothing to find at any resolution from any direction.
+- **An edge with no boundary.** Every wrinkle on the rock is a real edge and more views
+  confirm it harder, pushing toward over-segmentation. Which real edges are PART
+  boundaries is a question of meaning, not of evidence.
+
+### The design cut: draw the boundary, leave the mesh alone
+
+`design_cuts.py` invents the boundary instead of hunting for it. Two points picked on a
+rendered view define a plane swept along that view's axis -- the slice every 3D tool
+offers -- and a person or an agent looking at the render places it in one gesture, along
+the waterline where rock becomes shell, where no measurement can.
+
+**Nothing touches the mesh.** A cut only reassigns which named part a triangle belongs
+to; vertices, triangle indices and build placement are untouched, and the paint codec
+then preserves them byte-for-byte. That is what makes an invented boundary safe on
+interlocking flexi models: the design lives in the label, and a label is only ever a
+colour.
+
+Demonstrated on the case that motivated it. One line drawn on the front view split the
+67% merged class into **reef rock 30.61%** and **shell body 36.52%**, verified by
+looking: blue covers the reef and every coral runner on it, orange the shell above.
