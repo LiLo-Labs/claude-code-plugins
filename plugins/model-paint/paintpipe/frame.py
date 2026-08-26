@@ -49,7 +49,7 @@ class Frame:
     def diagonal_mm(self):
         return float(np.linalg.norm(self.extent_mm))
 
-    def working_mesh(self, mesh):
+    def working_mesh(self, mesh, store=None, inputs=()):
         """A copy of the mesh expressed in this frame's millimetres. RAY TARGET ONLY.
 
         Every length above this line is in millimetres and every length below it is in
@@ -63,8 +63,12 @@ class Frame:
         copy exists so rays can be cast in the units the rest of the system speaks.
         """
         import trimesh
+        from . import validate as validate_module
         working = trimesh.Trimesh(vertices=self.to_local(mesh.vertices),
                                   faces=mesh.faces, process=False)
+        working, checks = validate_module.validate_and_repair(working, store=store,
+                                                              inputs=inputs)
+        self.checks = checks
         return working
 
     def params(self):

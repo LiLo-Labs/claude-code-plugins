@@ -29,6 +29,12 @@ class Policy:
 
     # §4.5, §9 -- when to stop looking.
     incidence_bins: int = 3          # distinct viewing-angle bins required per point
+    # Every area is either sampled at least this many times -- across cameras, rigs and
+    # bands -- or it is INVISIBLE, and the invisible set is measured and reported rather
+    # than quietly excluded. A single look can be wrong in ways that thirty looks from
+    # different directions under different light cannot all be wrong in the same way,
+    # which is what lets imperfect masks resolve into a reliable answer (§7, §8).
+    min_samples: int = 30            # admitted observations required per point per band
     coverage_target: float = 0.995   # fraction of area meeting the coverage rule
     info_gain_floor: float = 0.02    # stop when marginal bits per view falls below
 

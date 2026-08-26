@@ -60,3 +60,51 @@ fitting the method to the model.
 | `scallop-shell-barricade.stl` | 8.26mm, 0.61mm |
 | `baby-dragon.stl` | 1.02mm |
 | `creature.stl` | 6.72mm |
+
+## Input validation is a stage, not an assumption (§4.1 step 1)
+
+`validate.py` checks and repairs every input before anything reasons about it. It was
+promoted to a stage because its absence produced a confidently wrong answer, and the
+failure mode is the dangerous kind: **the renders look correct while every quantity
+derived from the same mesh is wrong.**
+
+Every model in the sample set failed the orientation check:
+
+| model | bodies | wound inward |
+|-------|--------|--------------|
+| `scallop-shell-barricade.stl` | 1 | 1 |
+| `baby-dragon.stl` | 29 | 26 |
+| `creature.stl` | 5 | 5 |
+
+STL stores no winding guarantee and no vertex sharing. The rasteriser flips a normal
+toward the camera per pixel, so pictures render correctly regardless -- which is exactly
+why this hid. Only surface-space uses of a normal expose it, and they fail hard:
+
+- View planning aims a camera "along the normal" of an unseen point **into the object**.
+- A ray cast to ask whether a point can see out hits the model immediately. The shell
+  measured as **99.97% occluded from every direction**, contradicting its own renders.
+  After repair the same test returns **99.18% reachable, 0.82% genuinely enclosed.**
+
+Orientation is verified by **per-body signed volume**, not by agreement with the outward
+radial direction. The radial test is a poor proxy on anything non-convex: the correctly
+oriented dragon reads 56.7% agreement, because a spike under the tail really does point
+away from the centroid. It must be per body, too -- a print-in-place model has no single
+volume whose sign means anything.
+
+The repairs obey one rule: **vertex positions and face order never change.** Welding and
+re-winding alter connectivity and orientation, which geodesics and view planning need,
+while a face keeps its index so `hit_id` still routes a belief to the original file's
+triangle and the exported mesh stays the one the user supplied. Degenerate faces are
+therefore reported and never removed -- deleting one renumbers every face after it.
+
+## Coverage: 30 overlaps per area, and visibility measured not assumed
+
+The predicate has two halves and a point must pass both: at least `min_samples` (30)
+admitted observations, and at least `incidence_bins` distinct viewing-angle bins. Thirty
+looks from one direction are one look repeated -- they share every systematic error that
+direction has -- so count and spread are separate requirements.
+
+Direction bins are the six faces of a cube: the signed dominant axis. An earlier version
+combined an octant with a dominant axis and took it modulo the bin count, which collided
+constantly, so genuinely different views were recorded as the same view and coverage
+stalled at a third with no indication why.
