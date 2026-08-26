@@ -95,17 +95,26 @@ def select(children, birth, death, area, root_count, floor, ceiling):
     against the range of borders this surface happens to have rather than against a
     number that would mean something different on the next model.
 
-    The root is never selectable. It survives to the top by definition -- there is
+    A root is never selectable. It survives to the top by definition -- there is
     nothing left to absorb it -- so any persistence assigned to it is an artefact of
     the tree ending, and giving it one makes it beat every real object and return the
     whole model as a single part. That is exactly what a hardcoded root lifetime did
     here on the first run: one object, 100% of the surface.
+
+    There is more than one root whenever the model has more than one body, and print-
+    in-place models have dozens: the baby dragon is 29 separate solids that interlock
+    at the joints. Merging never crosses between them, so what `merge_tree` returns is
+    a FOREST. Walking only the last node created selected 7 objects on that dragon and
+    silently discarded 28 of its 29 bodies -- 97% of the surface, no warning. Every
+    root is walked.
     """
     total = len(birth)
     score = np.zeros(total)
     take = np.zeros(total, dtype=bool)
-    root = root_count - 1
-    for node in range(total):
+    roots = forest_roots(children, root_count)
+    is_root = np.zeros(total, dtype=bool)
+    is_root[roots] = True
+    for node in range(root_count):
         if area[node] <= 0:
             continue
         start = max(float(birth[node]), floor)
@@ -113,9 +122,9 @@ def select(children, birth, death, area, root_count, floor, ceiling):
         own = float(np.log(max(end, start * (1.0 + 1e-9)) / start) * area[node])
         left, right = children[node]
         below = 0.0 if left < 0 else score[left] + score[right]
-        if left < 0:
+        if left < 0 and not is_root[node]:
             score[node], take[node] = own, True
-        elif node == root or below > own:
+        elif left < 0 or is_root[node] or below > own:
             score[node] = below
         else:
             score[node], take[node] = own, True
@@ -129,8 +138,24 @@ def select(children, birth, death, area, root_count, floor, ceiling):
         walk(children[node][1])
 
     sys.setrecursionlimit(1 << 20)
-    walk(root_count - 1)
+    for root in roots:
+        walk(int(root))
     return chosen
+
+
+def forest_roots(children, used):
+    """Every node that is nobody's child -- one per connected body, not one per model.
+
+    A single-body model has exactly one; the print-in-place dragon has 29. Reading the
+    roots off the tree rather than assuming the last node created is the only one is
+    what makes the selection cover the whole surface instead of one body of it.
+    """
+    is_child = np.zeros(used, dtype=bool)
+    kids = children[:used]
+    inner = kids[:, 0] >= 0
+    is_child[kids[inner, 0]] = True
+    is_child[kids[inner, 1]] = True
+    return np.flatnonzero(~is_child)
 
 
 def leaves_of(children, node, count, out):

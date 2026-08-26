@@ -987,3 +987,43 @@ rather than a cup and poisoned the match. Selection quality is bounded by whethe
 exemplars are actually on the feature, which is a thing only looking establishes. The
 agent instructions now require verifying each coordinate against the render and
 reporting which were replaced.
+
+### The pipeline silently discarded 28 of the dragon's 29 bodies
+
+Every result up to here was measured on `scallop-shell-barricade.stl`, which is one
+connected solid. Running the same code unchanged on `baby-dragon.stl` -- 475,270
+triangles, a print-in-place articulated model -- exposed a bug that a single-body test
+set can never show.
+
+`merge_tree` agglomerates along the face-adjacency graph, so it never merges across a
+gap. The dragon is **29 separate interlocking solids**; the function therefore returns a
+FOREST with 29 roots, not a tree. `select` walked `root_count - 1`, the last node
+created, which is the root of exactly one of them. Result: **7 objects selected on a
+475k-triangle model, 97% of the surface silently unclaimed**, with no error and no
+warning. The printed node count was the only tell -- 2,653 nodes where 1,341 leaves
+should give 2,681, the 28 missing merges being the 28 gaps.
+
+`forest_roots()` now reads the roots off the tree (nodes that are nobody's child) and
+every one is walked. On the dragon that is **7 -> 197 objects and 0.00% of the surface
+unclaimed**. On the shell the output is **byte-identical, 963 objects**, because a
+one-body model has exactly one root either way.
+
+A root stays unselectable for the reason it always was -- its death is infinite, so any
+persistence it gets is an artefact of the tree ending -- with one exception now
+necessary: a body small enough to be a single leaf is its own root, and would otherwise
+vanish entirely rather than merely being subdivided.
+
+**What the dragon shows about the index itself.** Nothing was tuned for it. The
+characteristic-scale render puts every dorsal spike and claw in one fine band, the body
+mid, the skull plate coarse. Persistence then returns the skull as one object with the
+eyes separate, each foot as one object with its claws, and each spike as its own. The
+one honest defect visible in the render is the large tail fins, which are still split
+into tip and base.
+
+The two models fail in opposite directions, which is why both are needed: the shell has
+soft relief and almost no creases, so geometry alone under-segments it and camera
+evidence is what rescues it; the dragon is crease-bounded, so `index_regions` reports
+"no view_evidence.npz; geometry only" and still lands its boundaries correctly.
+
+**Test on more than one body.** Print-in-place is a large share of what hobbyists print,
+and every assumption of connectivity in this pipeline is invisible until one is used.
