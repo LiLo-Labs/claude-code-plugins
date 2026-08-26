@@ -155,56 +155,108 @@ def information_gain(before, after):
 
 def plan_views(frame, state, policy, bands, round_index, base=None,
                deficit_points=None, deficit_normals=None, taken=None):
-    """§4.5 / §12. Directions for the next round.
+    """§4.5 / §12. Directions for the next round, as (direction, framing) pairs.
 
-    The base round is a Fibonacci sphere -- spread rather than random, so it is
-    reproducible without a seed.
+    Every round does TWO things, because the deficit has two causes that need opposite
+    remedies and doing only one of them stalls:
 
-    Later rounds AIM ALONG THE DEFICIT'S OWN NORMALS, which is the whole trick. A point
-    is visible from the direction it faces unless something stands in front of it, so
-    the best camera for an unseen point is the one looking straight down its normal. An
-    earlier version aimed by taking the principal axes of the deficit's POSITIONS, which
-    is a fact about where the unseen surface sits rather than about which way it faces;
-    it left a stubborn twelve percent of the shell unseen no matter how many rounds ran,
-    because a camera pointed at a cavity from the wrong side still cannot see into it.
+      wide   -- a fresh spread of full-object views. This is what actually lifts the
+                sample count across the surface. The predicate asks for at least
+                `min_samples` observations EVERYWHERE, and only a view that sees
+                everything can raise everyone's count.
+      zoomed -- a few cameras framed on the surface that is still unseen or still
+                unresolvable. These fix the tail that wide views cannot: surface only
+                reachable at a grazing angle, whose ground sample distance from across
+                the object exceeds the band and is correctly refused by §7.
 
-    Directions are clustered so that one camera serves many deficit points, and any
-    direction already used is skipped -- repeating a view adds observations but adds no
-    information, and the information-gain floor would then stop the loop for the wrong
-    reason.
+    Measured, each alone fails in its own direction. Wide views only: the shell reaches
+    0.59 of visible area and stops, with roughly eight percent never admitted at all.
+    Zoomed views only: the median sample count runs away to 116 while coverage FALLS to
+    0.36, because a zoomed camera pours observations onto a patch and leaves the rest
+    of the object exactly where it was.
+
+    Each round's wide spread is a denser Fibonacci set, so it yields directions the
+    earlier rounds did not use. Repeating a direction adds votes without adding view,
+    and the information-gain floor would then stop the loop for the wrong reason.
     """
-    if round_index == 0:
-        count = base or max(12, 6 * len(bands))
-        return list(render_module.fibonacci_directions(count))
-    if deficit_normals is None or len(deficit_normals) == 0:
-        if deficit_points is None or len(deficit_points) == 0:
-            return []
-        centre = deficit_points.mean(axis=0)
-        primary = centre / max(np.linalg.norm(centre), 1e-9)
-        return [primary, -primary]
+    used = [] if taken is None else [np.asarray(t, dtype=float) for t in taken]
+    out = []
+
+    count = (base or max(12, 6 * len(bands))) * (1 + int(round_index))
+    for direction in render_module.fibonacci_directions(count):
+        if any(float(direction @ prior) > 0.999 for prior in used):
+            continue
+        out.append((direction, None))
+        used.append(direction)
+    if round_index == 0 or deficit_normals is None or len(deficit_normals) == 0:
+        return out
 
     normals = np.asarray(deficit_normals, dtype=float)
     normals = normals / np.maximum(np.linalg.norm(normals, axis=1, keepdims=True), 1e-12)
-    # Cluster on the sphere by nearest Fibonacci direction: a fixed, spread codebook, so
-    # the clustering is deterministic and needs no seed and no iteration count.
-    codebook = render_module.fibonacci_directions(max(24, 8 * len(bands)))
+    codebook = render_module.fibonacci_directions(
+        max(24, 8 * len(bands)) * (1 + int(round_index)))
     assignment = np.argmax(normals @ codebook.T, axis=1)
     population = np.bincount(assignment, minlength=len(codebook))
-    order = np.argsort(population)[::-1]
-    out = []
-    used = [] if taken is None else [np.asarray(t, dtype=float) for t in taken]
-    for index in order:
-        if population[index] == 0:
+    aimed = 0
+    for index in np.argsort(population)[::-1]:
+        if population[index] == 0 or aimed >= 4:
             break
         direction = codebook[index]
-        # Skip a direction already looked from: it would add votes without adding view.
-        if any(float(direction @ prior) > 0.985 for prior in used):
-            continue
-        out.append(direction)
-        used.append(direction)
-        if len(out) >= 6:
-            break
+        mine = deficit_points[assignment == index] if deficit_points is not None else None
+        # Localised spatially as well as by facing: a direction alone does not localise
+        # anything. A cluster like "faces -Y" is one whole side of the object, so framing
+        # it frames the object -- measured, every aimed camera kept the full 57.7mm
+        # radius and the overview's 0.222 mm/px footprint, which is why zooming appeared
+        # to do nothing at all. One camera per PLACE, not per direction.
+        for cluster in spatial_clusters(mine):
+            out.append((direction, cluster))
+            aimed += 1
+            if aimed >= 4:
+                break
     return out
+
+
+def spatial_clusters(points, divisions=3, keep=2):
+    """Split a set of surface points into the most populous cells of a coarse grid.
+
+    A grid rather than k-means: deterministic, needs no seed and no iteration count, and
+    the cell size is set by the extent of the points themselves rather than by a number.
+    """
+    if points is None or len(points) == 0:
+        return [None]
+    low = points.min(axis=0)
+    span = np.maximum(points.max(axis=0) - low, 1e-9)
+    cell = np.clip(((points - low) / span * divisions).astype(int), 0, divisions - 1)
+    key = (cell[:, 0] * divisions + cell[:, 1]) * divisions + cell[:, 2]
+    order = np.argsort(np.bincount(key, minlength=divisions ** 3))[::-1]
+    out = []
+    for index in order[:keep]:
+        chosen = points[key == index]
+        if len(chosen):
+            out.append(chosen)
+    return out or [points]
+
+
+def frame_deficit(deficit_points, full_centre, full_radius, margin=1.15):
+    """Centre and radius of a camera that FRAMES the deficit rather than the object.
+
+    The last stubborn part of the surface is not unreachable, it is only reachable at a
+    grazing angle -- and a grazing pixel has a large ground sample distance, so the band
+    gate refuses its vote, correctly. Measured on the shell: 99.18% of area can see out
+    along some direction, but roughly eight percent never gets admitted, because the
+    only directions that reach it cannot resolve it from across the whole object.
+
+    The fix is the one a person uses: move in. A camera framed on the deficit has a much
+    smaller footprint, so the same grazing surface clears the gate on its own merits
+    rather than by relaxing the gate. Nothing about the admission rule changes.
+    """
+    if deficit_points is None or len(deficit_points) == 0:
+        return full_centre, full_radius
+    centre = deficit_points.mean(axis=0)
+    spread = float(np.abs(deficit_points - centre).max()) if len(deficit_points) > 1 \
+        else full_radius
+    radius = float(np.clip(spread * margin, full_radius / 12.0, full_radius))
+    return centre, radius
 
 
 def observe_bundle(field, bundle, bands, policy, labeller, store=None, inputs=(),
@@ -262,6 +314,7 @@ def converge(field, mesh, frame, bands, policy, labeller, rigs=("zenithal",),
     state = coverage_state(field, bands)
     field.bands = list(bands)
     previous = 0.0
+    previous_unseen = 1.0
     reason = "budget"
     seen_directions = []
     normals = field.substrate.vertex_normals
@@ -284,10 +337,13 @@ def converge(field, mesh, frame, bands, policy, labeller, rigs=("zenithal",),
         if not directions:
             reason = "no deficit to aim at"
             break
-        for direction in directions:
+        for direction, share in directions:
             seen_directions.append(np.asarray(direction, dtype=float))
+            aim_centre, aim_radius = (centre, radius) if round_index == 0 else \
+                frame_deficit(share, centre, radius)
             camera = render_module.Camera(-np.asarray(direction, dtype=float),
-                                          [0.0, 0.0, 1.0], centre, radius, pixels)
+                                          [0.0, 0.0, 1.0], aim_centre, aim_radius,
+                                          pixels)
             for rig in rigs:
                 bundle = render_module.render_bundle(mesh, camera, rig, frame)
                 observe_bundle(field, bundle, bands, policy, labeller, store=store,
@@ -304,10 +360,16 @@ def converge(field, mesh, frame, bands, policy, labeller, rigs=("zenithal",),
         if state.holds(policy):
             reason = "coverage"
             break
-        if round_index > 0 and gain < policy.info_gain_floor:
+        unseen = state.invisible_area()
+        if round_index > 0 and gain < policy.info_gain_floor \
+                and (previous_unseen - unseen) < policy.info_gain_floor:
+            # Both halves have stalled. Stopping on the coverage gain alone was wrong:
+            # a round can lift no coverage at all while still bringing new surface into
+            # view for the first time, and that surface is exactly what the next round
+            # needs in order to lift anything.
             reason = "information gain below floor"
             break
-        previous = covered
+        previous, previous_unseen = covered, unseen
     if store is not None:
         covered = min(entry[0] for entry in state.satisfied(policy))
         ceiling = state.visibility_ceiling()

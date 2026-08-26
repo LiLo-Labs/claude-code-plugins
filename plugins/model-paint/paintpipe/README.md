@@ -108,3 +108,50 @@ Direction bins are the six faces of a cube: the signed dominant axis. An earlier
 combined an octant with a dominant axis and took it modulo the bin count, which collided
 constantly, so genuinely different views were recorded as the same view and coverage
 stalled at a third with no indication why.
+
+## Convergence: two remedies, because the deficit has two causes
+
+The coverage predicate needs at least `min_samples` observations EVERYWHERE. Each round
+therefore does two things, and measurements showed either alone fails in its own
+direction:
+
+| strategy | result on `scallop-shell-barricade.stl` |
+|----------|------------------------------------------|
+| wide views only | stalls at 0.59 of visible area; ~8% never admitted at all |
+| zoomed views only | median samples runs to 116 while coverage **falls** to 0.36 |
+| both | 0.34 → 0.60 → 0.72 → 0.76, p10 samples 8 → 16 → 30 → 46, unseen 16.7% → 4.7% |
+
+Wide views are what lift everyone's sample count; only a view that sees everything can.
+Zoomed views fix the tail wide views cannot: surface reachable only at a grazing angle,
+whose GSD from across the object exceeds the band and is correctly refused by §7. The
+fix is the one a person uses -- move in -- so the gate is never relaxed, the camera is
+just brought close enough that the surface clears it on its own merits.
+
+Aimed cameras are localised by facing **and by place**. Grouping by direction alone does
+not localise anything: a cluster like "faces -Y" is one whole side of the object, so
+framing it frames the object. Measured, every aimed camera kept the full 57.7mm radius
+and the overview's 0.222 mm/px footprint -- which is why zooming appeared to do nothing.
+With spatial sub-clustering the same cameras frame at ~21mm and 0.08 mm/px.
+
+## A full run
+
+`python3 -m paintpipe.cli --input samples/creature.stl --size-mm 60 --out run/`
+
+```
+frame: [60.0, 55.1, 55.0] mm, size declared
+  validate vertex_sharing  repaired  {'vertices_before': 6048, 'vertices_after': 1018}
+bands: ['6.72mm']
+round 0: 12 views, 0.928 of visible area at >=30 samples; p10=8181  median=11841
+round 1: 40 views, 0.995 of visible area at >=30 samples; p10=28317 median=36129
+converge: coverage after 40 views, 28826709 observations
+```
+
+Exits on **coverage**, at 0.9954 against the 0.995 target. The run writes `scheme.json`
+(regions, roles, paint sequence, gates) and `manifest.json` -- 494 entities including
+**124 rejections with reasons**, so every dropped pixel and merged region is answerable.
+
+Two honest notes on that run. The scheme has one region because the critic dropped the
+other two for never reaching `posterior_floor` anywhere, which is the critic doing its
+job on a nearly featureless test sphere with three overlapping proposals. And every
+region reports `realizable: false` because no palette or brush was declared -- §3.2's
+unconstrained mode, which produces a design rather than a plan and says which it is.

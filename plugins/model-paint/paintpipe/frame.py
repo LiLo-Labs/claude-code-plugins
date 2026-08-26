@@ -76,7 +76,11 @@ class Frame:
                 "translation": self.translation.round(9).tolist(),
                 "scale": round(self.scale, 12),
                 "extent_mm": self.extent_mm.round(6).tolist(),
-                "axis_names": self.axis_names, "size_source": self.size_source}
+                "axis_names": {name: (None if axis is None
+                                      else np.asarray(axis, dtype=float).round(6)
+                                      .tolist())
+                               for name, axis in self.axis_names.items()},
+                "size_source": self.size_source}
 
 
 def oriented_axes(mesh):
