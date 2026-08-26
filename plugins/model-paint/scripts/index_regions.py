@@ -44,7 +44,7 @@ from paintlib import raster                                          # noqa: E40
 PALETTE_SIZE = 24
 
 
-def edge_weights(session, index):
+def edge_weights(session, index, evidence=None, camera_weight=2.0):
     """Dissimilarity per adjacent face pair, from the index and the surface itself."""
     pairs = session["pairs"]
     left, right = pairs[:, 0], pairs[:, 1]
@@ -65,7 +65,30 @@ def edge_weights(session, index):
     turn = 1.0 - np.einsum("ij,ij->i", normals[left], normals[right])
     turn /= max(float(turn.std()), 1e-9)
 
-    return (scale_gap + form_gap + 2.0 * turn).astype(np.float64)
+    weight = scale_gap + form_gap + 2.0 * turn
+
+    # Camera evidence, when it exists. Geometry and the camera fail in different
+    # places, which is the only good reason to combine two signals: geometry measures
+    # surfaces no camera can see, and the camera notices edges a person would while
+    # geometry blurs across them. The three blurs are kept separate rather than summed
+    # because a fine crease between two barnacle cups and the broad edge where a ridge
+    # meets a panel are different scales of evidence, and the maximum across them says
+    # "visible as an edge at SOME scale" rather than "visible at the one I picked".
+    #
+    # A pair no direction could see contributes nothing rather than a zero: 19.82% of
+    # this model's pairs are interior, and scoring them as edge-free would quietly
+    # merge every enclosed cavity into whatever surrounds it.
+    if evidence is not None:
+        seen = evidence["seen"]
+        rows = np.asarray(evidence["evidence"], dtype=np.float64)
+        best = rows.max(axis=0)
+        observed = seen > 0
+        if observed.any():
+            spread = float(np.percentile(best[observed], 95)) or 1.0
+            camera = np.zeros(len(weight))
+            camera[observed] = np.clip(best[observed] / spread, 0.0, 3.0)
+            weight = weight + camera_weight * camera
+    return weight.astype(np.float64)
 
 
 def felzenszwalb(pairs, weights, count, k, min_faces):
@@ -120,6 +143,9 @@ def main():
                              "gives fewer, larger regions")
     parser.add_argument("--min-faces", type=int, default=200,
                         help="regions smaller than this are absorbed by a neighbour")
+    parser.add_argument("--camera-weight", type=float, default=2.0,
+                        help="how much multi-angle image evidence counts against the "
+                             "geometric terms; 0 uses geometry alone")
     parser.add_argument("--views", default="iso,front")
     args = parser.parse_args()
 
@@ -130,7 +156,13 @@ def main():
     index = np.load(index_path)
 
     faces, areas = session["faces"], session["areas"]
-    weights = edge_weights(session, index)
+    evidence_path = os.path.join(args.session, "view_evidence.npz")
+    evidence = None
+    if args.camera_weight > 0 and os.path.exists(evidence_path):
+        evidence = np.load(evidence_path)
+    elif args.camera_weight > 0:
+        sys.stderr.write("index_regions: no view_evidence.npz; geometry only\n")
+    weights = edge_weights(session, index, evidence, args.camera_weight)
     labels = felzenszwalb(session["pairs"], weights, len(faces), args.k, args.min_faces)
 
     counts = np.bincount(labels)

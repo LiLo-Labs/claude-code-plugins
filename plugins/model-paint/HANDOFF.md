@@ -568,3 +568,38 @@ rule, and hardcoding it would be exactly the subject-specific shortcut the proce
 forbids. The general answer is the one the pipeline was already built around: a class
 splits into connected instances, and a human names them. Geometry proposes; a person
 says which lump is rock.
+
+### Many angles, many scales, voting on the mesh
+
+`view_evidence.py` renders the model from every direction in the atlas and, for each
+pair of faces that touch on the MESH, accumulates how strong a visible edge runs
+between them in the image. `index_regions.py` adds that to its geometric edge weight.
+
+**This is not the recorded render-space dead end.** That failure segmented images and
+fused the result back to triangles, which shatters at five pixels per face. Nothing here
+segments an image. Each view only contributes evidence about a 3D quantity that already
+exists, and the decision is taken on the mesh. One view answers badly -- the pair may be
+edge-on, shadowed, occluded, or three pixels wide -- which is exactly why one view was
+never enough. Thirty-two answer well, because those failures are per-viewpoint and
+independent while a real crease is visible from most directions that can see it at all.
+
+Scale enters the same way: gradients at full resolution find the creases between
+barnacle cups, and the same gradients after blurring find the broad edge where a ridge
+meets a panel while ignoring the texture inside both. Three blurs are kept separate and
+combined by maximum, so a pair counts as an edge if it is visible at SOME scale rather
+than at the one that happened to be chosen.
+
+Measured on the shell, 32 directions at 900px:
+- Evidence is normalised per observation, so a pair seen from twenty angles is not
+  ranked above an equally sharp one seen from three merely for being easier to look at.
+- **19.82% of pairs are never observed from any direction.** They contribute nothing
+  rather than a zero -- scoring them edge-free would quietly merge every enclosed cavity
+  into whatever surrounds it. This is the pair-level counterpart of the 10.72% of faces
+  no camera can see.
+- Adding it: 368 regions to 402, and the largest region falls from **8.91% to 4.93%** of
+  area. The oversized merged region was being held together by geometry blurring across
+  an edge that is plainly visible from most angles.
+
+Geometry and the camera fail in different places -- geometry measures surfaces no camera
+can see, the camera notices edges geometry blurs across -- which is the only good reason
+to combine two signals rather than pick one.
