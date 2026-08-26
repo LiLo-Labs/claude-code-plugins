@@ -42,7 +42,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from paintlib import raster                                          # noqa: E402
 from patch_features import cluster                                   # noqa: E402
 
-FEATURES = ["log size", "relief", "log area", "parent elevation"]
+FEATURES = ["log extent mm", "relief", "log area", "parent elevation"]
 PALETTE = np.array([
     [0.90, 0.24, 0.20], [0.20, 0.55, 0.90], [0.30, 0.75, 0.35], [0.95, 0.65, 0.15],
     [0.65, 0.35, 0.85], [0.10, 0.70, 0.70], [0.95, 0.45, 0.65], [0.55, 0.45, 0.25],
@@ -85,12 +85,21 @@ def object_rows(session, index, objects, parent_ratio):
     total = float(areas.sum())
     order = np.argsort(objects, kind="stable")
     bounds = np.searchsorted(objects[order], np.arange(count + 1))
+    corners = session["vertices"][session["faces"]]
     rows = np.zeros((count, 4))
     for node in range(count):
         members = order[bounds[node]:bounds[node + 1]]
         if not len(members):
             continue
-        rows[node] = (np.median(np.log(np.maximum(characteristic[members], 1e-6))),
+        # How big the thing IS, from its own extent in millimetres -- not the median of
+        # its faces' characteristic scale. That was the dominant feature and it does not
+        # measure size: on four barnacle cups of 1.6, 1.1, 1.0 and 3.7mm extent it
+        # returned 0.99, 3.42, 2.50 and 1.83mm, in the wrong order. It measures how fast
+        # the surface turns nearby, which depends on how tightly the cups are packed and
+        # how deep each throat is. That is why identical cups landed in different classes
+        # and whole colonies came out unselected while their neighbours matched.
+        span = np.ptp(corners[members].reshape(-1, 3), axis=0)
+        rows[node] = (np.log(max(float(np.linalg.norm(span)), 1e-6)),
                       np.median(signed[members]),
                       np.log(max(areas[members].sum() / total, 1e-9)),
                       np.median(elevation[members]))

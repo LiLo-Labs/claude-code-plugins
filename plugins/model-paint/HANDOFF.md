@@ -914,3 +914,37 @@ from the picture and not from any number in the table.
 
 This is the same shape as the rest of the pipeline: geometry proposes, vision decides.
 k-means is retained only as a proposal to look at, never as the answer.
+
+### "Some colonies are white, not red" — traced two levels down
+
+Correct observation, and the cause was not where I kept looking.
+
+**Level one: the size feature did not measure size.** `log size` was the median
+`characteristic_mm` of an object's faces and it was the dominant feature. Measured on
+four barnacle cups whose physical extents are 1.6, 1.1, 1.0 and 3.7mm, it returned
+0.99, 3.42, 2.50 and 1.83mm -- not merely noisy, in the WRONG ORDER. Characteristic
+scale measures how fast the surface turns nearby, which depends on how tightly cups are
+packed and how deep each throat is, not on how big the thing is. Two identical cups in
+different colonies were therefore far apart in feature space, which is why whole
+colonies came back unselected while their neighbours matched. Now measured directly as
+the object's own extent in millimetres. Cheap, robust, and it means what its name says.
+
+**Level two, and the deeper one: objects are not consistently whole features.** The
+exemplar click landed on a 2mm object that is not a cone but a fragment between cones,
+so the selection returned the matrix BETWEEN the cups rather than the cups. Measured
+across all 963 objects, extent spans **0.87mm to 94.95mm, a factor of 109**, with 66
+objects holding 65.3% of the area and 358 objects in the 2-4mm band. Persistence picks
+each object at the scale where it is most stable, which is right in principle and means
+in practice that one cup can be one object while its neighbour is three -- a rim, a
+wall, a throat.
+
+No similarity search fixes that. Pointing at a cone and asking for things like it cannot
+match a cone that was never assembled into a single object. The hierarchy built by
+`index_hierarchy.py` does assemble them -- 0 of 1797 children straddle a parent -- so the
+selection should run at the level of that tree where a click's object is a whole
+feature, choosing the ancestor whose extent matches what was pointed at, rather than on
+the flat antichain `index_persist.py` emits.
+
+That is the next change, and it is stated here rather than attempted so the reasoning is
+not lost: **selection must be able to walk up the hierarchy from a click, not just
+outward through a flat list.**
