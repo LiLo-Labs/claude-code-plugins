@@ -948,3 +948,42 @@ the flat antichain `index_persist.py` emits.
 That is the next change, and it is stated here rather than attempted so the reasoning is
 not lost: **selection must be able to walk up the hierarchy from a click, not just
 outward through a flat list.**
+
+### Selection walks up the tree, and matches on shape alone
+
+Three failures in a row, each fixed by removing an assumption rather than tuning one.
+
+**A flat object list cannot answer "select all the barnacles".** Persistence picks each
+object where it is most stable, so one cup is one object while its neighbour is three --
+a rim, a wall, a throat. Extent across the 963 objects runs 0.87mm to 94.95mm, a factor
+of 109. A click lands on whatever fragment happens to be under it: pointing at a colony
+returned the matrix BETWEEN the cups, because the object under the cursor was a 2mm
+sliver and not a cone at all. No similarity search repairs that -- a cone that was never
+assembled into one node cannot be matched at any radius.
+
+`hierarchy_select.py` searches the whole merge tree instead of one antichain through it.
+Every grouping the border strengths support is a node somewhere: the rim, the cup, the
+colony, the whorl. A click prints its ancestor chain with each step's extent and area
+share, so the step that is the WHOLE thing is chosen by reading rather than guessed.
+Matches are kept maximal, so a cup and its own rim are never both returned.
+
+**Size must not be in the signature.** A barnacle is a barnacle at 1mm or 5mm, so
+matching on absolute size guarantees one population splits by size -- which is exactly
+what the cones did across 1.83, 2.14, 2.50 and 3.42mm. Building a scale-invariant index
+and then matching on absolute scale throws the invariance away. The signature is now
+aspect ratios, relief already divided by the object's own scale, and the shape of the
+scale-space response sampled at FRACTIONS of the object's own extent. Absolute extent is
+used for one thing only, and never for matching: lining exemplars up with each other.
+
+**"up N" is not comparable between clicks.** The tree is deeper under a crowded bed than
+under an isolated bump, so one --up 4 gave a 5.81mm cup at one exemplar and a 19.57mm
+shell band at another, and that single bad exemplar dragged the whole selection onto
+rock. The first click now sets the size of the thing being pointed at and every other
+click walks to whichever of its OWN ancestors is closest to it.
+
+**And the failure that mattered most was mine, not the code's.** Every attempt above was
+run on pixel coordinates I picked without opening the image; one landed on smooth shell
+rather than a cup and poisoned the match. Selection quality is bounded by whether the
+exemplars are actually on the feature, which is a thing only looking establishes. The
+agent instructions now require verifying each coordinate against the render and
+reporting which were replaced.
