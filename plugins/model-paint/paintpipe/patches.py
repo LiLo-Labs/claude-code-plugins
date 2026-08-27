@@ -114,7 +114,8 @@ def patch_colours(count, seed=7):
     return out
 
 
-def render_id_view(mesh, face_patch, count, camera, lit, glyph_px=GLYPH_PX):
+def render_id_view(mesh, face_patch, count, camera, lit, glyph_px=GLYPH_PX,
+                   only=None):
     """The shaded view with patch ids drawn where each patch is big enough to name.
 
     Returns (png bytes, visible patch ids). A patch too small on screen for a legible
@@ -144,7 +145,8 @@ def render_id_view(mesh, face_patch, count, camera, lit, glyph_px=GLYPH_PX):
     picture = Image.fromarray((image * 255).astype(np.uint8))
     draw = ImageDraw.Draw(picture)
     listed = []
-    for pid in range(count):
+    wanted = range(count) if only is None else sorted(only)
+    for pid in wanted:
         ys, xs = np.nonzero(patch_px == pid)
         if len(xs) < glyph_px * glyph_px:
             continue
