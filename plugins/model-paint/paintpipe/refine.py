@@ -99,16 +99,83 @@ def refine_subparts(mesh, face_part, labels, vocabulary, backend, intent,
             rounds.append((votes, 1.0))
         names = [parent] + children
         assigned, _votes = patch_module.fuse_votes(rounds, count, names)
-        # Splice: only faces claimed for a CHILD move; everything else stays parent.
+        # Splice: only faces claimed for a CHILD move; everything else stays parent. A
+        # recovery can therefore never award faces to an already-healthy label -- the
+        # candidate set is the parent's faces and the destinations are its missing
+        # children, nothing else.
         recovered = {}
+        moved = {}
         for local_face in range(len(parent_faces)):
             claim = assigned[local_patch[local_face]]
             if claim > 0:
                 child = names[int(claim)]
-                face_part[parent_faces[local_face]] = index[child]
-                recovered[child] = recovered.get(child, 0) + 1
+                moved.setdefault(child, []).append(local_face)
+        # VERIFY BEFORE KEEPING. Two of three recoveries on the CC0 set failed while
+        # reporting success: faces landed on the wrong anatomy (a fish's "eyes" as a
+        # blob on its flank) or nothing landed at all while the log still printed a
+        # recovered dict. So each claim is now shown back to the agent -- the claimed
+        # faces highlighted red on the parent -- and kept only on a yes. A no reverts
+        # the faces and is logged as the failure it is.
+        for child, local_faces in moved.items():
+            ok = _confirm_claim(backend, sub, local_faces, child, intent, centre,
+                                radius, pixels, frame)
+            if ok:
+                for local_face in local_faces:
+                    face_part[parent_faces[local_face]] = index[child]
+                recovered[child] = len(local_faces)
+            else:
+                report.setdefault("_rejected", {})[child] = len(local_faces)
         report[parent] = recovered
+    # Loud failure beats a quiet wrong answer: name every part still empty.
+    final_areas = np.bincount(face_part[face_part >= 0], minlength=len(labels))
+    for label in labels:
+        if final_areas[index[label]] == 0:
+            report.setdefault("_failed", []).append(label)
     return face_part, report
+
+
+def _confirm_claim(backend, sub, local_faces, child, intent, centre, radius, pixels,
+                   frame):
+    """Show the claimed faces highlighted and ask if they are the named part."""
+    import io
+    from PIL import Image
+    from . import render as render_module
+
+    mask = np.zeros(len(sub.faces), dtype=bool)
+    mask[local_faces] = True
+    best = None
+    # View the claim from the claimed faces' own pooled facing, so it is visible.
+    normals = sub.face_normals[mask].mean(axis=0)
+    norm = np.linalg.norm(normals)
+    direction = -normals / norm if norm > 1e-9 else np.array([0.0, -1.0, -0.3])
+    camera = render_module.Camera(direction, [0, 0, 1], centre, radius, pixels)
+    bundle = render_module.render_bundle(sub, camera, "zenithal", frame)
+    lit = np.clip(bundle["rgb_lit"], 0, 1)
+    visible = bundle["visible"]
+    hit = bundle["hit_id"]
+    image = np.ones((pixels, pixels, 3))
+    grey = 0.35 + 0.55 * lit
+    image[visible] = grey[visible, None]
+    claimed_px = visible & mask[np.clip(hit, 0, len(mask) - 1)]
+    image[claimed_px] = np.stack([0.35 + 0.6 * lit[claimed_px],
+                                  0.15 * lit[claimed_px],
+                                  0.10 * lit[claimed_px]], axis=1)
+    buffer = io.BytesIO()
+    Image.fromarray((image * 255).astype(np.uint8)).save(buffer, format="PNG")
+    from . import entities as entities_module
+    key = "confirm-%s-%s" % (child.replace(" ", "_"),
+                             entities_module.digest_of(buffer.getvalue())[7:17])
+    path = os.path.join(backend.directory, "%s.png" % key)
+    with open(path, "wb") as handle:
+        handle.write(buffer.getvalue())
+    prompt = ("The RED region on this model is claimed to be: %s\n"
+              "The piece: %s\n\n"
+              "Is the red region actually the %s -- on the right anatomy, in the right "
+              "place? Answer strictly.\n\n"
+              'Reply with ONLY a JSON object, no prose: {"correct": true} or '
+              '{"correct": false}' % (child, intent or "a model", child))
+    answer = backend._run([path], prompt, key)
+    return bool(answer and answer.get("correct"))
 
 
 ADOPT_PROMPT = """You are locating missing parts on a 3D model so a zoom camera can go find them. These parts were named but never found:

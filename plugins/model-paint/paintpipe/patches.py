@@ -175,6 +175,8 @@ What the piece is: %s
 For each part VISIBLE in this view, list the patch ids that belong to it. Rules:
 - A patch belongs to the part covering MOST of it. Every id you list must be readable \
 in the second image.
+- Paired features (eyes, horns, ears, fins, tusks) exist on BOTH sides. If you list one \
+side, look for the other in this view too; single-sided answers are usually misses.
 - Omit parts you cannot see. Omit patches you are unsure about -- another view will \
 catch them; a wrong assignment pollutes every view's evidence.
 - Ids you do not mention stay unassigned. That is fine.
