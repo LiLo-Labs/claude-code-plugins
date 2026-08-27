@@ -260,26 +260,51 @@ def frame_deficit(deficit_points, full_centre, full_radius, margin=1.15):
 
 
 def observe_bundle(field, bundle, bands, policy, labeller, store=None, inputs=(),
-                   state=None):
+                   state=None, sample_stride=1):
     """§12 `observe`: turn one bundle into admitted observations at every band.
 
     `labeller` maps (bundle, band) to (label, mask_confidence) -- the seam where an
-    agent's proposals enter (§10). A deterministic labeller is used by the tests and by
-    the unsupervised path; nothing below this line knows or cares which it was.
+    agent's proposals enter (§10).
+
+    Two things are shared across the labels of one bundle, because they depend on the
+    bundle and not on which part is being written: the admitted pixel set with its
+    weights, and which substrate vertex each admitted pixel lands on. Recomputing the
+    second per label ran the same KD-tree query once for every label at every band.
+
+    SUBSAMPLING. §8's estimator is a weighted sum, so keeping one admitted pixel in N and
+    multiplying its weight by N is unbiased -- the same expected density from a fraction
+    of the storage. Left unsampled, one shell run wrote 120 million observations, which
+    bought no accuracy the weights were not already carrying and made every downstream
+    query crawl.
     """
     written = 0
     sample = admit_module.gsd(bundle)
+    stride = max(1, int(sample_stride))
     for band in bands:
         weight, admitted = admit_module.admit(bundle, band, policy, store=store,
                                               inputs=inputs)
         if not admitted.any():
             continue
+        keep = admitted
+        if stride > 1:
+            flat = np.flatnonzero(admitted.ravel())
+            chosen = np.zeros(admitted.size, dtype=bool)
+            chosen[flat[::stride]] = True
+            keep = chosen.reshape(admitted.shape)
+        points = bundle["point"][keep]
+        if len(points) == 0:
+            continue
+        vertices = field.nearest_vertex(points)
+        base_weight = weight[keep] * float(stride)
+        band_gsd = sample[keep]
+        band_incidence = bundle["incidence"][keep]
+
         for label, confidence_map in labeller(bundle, band):
-            live = admitted & (confidence_map > 0)
+            values = confidence_map[keep]
+            live = values > 0
             if not live.any():
                 continue
-            points = bundle["point"][live]
-            weights = weight[live] * confidence_map[live]
+            weights = base_weight[live] * values[live]
             observation = None
             if store is not None:
                 observation = store.mint(
@@ -287,23 +312,24 @@ def observe_bundle(field, bundle, bands, policy, labeller, store=None, inputs=()
                     params={"label": label, "band": band.index,
                             "rig": bundle["rig"], "count": int(live.sum())},
                     attrs={"label": label, "band": band.index, "rig": bundle["rig"],
-                           "count": int(live.sum()),
+                           "count": int(live.sum()), "stride": stride,
                            "weight_mm2": round(float(weights.sum()), 4)},
                     reuse=False)
             written += field.observe(
-                points, label, weights, band.index,
-                gsd=sample[live], incidence=bundle["incidence"][live],
-                mask_confidence=confidence_map[live], rig_id=bundle["rig"],
+                points[live], label, weights, band.index,
+                gsd=band_gsd[live], incidence=band_incidence[live],
+                mask_confidence=values[live], rig_id=bundle["rig"],
+                vertices=vertices[live],
                 ids=None if observation is None else [observation.id] * int(live.sum()))
             if state is not None:
-                state.add(band.index, field.nearest_vertex(points), weights,
+                state.add(band.index, vertices[live], weights,
                           bundle["camera"].forward)
     return written
 
 
 def converge(field, mesh, frame, bands, policy, labeller, rigs=("zenithal",),
              pixels=700, store=None, inputs=(), max_rounds=6, log=None,
-             prefetch=None):
+             prefetch=None, sample_stride=8):
     """§9. Sampling and fusion as a LOOP, not a pass.
 
     Returns the coverage state and why it stopped. Which exit was taken is recorded on
@@ -355,10 +381,14 @@ def converge(field, mesh, frame, bands, policy, labeller, rigs=("zenithal",),
             camera = render_module.Camera(-np.asarray(direction, dtype=float),
                                           [0.0, 0.0, 1.0], aim_centre, aim_radius,
                                           pixels)
+            # One ray cast per camera; the rigs differ only in lighting, and a light
+            # cannot move a silhouette.
+            geometry = render_module.geometry_bundle(mesh, camera)
             for rig in rigs:
-                bundle = render_module.render_bundle(mesh, camera, rig, frame)
+                bundle = render_module.relight(geometry, rig, frame)
                 observe_bundle(field, bundle, bands, policy, labeller, store=store,
-                               inputs=inputs, state=state)
+                               inputs=inputs, state=state,
+                               sample_stride=sample_stride)
             state.views += 1
         covered = min(entry[0] for entry in state.satisfied(policy))
         gain = information_gain(previous, covered)

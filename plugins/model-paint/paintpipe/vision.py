@@ -30,56 +30,116 @@ from . import cues as cue_module
 
 # --------------------------------------------------------------------------- masks
 
-def synthesise_mask(bundle, band, seeds, policy, spread=None):
-    """Grow seed pixels into a fuzzy confidence map, bounded by what the cues see.
+def barrier_map(bundle, band):
+    """Where the cues see an edge. Shared by every label at this band.
 
-    A flood over the image whose cost to step between neighbouring pixels is the local
-    boundary strength -- silhouette, ridge, and depth step. Confidence falls with the
-    accumulated cost, so a seed spreads freely across a smooth face and stops at the
-    edge of the feature it was placed in, without anyone choosing a threshold.
-
-    `spread` is a geodesic allowance in millimetres; it defaults to the band's own
-    wavelength, which is the scale at which the feature that seed points at exists.
+    Computed once per (bundle, band) and handed to every mask. It used to be computed
+    inside the flood, so six labels at two bands recomputed the same two maps twelve
+    times -- most of the cost of a bundle, spent re-deriving something that does not
+    depend on which part is being grown.
     """
-    visible = bundle["visible"]
-    if not visible.any() or len(seeds) == 0:
-        return np.zeros(visible.shape)
-
-    camera = bundle["camera"]
-    spread_mm = float(spread if spread is not None else band.wavelength_mm)
     silhouette, _ = cue_module.silhouette(bundle, band.wavelength_mm)
     ridge, _ = cue_module.ridge(bundle, band.wavelength_mm)
-    barrier = np.clip(np.nan_to_num(silhouette) + np.nan_to_num(ridge), 0.0, 1.0)
+    return np.clip(np.nan_to_num(silhouette) + np.nan_to_num(ridge), 0.0, 1.0)
 
-    # Cost of stepping into a pixel: one footprint of travel, plus a penalty for
-    # crossing a boundary the cues can see. Both are in millimetres, so `spread` means
-    # what it says.
-    step = camera.footprint_mm * (1.0 + 8.0 * barrier)
-    step = np.where(visible, step, np.inf)
 
-    cost = np.full(visible.shape, np.inf)
-    for x, y in seeds:
-        if 0 <= y < visible.shape[0] and 0 <= x < visible.shape[1] and visible[y, x]:
-            cost[y, x] = 0.0
-    if not np.isfinite(cost).any():
-        return np.zeros(visible.shape)
+def pixel_graph(bundle, barrier):
+    """A 4-neighbour graph over the visible pixels, weighted by boundary strength.
 
-    # Iterative relaxation rather than a priority queue: vectorised, and the number of
-    # rounds is set by how far the flood is allowed to travel, not by a tuning choice.
-    rounds = int(np.clip(spread_mm / max(camera.footprint_mm, 1e-9), 4, 256))
-    for _ in range(rounds):
-        best = cost
-        for dy, dx in ((0, 1), (1, 0), (0, -1), (-1, 0)):
-            shifted = np.roll(np.roll(cost, dy, axis=0), dx, axis=1)
-            best = np.minimum(best, shifted + step)
-        if np.array_equal(best, cost):
-            break
-        cost = best
+    Built ONCE per (bundle, band) and reused by every label, because the graph is a
+    property of the image and not of which part is being grown. Costs are in
+    millimetres: one footprint of travel, plus a penalty for crossing an edge the cues
+    can see, so a flood's allowance means what it says.
+    """
+    import scipy.sparse as sparse
+    visible = bundle["visible"]
+    height, width = visible.shape
+    index = np.full(visible.shape, -1, dtype=np.int64)
+    index[visible] = np.arange(int(visible.sum()))
+    footprint = bundle["camera"].footprint_mm
+    weight = footprint * (1.0 + 8.0 * barrier)
 
-    confidence = np.zeros(visible.shape)
-    reached = visible & np.isfinite(cost)
-    confidence[reached] = np.exp(-cost[reached] / max(spread_mm, 1e-9))
-    return confidence
+    rows, cols, data = [], [], []
+    for dy, dx in ((0, 1), (1, 0)):
+        here = index[: height - dy, : width - dx]
+        there = index[dy:, dx:]
+        both = (here >= 0) & (there >= 0)
+        if not both.any():
+            continue
+        a, b = here[both], there[both]
+        # Cost of the step is the mean of the two endpoints' local weights, so crossing
+        # into a boundary pixel costs the same as crossing out of one.
+        cost = 0.5 * (weight[: height - dy, : width - dx][both]
+                      + weight[dy:, dx:][both])
+        rows.extend((a, b))
+        cols.extend((b, a))
+        data.extend((cost, cost))
+    count = int(visible.sum())
+    graph = sparse.coo_matrix(
+        (np.concatenate(data), (np.concatenate(rows), np.concatenate(cols))),
+        shape=(count, count)).tocsr()
+    return graph, index
+
+
+def synthesise_masks(bundle, band, seeds_by_label, policy, spread=None, barrier=None,
+                     graph=None):
+    """Grow every label's seeds at once. Returns {label: confidence map}.
+
+    Geodesic distance in the image, over a graph whose edge costs are the local boundary
+    strength, so a seed spreads across a smooth face and stops at the edge of the feature
+    it sits in without anyone choosing a threshold. Confidence falls exponentially with
+    that distance over the band's own wavelength.
+
+    Solved with scipy's Dijkstra rather than by relaxation sweeps. An isotropic sweep
+    moves information one pixel at a time, so reaching across a feature fifty pixels wide
+    took fifty passes over the whole image -- and that was repeated for each of twelve
+    label-band pairs, which was most of what a bundle cost.
+
+    Labels share the graph but keep INDEPENDENT masks rather than partitioning the image:
+    §10 says the region agent is never forced to partition, and a watershed would force
+    exactly that, discarding the overlap §8.4 exists to measure.
+    """
+    visible = bundle["visible"]
+    labels = [label for label, points in seeds_by_label.items() if points]
+    if not visible.any() or not labels:
+        return {}
+
+    spread_mm = float(spread if spread is not None else band.wavelength_mm)
+    if graph is None:
+        if barrier is None:
+            barrier = barrier_map(bundle, band)
+        graph, index = pixel_graph(bundle, barrier)
+    else:
+        graph, index = graph
+
+    from scipy.sparse.csgraph import dijkstra
+    height, width = visible.shape
+    out = {}
+    for label in labels:
+        sources = []
+        for x, y in seeds_by_label[label]:
+            if 0 <= y < height and 0 <= x < width and index[y, x] >= 0:
+                sources.append(int(index[y, x]))
+        if not sources:
+            continue
+        # `limit` stops the search once the flood is far enough out to contribute
+        # nothing, which is most of the object for a small part.
+        distance = dijkstra(graph, directed=False, indices=sources, min_only=True,
+                            limit=spread_mm * 6.0)
+        confidence = np.zeros(visible.shape)
+        reached = np.isfinite(distance)
+        if reached.any():
+            values = np.zeros(len(distance))
+            values[reached] = np.exp(-distance[reached] / max(spread_mm, 1e-9))
+            confidence[visible] = values
+        out[label] = confidence
+    return out
+
+
+def synthesise_mask(bundle, band, seeds, policy, spread=None, barrier=None):
+    """Single-label convenience wrapper over `synthesise_masks`."""
+    found = synthesise_masks(bundle, band, {"_": list(seeds)}, policy, spread, barrier)
+    return found.get("_", np.zeros(bundle["visible"].shape))
 
 
 # ------------------------------------------------------------------------ backends

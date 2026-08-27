@@ -116,12 +116,14 @@ def rig_directions(camera, rig_name, frame=None):
     return out
 
 
-def render_bundle(mesh, camera, rig_name, frame=None, cavity_taps=12):
-    """One camera x one rig -> the buffer set of §5.1.
+def geometry_bundle(mesh, camera, cavity_taps=12):
+    """The parts of §5.1's buffer set that DO NOT DEPEND ON THE LIGHTS.
 
-    Returns depth as distance along the view axis from the camera plane, normals in
-    world space, hit ids and barycentric coordinates for routing, the lit image the
-    VLM will read, and a screen-space cavity map.
+    Depth, normals, hit ids, barycentrics, incidence and the cavity map are properties of
+    the surface and the camera. Casting them once and relighting for each rig is not an
+    approximation -- a light cannot move a silhouette -- and it is the single largest
+    saving available, because the ray cast is most of what a bundle costs. Four rigs on
+    one camera went from four casts to one.
     """
     origins, directions = camera.rays()
     locations, ray_ids, face_ids = mesh.ray.intersects_location(
@@ -145,9 +147,8 @@ def render_bundle(mesh, camera, rig_name, frame=None, cavity_taps=12):
     normal = np.zeros((n, n, 3))
     if visible.any():
         normal[visible] = mesh.face_normals[hit_id[visible]]
-        # Face normals can point away from the camera on a mesh whose winding is not
-        # consistent. The camera cannot see a back face, so orient toward the viewer;
-        # this is a fact about visibility, not an edit to the mesh.
+        # A camera cannot see a back face, so orient toward the viewer. This is a fact
+        # about visibility, not an edit to the mesh.
         facing = np.einsum("ij,j->i", normal[visible], camera.forward)
         normal[visible] = np.where((facing > 0)[:, None], -normal[visible],
                                    normal[visible])
@@ -155,29 +156,42 @@ def render_bundle(mesh, camera, rig_name, frame=None, cavity_taps=12):
     barycentric = np.full((n, n, 3), np.nan)
     if visible.any():
         import trimesh as _tm
-        tris = mesh.triangles[hit_id[visible]]
         barycentric[visible] = _tm.triangles.points_to_barycentric(
-            tris, point[visible], method="cross")
+            mesh.triangles[hit_id[visible]], point[visible], method="cross")
 
     incidence = np.full((n, n), np.nan)
     if visible.any():
         incidence[visible] = np.clip(
             -np.einsum("ij,j->i", normal[visible], camera.forward), 0.0, 1.0)
 
+    return {"hit_id": hit_id, "depth": depth, "normal": normal, "point": point,
+            "barycentric": barycentric, "visible": visible, "incidence": incidence,
+            "cavity": screen_cavity(depth, visible, camera, taps=cavity_taps),
+            "camera": camera}
+
+
+def relight(geometry, rig_name, frame=None):
+    """Apply one rig to already-cast geometry. Everything but `rgb_lit` is shared."""
+    camera = geometry["camera"]
+    visible = geometry["visible"]
     lighting = rig_directions(camera, rig_name, frame)
-    lit = np.zeros((n, n))
+    lit = np.zeros(visible.shape)
     if visible.any():
+        normal = geometry["normal"]
         value = np.full(int(visible.sum()), lighting["ambient"])
         for direction, strength in lighting["lights"]:
             value = value + strength * np.clip(
                 np.einsum("ij,j->i", normal[visible], -direction), 0.0, 1.0)
         lit[visible] = value
+    bundle = dict(geometry)
+    bundle["rgb_lit"] = lit
+    bundle["rig"] = rig_name
+    return bundle
 
-    cavity = screen_cavity(depth, visible, camera, taps=cavity_taps)
 
-    return {"hit_id": hit_id, "depth": depth, "normal": normal, "point": point,
-            "barycentric": barycentric, "visible": visible, "incidence": incidence,
-            "rgb_lit": lit, "cavity": cavity, "camera": camera, "rig": rig_name}
+def render_bundle(mesh, camera, rig_name, frame=None, cavity_taps=12):
+    """One camera x one rig -> the buffer set of §5.1."""
+    return relight(geometry_bundle(mesh, camera, cavity_taps), rig_name, frame)
 
 
 def screen_cavity(depth, visible, camera, taps=12, radius_px=None):

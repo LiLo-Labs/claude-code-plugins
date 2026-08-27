@@ -117,7 +117,7 @@ class LabelField:
         return self._label_index[node_id]
 
     def observe(self, points, label, weights, band_index, gsd=None, incidence=None,
-                mask_confidence=None, rig_id="", ids=None):
+                mask_confidence=None, rig_id="", ids=None, vertices=None):
         """Append admitted votes (§8.1). NEVER mutates.
 
         Corrections arrive as NEW observations with later timestamps rather than as
@@ -132,7 +132,11 @@ class LabelField:
         count = len(points)
         index = self.label_index(label)
         self.obs_point.append(points)
-        self.obs_vertex.append(self.nearest_vertex(points))
+        # The caller may already know which substrate vertex each point lands on. Every
+        # label at a bundle shares one admitted pixel set, so recomputing the nearest
+        # vertex per label ran the same KD-tree query twelve times over.
+        self.obs_vertex.append(self.nearest_vertex(points) if vertices is None
+                               else np.asarray(vertices))
         self.obs_label.append(np.full(count, index, dtype=np.int32))
         self.obs_weight.append(weights)
         self.obs_band.append(np.full(count, int(band_index), dtype=np.int32))

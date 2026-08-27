@@ -216,3 +216,37 @@ One call per CAMERA, not per bundle: §5.2 makes zenithal the reference rig, and
 the same question about the same geometry under three lights triples the cost to gather
 three correlated answers. Calls within a round run concurrently — they are independent by
 construction, since §10 forbids telling the region agent about other views.
+
+## Performance: 11.4x, measured per stage
+
+Profiled first rather than guessed at, and the guesses were wrong — the ray cast was
+never the problem. Per bundle at 700px on 627k faces: mask synthesis **8.02s**, observe
+**5.32s**, render **1.32s**, cues and admission negligible.
+
+One camera × 4 rigs × 2 bands — the real unit of work — went from **58.4s to 5.14s**.
+
+**Share the ray cast across rigs.** Depth, normals, hit ids, barycentrics and incidence
+are properties of the surface and the camera; a light cannot move a silhouette. Four rigs
+went from four casts to one: **5.45s → 0.97s**, and every buffer is bit-identical.
+
+**Solve the mask flood as a shortest path.** The barrier map was recomputed inside the
+flood, so six labels at two bands re-derived the same two maps twelve times. And the
+flood was an isotropic relaxation, which moves information one pixel per sweep — crossing
+a feature fifty pixels wide took fifty passes over the whole image, twelve times over.
+Now the barrier and a 4-neighbour pixel graph are built once per (bundle, band) and
+scipy's Dijkstra solves every label against them: **8.02s → 0.86s**. Masks stay
+independent rather than partitioning the image — a watershed would be faster still and
+would discard the overlap §8.4 exists to measure.
+
+**Share the vertex lookup, and subsample.** Every label at a bundle shares one admitted
+pixel set, so the KD-tree query ran twelve times for one answer. And §8's estimator is a
+weighted sum, so keeping one admitted pixel in N and multiplying its weight by N is
+unbiased. Left unsampled, one shell run wrote **120 million observations** and never
+finished its downstream stages; the weights were already carrying everything those
+pixels bought.
+
+Verified rather than assumed — stride 1 against stride 8 on the same six cameras:
+
+| | observations | mean posterior difference | argmax agreement |
+|---|---|---|---|
+| stride 1 vs 8 | 5,076,638 → 634,688 | 0.0119 | 96.16% |
