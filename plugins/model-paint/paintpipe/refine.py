@@ -59,13 +59,19 @@ def refine_subparts(mesh, face_part, labels, vocabulary, backend, intent,
             by_parent.setdefault(parent, []).append(label)
         else:
             orphans.append(label)
-    # A missing part with no usable declared parent gets one by ASKING (tail of the
-    # cow, tusks of the ogre, eyes of the fish -- all empty, all with no parent that
-    # held area, all previously unreachable by any zoom).
+    # A missing part with no usable declared parent is LOCATED, not adopted. Adoption
+    # answered "what is it on" -- true and useless when the answer is `body`, because
+    # zooming onto a host that is most of the model is not zooming, and three CC0
+    # models proved it: tail, eyes, lips and tusks all stayed empty through two
+    # adoption-based recovery attempts. A pixel box in a named view backprojects to a
+    # point and a radius a camera can actually be aimed at.
+    notes_all = {part["label"]: part.get("note", "") for part in vocabulary or []}
+    located_report = {}
     if orphans and present:
-        adopted = adopt_hosts(backend, orphans, present, intent)
-        for label, host in adopted.items():
-            by_parent.setdefault(host, []).append(label)
+        located = locate_missing(backend, mesh, frame, orphans, intent, notes_all)
+        if located:
+            face_part, located_report = recover_located(
+                mesh, face_part, labels, backend, intent, frame, located, notes_all)
 
     report = {}
     notes = {part["label"]: part.get("note", "") for part in vocabulary or []}
@@ -156,6 +162,8 @@ def refine_subparts(mesh, face_part, labels, vocabulary, backend, intent,
             else:
                 report.setdefault("_rejected", {})[child] = len(local_faces)
         report[parent] = recovered
+    if located_report:
+        report["_located"] = located_report
     # Loud failure beats a quiet wrong answer: name every part still empty.
     final_areas = np.bincount(face_part[face_part >= 0], minlength=len(labels))
     for label in labels:
@@ -244,6 +252,153 @@ def adopt_hosts(backend, missing, present, intent, overview_paths=()):
     return {entry["missing"]: entry["host"]
             for entry in answer.get("adoptions", [])
             if entry.get("host") in valid and entry.get("missing") in missing}
+
+
+LOCATE_PROMPT = """You are locating small missing parts on a 3D model so a zoom camera can be aimed at them. You get several numbered views of the whole model, in the order listed (view 0 first).
+
+Missing parts:
+%s
+
+The piece: %s
+
+For each part you can SEE in some view, give the view number and a tight pixel bounding
+box [x0, y0, x1, y1] around ONE clear instance of it ([0,0] is top-left, images are
+%dpx square). Skip parts you cannot find. A wrong box wastes a camera; skipping costs
+nothing.
+
+Reply with ONLY a JSON object, no prose, no code fences:
+{"locations": [{"part": str, "view": int, "box": [int, int, int, int]}]}"""
+
+
+def locate_missing(backend, mesh, frame, missing, intent, notes, pixels=800, views=5):
+    """Ask WHERE each missing part is; backproject the box to a 3D ball.
+
+    This replaces host adoption for parts the hierarchy cannot place. Adoption failed
+    structurally on big hosts: "the tail is on the body" is true and useless, because
+    zooming onto a host that is most of the model is not zooming -- the patches come out
+    as coarse as the pass that already missed the part. A pixel box in a named view
+    backprojects through the pick buffer to a point and a radius, and THAT is a place a
+    camera can actually be aimed at, whatever labels currently cover it.
+    """
+    from . import entities as entities_module
+    from . import render as render_module
+    from . import vision as vision_module
+
+    centre = mesh.vertices.mean(axis=0)
+    radius = float(np.ptp(mesh.vertices, axis=0).max()) / 2 * 1.05
+    directions = render_module.fibonacci_directions(views)
+    bundles, paths = [], []
+    for k, direction in enumerate(directions):
+        camera = render_module.Camera(-direction, [0, 0, 1], centre, radius, pixels)
+        bundle = render_module.render_bundle(mesh, camera, "zenithal", frame)
+        bundles.append(bundle)
+        path = os.path.join(backend.directory, "locate-view-%d.png" % k)
+        with open(path, "wb") as handle:
+            handle.write(vision_module.render_png(bundle))
+        paths.append(path)
+    prompt = LOCATE_PROMPT % ("\n".join("- %s: %s" % (m, notes.get(m, ""))
+                                        for m in missing),
+                              intent or "not stated", pixels)
+    key = "locate-%s" % entities_module.digest_of(sorted(missing))[7:17]
+    answer = backend._run(paths, prompt, key)
+    if not answer:
+        return {}
+    found = {}
+    for entry in answer.get("locations", []):
+        part = entry.get("part")
+        view = entry.get("view")
+        box = entry.get("box") or []
+        if part not in missing or not isinstance(view, int) \
+                or not (0 <= view < len(bundles)) or len(box) != 4:
+            continue
+        x0, y0, x1, y1 = [int(np.clip(v, 0, pixels - 1)) for v in box]
+        if x1 <= x0 or y1 <= y0:
+            continue
+        bundle = bundles[view]
+        window = bundle["point"][y0:y1, x0:x1]
+        seen = bundle["visible"][y0:y1, x0:x1]
+        if not seen.any():
+            continue
+        points = window[seen]
+        anchor = np.median(points, axis=0)
+        extent = float(np.linalg.norm(points.max(axis=0) - points.min(axis=0)))
+        found[part] = {"anchor": anchor, "extent_mm": max(extent, 1e-3),
+                       "direction": bundles[view]["camera"].forward}
+    return found
+
+
+def recover_located(mesh, face_part, labels, backend, intent, frame, located, notes,
+                    pixels=760, views=3):
+    """Zoom a camera at each located ball and ask the patch question there.
+
+    The ball is spatial -- faces near the anchor, whatever label they carry -- so
+    anatomy mislabelled to any neighbour is in frame. Only claims for the missing part
+    move faces, and each claim still passes the visual confirm gate.
+    """
+    from . import patches as patch_module
+    from . import render as render_module
+    from . import vision as vision_module
+    from . import entities as entities_module
+    import trimesh
+
+    index = {label: i for i, label in enumerate(labels)}
+    centres = mesh.triangles.mean(axis=1)
+    report = {}
+    for part, spec in located.items():
+        anchor, extent = spec["anchor"], spec["extent_mm"]
+        ball = np.flatnonzero(np.linalg.norm(centres - anchor, axis=1)
+                              < max(extent * 1.6, 2.0))
+        if len(ball) < 30:
+            report[part] = 0
+            continue
+        sub = trimesh.Trimesh(vertices=mesh.vertices, faces=mesh.faces[ball],
+                              process=False)
+        zoom_r = max(extent * 1.4, 1e-2)
+        footprint = 2 * zoom_r / pixels
+        target = patch_module.TILE_FACTOR * patch_module.GLYPH_PX * footprint
+        local_patch, count = patch_module.build_patches(sub, target)
+        local_labels = sorted({labels[int(face_part[f])] for f in ball
+                               if face_part[f] >= 0})
+        vocab_here = ([{"label": l, "note": notes.get(l, "")} for l in local_labels]
+                      + [{"label": part, "note": notes.get(part, "")}])
+        base = np.asarray(spec["direction"], dtype=float)
+        helper = np.array([0.0, 0.0, 1.0]) if abs(base[2]) < 0.9 \
+            else np.array([1.0, 0.0, 0.0])
+        side = np.cross(base, helper)
+        side /= max(np.linalg.norm(side), 1e-9)
+        rounds = []
+        for k, tilt in enumerate((0.0, 0.5, -0.5)[:views]):
+            direction = base + side * tilt
+            direction /= np.linalg.norm(direction)
+            camera = render_module.Camera(direction, [0, 0, 1], anchor, zoom_r, pixels)
+            bundle = render_module.render_bundle(sub, camera, "zenithal", frame)
+            shaded = vision_module.render_png(bundle)
+            lit = np.clip(bundle["rgb_lit"], 0, 1)
+            id_png, listed = patch_module.render_id_view(sub, local_patch, count,
+                                                         camera, lit)
+            state = entities_module.digest_of({"ball": ball, "part": part})[7:17]
+            votes = patch_module.ask_assignments(backend, shaded, id_png, listed,
+                                                 vocab_here, intent,
+                                                 "locrec-%s-%s-%d"
+                                                 % (part.replace(" ", "_"), state, k))
+            rounds.append((votes, 1.0))
+        names = local_labels + [part]
+        target_id = len(names) - 1
+        assigned, _votes = patch_module.fuse_votes(rounds, count, names)
+        claimed = [f for f in range(len(ball))
+                   if assigned[local_patch[f]] == target_id]
+        if not claimed:
+            report[part] = 0
+            continue
+        ok = _confirm_claim(backend, sub, claimed, part, intent, anchor, zoom_r,
+                            pixels, frame)
+        if ok:
+            for local_face in claimed:
+                face_part[ball[local_face]] = index[part]
+            report[part] = len(claimed)
+        else:
+            report[part] = -len(claimed)
+    return face_part, report
 
 
 REVIEW_PROMPT = """You are reviewing the paint scheme for a 3D print as a miniature \
