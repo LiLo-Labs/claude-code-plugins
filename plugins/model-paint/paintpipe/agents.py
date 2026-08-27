@@ -303,5 +303,86 @@ class Painter(Agent):
         return (lightness[role], 0.0 + 6.0 * ((order % 3) - 1), 0.0)
 
 
+class VisionPainter(Painter):
+    """The Painter of §10, backed by a vision model that has looked at the object.
+
+    IT WORKS IN CONTINUOUS COLOUR AND THE PALETTE DOES NOT EXIST TO IT. That is §10's
+    rule and it is load-bearing: handing the painter the four filaments makes it solve
+    two problems at once -- what should this look like, and what can I actually lay down
+    -- and the second is the limiter's job (§11), under contrast constraints at a viewing
+    distance the painter has no way to check.
+
+    An earlier version of this class did tell the painter the printer had four inks,
+    reasoning that four fixed points is a medium rather than a catalogue. That was wrong
+    twice over: it collapsed the two decisions the spec deliberately separates, and it
+    threw away the thing that makes the limiter's output judgeable -- an unconstrained
+    scheme to compare it against. Colour beautifully, then constrain, and keep both.
+    """
+
+    name = "vision_painter"
+
+    def __init__(self, backend, actor=None):
+        super().__init__(actor or backend.actor)
+        self.backend = backend
+
+    def colour(self, field, labels, radius_mm, intent="", vocabulary=None,
+               overviews=None):
+        if not hasattr(self.backend, "_run"):
+            return super().colour(field, labels, radius_mm, intent)
+        notes = {part["label"]: part.get("note", "") for part in (vocabulary or [])}
+        lines = "\n".join("- %s: %s" % (label, notes.get(label, "")) for label in labels)
+        prompt = (
+            "You are choosing the paint scheme for a display piece, working in FULL "
+            "COLOUR with no restrictions. Ignore what any printer or paint range can "
+            "do -- that is somebody else's problem later. Choose the colours this object "
+            "should be.\n\n"
+            "The regions found on the model, with what each one is:\n%s\n\n"
+            "What the piece is: %s\n\n"
+            "Give each region a colour that makes the finished piece look like the real "
+            "thing, and beautiful. Think like a painter:\n"
+            "- Let the material speak. Wet weed is not the same green as dry weed; "
+            "old shell is not white, it is a dozen warm off-whites.\n"
+            "- Put the strongest saturation where it earns attention, and keep the rest "
+            "restrained so it reads.\n"
+            "- Neighbouring regions need enough separation in value, not just in hue, "
+            "or the form flattens out.\n"
+            "- `role` is one of base, shade, highlight, accent.\n\n"
+            'Reply with ONLY a JSON object, no prose and no code fences:\n'
+            '{"regions": [{"label": str, "hex": "#RRGGBB", "role": str, "why": str}]}'
+            % (lines, intent or "not stated"))
+        paths = []
+        if overviews:
+            import os
+            for index, image in enumerate(overviews):
+                path = os.path.join(self.backend.directory, "painter-%d.png" % index)
+                with open(path, "wb") as handle:
+                    handle.write(image)
+                paths.append(path)
+        answer = self.backend._run(paths, prompt, "painter-scheme")
+        if not answer:
+            return super().colour(field, labels, radius_mm, intent)
+        chosen = {entry["label"]: entry for entry in answer.get("regions", [])}
+        scheme = []
+        for order, label in enumerate(labels):
+            entry = chosen.get(label) or {}
+            lab = _hex_to_lab(entry.get("hex", "#808080"))
+            scheme.append({"region": label, "role": entry.get("role", "base"),
+                           "lab": lab, "hex": entry.get("hex", "#808080"),
+                           "why": entry.get("why", ""), "actor": self.actor})
+        return scheme
+
+
+def _hex_to_lab(value):
+    from colour import sRGB_to_XYZ, XYZ_to_Lab
+    value = (value or "").strip().lstrip("#")
+    if len(value) != 6:
+        value = "808080"
+    try:
+        rgb = np.array([int(value[i:i + 2], 16) / 255.0 for i in (0, 2, 4)])
+    except ValueError:
+        rgb = np.array([0.5, 0.5, 0.5])
+    return tuple(float(v) for v in XYZ_to_Lab(sRGB_to_XYZ(rgb)))
+
+
 DEFAULT_AGENTS = {"planner": Planner(), "identity": Identity(), "region": Region(),
                   "critic": Critic(), "painter": Painter()}

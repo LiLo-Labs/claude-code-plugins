@@ -42,6 +42,72 @@ def delta_e(lab_a, lab_b):
                                  np.asarray(lab_b, dtype=float)))
 
 
+def adjacency(field, labels, radius_mm):
+    """Which regions actually touch, read off the field rather than assumed.
+
+    Two regions are adjacent when a mesh edge has one at each end under the current
+    posterior. That is a question about beliefs and not about geometry, which is why it
+    belongs here and not in the mesh: regions are level sets of a continuous field, so
+    "touching" means their territories meet, not that some triangle is shared.
+    """
+    posterior = field.posterior(radius_mm)
+    if posterior.shape[0] == 0:
+        return set()
+    index = {label: i for i, label in enumerate(field.labels)}
+    rows = [index[label] for label in labels if label in index]
+    if not rows:
+        return set()
+    owner = np.argmax(posterior[rows], axis=0)
+    claimed = posterior[rows].max(axis=0) > 0
+    edges = field.substrate.edges_unique
+    a, b = owner[edges[:, 0]], owner[edges[:, 1]]
+    both = claimed[edges[:, 0]] & claimed[edges[:, 1]]
+    touching = set()
+    for left, right in np.unique(np.stack([np.minimum(a, b), np.maximum(a, b)],
+                                          axis=1)[both & (a != b)], axis=0):
+        touching.add((labels[int(left)], labels[int(right)]))
+    return touching
+
+
+def assign_paints(scheme, palette, touching, policy, distance_mm=None):
+    """Choose one paint per region: minimise colour error, keep neighbours separable.
+
+    §11 says the palette fit is a CONSTRAINT, not a lookup, and the difference decides
+    whether the print reads at all. Fitting each region to its own nearest paint
+    independently put all six of the shell's regions onto two filaments -- ribs, rim and
+    barnacles all white; rock, cracks and weed all grey -- with orange and black unused
+    and every boundary between them gone. Each choice was individually optimal and the
+    result was a blank object.
+
+    Solved exactly over the whole assignment rather than region by region, so a region
+    accepts a worse colour match when that is what keeps its neighbour distinguishable.
+    The search is |palette| ** |regions|, which is small by construction: a scheme with
+    more regions than a few dozen has already failed the critic.
+    """
+    import itertools
+    labels = [entry["region"] for entry in scheme]
+    wanted = [tuple(entry["lab"]) for entry in scheme]
+    cost = np.array([[delta_e(want, paint.lab) for paint in palette] for want in wanted])
+    neighbours = [(labels.index(a), labels.index(b)) for a, b in touching
+                  if a in labels and b in labels]
+
+    # A collapsed boundary costs more than any colour error can, so separability wins
+    # every trade -- but among assignments that keep neighbours apart, colour decides.
+    penalty = float(cost.max()) * len(labels) + 1.0
+    best, best_score = None, np.inf
+    if len(labels) > 12:
+        order = np.argsort(cost.min(axis=1))
+        return {labels[i]: palette[int(np.argmin(cost[i]))] for i in order}, None
+    for combination in itertools.product(range(len(palette)), repeat=len(labels)):
+        score = float(sum(cost[i, combination[i]] for i in range(len(labels))))
+        clashes = sum(1 for a, b in neighbours if combination[a] == combination[b])
+        score += clashes * penalty
+        if score < best_score:
+            best, best_score = combination, score
+    clashes = [(labels[a], labels[b]) for a, b in neighbours if best[a] == best[b]]
+    return ({labels[i]: palette[best[i]] for i in range(len(labels))}, clashes)
+
+
 def fit_palette(scheme, profile, field, radius_mm, policy, store=None, inputs=()):
     """§11 palette fit. Nearest paint by dE2000, SUBJECT TO A CONSTRAINT.
 
@@ -61,11 +127,20 @@ def fit_palette(scheme, profile, field, radius_mm, policy, store=None, inputs=()
                          inputs=inputs, count=len(scheme))
         return scheme
 
+    touching = adjacency(field, [e["region"] for e in scheme], radius_mm)
+    chosen, clashes = assign_paints(scheme, profile.palette, touching, policy,
+                                    profile.viewing.distance_mm)
     for entry in scheme:
-        best = min(profile.palette, key=lambda paint: delta_e(entry["lab"], paint.lab))
-        entry["paint"] = best
-        entry["paint_de"] = delta_e(entry["lab"], best.lab)
+        paint = chosen[entry["region"]]
+        entry["paint"] = paint
+        entry["paint_de"] = delta_e(entry["lab"], paint.lab)
         entry["realizable"] = True
+    if store is not None and clashes:
+        for left, right in clashes:
+            store.reject("scheme_entry",
+                         "%s and %s touch and could not be given different paints; "
+                         "the palette is too small to separate every region"
+                         % (left, right), inputs=inputs, count=1)
 
     distance = profile.viewing.distance_mm
     if distance is None:
