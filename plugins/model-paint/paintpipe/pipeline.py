@@ -105,6 +105,16 @@ def paint(input_path, out_dir, intent="", size_mm=None, palette=(),
     log("recovery: %s" % (json.dumps(recovered) if recovered
                           else "nothing missing"))
 
+    # Every instance of every small part gets its own zoomed look; a refused
+    # instance reverts to the label around it. The audit judges from model
+    # distance, and at that distance a forehead can pass for an eye.
+    face_part, refused = refine_module.verify_instances(
+        mesh, face_part, labels, backend, intent, frame, up=up,
+        workers=workers, log=log)
+    if refused:
+        recovered = dict(recovered or {})
+        recovered["_instances_refused"] = refused
+
     settled, claimed, rows = _settle(field, mesh, face_part, labels, log=log)
     _part_atlas(mesh, settled, claimed, labels, frame, out_dir, preview, up)
 

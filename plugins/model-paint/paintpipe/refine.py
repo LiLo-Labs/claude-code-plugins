@@ -198,6 +198,87 @@ def refine_subparts(mesh, face_part, labels, vocabulary, backend, intent,
     return face_part, report
 
 
+def verify_instances(mesh, face_part, labels, backend, intent, frame,
+                     up=(0, 0, 1), max_share=0.04, max_per_part=6,
+                     pixels=760, workers=3, log=print):
+    """Zoom onto every instance of every small part and ask if it is real.
+
+    The audit judges whole-model views, and at that distance a forehead plane
+    can pass for an eye-white -- the cyclops ogre got two extra "eyes" above
+    its brow that no close look would ever confirm. So each connected instance
+    of each small part gets its own zoomed, in-context look; a refused
+    instance reverts to the label that surrounds it. Small parts only: a big
+    region's boundary is the consensus stage's business, but a small part IS
+    its instances, and one wrong instance ruins the print.
+    """
+    import scipy.sparse as sparse
+    import trimesh as trimesh_module
+    from concurrent.futures import ThreadPoolExecutor
+
+    areas = np.asarray(mesh.area_faces, dtype=float)
+    total = float(areas.sum())
+    adjacency = mesh.face_adjacency
+    centres = mesh.triangles.mean(axis=1)
+    jobs = []
+    for label_id, label in enumerate(labels):
+        faces = np.flatnonzero(face_part == label_id)
+        if not len(faces) or areas[faces].sum() / total > max_share:
+            continue
+        inside = np.zeros(len(mesh.faces), dtype=bool)
+        inside[faces] = True
+        both = inside[adjacency[:, 0]] & inside[adjacency[:, 1]]
+        local = {int(f): i for i, f in enumerate(faces)}
+        rows = [local[int(a)] for a, b in adjacency[both]]
+        cols = [local[int(b)] for a, b in adjacency[both]]
+        graph = sparse.coo_matrix((np.ones(len(rows)), (rows, cols)),
+                                  shape=(len(faces), len(faces)))
+        count, component = sparse.csgraph.connected_components(graph,
+                                                               directed=False)
+        comp_area = np.bincount(component, weights=areas[faces],
+                                minlength=count)
+        order = np.argsort(-comp_area)[:max_per_part]
+        for comp in order:
+            members = faces[component == comp]
+            if len(members) < 8:
+                continue
+            jobs.append((label_id, label, members))
+
+    def check(label_id, label, members):
+        centre = centres[members].mean(axis=0)
+        span = np.ptp(centres[members], axis=0)
+        radius = max(float(np.linalg.norm(span)) * 1.6, 4.0)
+        ok = _confirm_in_context(backend, mesh, members, label, intent, centre,
+                                 radius, pixels, frame, up=up)
+        return label_id, label, members, ok
+
+    report = {}
+    if jobs:
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            results = list(pool.map(lambda j: check(*j), jobs))
+        for label_id, label, members, ok in results:
+            if ok:
+                continue
+            # Revert to the label that surrounds the refused instance.
+            inside = np.zeros(len(mesh.faces), dtype=bool)
+            inside[members] = True
+            edge = inside[adjacency[:, 0]] ^ inside[adjacency[:, 1]]
+            outside = np.where(inside[adjacency[edge][:, 0]],
+                               adjacency[edge][:, 1], adjacency[edge][:, 0])
+            neighbours = face_part[outside]
+            neighbours = neighbours[(neighbours >= 0)
+                                    & (neighbours != label_id)]
+            target = int(np.bincount(neighbours).argmax()) if len(neighbours) \
+                else -1
+            face_part[members] = target
+            report.setdefault(label, []).append(
+                {"faces": int(len(members)),
+                 "reassigned_to": labels[target] if target >= 0 else "unpainted"})
+            log("  instance check: %s x%d faces refused -> %s"
+                % (label, len(members),
+                   labels[target] if target >= 0 else "unpainted"))
+    return face_part, report
+
+
 def _confirm_claim(backend, sub, local_faces, child, intent, centre, radius, pixels,
                    frame, up=(0, 0, 1)):
     """Show the claimed faces highlighted and ask if they are the named part."""
