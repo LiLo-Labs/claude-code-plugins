@@ -203,6 +203,11 @@ def audit(mesh, frame, backend, atom_map, count, assigned, votes, labels,
         cameras = [render_module.Camera(np.asarray(d, float), [0, 0, 1], centre,
                                         radius, pixels) for d in directions]
 
+        # The cache key carries the assignment state: a replayed round must
+        # never answer for renders it was not actually shown.
+        from . import entities
+        state = entities.digest_of(assigned.tobytes())[7:15]
+
         def one(view_id, camera):
             bundle = render_module.render_bundle(mesh, camera, "zenithal", frame)
             shaded = vision.render_png(bundle)
@@ -212,7 +217,8 @@ def audit(mesh, frame, backend, atom_map, count, assigned, votes, labels,
                                                     camera, lit)
             return ask_corrections(backend, shaded, label_png, id_png, listed,
                                    vocabulary, labels, intent,
-                                   "audit-%d-%02d" % (round_id, view_id))
+                                   "audit-%d-%02d-%s" % (round_id, view_id,
+                                                         state))
 
         with ThreadPoolExecutor(max_workers=workers) as pool:
             answers = list(pool.map(lambda kc: one(kc[0], kc[1]),
@@ -223,10 +229,14 @@ def audit(mesh, frame, backend, atom_map, count, assigned, votes, labels,
         log("audit round %d: %d corrections" % (round_id, corrections))
         if not corrections:
             break
+        # A correction was made looking at the FUSED result, so it overrides:
+        # it must beat whatever vote mass put the atom where it is, or the next
+        # round just re-files the same complaint.
         for answer in answers:
             for part, ids in answer.items():
                 for atom in ids:
-                    votes[atom, index[part]] += correction_weight
+                    votes[atom, index[part]] += (votes[atom].max()
+                                                 + correction_weight)
         voted = votes.sum(axis=1) > 0
         assigned = np.where(voted, np.argmax(votes, axis=1), -1).astype(np.int32)
         assigned = fill(assigned, weights, len(labels))
