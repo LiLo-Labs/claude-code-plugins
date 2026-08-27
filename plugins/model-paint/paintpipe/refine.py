@@ -49,12 +49,23 @@ def refine_subparts(mesh, face_part, labels, vocabulary, backend, intent,
     index = {label: i for i, label in enumerate(labels)}
     hierarchy = parent_of(vocabulary)
     areas = np.bincount(face_part[face_part >= 0], minlength=len(labels)).astype(float)
-    missing = [label for label in labels
-               if areas[index[label]] == 0 and hierarchy.get(label)
-               and hierarchy[label] in index and areas[index[hierarchy[label]]] > 0]
+    empty = [label for label in labels if areas[index[label]] == 0]
+    present = [label for label in labels if areas[index[label]] > 0]
     by_parent = {}
-    for label in missing:
-        by_parent.setdefault(hierarchy[label], []).append(label)
+    orphans = []
+    for label in empty:
+        parent = hierarchy.get(label)
+        if parent and parent in index and areas[index[parent]] > 0:
+            by_parent.setdefault(parent, []).append(label)
+        else:
+            orphans.append(label)
+    # A missing part with no usable declared parent gets one by ASKING (tail of the
+    # cow, tusks of the ogre, eyes of the fish -- all empty, all with no parent that
+    # held area, all previously unreachable by any zoom).
+    if orphans and present:
+        adopted = adopt_hosts(backend, orphans, present, intent)
+        for label, host in adopted.items():
+            by_parent.setdefault(host, []).append(label)
 
     report = {}
     notes = {part["label"]: part.get("note", "") for part in vocabulary or []}
@@ -98,6 +109,41 @@ def refine_subparts(mesh, face_part, labels, vocabulary, backend, intent,
                 recovered[child] = recovered.get(child, 0) + 1
         report[parent] = recovered
     return face_part, report
+
+
+ADOPT_PROMPT = """You are locating missing parts on a 3D model so a zoom camera can go find them. These parts were named but never found:
+%s
+
+These parts WERE found and hold surface area:
+%s
+
+The piece: %s
+
+For each missing part, name the ONE found part that physically contains it or that it sits directly on. Look at the images if given.
+
+Reply with ONLY a JSON object, no prose, no code fences:
+{"adoptions": [{"missing": str, "host": str}]}"""
+
+
+def adopt_hosts(backend, missing, present, intent, overview_paths=()):
+    """Ask which present part each missing part lives on. Agent-declared hierarchy.
+
+    The identity agent's parent field covers the usual case, but a missing part whose
+    declared parent is itself empty -- or root -- leaves the zoom pass with nowhere to
+    look. The tail of the cow, the tusks of the ogre and the eyes of the fish all fell
+    through exactly this hole, and the critic's colour override on them was a no-op on
+    zero faces, which is the worst kind of fix: one that reports success.
+    """
+    prompt = ADOPT_PROMPT % ("\n".join("- %s" % m for m in missing),
+                             "\n".join("- %s" % p for p in present),
+                             intent or "not stated")
+    answer = backend._run(list(overview_paths), prompt, "adoptions")
+    if not answer:
+        return {}
+    valid = set(present)
+    return {entry["missing"]: entry["host"]
+            for entry in answer.get("adoptions", [])
+            if entry.get("host") in valid and entry.get("missing") in missing}
 
 
 REVIEW_PROMPT = """You are reviewing the paint scheme for a 3D print as a miniature \
