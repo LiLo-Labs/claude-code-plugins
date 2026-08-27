@@ -701,7 +701,15 @@ def review_scheme(backend, render_paths, scheme, chosen, palette, intent):
                       for entry in scheme)
     filaments = ", ".join(paint.name for paint in palette)
     prompt = REVIEW_PROMPT % (intent or "not stated", lines, filaments)
-    answer = backend._run(list(render_paths), prompt, "critic-review")
+    # Keyed by the renders actually reviewed: a constant key replayed the
+    # first critique ever cached against renders it never saw.
+    from . import entities as entities_module
+    blob = prompt.encode("utf-8")
+    for path in render_paths:
+        with open(path, "rb") as handle:
+            blob += handle.read()
+    answer = backend._run(list(render_paths), prompt,
+                          "critic-%s" % entities_module.digest_of(blob)[7:19])
     if not answer:
         return {}, "review unavailable"
     by_name = {paint.name.lower(): paint for paint in palette}

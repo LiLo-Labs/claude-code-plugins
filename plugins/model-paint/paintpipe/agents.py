@@ -359,7 +359,13 @@ class VisionPainter(Painter):
                 with open(path, "wb") as handle:
                     handle.write(image)
                 paths.append(path)
-        answer = self.backend._run(paths, prompt, "painter-scheme")
+        # The key is the question actually asked -- prompt and images -- so a
+        # re-run whose regions or renders changed re-asks instead of replaying
+        # a scheme for a labelling that no longer exists.
+        from . import entities as entities_module
+        key = "painter-%s" % entities_module.digest_of(
+            prompt.encode("utf-8") + b"".join(overviews or []))[7:19]
+        answer = self.backend._run(paths, prompt, key)
         if not answer:
             return super().colour(field, labels, radius_mm, intent)
         chosen = {entry["label"]: entry for entry in answer.get("regions", [])}
