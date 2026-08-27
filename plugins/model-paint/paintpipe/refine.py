@@ -241,10 +241,18 @@ def verify_instances(mesh, face_part, labels, backend, intent, frame,
         comp_area = np.bincount(component, weights=areas[faces],
                                 minlength=count)
         median = float(np.median(comp_area[comp_area > 0]))
+        label_total = float(comp_area.sum())
         members_of = {comp: faces[component == comp] for comp in range(count)}
         peer_ids, outlier_ids = [], []
         for comp in range(count):
             if comp_area[comp] <= 0:
+                continue
+            # The label's dominant body is the consensus stage's business,
+            # and slivers are absorption's; instances in between are the
+            # verifier's. Both bounds are relative to the label itself.
+            if comp_area[comp] >= 0.8 * label_total:
+                continue
+            if comp_area[comp] < 0.02 * median:
                 continue
             if 0.3 * median <= comp_area[comp] <= 3.0 * median:
                 peer_ids.append(comp)
@@ -262,12 +270,30 @@ def verify_instances(mesh, face_part, labels, backend, intent, frame,
             peers_of[label_id] = [members_of[comp] for comp in ordered[1:-1]]
 
     def check(label_id, label, members):
+        # A refused instance must be RE-IDENTIFIED, not dumped on a
+        # neighbour: binary refusal plus mechanical reassignment swapped the
+        # ogre's horns and ears into each other and dropped a third of its
+        # hide into "ears". The reviewer picks from the labels actually
+        # present around the instance, or says none.
+        inside = np.zeros(len(mesh.faces), dtype=bool)
+        inside[members] = True
+        edge = inside[adjacency[:, 0]] ^ inside[adjacency[:, 1]]
+        outside = np.where(inside[adjacency[edge][:, 0]],
+                           adjacency[edge][:, 1], adjacency[edge][:, 0])
+        neighbours = face_part[outside]
+        neighbours = neighbours[neighbours >= 0]
+        options = [label] + [labels[i] for i in
+                             np.bincount(neighbours,
+                                         minlength=len(labels)).argsort()[::-1]
+                             if np.bincount(neighbours,
+                                            minlength=len(labels))[i] > 0
+                             and labels[i] != label][:5]
         centre = centres[members].mean(axis=0)
         span = np.ptp(centres[members], axis=0)
         radius = max(float(np.linalg.norm(span)) * 1.6, 0.04 * extent)
-        ok = _confirm_in_context(backend, mesh, members, label, intent, centre,
-                                 radius, pixels, frame, up=up)
-        return label_id, label, members, ok
+        answer = _identify_region(backend, mesh, members, options, intent,
+                                  centre, radius, pixels, frame, up=up)
+        return label_id, label, members, answer
 
     report = {}
     jobs = (suspects + representatives)[:max_checks]
@@ -277,42 +303,103 @@ def verify_instances(mesh, face_part, labels, backend, intent, frame,
     if jobs:
         with ThreadPoolExecutor(max_workers=workers) as pool:
             results = list(pool.map(lambda j: check(*j), jobs))
-        # A failed representative indicts its whole peer set: check the rest.
+        # A re-identified representative indicts its peer set: check the rest.
         escalate = []
-        for label_id, label, _members, ok in results:
-            if ok is False and label_id in peers_of:
+        for label_id, label, _members, answer in results:
+            if answer is not None and answer != label and label_id in peers_of:
                 for members in peers_of.pop(label_id):
                     escalate.append((label_id, label, members))
         if escalate:
             with ThreadPoolExecutor(max_workers=workers) as pool:
                 results += list(pool.map(lambda j: check(*j),
                                          escalate[:max_checks]))
-        for label_id, label, members, ok in results:
-            if ok is None:
-                log("  instance check: %s x%d faces unseen -- kept"
-                    % (label, len(members)))
+        for label_id, label, members, answer in results:
+            if answer is None:
                 continue
-            if ok:
+            if answer == label:
                 continue
-            # Revert to the label that surrounds the refused instance.
-            inside = np.zeros(len(mesh.faces), dtype=bool)
-            inside[members] = True
-            edge = inside[adjacency[:, 0]] ^ inside[adjacency[:, 1]]
-            outside = np.where(inside[adjacency[edge][:, 0]],
-                               adjacency[edge][:, 1], adjacency[edge][:, 0])
-            neighbours = face_part[outside]
-            neighbours = neighbours[(neighbours >= 0)
-                                    & (neighbours != label_id)]
-            target = int(np.bincount(neighbours).argmax()) if len(neighbours) \
-                else -1
+            target = labels.index(answer)
             face_part[members] = target
             report.setdefault(label, []).append(
-                {"faces": int(len(members)),
-                 "reassigned_to": labels[target] if target >= 0 else "unpainted"})
-            log("  instance check: %s x%d faces refused -> %s"
-                % (label, len(members),
-                   labels[target] if target >= 0 else "unpainted"))
+                {"faces": int(len(members)), "reassigned_to": answer})
+            log("  instance check: %s x%d faces re-identified -> %s"
+                % (label, len(members), answer))
     return face_part, report
+
+
+def _identify_region(backend, mesh, members, options, intent, anchor, radius,
+                     pixels, frame, up=(0, 0, 1)):
+    """Show the region red in its best view; the reviewer picks its part.
+
+    Returns the chosen label, or None when no view shows the region or the
+    reviewer cannot tell -- in either case the caller changes nothing.
+    """
+    import io
+    from PIL import Image
+    from . import entities as entities_module
+    from . import render as render_module
+
+    mask = np.zeros(len(mesh.faces), dtype=bool)
+    mask[members] = True
+    normals = mesh.face_normals[mask].mean(axis=0)
+    norm = np.linalg.norm(normals)
+    base = -normals / norm if norm > 1e-9 else np.array([0.0, -1.0, -0.3])
+    axis = np.asarray(up, dtype=float)
+    axis = axis / max(np.linalg.norm(axis), 1e-12)
+
+    def spun(angle_deg):
+        angle = np.radians(angle_deg)
+        parallel = axis * float(base @ axis)
+        ortho = base - parallel
+        side = np.cross(axis, ortho)
+        return parallel + ortho * np.cos(angle) + side * np.sin(angle)
+
+    best = None
+    for direction in (base, spun(50), spun(-50), spun(120), spun(-120)):
+        direction = direction / max(np.linalg.norm(direction), 1e-12)
+        camera = render_module.Camera(direction, up, anchor, radius, pixels)
+        bundle = render_module.render_bundle(mesh, camera, "zenithal", frame)
+        visible = bundle["visible"]
+        hit = bundle["hit_id"]
+        red = visible & mask[np.clip(hit, 0, len(mask) - 1)]
+        coverage = int(red.sum())
+        if best is None or coverage > best[0]:
+            best = (coverage, bundle, red)
+        if coverage > (pixels * pixels) // 50:
+            break
+    coverage, bundle, red = best
+    if coverage < 150:
+        return None
+    lit = np.clip(bundle["rgb_lit"], 0, 1)
+    visible = bundle["visible"]
+    image = np.ones((pixels, pixels, 3))
+    grey = 0.35 + 0.55 * lit
+    image[visible] = grey[visible, None]
+    image[red] = np.stack([0.40 + 0.55 * lit[red], 0.12 * lit[red],
+                           0.08 * lit[red]], axis=1)
+    buffer = io.BytesIO()
+    Image.fromarray((image * 255).astype(np.uint8)).save(buffer, format="PNG")
+    listed = "\n".join("%d. %s" % (i, option)
+                       for i, option in enumerate(options))
+    prompt = ("The RED region is one connected piece of this model's surface.\n"
+              "The piece: %s\n\nWhich of these parts is the red region?\n%s\n"
+              "%d. none of these / cannot tell\n\n"
+              'Reply with ONLY a JSON object, no prose: {"choice": <number>}'
+              % (intent or "a model", listed, len(options)))
+    key = "ident-%s" % entities_module.digest_of(
+        buffer.getvalue() + prompt.encode("utf-8"))[7:19]
+    path = os.path.join(backend.directory, "%s.png" % key)
+    if not os.path.exists(path):
+        with open(path, "wb") as handle:
+            handle.write(buffer.getvalue())
+    answer = backend._run([path], prompt, key)
+    try:
+        choice = int((answer or {}).get("choice", -1))
+    except (TypeError, ValueError):
+        return None
+    if 0 <= choice < len(options):
+        return options[choice]
+    return None
 
 
 def _confirm_claim(backend, sub, local_faces, child, intent, centre, radius, pixels,
