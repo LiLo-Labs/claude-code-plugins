@@ -33,7 +33,7 @@ def parent_of(vocabulary):
 
 
 def refine_subparts(mesh, face_part, labels, vocabulary, backend, intent,
-                    frame=None, views=4, pixels=760):
+                    frame=None, views=4, pixels=760, workers=3):
     """Zoom onto each parent whose children came back empty; re-patch, re-ask, splice.
 
     Returns the updated per-face part index and a report of what was recovered. Faces
@@ -64,10 +64,14 @@ def refine_subparts(mesh, face_part, labels, vocabulary, backend, intent,
     report = {}
     notes = {part["label"]: part.get("note", "") for part in vocabulary or []}
     adjacency = mesh.face_adjacency
-    for parent, children in by_parent.items():
+
+    # Each parent's recovery is vision-bound and independent of the others, so
+    # the render/ask/confirm work fans out across a pool; only the final splice
+    # into face_part happens serially, so two parents can never race a face.
+    def _recover_parent(parent, children):
         host_faces = np.flatnonzero(face_part == index[parent])
         if len(host_faces) < 50:
-            continue
+            return None
         # THE SEARCH REGION IS SPATIAL, NOT LABEL-BOUND. Restricting the zoom to the
         # host's own faces assumed the missing part's geometry currently carries the
         # host's label -- but the ogre's tusks were labelled skull dome, so a zoom onto
@@ -127,7 +131,6 @@ def refine_subparts(mesh, face_part, labels, vocabulary, backend, intent,
         # recovery can therefore never award faces to an already-healthy label -- the
         # candidate set is the parent's faces and the destinations are its missing
         # children, nothing else.
-        recovered = {}
         moved = {}
         for local_face in range(len(parent_faces)):
             claim = assigned[local_patch[local_face]]
@@ -140,16 +143,33 @@ def refine_subparts(mesh, face_part, labels, vocabulary, backend, intent,
         # recovered dict. So each claim is now shown back to the agent -- the claimed
         # faces highlighted red on the parent -- and kept only on a yes. A no reverts
         # the faces and is logged as the failure it is.
+        confirmed, rejected = {}, {}
         for child, local_faces in moved.items():
             ok = _confirm_claim(backend, sub, local_faces, child, intent, centre,
                                 radius, pixels, frame)
             if ok:
-                for local_face in local_faces:
-                    face_part[parent_faces[local_face]] = index[child]
-                recovered[child] = len(local_faces)
+                confirmed[child] = [int(parent_faces[f]) for f in local_faces]
             else:
-                report.setdefault("_rejected", {})[child] = len(local_faces)
-        report[parent] = recovered
+                rejected[child] = len(local_faces)
+        return parent, confirmed, rejected
+
+    from concurrent.futures import ThreadPoolExecutor
+    if by_parent:
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            results = list(pool.map(lambda item: _recover_parent(*item),
+                                    by_parent.items()))
+        for result in results:
+            if result is None:
+                continue
+            parent, confirmed, rejected = result
+            recovered = {}
+            for child, global_faces in confirmed.items():
+                for face in global_faces:
+                    face_part[face] = index[child]
+                recovered[child] = len(global_faces)
+            for child, dropped in rejected.items():
+                report.setdefault("_rejected", {})[child] = dropped
+            report[parent] = recovered
     # LOCATE-THEN-ZOOM IS ROUTED BY FAILURE, NOT BY PEDIGREE. The first wiring sent
     # only "orphans" -- parts with no usable declared parent -- through it, and on
     # three CC0 models that set was empty: the tail, eyes, lips and tusks all HAD
@@ -163,7 +183,8 @@ def refine_subparts(mesh, face_part, labels, vocabulary, backend, intent,
         located = locate_missing(backend, mesh, frame, still, intent, notes_all)
         if located:
             face_part, located_report = recover_located(
-                mesh, face_part, labels, backend, intent, frame, located, notes_all)
+                mesh, face_part, labels, backend, intent, frame, located,
+                notes_all, workers=workers)
             report["_located"] = located_report
         skipped = [label for label in still if label not in located]
         if skipped:
@@ -341,7 +362,7 @@ def locate_missing(backend, mesh, frame, missing, intent, notes, pixels=800, vie
 
 
 def recover_located(mesh, face_part, labels, backend, intent, frame, located, notes,
-                    pixels=760, views=3):
+                    pixels=760, views=3, workers=3):
     """Zoom a camera at each located ball and ask the patch question there.
 
     The ball is spatial -- faces near the anchor, whatever label they carry -- so
@@ -357,13 +378,15 @@ def recover_located(mesh, face_part, labels, backend, intent, frame, located, no
     index = {label: i for i, label in enumerate(labels)}
     centres = mesh.triangles.mean(axis=1)
     report = {}
-    for part, spec in located.items():
+
+    # Vision-bound and independent per part, exactly like the parent pass:
+    # fan out the zoomed asks, splice serially.
+    def _recover_part(part, spec):
         anchor, extent = spec["anchor"], spec["extent_mm"]
         ball = np.flatnonzero(np.linalg.norm(centres - anchor, axis=1)
                               < max(extent * 1.6, 2.0))
         if len(ball) < 30:
-            report[part] = 0
-            continue
+            return part, [], 0
         sub = trimesh.Trimesh(vertices=mesh.vertices, faces=mesh.faces[ball],
                               process=False)
         zoom_r = max(extent * 1.4, 1e-2)
@@ -401,8 +424,7 @@ def recover_located(mesh, face_part, labels, backend, intent, frame, located, no
         claimed_patches = sorted({int(local_patch[f]) for f in range(len(ball))
                                   if assigned[local_patch[f]] == target_id})
         if not claimed_patches:
-            report[part] = 0
-            continue
+            return part, [], 0
         # PRUNE, DON'T VETO. The binary confirm gate stalemated with claim greed: asked
         # to find a part, the finder finds it everywhere -- half a fish's face claimed
         # as "lips" -- and the gate could only throw the whole claim away, so every
@@ -413,14 +435,22 @@ def recover_located(mesh, face_part, labels, backend, intent, frame, located, no
         # did at the entry.
         kept_patches = _prune_claim(backend, sub, local_patch, count, claimed_patches,
                                     part, intent, anchor, zoom_r, pixels, frame)
-        kept = [f for f in range(len(ball))
+        kept = [int(ball[f]) for f in range(len(ball))
                 if int(local_patch[f]) in kept_patches]
-        if kept:
-            for local_face in kept:
-                face_part[ball[local_face]] = index[part]
-            report[part] = len(kept)
-        else:
-            report[part] = -len(claimed_patches)
+        return part, kept, len(claimed_patches)
+
+    from concurrent.futures import ThreadPoolExecutor
+    if located:
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            results = list(pool.map(lambda item: _recover_part(*item),
+                                    located.items()))
+        for part, kept, claimed_count in results:
+            if kept:
+                for face in kept:
+                    face_part[face] = index[part]
+                report[part] = len(kept)
+            else:
+                report[part] = -claimed_count if claimed_count else 0
     # DESIGN CUT, the last resort and an honest one. A part that was LOCATED -- the
     # agent boxed where it belongs -- but that every geometric gate refused is a
     # feature that exists in the design and not in the mesh: lips on a smooth toy

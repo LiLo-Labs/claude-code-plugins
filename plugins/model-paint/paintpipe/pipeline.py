@@ -100,7 +100,8 @@ def paint(input_path, out_dir, intent="", size_mm=None, palette=(),
     # -- second pass: recover what the vocabulary promised but nobody found ---
     from . import refine as refine_module
     face_part, recovered = refine_module.refine_subparts(
-        mesh, face_part, labels, vocabulary, backend, intent, frame=frame)
+        mesh, face_part, labels, vocabulary, backend, intent, frame=frame,
+        workers=workers)
     log("recovery: %s" % (json.dumps(recovered) if recovered
                           else "nothing missing"))
 
