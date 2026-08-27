@@ -292,9 +292,15 @@ def _name_atoms(mesh, frame, face_atom, tree, atom_count, backend, intent, up,
     centre = mesh.vertices.mean(axis=0)
     radius = float(np.ptp(mesh.vertices, axis=0).max()) / 2.0 * 1.05
 
+    # The vocabulary is anatomy, and anatomy is read from upright, eye-level
+    # views -- five arbitrary directions let the ogre's chin folds pass for a
+    # face because no overview ever showed the real one straight on.
+    overview_directions = (preview.orbit(4, 4.0, up=up)
+                           + preview.orbit(2, 45.0, start_deg=45.0, up=up))
     overviews = [vision.render_png(render_module.render_bundle(
-        mesh, render_module.Camera(-d, up, centre, radius, 640),
-        "zenithal", frame)) for d in render_module.fibonacci_directions(5)]
+        mesh, render_module.Camera(np.asarray(d, float), up, centre, radius,
+                                   640),
+        "zenithal", frame)) for d in overview_directions]
     vocabulary = backend.vocabulary(overviews, intent)
     labels = [part["label"] for part in vocabulary]
     # Ask keys carry the full question state -- view geometry AND the
