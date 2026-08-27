@@ -362,9 +362,15 @@ def locate_missing(backend, mesh, frame, missing, intent, notes, pixels=800, vie
         stencil = np.unique(bundle["hit_id"][y0:y1, x0:x1][seen])
         # A paired or repeated part legitimately produces SEVERAL boxes -- two
         # eyes, many studs -- and each is its own recovery target; the old
-        # single-slot dict silently kept only the last instance.
+        # single-slot dict silently kept only the last instance. But the SAME
+        # instance boxed in two views is one target, not two: the ogre's one
+        # neck stump, boxed twice, was drawn twice and flooded the head. Two
+        # boxes whose anchors sit within each other's extent are one instance.
         instances = found.setdefault(part, [])
-        if len(instances) < 4:
+        duplicate = any(np.linalg.norm(anchor - known["anchor"])
+                        < 0.6 * (extent + known["extent_mm"])
+                        for known in instances)
+        if not duplicate and len(instances) < 4:
             instances.append({"anchor": anchor, "extent_mm": max(extent, 1e-3),
                               "direction": bundles[view]["camera"].forward,
                               "stencil_faces": stencil[stencil >= 0]})
