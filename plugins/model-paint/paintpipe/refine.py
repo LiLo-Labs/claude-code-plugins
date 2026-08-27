@@ -69,10 +69,32 @@ def refine_subparts(mesh, face_part, labels, vocabulary, backend, intent,
 
     report = {}
     notes = {part["label"]: part.get("note", "") for part in vocabulary or []}
+    adjacency = mesh.face_adjacency
     for parent, children in by_parent.items():
-        parent_faces = np.flatnonzero(face_part == index[parent])
-        if len(parent_faces) < 50:
+        host_faces = np.flatnonzero(face_part == index[parent])
+        if len(host_faces) < 50:
             continue
+        # THE SEARCH REGION IS SPATIAL, NOT LABEL-BOUND. Restricting the zoom to the
+        # host's own faces assumed the missing part's geometry currently carries the
+        # host's label -- but the ogre's tusks were labelled skull dome, so a zoom onto
+        # "lips and mouth" could not contain a single tusk face and returned nothing,
+        # honestly, forever. The region is now the host plus adjacency rings out to
+        # roughly 2.5x the host's area, so anatomy mislabelled to a NEIGHBOUR is inside
+        # the frame. Claims still move faces only INTO the missing children, and the
+        # visual confirm gate still stands between a claim and the model.
+        inside = np.zeros(len(mesh.faces), dtype=bool)
+        inside[host_faces] = True
+        host_area = float(mesh.area_faces[host_faces].sum())
+        for _ring in range(12):
+            if float(mesh.area_faces[inside].sum()) >= 2.5 * host_area:
+                break
+            touch = inside[adjacency[:, 0]] | inside[adjacency[:, 1]]
+            grow = np.unique(adjacency[touch].ravel())
+            before = int(inside.sum())
+            inside[grow] = True
+            if int(inside.sum()) == before:
+                break
+        parent_faces = np.flatnonzero(inside)
         sub = trimesh.Trimesh(vertices=mesh.vertices,
                               faces=mesh.faces[parent_faces], process=False)
         centre = sub.triangles.mean(axis=1).mean(axis=0)
@@ -82,8 +104,12 @@ def refine_subparts(mesh, face_part, labels, vocabulary, backend, intent,
         target = patch_module.TILE_FACTOR * patch_module.GLYPH_PX * footprint
         local_patch, count = patch_module.build_patches(sub, target)
 
-        # Ask from several sides of the parent.
-        vocab_here = ([{"label": parent, "note": "everything not otherwise named"}]
+        # Every label actually present in the frame is offered, so the agent is not
+        # forced to launder neighbouring anatomy through the host's name; but only
+        # claims for the MISSING children ever move a face.
+        local_labels = sorted({labels[int(face_part[f])] for f in parent_faces
+                               if face_part[f] >= 0})
+        vocab_here = ([{"label": l, "note": notes.get(l, "")} for l in local_labels]
                       + [{"label": c, "note": notes.get(c, "")} for c in children])
         rounds = []
         for k, direction in enumerate(render_module.fibonacci_directions(views)):
@@ -93,11 +119,15 @@ def refine_subparts(mesh, face_part, labels, vocabulary, backend, intent,
             lit = np.clip(bundle["rgb_lit"], 0, 1)
             id_png, listed = patch_module.render_id_view(sub, local_patch, count,
                                                          camera, lit)
-            key = "refine-%s-%d" % (parent.replace(" ", "_"), k)
+            from . import entities as entities_module
+            state = entities_module.digest_of(
+                {"faces": parent_faces, "children": children})[7:17]
+            key = "refine-%s-%s-%d" % (parent.replace(" ", "_"), state, k)
             votes = patch_module.ask_assignments(backend, shaded, id_png, listed,
                                                  vocab_here, intent, key)
             rounds.append((votes, 1.0))
-        names = [parent] + children
+        names = local_labels + children
+        child_ids = {names.index(c) for c in children}
         assigned, _votes = patch_module.fuse_votes(rounds, count, names)
         # Splice: only faces claimed for a CHILD move; everything else stays parent. A
         # recovery can therefore never award faces to an already-healthy label -- the
@@ -107,7 +137,7 @@ def refine_subparts(mesh, face_part, labels, vocabulary, backend, intent,
         moved = {}
         for local_face in range(len(parent_faces)):
             claim = assigned[local_patch[local_face]]
-            if claim > 0:
+            if claim >= 0 and int(claim) in child_ids:
                 child = names[int(claim)]
                 moved.setdefault(child, []).append(local_face)
         # VERIFY BEFORE KEEPING. Two of three recoveries on the CC0 set failed while
@@ -204,7 +234,10 @@ def adopt_hosts(backend, missing, present, intent, overview_paths=()):
     prompt = ADOPT_PROMPT % ("\n".join("- %s" % m for m in missing),
                              "\n".join("- %s" % p for p in present),
                              intent or "not stated")
-    answer = backend._run(list(overview_paths), prompt, "adoptions")
+    from . import entities as entities_module
+    key = "adoptions-%s" % entities_module.digest_of(
+        {"missing": sorted(missing), "present": sorted(present)})[7:17]
+    answer = backend._run(list(overview_paths), prompt, key)
     if not answer:
         return {}
     valid = set(present)
