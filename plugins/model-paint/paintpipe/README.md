@@ -250,3 +250,43 @@ Verified rather than assumed — stride 1 against stride 8 on the same six camer
 | | observations | mean posterior difference | argmax agreement |
 |---|---|---|---|
 | stride 1 vs 8 | 5,076,638 → 634,688 | 0.0119 | 96.16% |
+
+## Two bugs in the coverage predicate, both found by asking why runs were slow
+
+A run always burned its whole budget and reported `0.000 of visible area at >=30 samples`
+while simultaneously reporting a median of 52 samples. Those two numbers cannot both be
+right, and the disagreement was the clue.
+
+**A sample was a bookkeeping row, not a look.** `state.add` was called inside the label
+loop, so one camera's view of a vertex was counted once per label per band per rig — with
+six labels, two bands and four rigs, a vertex seen from a SINGLE camera scored up to
+forty-eight "samples" while its distinct-bin count correctly said one. Coverage is now
+counted once per (camera, rig, band) over everything admitted, before any label is
+considered.
+
+**Bin granularity made the requirement impossible.** Three versions:
+
+| binning | failure |
+|---------|---------|
+| octant + dominant axis, mod bin count | collided — different views recorded as the same one, coverage stalled at a third |
+| six cube faces | no collisions, but unreachable |
+| twenty Fibonacci directions (~40° apart) | a point's admissible cone spans four or five |
+
+A pixel votes only where its GSD resolves the band, which confines it to roughly seventy
+degrees around the surface normal — about one or two cube faces. Asking for three was
+asking for something no amount of looking could deliver, and nothing distinguished that
+from a genuine shortfall.
+
+With both fixed, coverage climbs as it should: **0.308 → 0.411 → 0.515** over three
+rounds, unseen area 36.5% → 11.4%.
+
+## Full run on the shell
+
+132 cameras, 80 views, 4 rigs, 2 bands, 7.6M observations — **530s**. The same work
+before the optimisations would have been roughly two hours.
+
+Verified by looking: `seaweed fronds` tracks the strappy fronds along the rim in every
+view, `shell ribs` covers the ribbed body, `barnacle colonies` lands on the bumpy
+clusters. The one clear false claim is a patch of `cracked shell breaks` on smooth shell
+— which is the label the vision agent gave **0.35 confidence**. The errors are where the
+agent said it was guessing, which is the property the whole weighting scheme depends on.

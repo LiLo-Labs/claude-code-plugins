@@ -31,10 +31,11 @@ class CoverageState:
     surface been seen enough" is about the object and must survive a change of camera.
     """
 
-    def __init__(self, vertex_count, band_count, area_mm2, bins=6):
-        # Six is not a tuning choice: it is how many faces a cube has, and `bin_of`
-        # returns exactly one of them.
+    def __init__(self, vertex_count, band_count, area_mm2, bins=20):
         self.bins = int(bins)
+        if self.bins > 63:
+            raise ValueError("bin count %d exceeds the bitmask width" % self.bins)
+        self._codebook = render_module.fibonacci_directions(self.bins)
         self.area = np.asarray(area_mm2, dtype=float)
         # One bitmask per (vertex, band): which direction bins have resolved it.
         self.seen = np.zeros((band_count, vertex_count), dtype=np.int64)
@@ -48,20 +49,32 @@ class CoverageState:
     def bin_of(self, direction):
         """Which viewing-angle bin a camera direction falls in.
 
-        The signed dominant axis -- which face of a cube the camera looks from. Six
-        bins, every direction in exactly one, and two directions share a bin only if
-        they really do look from the same side.
+        The nearest of a fixed Fibonacci codebook on the sphere: deterministic, needs no
+        seed, and evenly spread, so neighbouring bins sit the same angle apart
+        everywhere.
 
-        The first version of this combined an octant index with a dominant axis and took
-        it modulo the bin count, which collided constantly: genuinely different views
-        were recorded as the same view, so the predicate believed the object had been
-        seen from three sides when it had been seen from one, and coverage stalled at a
-        third with no indication why. A binning function that loses information is worse
-        than no binning, because the count still looks like it means something.
+        THE GRANULARITY IS THE WHOLE PREDICATE. A bin has to mean "a meaningfully
+        different view", and it has to be fine enough that the requirement is reachable
+        by a surface that really is well observed. Two earlier versions got this wrong in
+        opposite directions:
+
+        - A composite of octant and dominant axis taken modulo the bin count COLLIDED,
+          so genuinely different views were recorded as the same one and coverage
+          stalled at a third with no indication why.
+        - The six faces of a cube fixed the collisions and made the requirement
+          IMPOSSIBLE. A pixel votes only where its ground sample distance resolves the
+          band, which confines it to roughly seventy degrees around the surface normal
+          -- about one or two cube faces. Asking for three was asking for something no
+          amount of looking could deliver, and every run burned its whole budget with
+          coverage pinned at 0.000 and no way to tell that from a genuine shortfall.
+
+        Twenty directions put neighbours about forty degrees apart, so a point's
+        admissible cone spans four or five of them and "three distinct bins" means three
+        genuinely different viewpoints, which is what the rule is for.
         """
         direction = np.asarray(direction, dtype=float)
-        dominant = int(np.argmax(np.abs(direction)))
-        return dominant * 2 + int(direction[dominant] > 0)
+        direction = direction / max(np.linalg.norm(direction), 1e-12)
+        return int(np.argmax(self._codebook @ direction))
 
     def add(self, band_index, vertices, weights, direction):
         bit = np.int64(1) << np.int64(self.bin_of(direction))
@@ -295,9 +308,22 @@ def observe_bundle(field, bundle, bands, policy, labeller, store=None, inputs=()
         if len(points) == 0:
             continue
         vertices = field.nearest_vertex(points)
+
+        # A SAMPLE IS A LOOK, NOT A BOOKKEEPING ROW. Coverage is counted once per
+        # (camera, rig, band) over everything admitted, before any label is considered.
+        #
+        # Counting it inside the label loop instead multiplied one look by the number of
+        # labels that claimed it: with six labels, two bands and four rigs, a vertex seen
+        # from a SINGLE camera scored up to forty-eight "samples" while its distinct-bin
+        # count correctly said one. The predicate then reported a median of 52 samples
+        # and 0.000 coverage at the same time, which is the two halves disagreeing about
+        # what a sample is rather than a shortfall in looking.
         base_weight = weight[keep] * float(stride)
         band_gsd = sample[keep]
         band_incidence = bundle["incidence"][keep]
+        if state is not None:
+            state.add(band.index, vertices, base_weight,
+                      bundle["camera"].forward)
 
         for label, confidence_map in labeller(bundle, band):
             values = confidence_map[keep]
@@ -321,9 +347,6 @@ def observe_bundle(field, bundle, bands, policy, labeller, store=None, inputs=()
                 mask_confidence=values[live], rig_id=bundle["rig"],
                 vertices=vertices[live],
                 ids=None if observation is None else [observation.id] * int(live.sum()))
-            if state is not None:
-                state.add(band.index, vertices[live], weights,
-                          bundle["camera"].forward)
     return written
 
 
