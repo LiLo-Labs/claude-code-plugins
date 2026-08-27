@@ -67,12 +67,19 @@ def _hit_within(mesh, origins, direction, reach):
 
 
 def render_asset(mesh, face_rgb, direction, size=640, occlusion=None, up=(0, 0, 1),
-                 background=(0.97, 0.965, 0.955)):
-    """One presentation view: key, fill, sky, and ambient occlusion over flat colour."""
+                 background=(0.97, 0.965, 0.955), centre=None, zoom=1.0):
+    """One presentation view: key, fill, sky, and ambient occlusion over flat colour.
+
+    `centre` and `zoom` frame a detail. A zoom is a real camera move rather than a crop
+    of a finished image: the rays are recast at full resolution, so a close view resolves
+    detail the wide view never sampled, which is the whole point of looking closer.
+    """
     direction = np.asarray(direction, dtype=float)
     direction = direction / np.linalg.norm(direction)
-    centre = mesh.vertices.mean(axis=0)
-    radius = float(np.ptp(mesh.vertices, axis=0).max()) / 2.0 * 1.08
+    if centre is None:
+        centre = mesh.vertices.mean(axis=0)
+    centre = np.asarray(centre, dtype=float)
+    radius = float(np.ptp(mesh.vertices, axis=0).max()) / 2.0 * 1.08 / max(zoom, 1e-6)
     camera = render_module.Camera(direction, up, centre, radius, size)
     origins, rays = camera.rays()
     hit = mesh.ray.intersects_first(ray_origins=origins,
@@ -112,11 +119,18 @@ def render_asset(mesh, face_rgb, direction, size=640, occlusion=None, up=(0, 0, 
 
 
 def contact_sheet(mesh, face_rgb, directions, size=640, occlusion=None, columns=3,
-                  gap=10, background=(247, 246, 244)):
-    """Several views laid out as one image."""
+                  gap=10, background=(247, 246, 244), frames=None):
+    """Several views laid out as one image.
+
+    `frames` optionally pairs each direction with a (centre, zoom) so one sheet can mix
+    wide views and details.
+    """
     from PIL import Image
-    tiles = [render_asset(mesh, face_rgb, direction, size=size, occlusion=occlusion)
-             for direction in directions]
+    if frames is None:
+        frames = [(None, 1.0)] * len(directions)
+    tiles = [render_asset(mesh, face_rgb, direction, size=size, occlusion=occlusion,
+                          centre=frame[0], zoom=frame[1])
+             for direction, frame in zip(directions, frames)]
     rows = (len(tiles) + columns - 1) // columns
     sheet = Image.new("RGB", (columns * size + (columns + 1) * gap,
                               rows * size + (rows + 1) * gap), background)
@@ -127,13 +141,64 @@ def contact_sheet(mesh, face_rgb, directions, size=640, occlusion=None, columns=
     return sheet
 
 
-def turntable(count=6, elevation_deg=18.0):
+def turntable(count=6, elevation_deg=18.0, up=(0, 0, 1)):
     """Directions around the object at a fixed elevation, for a guide sheet."""
+    return orbit(count, elevation_deg, up=up)
+
+
+def orbit(count=12, elevation_deg=14.0, start_deg=0.0, up=(0, 0, 1)):
+    """A full turn around the object's OWN up axis, at one elevation.
+
+    The up axis has to be passed in because the working mesh is expressed in the
+    intrinsic frame, whose axes are sorted by extent (§4.2) and therefore have nothing to
+    do with which way the object stands. Orbiting around the frame's third axis put the
+    rock base at the top of every render -- the piece was upside down in every view, and
+    the renders were the only place that showed it.
+    """
+    up = np.asarray(up, dtype=float)
+    up = up / max(np.linalg.norm(up), 1e-12)
+    helper = np.array([1.0, 0.0, 0.0])
+    if abs(float(up @ helper)) > 0.9:
+        helper = np.array([0.0, 1.0, 0.0])
+    east = np.cross(up, helper)
+    east /= np.linalg.norm(east)
+    north = np.cross(up, east)
     elevation = np.radians(elevation_deg)
     out = []
     for index in range(count):
-        angle = 2.0 * np.pi * index / count
-        out.append([np.cos(angle) * np.cos(elevation),
-                    np.sin(angle) * np.cos(elevation),
-                    -np.sin(elevation)])
+        angle = np.radians(start_deg) + 2.0 * np.pi * index / count
+        horizontal = np.cos(angle) * east + np.sin(angle) * north
+        # The camera looks DOWN from above the horizon, so the view direction carries a
+        # negative component along up.
+        out.append(list(horizontal * np.cos(elevation) - up * np.sin(elevation)))
     return out
+
+
+def up_axis(frame):
+    """The file's own +Z, expressed in the intrinsic frame the working mesh lives in.
+
+    A print-ready mesh stands the way it will be printed, so the file's Z is the axis to
+    orbit around and to light from -- not the frame's longest extent.
+    """
+    local = np.array([0.0, 0.0, 1.0]) @ np.asarray(frame.rotation, dtype=float).T
+    return local / max(np.linalg.norm(local), 1e-12)
+
+
+def region_centre(field_posterior, vertices, label_index):
+    """Where a region sits, weighted by how strongly it is claimed."""
+    weight = np.asarray(field_posterior)[label_index]
+    total = weight.sum()
+    if total <= 0:
+        return vertices.mean(axis=0)
+    return (vertices * weight[:, None]).sum(axis=0) / total
+
+
+def facing_direction(mesh, field_posterior, label_index):
+    """The direction to view a region from: its own posterior-weighted normal."""
+    weight = np.asarray(field_posterior)[label_index]
+    normals = mesh.vertex_normals
+    pooled = (normals * weight[:, None]).sum(axis=0)
+    norm = np.linalg.norm(pooled)
+    if norm < 1e-9:
+        return np.array([0.0, -1.0, -0.3])
+    return -pooled / norm
