@@ -116,9 +116,11 @@ def main(argv=None):
     else:
         backend = vision.HeadlessBackend(os.path.join(args.out, "vision"),
                                          model=args.model)
+        args._backend = backend
         region_agent = agents.VisionRegion(backend, intent=args.intent, policy=policy,
                                            store=store).bind(working, frame)
         vocabulary = region_agent.learn_vocabulary(overviews)
+        args._vocabulary = vocabulary
         log("parts %s" % [part["label"] for part in vocabulary])
 
     state, why = views_module.converge(
@@ -257,6 +259,37 @@ def _finish(args, store, run, field, frame, posterior, labels, scheme, profile, 
     write(limited, "limited")
     log("wrote limited-turnaround.png, limited-hero.png")
 
+    # -- second pass (§10): sub-parts below patch resolution, then the critic ----
+    # Any part the coarse pass left empty, whose parent has area, gets a zoomed
+    # re-ask over the parent's own faces. Generic: driven by the vocabulary
+    # hierarchy the identity agent returned, with nothing model-specific in it.
+    backend = getattr(args, "_backend", None)
+    vocabulary = getattr(args, "_vocabulary", None)
+    if backend is not None and vocabulary:
+        from . import refine as refine_module
+        face_part = _face_parts(field, committed, claimed)
+        face_part, recovered = refine_module.refine_subparts(
+            mesh, face_part, names, vocabulary, backend, args.intent, frame=frame)
+        if recovered:
+            log("second pass recovered: %s" % recovered)
+            committed, claimed = _vertex_parts(field, face_part, len(names))
+
+        overrides, verdict = refine_module.review_scheme(
+            backend, [os.path.join(args.out, "limited-hero.png"),
+                      os.path.join(args.out, "limited-turnaround.png")],
+            scheme, chosen, profile.palette, args.intent)
+        if verdict:
+            log("critic: %s" % verdict)
+        for part, (paint, why) in overrides.items():
+            log("  critic override %-22s -> %-7s %s" % (part, paint.name, why[:60]))
+            chosen[part] = paint
+        if overrides or recovered:
+            limited = np.array([chosen[entry["region"]].lab
+                                for entry in scheme])[committed]
+            limited[~claimed] = np.array(profile.palette[-1].lab)
+            write(limited, "final")
+            log("wrote final-turnaround.png, final-hero.png")
+
     export = _export_3mf(args, field, chosen, names, committed, claimed, profile,
                          source, log)
     return {"regions": [{k: v for k, v in entry.items() if k != "actor"}
@@ -264,6 +297,25 @@ def _finish(args, store, run, field, frame, posterior, labels, scheme, profile, 
             "filaments": {entry["region"]: chosen[entry["region"]].name
                           for entry in scheme},
             "unseparated": clashes, "export": export}
+
+
+def _face_parts(field, owner, claimed):
+    faces = field.substrate.faces
+    face_claimed = claimed[faces]
+    return np.where(face_claimed.any(axis=1),
+                    np.take_along_axis(owner[faces],
+                                       np.argmax(face_claimed, axis=1)[:, None],
+                                       axis=1).ravel(), -1).astype(np.int32)
+
+
+def _vertex_parts(field, face_part, count):
+    votes = np.zeros((len(field.substrate.vertices), count))
+    for column in range(3):
+        v = field.substrate.faces[:, column]
+        ok = face_part >= 0
+        np.add.at(votes, (v[ok], face_part[ok]), 1.0)
+    claimed = votes.sum(axis=1) > 0
+    return np.where(claimed, np.argmax(votes, axis=1), 0).astype(np.int32), claimed
 
 
 def _export_3mf(args, field, chosen, names, owner, claimed, profile, source, log):
