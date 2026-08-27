@@ -81,68 +81,38 @@ def pixel_graph(bundle, barrier):
     return graph, index
 
 
-def seed_extent_mm(bundle, points):
-    """How big is ONE instance of the part the agent pointed at, in millimetres.
+def contest_masks(bundle, band, seeds_by_label, policy, barrier=None, graph=None,
+                  spread=None, spread_by_label=None):
+    """Every label races for the surface. Returns {label: confidence map}.
 
-    The part tells you its own scale, but you have to ask the question correctly. The
-    obvious reading -- the extent of the whole seed SET -- is right only when the part
-    occurs once. For a part with several instances it measures the distance BETWEEN
-    them: four clawed feet on a dragon are a hundred millimetres apart, so every seed
-    flooded fifty millimetres and the claws swallowed a quarter of the model.
+    A LABEL'S EXTENT IS SET BY ITS COMPETITORS, NOT BY A LENGTH SOMEBODY CHOSE. For each
+    pixel, measure the barrier-weighted geodesic distance to the nearest seed of this
+    label (d1) and to the nearest seed of any OTHER label (d2), and take
 
-    The tell was exact. Parts with one instance came out clean -- `tail fin`, five
-    connected pieces with 96% of its area in the largest -- while parts with many came
-    out shattered: `clawed feet` 447 pieces across 24.7% of the surface, `neck and body
-    segments` 557 pieces. One instance or many was the only thing that separated them.
+        confidence = (d2 - d1) / (d2 + d1)
 
-    So measure LOCALLY: the typical distance from a seed to its nearest neighbour of the
-    same label. Two points on one foot are close whether or not another foot is across
-    the model, which is exactly the invariance wanted.
-    """
-    if len(points) < 2:
-        return None
-    surface = bundle["point"]
-    visible = bundle["visible"]
-    found = []
-    for x, y in points:
-        if 0 <= y < visible.shape[0] and 0 <= x < visible.shape[1] and visible[y, x]:
-            found.append(surface[y, x])
-    if len(found) < 2:
-        return None
-    found = np.asarray(found)
-    gaps = np.linalg.norm(found[:, None, :] - found[None, :, :], axis=2)
-    np.fill_diagonal(gaps, np.inf)
-    nearest = gaps.min(axis=1)
-    nearest = nearest[np.isfinite(nearest)]
-    if not len(nearest):
-        return None
-    return float(np.median(nearest))
+    which is dimensionless, needs no constant, and is 1 deep inside a label's own basin,
+    0 on the seam between two labels, and negative beyond it. Where a competitor arrives
+    first, this label simply stops -- no reach parameter, no decay length.
 
+    THIS REPLACES AN UNBOUNDED FLOOD, and the flood was the whole defect. It ran one
+    multi-source solve per label with `min_only`, which is a UNION: each of a label's
+    seeds is an independent chance to leak across a weak barrier, with nothing opposing
+    it. Smear therefore scaled with instance count by construction, which is exactly what
+    the isolation report measured -- `tail fin` with one instance came back 5 connected
+    pieces at 96% in the largest, while `clawed feet` with four came back 447 pieces
+    across a quarter of the model. Three successive definitions of `spread` were tried
+    and all three failed, because an unopposed flood has no correct length: the constant
+    was never the bug, the union was.
 
-def synthesise_masks(bundle, band, seeds_by_label, policy, spread=None, barrier=None,
-                     graph=None, spread_by_label=None):
-    """Grow every label's seeds at once. Returns {label: confidence map}.
-
-    Geodesic distance in the image, over a graph whose edge costs are the local boundary
-    strength, so a seed spreads across a smooth face and stops at the edge of the feature
-    it sits in without anyone choosing a threshold. Confidence falls exponentially with
-    that distance over the band's own wavelength.
-
-    Solved with scipy's Dijkstra rather than by relaxation sweeps. An isotropic sweep
-    moves information one pixel at a time, so reaching across a feature fifty pixels wide
-    took fifty passes over the whole image -- and that was repeated for each of twelve
-    label-band pairs, which was most of what a bundle cost.
-
-    Labels share the graph but keep INDEPENDENT masks rather than partitioning the image:
-    §10 says the region agent is never forced to partition, and a watershed would force
-    exactly that, discarding the overlap §8.4 exists to measure.
+    A race has no such asymmetry. Four feet do not reach further than one, because what
+    stops each foot is where the leg and body fronts arrive, and that does not grow with
+    the number of feet.
     """
     visible = bundle["visible"]
     labels = [label for label, points in seeds_by_label.items() if points]
     if not visible.any() or not labels:
         return {}
-
-    default_spread = float(spread if spread is not None else band.wavelength_mm)
     if graph is None:
         if barrier is None:
             barrier = barrier_map(bundle, band)
@@ -150,46 +120,53 @@ def synthesise_masks(bundle, band, seeds_by_label, policy, spread=None, barrier=
     else:
         graph, index = graph
 
-    from scipy.sparse.csgraph import dijkstra
     height, width = visible.shape
-    out = {}
-    for label in labels:
-        spread_mm = default_spread
-        if spread_by_label and spread_by_label.get(label):
-            # Never smaller than the band: a part cannot be described more finely than
-            # the scale the evidence for it was admitted at.
-            spread_mm = max(default_spread, float(spread_by_label[label]) * 0.5)
-        sources = []
-        for x, y in seeds_by_label[label]:
+
+    def nodes_for(points):
+        out = []
+        for x, y in points:
             if 0 <= y < height and 0 <= x < width and index[y, x] >= 0:
-                sources.append(int(index[y, x]))
-        if not sources:
-            continue
-        # A mask expresses ONE part, and a part's extent is the band it lives at. The
-        # confidence is exp(-d / spread), so past about two and a half spreads it is
-        # under a percent and adds nothing but reach.
-        #
-        # This was 6x when the flood was first ported to Dijkstra, and it was a real
-        # regression: the relaxation it replaced had capped travel at spread/footprint
-        # sweeps, roughly one wavelength, while 6x let every seed on the shell flood
-        # 49.6mm across a 110mm object. Eighty views then produced flat claims that
-        # ignored the surface entirely -- worse than the twelve-view run had been. Speed
-        # is not worth a quantity changing behind a rewrite.
-        distance = dijkstra(graph, directed=False, indices=sources, min_only=True,
-                            limit=spread_mm * 2.5)
+                out.append(int(index[y, x]))
+        return out
+
+    by_label = {label: nodes_for(seeds_by_label[label]) for label in labels}
+    by_label = {label: nodes for label, nodes in by_label.items() if nodes}
+    if len(by_label) == 1:
+        # Nothing to race against. One label alone owns whatever it can reach, which is
+        # the honest answer -- a single label in a view carries no boundary information.
+        label = next(iter(by_label))
         confidence = np.zeros(visible.shape)
-        reached = np.isfinite(distance)
-        if reached.any():
-            values = np.zeros(len(distance))
-            values[reached] = np.exp(-distance[reached] / max(spread_mm, 1e-9))
-            confidence[visible] = values
+        confidence[visible] = 1.0
+        return {label: confidence}
+
+    from scipy.sparse.csgraph import dijkstra
+    out = {}
+    for label, nodes in by_label.items():
+        others = [n for other, group in by_label.items() if other != label
+                  for n in group]
+        mine = dijkstra(graph, directed=False, indices=nodes, min_only=True)
+        theirs = dijkstra(graph, directed=False, indices=others, min_only=True)
+        total = mine + theirs
+        margin = np.zeros(len(mine))
+        live = np.isfinite(total) & (total > 0)
+        margin[live] = (theirs[live] - mine[live]) / total[live]
+        # Unreachable for everyone: nobody claims it. Reachable only by this label:
+        # it owns it, which is what an infinite competitor distance means.
+        only_mine = np.isfinite(mine) & ~np.isfinite(theirs)
+        margin[only_mine] = 1.0
+        confidence = np.zeros(visible.shape)
+        confidence[visible] = np.clip(margin, 0.0, 1.0)
         out[label] = confidence
     return out
 
 
-def synthesise_mask(bundle, band, seeds, policy, spread=None, barrier=None):
-    """Single-label convenience wrapper over `synthesise_masks`."""
-    found = synthesise_masks(bundle, band, {"_": list(seeds)}, policy, spread, barrier)
+# Kept as the name the rest of the package calls; the mechanism is the race above.
+synthesise_masks = contest_masks
+
+
+def synthesise_mask(bundle, band, seeds, policy, spread=None, barrier=None, graph=None):
+    """Single-label convenience wrapper. With no competitor there is no contest."""
+    found = contest_masks(bundle, band, {"_": list(seeds)}, policy, barrier, graph)
     return found.get("_", np.zeros(bundle["visible"].shape))
 
 
