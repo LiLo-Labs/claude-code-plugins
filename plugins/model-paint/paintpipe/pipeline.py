@@ -93,7 +93,9 @@ def paint(input_path, out_dir, intent="", size_mm=None, palette=(),
     up = _choose_up(mesh, frame, backend, intent=intent, log=log)
 
     # -- name the pieces ------------------------------------------------------
-    face_part, labels, vocabulary, naming, overviews = _name_atoms(
+    # `intent` comes back enriched: the identity dossier studied before
+    # naming rides inside it for every later stage as well.
+    face_part, labels, vocabulary, naming, overviews, intent = _name_atoms(
         mesh, frame, face_atom, tree, atom_count, backend, intent, up,
         pixels=pixels, workers=workers, log=log)
 
@@ -301,6 +303,25 @@ def _name_atoms(mesh, frame, face_atom, tree, atom_count, backend, intent, up,
         mesh, render_module.Camera(np.asarray(d, float), up, centre, radius,
                                    640),
         "zenithal", frame)) for d in overview_directions]
+    # WHAT IS THIS THING -- studied once, deeply, before any part is named.
+    # The dossier's identity and its cautions about look-alike traps travel
+    # inside every downstream ask, so the labeller that meets the ogre's
+    # chin folds has already been told they are not a face.
+    dossier = backend.describe(overviews, intent)
+    if dossier.get("identity"):
+        log("identity: %s" % dossier["identity"])
+    if dossier.get("cautions"):
+        log("cautions: %s" % dossier["cautions"])
+    briefing = intent or ""
+    if dossier.get("identity"):
+        briefing += "\n\nWhat this piece is (studied): %s" % dossier["identity"]
+    for landmark in dossier.get("landmarks", []) or []:
+        briefing += "\n- %s: %s" % (landmark.get("what", ""),
+                                    landmark.get("where", ""))
+    if dossier.get("cautions"):
+        briefing += "\nCautions: %s" % dossier["cautions"]
+    intent = briefing.strip() or intent
+
     vocabulary = backend.vocabulary(overviews, intent)
     labels = [part["label"] for part in vocabulary]
     # Ask keys carry the full question state -- view geometry AND the
@@ -438,7 +459,7 @@ def _name_atoms(mesh, frame, face_atom, tree, atom_count, backend, intent, up,
     naming = {"views": len(cameras), "contested": int(len(contested)),
               "voted_atoms": int((assigned >= 0).sum()), "atoms": int(count),
               "audit_corrections": audit_history}
-    return face_part, labels, vocabulary, naming, overviews
+    return face_part, labels, vocabulary, naming, overviews, intent
 
 
 def _settle(field, mesh, face_part, labels, log=default_log):

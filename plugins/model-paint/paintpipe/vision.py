@@ -251,6 +251,27 @@ VOCAB_SCHEMA = {
     "additionalProperties": False,
 }
 
+DESCRIBE_PROMPT = """You are studying orthographic renders of one 3D model, shown \
+upright from several angles, before anyone names its parts. Work out what this \
+object actually IS -- not a guess from one view, but a reading that survives all \
+of them.
+
+Report:
+- identity: two to four sentences on what the object is, its overall form, and \
+which direction it faces.
+- landmarks: the distinct anatomical or structural features you are SURE of, \
+each with where it sits on the object.
+- cautions: look-alike traps on THIS model -- surface folds that mimic a face, \
+sockets that mimic eyes, anything a labeller in a hurry would get wrong, and \
+what each such region really is.
+
+If the person's own description (below) conflicts with what the renders show, \
+trust the renders and say so in cautions.
+
+Reply with ONLY a JSON object, no prose, no code fences:
+{"identity": str, "landmarks": [{"what": str, "where": str}], "cautions": str}"""
+
+
 VOCAB_PROMPT = """You are looking at orthographic renders of one 3D model from several \
 directions, lit from above as it would be primed for painting.
 
@@ -489,6 +510,25 @@ class HeadlessBackend(VisionBackend):
         round: fifteen views came back with zero votes and nothing said why."""
         with open(os.path.join(self.directory, "%s.failed.txt" % cache_key), "w") as f:
             f.write(text)
+
+    def describe(self, overviews, intent):
+        """The identity dossier: what the object IS, studied before any part
+        is named, with explicit cautions about this model's look-alike traps.
+        Its text is folded into every downstream ask."""
+        from . import entities as entities_module
+        paths = []
+        for index, image in enumerate(overviews):
+            path = os.path.join(self.directory, "study-%d.png" % index)
+            with open(path, "wb") as handle:
+                handle.write(image)
+            paths.append(path)
+        prompt = DESCRIBE_PROMPT
+        if intent:
+            prompt += "\n\nWhat the person said about the piece: %s" % intent
+        key = "describe-%s" % entities_module.digest_of(
+            prompt.encode("utf-8") + b"".join(overviews))[7:19]
+        answer = self._run(paths, prompt, key)
+        return answer or {}
 
     def vocabulary(self, overviews, intent):
         from . import entities as entities_module

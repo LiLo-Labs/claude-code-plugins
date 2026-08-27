@@ -35,9 +35,16 @@ Never modify `<MODEL>`. The pipeline reads it; nothing writes to it.
 
 ## Step 2 — Resolve intent, size and filaments
 
-**Intent.** If the user did not say what the piece is, ask once ("what is this
-model?"). One phrase in their own words is the cheapest disambiguation a grey
-render can get; pass it verbatim as `--intent`.
+**Intent.** If the user did not say what the piece is, ask once — and ask for
+a few SENTENCES, not a phrase: what the piece is, its notable features and
+where they are, and anything easy to get wrong ("a one-eyed ogre bust — a
+single central eye under the brow; the folds under the chin are jowls, not a
+face"). Every sentence they give travels inside every judgement the agents
+make, and the pipeline also studies the model itself and folds its own
+identity dossier in — but the user's knowledge of their own model is the
+cheapest, highest-value signal available. Pass it verbatim as `--intent`.
+Never invent features they did not mention (asserting "tusks" on a model
+without tusks sends the agents hunting for them).
 
 **Size.** If they gave a printed size, pass it as `--size-mm` (the largest
 dimension). If not, omit it — the pipeline infers from the file and flags the
