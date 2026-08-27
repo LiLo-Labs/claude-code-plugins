@@ -302,7 +302,8 @@ def observe_bundle(field, bundle, bands, policy, labeller, store=None, inputs=()
 
 
 def converge(field, mesh, frame, bands, policy, labeller, rigs=("zenithal",),
-             pixels=700, store=None, inputs=(), max_rounds=6, log=None):
+             pixels=700, store=None, inputs=(), max_rounds=6, log=None,
+             prefetch=None):
     """§9. Sampling and fusion as a LOOP, not a pass.
 
     Returns the coverage state and why it stopped. Which exit was taken is recorded on
@@ -337,6 +338,16 @@ def converge(field, mesh, frame, bands, policy, labeller, rigs=("zenithal",),
         if not directions:
             reason = "no deficit to aim at"
             break
+        planned = []
+        for direction, share in directions:
+            aim_centre, aim_radius = (centre, radius) if round_index == 0 else \
+                frame_deficit(share, centre, radius)
+            planned.append(render_module.Camera(
+                -np.asarray(direction, dtype=float), [0.0, 0.0, 1.0], aim_centre,
+                aim_radius, pixels))
+        if prefetch is not None:
+            prefetch(planned)
+
         for direction, share in directions:
             seen_directions.append(np.asarray(direction, dtype=float))
             aim_centre, aim_radius = (centre, radius) if round_index == 0 else \

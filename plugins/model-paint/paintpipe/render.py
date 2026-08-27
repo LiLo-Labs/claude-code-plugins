@@ -20,15 +20,21 @@ import numpy as np
 # Rig names are semantic (§5.2). Cues from different rigs are separate evidence
 # channels and are never averaged: a cue is a LIGHTING RESPONSE, so the rig is part of
 # the measurement, and averaging two rigs measures nothing that exists.
+# Weights within a rig sum to 1.0, so a fully lit surface reaches white and nothing
+# clips. This is not cosmetic. The first version summed to 1.28 on the zenithal rig and
+# the renders came back with blown highlights and crushed blacks -- and those renders are
+# what the vision agent LOOKS AT (§10). Detail destroyed by exposure is detail the agent
+# cannot name, and it is destroyed identically in every view, so no amount of fusion
+# recovers it.
 RIGS = {
     # Key from intrinsic up. Reproduces how the object will actually be primed and
     # read, and is the reference rig for shade and highlight reasoning.
-    "zenithal": {"key": ("up", 1.0), "fill": ("front", 0.18), "ambient": 0.10},
+    "zenithal": {"key": ("up", 0.62), "fill": ("front", 0.16), "ambient": 0.22},
     # No directional key, for material and albedo reasoning where a key light lies.
     "flat": {"key": None, "fill": None, "ambient": 1.0},
     # Grazing from two orthogonal azimuths; maximises edge and plane-break separation.
-    "raking_a": {"key": ("right", 1.0), "fill": None, "ambient": 0.06, "graze": True},
-    "raking_b": {"key": ("front", 1.0), "fill": None, "ambient": 0.06, "graze": True},
+    "raking_a": {"key": ("right", 0.72), "fill": None, "ambient": 0.28, "graze": True},
+    "raking_b": {"key": ("front", 0.72), "fill": None, "ambient": 0.28, "graze": True},
 }
 
 

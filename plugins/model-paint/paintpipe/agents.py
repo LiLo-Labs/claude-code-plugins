@@ -106,6 +106,121 @@ class Region(Agent):
         yield ("field", field)
 
 
+class VisionRegion(Region):
+    """The Region agent of §10, backed by a vision model.
+
+    The model names parts and points at them; `vision.synthesise_mask` grows each point
+    into a fuzzy mask through the cue maps. Neither half could do this alone: the model
+    cannot paint pixels, and the cues cannot say which blob is a barnacle colony.
+
+    ONE CALL PER CAMERA, not per bundle. §5.2 makes the zenithal rig the reference for
+    shade and highlight reasoning, so that is the render the agent looks at, and its
+    proposals are then admitted separately under every rig and band of that camera. The
+    alternative -- asking the model the same question about the same geometry under three
+    lights -- triples the cost to gather three answers that are correlated anyway, which
+    is the opposite of what independent evidence means.
+
+    Seed confidence is carried through as `mask_confidence` into §7's weight, so a part
+    the agent half-saw contributes half as much. It is never rounded up to a decision.
+    """
+
+    name = "vision_region"
+
+    def __init__(self, backend, vocabulary=None, intent="", policy=None, store=None,
+                 actor=None):
+        super().__init__(actor or backend.actor)
+        self.backend = backend
+        self.vocabulary = vocabulary or []
+        self.intent = intent
+        self.policy = policy
+        self.store = store
+        self._seeds = {}
+        self.misses = 0
+
+    def learn_vocabulary(self, overviews):
+        self.vocabulary = self.backend.vocabulary(overviews, self.intent)
+        return self.vocabulary
+
+    @staticmethod
+    def _key(camera):
+        return (tuple(np.round(camera.forward, 6)), round(camera.radius_mm, 4),
+                tuple(np.round(camera.centre, 4)))
+
+    def _reference_png(self, camera):
+        from . import render as render_module
+        from . import vision as vision_module
+        return vision_module.render_png(render_module.render_bundle(
+            self._mesh, camera, "zenithal", self._frame))
+
+    def prefetch(self, cameras, workers=6):
+        """Look at a whole round's cameras at once.
+
+        Each call is a separate subprocess taking about twenty seconds, so serially a
+        forty-view round spends thirteen minutes doing nothing but waiting. The calls are
+        independent by construction -- §10 says the region agent is never told about
+        other views -- so running them concurrently changes the wall clock and nothing
+        else about the evidence.
+        """
+        from concurrent.futures import ThreadPoolExecutor
+        wanted = [camera for camera in cameras if self._key(camera) not in self._seeds]
+        if not wanted:
+            return 0
+        images = [(self._key(camera), self._reference_png(camera))
+                  for camera in wanted]
+
+        def fetch(item):
+            key, png = item
+            return key, self.backend.seeds(png, self.vocabulary, self.intent)
+
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            for key, found in pool.map(fetch, images):
+                self._seeds[key] = found
+        return len(wanted)
+
+    def seeds_for(self, bundle):
+        """Cached per camera, so every rig and band of one camera shares one look."""
+        camera = bundle["camera"]
+        key = self._key(camera)
+        if key not in self._seeds:
+            from . import vision as vision_module
+            reference = bundle if bundle["rig"] == "zenithal" \
+                else None
+            png = vision_module.render_png(reference) if reference is not None \
+                else self._reference_png(camera)
+            self._seeds[key] = self.backend.seeds(png, self.vocabulary, self.intent)
+        return self._seeds[key]
+
+    def bind(self, mesh, frame):
+        """The mesh and frame needed to re-render the reference rig on demand."""
+        self._mesh, self._frame = mesh, frame
+        return self
+
+    def propose(self, bundle, band, tree=None):
+        from . import vision as vision_module
+        known = {part["label"] for part in self.vocabulary}
+        for entry in self.seeds_for(bundle):
+            label = entry.get("label", "")
+            if label not in known:
+                # A label outside the vocabulary cannot be fused with anything, because
+                # no other view will produce it. Dropping it is recorded rather than
+                # silent -- a vocabulary that keeps getting ignored is a finding.
+                self.misses += 1
+                if self.store is not None:
+                    self.store.reject("proposal",
+                                      "label %r is not in the vocabulary" % label,
+                                      count=1)
+                continue
+            points = [(int(p[0]), int(p[1])) for p in entry.get("points", [])
+                      if len(p) >= 2]
+            if not points:
+                continue
+            confidence = float(entry.get("confidence", 0.5))
+            mask = vision_module.synthesise_mask(bundle, band, points, self.policy)
+            if mask.max() <= 0:
+                continue
+            yield (label, mask * confidence)
+
+
 class Critic(Agent):
     """field rendered back + region stats -> tree edits.
 

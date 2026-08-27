@@ -155,3 +155,64 @@ other two for never reaching `posterior_floor` anywhere, which is the critic doi
 job on a nearly featureless test sphere with three overlapping proposals. And every
 region reports `realizable: false` because no palette or brush was declared -- §3.2's
 unconstrained mode, which produces a design rather than a plan and says which it is.
+
+## The Region agent (§10), backed by a vision model
+
+A vision model cannot paint a pixel mask, and asking it to is the usual way this goes
+wrong. The work splits:
+
+- **the model** names parts and points at them — a label and a few pixel coordinates
+- **`vision.synthesise_mask`** grows each point into a fuzzy mask through the cue maps,
+  a flood whose cost to cross between pixels is the local boundary strength
+
+Masks are approximate on purpose. §7 weights every pixel by how well that view resolved
+it and §8 fuses across every camera, rig and band, so a seed that lands badly in one view
+is outvoted rather than believed.
+
+**Label consistency is what makes fusion possible.** Two views calling the same feature
+"barnacle cluster" and "barnacles" produce two regions that never reinforce each other.
+So the vocabulary is fixed once by the identity agent on overview renders, and every
+per-view proposal must choose from it. A label outside it is rejected with a reason.
+
+### Backends
+
+| backend | needs | use |
+|---------|-------|-----|
+| `HeadlessBackend` | nothing — `claude -p` with the session's own auth | default in Claude Code |
+| `AnthropicBackend` | `ANTHROPIC_API_KEY` | unattended runs; structured outputs |
+| `CueBackend` | nothing | the null floor every other backend must beat |
+
+### Two things that are not optional, both learned by getting them wrong
+
+**Name the model.** The headless default is Sonnet, and on a grey shaded render of the
+shell it confidently returned `tattered cloak/fringe edge`, `main robe/drapery folds` and
+`face/mask area` — a robed figure that is not there. Opus 5 on the same image returns
+`ribbed shell wall`, `barnacle clusters`, `rock base`.
+
+**Pass the painter's intent.** An untextured grey render is genuinely ambiguous, and the
+brief is the cheapest disambiguation available.
+
+### Exposure is not cosmetic
+
+Rig weights now sum to 1.0. The first version summed to 1.28 on the zenithal rig, and
+those renders — **which are what the vision agent looks at** — came back with blown
+highlights and crushed blacks. Detail destroyed by exposure is detail the agent cannot
+name, and it is destroyed identically in every view, so no amount of fusion recovers it.
+Measured after the fix: 0.00% clipped, 0.00% black.
+
+### First fused result
+
+Vocabulary learned from 4 overviews: `shell ribs`, `shell rim`, `barnacle colonies`,
+`seaweed fronds`, `rock base`, `cracked shell breaks` — with a parent hierarchy and a
+painter's rationale for each.
+
+Seeds verified by overlaying them on the render and looking: blue lands on all three
+barnacle clusters, green on the strappy fronds, red on the ribbed bands. Where the agent
+was guessing it said so — `shell rim` 0.45, `cracked shell breaks` 0.35 — and those are
+the placements that are genuinely ambiguous. That honest confidence is carried into §7's
+weight as `mask_confidence` and never rounded up to a decision.
+
+One call per CAMERA, not per bundle: §5.2 makes zenithal the reference rig, and asking
+the same question about the same geometry under three lights triples the cost to gather
+three correlated answers. Calls within a round run concurrently — they are independent by
+construction, since §10 forbids telling the region agent about other views.
