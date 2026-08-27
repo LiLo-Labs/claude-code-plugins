@@ -187,7 +187,7 @@ def ask_corrections(backend, shaded_png, label_png, id_png, listed, vocabulary,
 
 
 def audit(mesh, frame, backend, atom_map, count, assigned, votes, labels,
-          vocabulary, intent, up, weights, pixels=900, views=6, rounds=2,
+          vocabulary, intent, up, weights, pixels=900, views=6, rounds=3,
           workers=3, correction_weight=3.0, log=print):
     """Show, correct, refuse, repeat -- until the agent has nothing to fix."""
     from concurrent.futures import ThreadPoolExecutor
