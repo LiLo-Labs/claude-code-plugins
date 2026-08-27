@@ -319,6 +319,16 @@ def verify_instances(mesh, face_part, labels, backend, intent, frame,
             if answer == label:
                 continue
             target = labels.index(answer)
+            # A re-identification that would dwarf everything the target
+            # label already holds is a forced choice gone wrong, not a
+            # finding -- leave the instance alone and say so.
+            instance_area = float(areas[members].sum())
+            target_area = float(areas[face_part == target].sum())
+            if target_area > 0 and instance_area > 5.0 * target_area:
+                log("  instance check: %s x%d faces -> %s refused as "
+                    "implausible (target holds far less); left unchanged"
+                    % (label, len(members), answer))
+                continue
             face_part[members] = target
             report.setdefault(label, []).append(
                 {"faces": int(len(members)), "reassigned_to": answer})

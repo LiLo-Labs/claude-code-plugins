@@ -291,19 +291,20 @@ def _name_atoms(mesh, frame, face_atom, tree, atom_count, backend, intent, up,
 
     centre = mesh.vertices.mean(axis=0)
     radius = float(np.ptp(mesh.vertices, axis=0).max()) / 2.0 * 1.05
-    # Ask keys carry the view state (up axis, resolution): a re-run whose
-    # orientation changed must re-ask, not replay answers for renders the
-    # agent never saw.
-    from . import entities
-    view_state = entities.digest_of({"up": np.round(np.asarray(up), 4).tolist(),
-                                     "pixels": int(pixels),
-                                     "camera": "up-hinted"})[7:13]
 
     overviews = [vision.render_png(render_module.render_bundle(
         mesh, render_module.Camera(-d, up, centre, radius, 640),
         "zenithal", frame)) for d in render_module.fibonacci_directions(5)]
     vocabulary = backend.vocabulary(overviews, intent)
     labels = [part["label"] for part in vocabulary]
+    # Ask keys carry the full question state -- view geometry AND the
+    # vocabulary being assigned. Replaying an old run's answers against a new
+    # part list silently drops the votes for every renamed part.
+    from . import entities
+    view_state = entities.digest_of({"up": np.round(np.asarray(up), 4).tolist(),
+                                     "pixels": int(pixels),
+                                     "camera": "up-hinted",
+                                     "labels": labels})[7:13]
     if not labels:
         # The backend returns [] on any failed call. Stop before spending a
         # dozen naming views on a run that can only end in an empty argmax.
