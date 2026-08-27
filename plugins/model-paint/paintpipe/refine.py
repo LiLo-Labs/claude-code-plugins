@@ -199,30 +199,34 @@ def refine_subparts(mesh, face_part, labels, vocabulary, backend, intent,
 
 
 def verify_instances(mesh, face_part, labels, backend, intent, frame,
-                     up=(0, 0, 1), max_share=0.04, max_per_part=6,
-                     pixels=760, workers=3, log=print):
-    """Zoom onto every instance of every small part and ask if it is real.
+                     up=(0, 0, 1), max_checks=40, pixels=760, workers=3,
+                     log=print):
+    """Zoom onto instances and ask if they are real -- selected RELATIVELY.
 
     The audit judges whole-model views, and at that distance a forehead plane
     can pass for an eye-white -- the cyclops ogre got two extra "eyes" above
-    its brow that no close look would ever confirm. So each connected instance
-    of each small part gets its own zoomed, in-context look; a refused
-    instance reverts to the label that surrounds it. Small parts only: a big
-    region's boundary is the consensus stage's business, but a small part IS
-    its instances, and one wrong instance ruins the print.
+    its brow that no close look would ever confirm. Each suspicious connected
+    instance gets its own zoomed, in-context look; a refused instance reverts
+    to the label that surrounds it.
+
+    Nothing here is an absolute size. An instance is suspect because it is an
+    OUTLIER AGAINST ITS OWN LABEL'S PEERS: hooves come four to a cow and all
+    four are the same size, so a fifth "hoof" three times the median is the
+    one to look at. Peer-consistent sets are sampled (largest and smallest
+    stand for the set; if either fails, the rest are checked too). The one
+    absolute number is `max_checks`, a spend budget, not a size claim.
     """
     import scipy.sparse as sparse
-    import trimesh as trimesh_module
     from concurrent.futures import ThreadPoolExecutor
 
     areas = np.asarray(mesh.area_faces, dtype=float)
-    total = float(areas.sum())
     adjacency = mesh.face_adjacency
     centres = mesh.triangles.mean(axis=1)
-    jobs = []
+    extent = float(np.linalg.norm(np.ptp(mesh.vertices, axis=0)))
+    suspects, representatives, peers_of = [], [], {}
     for label_id, label in enumerate(labels):
         faces = np.flatnonzero(face_part == label_id)
-        if not len(faces) or areas[faces].sum() / total > max_share:
+        if not len(faces):
             continue
         inside = np.zeros(len(mesh.faces), dtype=bool)
         inside[faces] = True
@@ -236,25 +240,53 @@ def verify_instances(mesh, face_part, labels, backend, intent, frame,
                                                                directed=False)
         comp_area = np.bincount(component, weights=areas[faces],
                                 minlength=count)
-        order = np.argsort(-comp_area)[:max_per_part]
-        for comp in order:
-            members = faces[component == comp]
-            if len(members) < 8:
+        median = float(np.median(comp_area[comp_area > 0]))
+        members_of = {comp: faces[component == comp] for comp in range(count)}
+        peer_ids, outlier_ids = [], []
+        for comp in range(count):
+            if comp_area[comp] <= 0:
                 continue
-            jobs.append((label_id, label, members))
+            if 0.3 * median <= comp_area[comp] <= 3.0 * median:
+                peer_ids.append(comp)
+            else:
+                outlier_ids.append(comp)
+        for comp in outlier_ids:
+            suspects.append((label_id, label, members_of[comp]))
+        if len(peer_ids) <= 2:
+            for comp in peer_ids:
+                suspects.append((label_id, label, members_of[comp]))
+        else:
+            ordered = sorted(peer_ids, key=lambda c: -comp_area[c])
+            for comp in (ordered[0], ordered[-1]):
+                representatives.append((label_id, label, members_of[comp]))
+            peers_of[label_id] = [members_of[comp] for comp in ordered[1:-1]]
 
     def check(label_id, label, members):
         centre = centres[members].mean(axis=0)
         span = np.ptp(centres[members], axis=0)
-        radius = max(float(np.linalg.norm(span)) * 1.6, 4.0)
+        radius = max(float(np.linalg.norm(span)) * 1.6, 0.04 * extent)
         ok = _confirm_in_context(backend, mesh, members, label, intent, centre,
                                  radius, pixels, frame, up=up)
         return label_id, label, members, ok
 
     report = {}
+    jobs = (suspects + representatives)[:max_checks]
+    if len(suspects) + len(representatives) > max_checks:
+        log("  instance check: budget hit, %d of %d instances checked"
+            % (max_checks, len(suspects) + len(representatives)))
     if jobs:
         with ThreadPoolExecutor(max_workers=workers) as pool:
             results = list(pool.map(lambda j: check(*j), jobs))
+        # A failed representative indicts its whole peer set: check the rest.
+        escalate = []
+        for label_id, label, _members, ok in results:
+            if ok is False and label_id in peers_of:
+                for members in peers_of.pop(label_id):
+                    escalate.append((label_id, label, members))
+        if escalate:
+            with ThreadPoolExecutor(max_workers=workers) as pool:
+                results += list(pool.map(lambda j: check(*j),
+                                         escalate[:max_checks]))
         for label_id, label, members, ok in results:
             if ok is None:
                 log("  instance check: %s x%d faces unseen -- kept"
