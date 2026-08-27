@@ -122,10 +122,18 @@ def synthesise_masks(bundle, band, seeds_by_label, policy, spread=None, barrier=
                 sources.append(int(index[y, x]))
         if not sources:
             continue
-        # `limit` stops the search once the flood is far enough out to contribute
-        # nothing, which is most of the object for a small part.
+        # A mask expresses ONE part, and a part's extent is the band it lives at. The
+        # confidence is exp(-d / spread), so past about two and a half spreads it is
+        # under a percent and adds nothing but reach.
+        #
+        # This was 6x when the flood was first ported to Dijkstra, and it was a real
+        # regression: the relaxation it replaced had capped travel at spread/footprint
+        # sweeps, roughly one wavelength, while 6x let every seed on the shell flood
+        # 49.6mm across a 110mm object. Eighty views then produced flat claims that
+        # ignored the surface entirely -- worse than the twelve-view run had been. Speed
+        # is not worth a quantity changing behind a rewrite.
         distance = dijkstra(graph, directed=False, indices=sources, min_only=True,
-                            limit=spread_mm * 6.0)
+                            limit=spread_mm * 2.5)
         confidence = np.zeros(visible.shape)
         reached = np.isfinite(distance)
         if reached.any():
