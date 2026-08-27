@@ -246,3 +246,53 @@ def fill_unassigned(assigned, neighbours):
         if not changed:
             break
     return out
+
+
+def contested(votes, assigned):
+    """Which patches the statistics do not settle (spec §9: variance drives resampling).
+
+    Two ways a patch is unsettled: nobody ever voted for it, or the margin between its
+    top two labels is thin. A thin margin over many views is a real disagreement, not
+    noise -- the views are looking at the same surface and reading it differently -- so
+    the remedy is the one §9 prescribes for high variance anywhere: aim more looks at
+    exactly that surface, closer.
+    """
+    top = votes.max(axis=1)
+    second = np.partition(votes, -2, axis=1)[:, -2] if votes.shape[1] >= 2 else 0 * top
+    never = top <= 0
+    thin = (top > 0) & ((top - second) < 0.5 * top)
+    return np.flatnonzero(never | thin)
+
+
+def contested_views(mesh, face_patch, ids, views=6):
+    """Cameras aimed at clusters of contested patches, framed close.
+
+    The clusters come from the patch centroids themselves -- the same
+    spatial-grouping-by-place lesson the deficit cameras learned: a direction alone
+    localises nothing.
+    """
+    centres = np.zeros((len(ids), 3))
+    normals = np.zeros((len(ids), 3))
+    patch_centres = {}
+    face_centres = mesh.triangles.mean(axis=1)
+    for k, pid in enumerate(ids):
+        mine = np.flatnonzero(face_patch == pid)
+        centres[k] = face_centres[mine].mean(axis=0)
+        normals[k] = mesh.face_normals[mine].mean(axis=0)
+    out = []
+    remaining = np.ones(len(ids), dtype=bool)
+    for _ in range(views):
+        if not remaining.any():
+            break
+        seed = int(np.flatnonzero(remaining)[0])
+        near = np.linalg.norm(centres - centres[seed], axis=1)
+        group = remaining & (near < np.percentile(near[remaining], 40) + 1e-9)
+        cluster = centres[group]
+        pooled = normals[group].sum(axis=0)
+        norm = np.linalg.norm(pooled)
+        direction = -pooled / norm if norm > 1e-9 else np.array([0.0, -1.0, -0.3])
+        centre = cluster.mean(axis=0)
+        radius = max(float(np.abs(cluster - centre).max()) * 1.6, 1e-3)
+        out.append((direction, centre, radius))
+        remaining &= ~group
+    return out
