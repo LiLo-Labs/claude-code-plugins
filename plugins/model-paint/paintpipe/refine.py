@@ -256,6 +256,10 @@ def verify_instances(mesh, face_part, labels, backend, intent, frame,
         with ThreadPoolExecutor(max_workers=workers) as pool:
             results = list(pool.map(lambda j: check(*j), jobs))
         for label_id, label, members, ok in results:
+            if ok is None:
+                log("  instance check: %s x%d faces unseen -- kept"
+                    % (label, len(members)))
+                continue
             if ok:
                 continue
             # Revert to the label that surrounds the refused instance.
@@ -682,7 +686,15 @@ def _pick_design_cut(backend, mesh, frame, part, spec, intent, pixels,
 
 def _confirm_in_context(backend, mesh, faces, part, intent, anchor, radius, pixels,
                         frame, up=(0, 0, 1)):
-    """Whole model in frame, claimed faces red, one question."""
+    """Whole model in frame, claimed faces red, one question.
+
+    Returns True (confirmed), False (refused), or None: no candidate view
+    showed the claim, so nothing was actually judged. The ogre's tusks were
+    "refused" from a view that showed zero red pixels -- an honest reviewer
+    saying it could not see tusks, mistaken by the caller for a verdict.
+    Several directions are tried and the one showing the claim best asks the
+    question; unseen is reported as unseen.
+    """
     import io
     from PIL import Image
     from . import entities as entities_module
@@ -692,16 +704,38 @@ def _confirm_in_context(backend, mesh, faces, part, intent, anchor, radius, pixe
     mask[faces] = True
     normals = mesh.face_normals[mask].mean(axis=0)
     norm = np.linalg.norm(normals)
-    direction = -normals / norm if norm > 1e-9 else np.array([0.0, -1.0, -0.3])
-    camera = render_module.Camera(direction, up, anchor, radius, pixels)
-    bundle = render_module.render_bundle(mesh, camera, "zenithal", frame)
+    base = -normals / norm if norm > 1e-9 else np.array([0.0, -1.0, -0.3])
+    axis = np.asarray(up, dtype=float)
+    axis = axis / max(np.linalg.norm(axis), 1e-12)
+
+    def spun(angle_deg):
+        angle = np.radians(angle_deg)
+        parallel = axis * float(base @ axis)
+        ortho = base - parallel
+        side = np.cross(axis, ortho)
+        return parallel + ortho * np.cos(angle) + side * np.sin(angle)
+
+    best = None
+    for direction in (base, spun(50), spun(-50), spun(120), spun(-120)):
+        direction = direction / max(np.linalg.norm(direction), 1e-12)
+        camera = render_module.Camera(direction, up, anchor, radius, pixels)
+        bundle = render_module.render_bundle(mesh, camera, "zenithal", frame)
+        visible = bundle["visible"]
+        hit = bundle["hit_id"]
+        red = visible & mask[np.clip(hit, 0, len(mask) - 1)]
+        coverage = int(red.sum())
+        if best is None or coverage > best[0]:
+            best = (coverage, bundle, red)
+        if coverage > (pixels * pixels) // 50:
+            break
+    coverage, bundle, red = best
+    if coverage < 150:
+        return None
     lit = np.clip(bundle["rgb_lit"], 0, 1)
     visible = bundle["visible"]
-    hit = bundle["hit_id"]
     image = np.ones((pixels, pixels, 3))
     grey = 0.35 + 0.55 * lit
     image[visible] = grey[visible, None]
-    red = visible & mask[np.clip(hit, 0, len(mask) - 1)]
     image[red] = np.stack([0.40 + 0.55 * lit[red], 0.12 * lit[red],
                            0.08 * lit[red]], axis=1)
     buffer = io.BytesIO()
@@ -719,7 +753,9 @@ def _confirm_in_context(backend, mesh, faces, part, intent, anchor, radius, pixe
               'Reply with ONLY a JSON object, no prose: {"correct": true} or '
               '{"correct": false}' % (part, intent or "a model", part))
     answer = backend._run([path], prompt, key)
-    return bool(answer and answer.get("correct"))
+    if not answer:
+        return None
+    return bool(answer.get("correct"))
 
 
 def _prune_claim(backend, sub, local_patch, count, claimed_patches, part, intent,
