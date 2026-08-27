@@ -59,19 +59,7 @@ def refine_subparts(mesh, face_part, labels, vocabulary, backend, intent,
             by_parent.setdefault(parent, []).append(label)
         else:
             orphans.append(label)
-    # A missing part with no usable declared parent is LOCATED, not adopted. Adoption
-    # answered "what is it on" -- true and useless when the answer is `body`, because
-    # zooming onto a host that is most of the model is not zooming, and three CC0
-    # models proved it: tail, eyes, lips and tusks all stayed empty through two
-    # adoption-based recovery attempts. A pixel box in a named view backprojects to a
-    # point and a radius a camera can actually be aimed at.
     notes_all = {part["label"]: part.get("note", "") for part in vocabulary or []}
-    located_report = {}
-    if orphans and present:
-        located = locate_missing(backend, mesh, frame, orphans, intent, notes_all)
-        if located:
-            face_part, located_report = recover_located(
-                mesh, face_part, labels, backend, intent, frame, located, notes_all)
 
     report = {}
     notes = {part["label"]: part.get("note", "") for part in vocabulary or []}
@@ -162,8 +150,24 @@ def refine_subparts(mesh, face_part, labels, vocabulary, backend, intent,
             else:
                 report.setdefault("_rejected", {})[child] = len(local_faces)
         report[parent] = recovered
-    if located_report:
-        report["_located"] = located_report
+    # LOCATE-THEN-ZOOM IS ROUTED BY FAILURE, NOT BY PEDIGREE. The first wiring sent
+    # only "orphans" -- parts with no usable declared parent -- through it, and on
+    # three CC0 models that set was empty: the tail, eyes, lips and tusks all HAD
+    # declared parents with area (`body`, `lips and mouth`). They took the declared
+    # path, which cannot work when the parent is most of the model or does not contain
+    # the anatomy, and the locator never fired at all. Whatever a part's pedigree,
+    # if it is still empty after the hierarchy pass, it gets pointed at.
+    interim = np.bincount(face_part[face_part >= 0], minlength=len(labels))
+    still = [label for label in empty if interim[index[label]] == 0]
+    if still:
+        located = locate_missing(backend, mesh, frame, still, intent, notes_all)
+        if located:
+            face_part, located_report = recover_located(
+                mesh, face_part, labels, backend, intent, frame, located, notes_all)
+            report["_located"] = located_report
+        skipped = [label for label in still if label not in located]
+        if skipped:
+            report["_not_located"] = skipped
     # Loud failure beats a quiet wrong answer: name every part still empty.
     final_areas = np.bincount(face_part[face_part >= 0], minlength=len(labels))
     for label in labels:
