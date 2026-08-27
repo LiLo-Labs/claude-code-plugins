@@ -82,16 +82,22 @@ def pixel_graph(bundle, barrier):
 
 
 def seed_extent_mm(bundle, points):
-    """How far apart an agent's seeds for one part are, on the surface, in millimetres.
+    """How big is ONE instance of the part the agent pointed at, in millimetres.
 
-    THE PART TELLS YOU ITS OWN SCALE. When the agent puts four points on a dragon's head
-    it has said, without being asked, that the head is about that big; when it puts two
-    points on one spike it has said that too. Nothing else in the pipeline knows this --
-    the band ladder describes the scales at which the OBJECT has structure, not the size
-    of the thing being pointed at, and on the dragon those came apart badly. Its ladder
-    collapsed to a single 1.02mm band, so every mask was a one-millimetre dot on a
-    187mm model and the whole run produced 16,136 observations where the shell produced
-    7.6 million.
+    The part tells you its own scale, but you have to ask the question correctly. The
+    obvious reading -- the extent of the whole seed SET -- is right only when the part
+    occurs once. For a part with several instances it measures the distance BETWEEN
+    them: four clawed feet on a dragon are a hundred millimetres apart, so every seed
+    flooded fifty millimetres and the claws swallowed a quarter of the model.
+
+    The tell was exact. Parts with one instance came out clean -- `tail fin`, five
+    connected pieces with 96% of its area in the largest -- while parts with many came
+    out shattered: `clawed feet` 447 pieces across 24.7% of the surface, `neck and body
+    segments` 557 pieces. One instance or many was the only thing that separated them.
+
+    So measure LOCALLY: the typical distance from a seed to its nearest neighbour of the
+    same label. Two points on one foot are close whether or not another foot is across
+    the model, which is exactly the invariance wanted.
     """
     if len(points) < 2:
         return None
@@ -104,7 +110,13 @@ def seed_extent_mm(bundle, points):
     if len(found) < 2:
         return None
     found = np.asarray(found)
-    return float(np.linalg.norm(found.max(axis=0) - found.min(axis=0)))
+    gaps = np.linalg.norm(found[:, None, :] - found[None, :, :], axis=2)
+    np.fill_diagonal(gaps, np.inf)
+    nearest = gaps.min(axis=1)
+    nearest = nearest[np.isfinite(nearest)]
+    if not len(nearest):
+        return None
+    return float(np.median(nearest))
 
 
 def synthesise_masks(bundle, band, seeds_by_label, policy, spread=None, barrier=None,
