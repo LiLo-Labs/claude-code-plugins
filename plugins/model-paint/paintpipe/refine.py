@@ -389,20 +389,69 @@ def recover_located(mesh, face_part, labels, backend, intent, frame, located, no
         names = local_labels + [part]
         target_id = len(names) - 1
         assigned, _votes = patch_module.fuse_votes(rounds, count, names)
-        claimed = [f for f in range(len(ball))
-                   if assigned[local_patch[f]] == target_id]
-        if not claimed:
+        claimed_patches = sorted({int(local_patch[f]) for f in range(len(ball))
+                                  if assigned[local_patch[f]] == target_id})
+        if not claimed_patches:
             report[part] = 0
             continue
-        ok = _confirm_claim(backend, sub, claimed, part, intent, anchor, zoom_r,
-                            pixels, frame)
-        if ok:
-            for local_face in claimed:
+        # PRUNE, DON'T VETO. The binary confirm gate stalemated with claim greed: asked
+        # to find a part, the finder finds it everywhere -- half a fish's face claimed
+        # as "lips" -- and the gate could only throw the whole claim away, so every
+        # recovery ended at zero. Verified by looking at the rejected renders: the gate
+        # was right each time, and binary right gets nothing kept. The reviewer now
+        # sees the CLAIMED patches numbered and says which are truly the part; the
+        # intersection survives. Selection beats judgement at the exit exactly as it
+        # did at the entry.
+        kept_patches = _prune_claim(backend, sub, local_patch, count, claimed_patches,
+                                    part, intent, anchor, zoom_r, pixels, frame)
+        kept = [f for f in range(len(ball))
+                if int(local_patch[f]) in kept_patches]
+        if kept:
+            for local_face in kept:
                 face_part[ball[local_face]] = index[part]
-            report[part] = len(claimed)
+            report[part] = len(kept)
         else:
-            report[part] = -len(claimed)
+            report[part] = -len(claimed_patches)
     return face_part, report
+
+
+def _prune_claim(backend, sub, local_patch, count, claimed_patches, part, intent,
+                 anchor, zoom_r, pixels, frame):
+    """Show the claim as numbered patches; keep only the ids the reviewer confirms."""
+    from . import entities as entities_module
+    from . import patches as patch_module
+    from . import render as render_module
+    import io
+    from PIL import Image, ImageDraw
+
+    mask_faces = np.isin(local_patch, list(claimed_patches))
+    normals = sub.face_normals[mask_faces].mean(axis=0)
+    norm = np.linalg.norm(normals)
+    direction = -normals / norm if norm > 1e-9 else np.array([0.0, -1.0, -0.3])
+    camera = render_module.Camera(direction, [0, 0, 1], anchor, zoom_r, pixels)
+    bundle = render_module.render_bundle(sub, camera, "zenithal", frame)
+    lit = np.clip(bundle["rgb_lit"], 0, 1)
+    id_png, listed = patch_module.render_id_view(sub, local_patch, count, camera, lit)
+    offer = [pid for pid in listed if pid in set(claimed_patches)]
+    if not offer:
+        return set()
+    key = "prune-%s-%s" % (part.replace(" ", "_"),
+                           entities_module.digest_of(sorted(claimed_patches))[7:17])
+    path = os.path.join(backend.directory, "%s.png" % key)
+    with open(path, "wb") as handle:
+        handle.write(id_png)
+    prompt = ("A recovery pass claims these numbered patches are: %s\n"
+              "The piece: %s\n\n"
+              "Candidate patch ids: %s\n\n"
+              "Which of those ids are TRULY part of the %s -- on the right anatomy, in "
+              "the right place? Be strict: keeping a wrong patch paints the wrong "
+              "surface. An empty list is a fine answer.\n\n"
+              'Reply with ONLY a JSON object, no prose: {"keep": [int, ...]}'
+              % (part, intent or "a model", offer, part))
+    answer = backend._run([path], prompt, key)
+    if not answer:
+        return set()
+    return {int(i) for i in answer.get("keep", []) if int(i) in set(offer)}
 
 
 REVIEW_PROMPT = """You are reviewing the paint scheme for a 3D print as a miniature \
