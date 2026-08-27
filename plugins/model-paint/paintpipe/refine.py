@@ -267,8 +267,10 @@ The piece: %s
 
 For each part you can SEE in some view, give the view number and a tight pixel bounding
 box [x0, y0, x1, y1] around ONE clear instance of it ([0,0] is top-left, images are
-%dpx square). Skip parts you cannot find. A wrong box wastes a camera; skipping costs
-nothing.
+%dpx square). If the feature is subtle or would only be PAINTED on this shape rather
+than sculpted (lips or eyes on a smooth toy, for instance), box the place where it
+belongs -- that is a real answer, and it is how a painter decides where such features
+go. Skip only parts whose place you genuinely cannot tell.
 
 Reply with ONLY a JSON object, no prose, no code fences:
 {"locations": [{"part": str, "view": int, "box": [int, int, int, int]}]}"""
@@ -326,8 +328,14 @@ def locate_missing(backend, mesh, frame, missing, intent, notes, pixels=800, vie
         points = window[seen]
         anchor = np.median(points, axis=0)
         extent = float(np.linalg.norm(points.max(axis=0) - points.min(axis=0)))
+        # The box's own faces, kept as a stencil. When the geometry refuses to yield
+        # the part -- because on this mesh the feature was only ever painted, not
+        # sculpted -- the located pixels themselves are the design cut: a label-only
+        # boundary drawn where the agent says the feature belongs, mesh untouched.
+        stencil = np.unique(bundle["hit_id"][y0:y1, x0:x1][seen])
         found[part] = {"anchor": anchor, "extent_mm": max(extent, 1e-3),
-                       "direction": bundles[view]["camera"].forward}
+                       "direction": bundles[view]["camera"].forward,
+                       "stencil_faces": stencil[stencil >= 0]}
     return found
 
 
@@ -412,6 +420,28 @@ def recover_located(mesh, face_part, labels, backend, intent, frame, located, no
             report[part] = len(kept)
         else:
             report[part] = -len(claimed_patches)
+    # DESIGN CUT, the last resort and an honest one. A part that was LOCATED -- the
+    # agent boxed where it belongs -- but that every geometric gate refused is a
+    # feature that exists in the design and not in the mesh: lips on a smooth toy
+    # fish, markings on a stylized cow. The spec calls for exactly this: a label-only
+    # boundary drawn where it does not exist geometrically, without touching the mesh.
+    # The stencil is the located box's own faces, confirmed like any other claim.
+    for part, spec in located.items():
+        if report.get(part, 0) > 0:
+            continue
+        stencil = spec.get("stencil_faces")
+        if stencil is None or len(stencil) < 10:
+            continue
+        sub_all = trimesh.Trimesh(vertices=mesh.vertices, faces=mesh.faces[stencil],
+                                  process=False)
+        local = list(range(len(stencil)))
+        ok = _confirm_claim(backend, sub_all, local, part, intent, spec["anchor"],
+                            max(spec["extent_mm"] * 1.3, 1e-2), pixels, frame)
+        if ok:
+            for face in stencil:
+                face_part[int(face)] = index[part]
+            report[part] = int(len(stencil))
+            report.setdefault("_drawn", []).append(part)
     return face_part, report
 
 
