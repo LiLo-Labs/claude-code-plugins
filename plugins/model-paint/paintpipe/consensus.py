@@ -88,6 +88,62 @@ def smooth(assigned, votes, weights, flip_margin=0.5, surround=0.7, sweeps=3):
     return assigned
 
 
+def absorb_islands(assigned, weights, atom_area, label_count, min_share=0.15,
+                   dominance=0.6, sweeps=3, log=None):
+    """Satellite fragments join the label that surrounds them.
+
+    An audit correction is deliberately immune to smoothing, which means a
+    stray correction leaves a confident orphan -- nine "ear" pieces where the
+    ears are two. The discriminator between an orphan and a legitimate
+    instance is SIZE RELATIVE TO ITS OWN LABEL: hooves come four to a cow but
+    all four are the same size, while a satellite is a sliver next to its
+    label's real component. A component smaller than `min_share` of its
+    label's largest component, bordered mostly (`dominance`) by one other
+    label, is absorbed into that label. Repeated parts survive because their
+    instances are peers.
+    """
+    import scipy.sparse as sparse
+    assigned = assigned.copy()
+    coo = weights.tocoo()
+    for _sweep in range(sweeps):
+        ok = (assigned[coo.row] >= 0) & (assigned[coo.row] == assigned[coo.col])
+        same = sparse.coo_matrix((coo.data[ok], (coo.row[ok], coo.col[ok])),
+                                 shape=weights.shape).tocsr()
+        count, component = sparse.csgraph.connected_components(same,
+                                                               directed=False)
+        comp_area = np.bincount(component, weights=atom_area, minlength=count)
+        comp_label = np.full(count, -1, dtype=np.int64)
+        has = assigned >= 0
+        comp_label[component[has]] = assigned[has]
+        largest = np.zeros(label_count)
+        for comp in range(count):
+            label = comp_label[comp]
+            if label >= 0:
+                largest[label] = max(largest[label], comp_area[comp])
+        moved = 0
+        for comp in range(count):
+            label = comp_label[comp]
+            if label < 0 or comp_area[comp] >= min_share * largest[label]:
+                continue
+            members = np.flatnonzero(component == comp)
+            inside = np.isin(coo.row, members) & ~np.isin(coo.col, members)
+            outside_ok = inside & (assigned[coo.col] >= 0)
+            if not outside_ok.any():
+                continue
+            tally = np.bincount(assigned[coo.col[outside_ok]],
+                                weights=coo.data[outside_ok],
+                                minlength=label_count)
+            neighbour = int(np.argmax(tally))
+            if neighbour != label and tally[neighbour] >= dominance * tally.sum():
+                assigned[members] = neighbour
+                moved += 1
+        if log and moved:
+            log("  absorbed %d satellite fragment(s)" % moved)
+        if not moved:
+            break
+    return assigned
+
+
 def render_label_view(mesh, atom_map, assigned, camera, lit):
     """The current assignment as the agent will judge it: legend colours, atom
     borders, unassigned in neutral."""
@@ -197,7 +253,14 @@ def audit(mesh, frame, backend, atom_map, count, assigned, votes, labels,
     radius = float(np.ptp(mesh.vertices, axis=0).max()) / 2.0 * 1.05
     index = {label: i for i, label in enumerate(labels)}
     history = []
-    for round_id in range(rounds):
+    # The base rounds are COVERAGE (each rotates the cameras 40 degrees, so
+    # counts can rise while new angles surface new atoms). After them, extra
+    # verify rounds run only while the loop is converging fast -- the last
+    # round at most half the one before -- so a run that is nearly clean gets
+    # to reach zero, and a plateauing organic sculpt stops burning views.
+    hard_cap = rounds + 2
+    round_id = 0
+    while round_id < hard_cap:
         directions = preview.orbit(views, 22.0, start_deg=30.0 + 40.0 * round_id,
                                    up=up)
         cameras = [render_module.Camera(np.asarray(d, float), [0, 0, 1], centre,
@@ -241,4 +304,8 @@ def audit(mesh, frame, backend, atom_map, count, assigned, votes, labels,
         assigned = np.where(voted, np.argmax(votes, axis=1), -1).astype(np.int32)
         assigned = fill(assigned, weights, len(labels))
         assigned = smooth(assigned, votes, weights)
+        round_id += 1
+        if round_id >= rounds and (len(history) < 2
+                                   or history[-1] * 2 > history[-2]):
+            break
     return assigned, votes, history

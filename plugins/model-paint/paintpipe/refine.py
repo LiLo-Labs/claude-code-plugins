@@ -287,11 +287,14 @@ Missing parts:
 The piece: %s
 
 For each part you can SEE in some view, give the view number and a tight pixel bounding
-box [x0, y0, x1, y1] around ONE clear instance of it ([0,0] is top-left, images are
-%dpx square). If the feature is subtle or would only be PAINTED on this shape rather
-than sculpted (lips or eyes on a smooth toy, for instance), box the place where it
-belongs -- that is a real answer, and it is how a painter decides where such features
-go. Skip only parts whose place you genuinely cannot tell.
+box [x0, y0, x1, y1] around EACH clear instance of it ([0,0] is top-left, images are
+%dpx square) -- a paired or repeated part (two eyes, two horns, several studs) gets one
+entry PER instance, and both sides of a pair should be boxed even if that takes two
+different views. Anchor each box on the exact anatomy: an eye sits on the FACE below
+the brow, never on a horn or an ear. If the feature is subtle or would only be PAINTED
+on this shape rather than sculpted (lips or eyes on a smooth toy, for instance), box
+the place where it belongs -- that is a real answer, and it is how a painter decides
+where such features go. Skip only parts whose place you genuinely cannot tell.
 
 Reply with ONLY a JSON object, no prose, no code fences:
 {"locations": [{"part": str, "view": int, "box": [int, int, int, int]}]}"""
@@ -355,9 +358,14 @@ def locate_missing(backend, mesh, frame, missing, intent, notes, pixels=800, vie
         # sculpted -- the located pixels themselves are the design cut: a label-only
         # boundary drawn where the agent says the feature belongs, mesh untouched.
         stencil = np.unique(bundle["hit_id"][y0:y1, x0:x1][seen])
-        found[part] = {"anchor": anchor, "extent_mm": max(extent, 1e-3),
-                       "direction": bundles[view]["camera"].forward,
-                       "stencil_faces": stencil[stencil >= 0]}
+        # A paired or repeated part legitimately produces SEVERAL boxes -- two
+        # eyes, many studs -- and each is its own recovery target; the old
+        # single-slot dict silently kept only the last instance.
+        instances = found.setdefault(part, [])
+        if len(instances) < 4:
+            instances.append({"anchor": anchor, "extent_mm": max(extent, 1e-3),
+                              "direction": bundles[view]["camera"].forward,
+                              "stencil_faces": stencil[stencil >= 0]})
     return found
 
 
@@ -440,52 +448,145 @@ def recover_located(mesh, face_part, labels, backend, intent, frame, located, no
         return part, kept, len(claimed_patches)
 
     from concurrent.futures import ThreadPoolExecutor
-    if located:
+    jobs = [(part, spec) for part, specs in located.items() for spec in specs]
+    if jobs:
         with ThreadPoolExecutor(max_workers=workers) as pool:
-            results = list(pool.map(lambda item: _recover_part(*item),
-                                    located.items()))
+            results = list(pool.map(lambda item: _recover_part(*item), jobs))
         for part, kept, claimed_count in results:
             if kept:
                 for face in kept:
                     face_part[face] = index[part]
-                report[part] = len(kept)
-            else:
-                report[part] = -claimed_count if claimed_count else 0
+                report[part] = report.get(part, 0) if report.get(part, 0) > 0 \
+                    else 0
+                report[part] += len(kept)
+            elif report.get(part, 0) <= 0:
+                report[part] = min(report.get(part, 0),
+                                   -claimed_count if claimed_count else 0)
     # DESIGN CUT, the last resort and an honest one. A part that was LOCATED -- the
     # agent boxed where it belongs -- but that every geometric gate refused is a
     # feature that exists in the design and not in the mesh: lips on a smooth toy
     # fish, markings on a stylized cow. The spec calls for exactly this: a label-only
     # boundary drawn where it does not exist geometrically, without touching the mesh.
-    # The stencil is the located box's own faces, confirmed like any other claim.
-    for part, spec in located.items():
+    # A single drawing put to a yes/no gate stalemated exactly like the binary
+    # confirm did: the gate kept being RIGHT about a mediocre drawing and the
+    # feature stayed unpainted forever. So the reviewer now picks from several
+    # candidate drawings -- stencil solidified at different radii, discs of
+    # camera-facing surface at the located anchor -- or rejects them all.
+    # Selection beats judgement at the last gate too.
+    for part, specs in located.items():
         if report.get(part, 0) > 0:
             continue
-        stencil = spec.get("stencil_faces")
-        if stencil is None or len(stencil) < 10:
-            continue
-        # Solidify: pick-buffer faces are one-per-pixel and arrive as a speckle; a few
-        # adjacency rings close the holes so the stencil is a surface, not confetti.
-        adjacency = mesh.face_adjacency
-        chosen = np.zeros(len(mesh.faces), dtype=bool)
-        chosen[stencil] = True
-        for _ring in range(3):
-            touch = chosen[adjacency[:, 0]] | chosen[adjacency[:, 1]]
-            chosen[np.unique(adjacency[touch].ravel())] = True
-        solid = np.flatnonzero(chosen)
-        # Confirm IN CONTEXT. The first version rendered the stencil faces alone -- a
-        # red speck cloud floating in a void -- and asked "is this the tail?" of a
-        # reviewer who could not see the animal. Every design cut was refused for the
-        # obvious reason. The claim is judged on the whole model or not at all.
-        ok = _confirm_in_context(backend, mesh, solid, part, intent, spec["anchor"],
-                                 max(spec["extent_mm"] * 2.5, 5.0), pixels, frame)
-        if ok:
-            for face in solid:
-                face_part[int(face)] = index[part]
-            report[part] = int(len(solid))
-            report.setdefault("_drawn", []).append(part)
+        drawn = 0
+        for slot, spec in enumerate(specs):
+            stencil = spec.get("stencil_faces")
+            if stencil is None or len(stencil) < 10:
+                continue
+            faces, tag = _pick_design_cut(backend, mesh, frame, part, spec,
+                                          intent, pixels)
+            if faces is not None:
+                for face in faces:
+                    face_part[int(face)] = index[part]
+                drawn += int(len(faces))
+                report.setdefault("_drawn", []).append(
+                    "%s#%d(%s)" % (part, slot, tag))
+        if drawn:
+            report[part] = drawn
         else:
             report.setdefault("_drawn_rejected", []).append(part)
     return face_part, report
+
+
+def _design_candidates(mesh, spec):
+    """Several plausible drawings of a located, geometry-less feature."""
+    adjacency = mesh.face_adjacency
+    stencil = np.asarray(spec["stencil_faces"], dtype=int)
+    out = []
+    for rings, tag in ((1, "tight"), (3, "solid"), (5, "wide")):
+        chosen = np.zeros(len(mesh.faces), dtype=bool)
+        chosen[stencil] = True
+        for _ring in range(rings):
+            touch = chosen[adjacency[:, 0]] | chosen[adjacency[:, 1]]
+            chosen[np.unique(adjacency[touch].ravel())] = True
+        out.append((np.flatnonzero(chosen), tag))
+    centres = mesh.triangles.mean(axis=1)
+    direction = np.asarray(spec["direction"], dtype=float)
+    facing = (mesh.face_normals @ direction) < -0.1
+    for scale, tag in ((0.45, "disc-small"), (0.8, "disc-large")):
+        disc = (np.linalg.norm(centres - spec["anchor"], axis=1)
+                < spec["extent_mm"] * scale) & facing
+        if disc.sum() >= 10:
+            out.append((np.flatnonzero(disc), tag))
+    # Drop near-duplicates: two candidates within 20% of the same size are one
+    # choice, not two.
+    kept = []
+    for faces, tag in out:
+        if all(abs(len(faces) - len(other)) > 0.2 * max(len(faces), len(other))
+               for other, _tag in kept):
+            kept.append((faces, tag))
+    return kept[:5]
+
+
+def _pick_design_cut(backend, mesh, frame, part, spec, intent, pixels):
+    """Render every candidate red-in-context from the locating view; one pick."""
+    import io
+    from PIL import Image, ImageDraw
+    from . import entities as entities_module
+    from . import render as render_module
+
+    candidates = _design_candidates(mesh, spec)
+    if not candidates:
+        return None, ""
+    direction = np.asarray(spec["direction"], dtype=float)
+    radius = max(spec["extent_mm"] * 2.5, 5.0)
+    camera = render_module.Camera(direction, [0, 0, 1], spec["anchor"], radius,
+                                  pixels)
+    bundle = render_module.render_bundle(mesh, camera, "zenithal", frame)
+    lit = np.clip(bundle["rgb_lit"], 0, 1)
+    visible = bundle["visible"]
+    hit = bundle["hit_id"]
+    grey = 0.35 + 0.55 * lit
+    blobs, paths = [], []
+    for i, (faces, _tag) in enumerate(candidates):
+        mask = np.zeros(len(mesh.faces), dtype=bool)
+        mask[faces] = True
+        image = np.ones((pixels, pixels, 3))
+        image[visible] = grey[visible, None]
+        red = visible & mask[np.clip(hit, 0, len(mask) - 1)]
+        image[red] = np.stack([0.40 + 0.55 * lit[red], 0.12 * lit[red],
+                               0.08 * lit[red]], axis=1)
+        picture = Image.fromarray((image * 255).astype(np.uint8))
+        ImageDraw.Draw(picture).text((10, 8), str(i), fill=(0, 0, 0))
+        buffer = io.BytesIO()
+        picture.save(buffer, format="PNG")
+        blobs.append(buffer.getvalue())
+    key = "pickcut-%s-%s" % (part.replace(" ", "_"),
+                             entities_module.digest_of(b"".join(blobs))[7:17])
+    for i, blob in enumerate(blobs):
+        path = os.path.join(backend.directory, "%s-%d.png" % (key, i))
+        if not os.path.exists(path):
+            with open(path, "wb") as handle:
+                handle.write(blob)
+        paths.append(path)
+    prompt = ("Each image shows the SAME view of the piece with a DIFFERENT red "
+              "drawing of where the %s would be painted (the feature may be "
+              "purely painted-on; judge placement, coverage and shape). Images "
+              "are numbered top-left, in the order given.\n"
+              "The piece: %s\n\n"
+              "Which drawing best matches where the %s belongs? Prefer the one "
+              "a painter would mask. If none is acceptable -- wrong place, or "
+              "absurd shape -- reject them all.\n\n"
+              'Reply with ONLY a JSON object, no prose: {"choice": <number>} '
+              'or {"choice": -1}'
+              % (part, intent or "a model", part))
+    answer = backend._run(paths, prompt, key)
+    try:
+        choice = int((answer or {}).get("choice", -1))
+    except (TypeError, ValueError):
+        choice = -1
+    if 0 <= choice < len(candidates):
+        faces, tag = candidates[choice]
+        return faces, tag
+    return None, ""
 
 
 def _confirm_in_context(backend, mesh, faces, part, intent, anchor, radius, pixels,

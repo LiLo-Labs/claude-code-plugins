@@ -90,7 +90,7 @@ def paint(input_path, out_dir, intent="", size_mm=None, palette=(),
 
     # Which way is up is a fact about the depicted thing, not about the file's
     # axis convention -- so it is looked at, not assumed.
-    up = _choose_up(mesh, frame, backend, log=log)
+    up = _choose_up(mesh, frame, backend, intent=intent, log=log)
 
     # -- name the pieces ------------------------------------------------------
     face_part, labels, vocabulary, naming, overviews = _name_atoms(
@@ -190,7 +190,7 @@ def repaint(input_path, out_dir, palette, overrides, size_mm=None,
     lab[painted_faces] = table[face_part[painted_faces]]
     rgb = preview.lab_to_srgb(lab)
     preview.contact_sheet(mesh, rgb, preview.orbit(8, 18.0, up=up), size=470,
-                          occlusion=occlusion, columns=4).save(
+                          occlusion=occlusion, columns=4, up=up).save(
         os.path.join(out_dir, "final-turnaround.png"))
     Image.fromarray(preview.render_asset(
         mesh, rgb, preview.orbit(1, 24.0, start_deg=200.0, up=up)[0],
@@ -211,11 +211,16 @@ corner, each assuming a different up direction. In exactly one of them the \
 model sits the way it would actually stand or display: base at the bottom, \
 not tipped on its side or upside down.
 
+What the piece is: %s
+
+Use the anatomy of what is depicted -- a head's chin is below its brow, an \
+animal stands on its feet, horns and ears point up.
+
 Reply with ONLY a JSON object, no prose, no code fences:
 {"upright": <the number>, "why": "<one line>"}"""
 
 
-def _choose_up(mesh, frame, backend, log=default_log):
+def _choose_up(mesh, frame, backend, intent="", log=default_log):
     """Ask the agent which orientation is upright, instead of trusting the
     file's axis convention (STLs converted from Y-up sources lie about it)."""
     from PIL import Image, ImageDraw
@@ -242,8 +247,10 @@ def _choose_up(mesh, frame, backend, log=default_log):
         paths.append(path)
         with open(path, "rb") as handle:
             blobs.append(handle.read())
-    key = "up-%s" % entities.digest_of(b"".join(blobs))[7:19]
-    answer = backend._run(paths, UP_PROMPT, key) or {}
+    prompt = UP_PROMPT % (intent or "not stated")
+    key = "up-%s" % entities.digest_of(b"".join(blobs)
+                                       + intent.encode("utf-8"))[7:19]
+    answer = backend._run(paths, prompt, key) or {}
     try:
         pick = int(answer.get("upright", 0))
     except (TypeError, ValueError):
@@ -267,6 +274,12 @@ def _name_atoms(mesh, frame, face_atom, tree, atom_count, backend, intent, up,
 
     centre = mesh.vertices.mean(axis=0)
     radius = float(np.ptp(mesh.vertices, axis=0).max()) / 2.0 * 1.05
+    # Ask keys carry the view state (up axis, resolution): a re-run whose
+    # orientation changed must re-ask, not replay answers for renders the
+    # agent never saw.
+    from . import entities
+    view_state = entities.digest_of({"up": np.round(np.asarray(up), 4).tolist(),
+                                     "pixels": int(pixels)})[7:13]
 
     overviews = [vision.render_png(render_module.render_bundle(
         mesh, render_module.Camera(-d, [0, 0, 1], centre, radius, 640),
@@ -304,7 +317,8 @@ def _name_atoms(mesh, frame, face_atom, tree, atom_count, backend, intent, up,
                for k, d in enumerate(directions)]
     with ThreadPoolExecutor(max_workers=workers) as pool:
         rounds = list(pool.map(
-            lambda kc: ask(kc[0], kc[1], face_atom, atom_count, "name"),
+            lambda kc: ask(kc[0], kc[1], face_atom, atom_count,
+                           "name-%s" % view_state),
             cameras))
     assigned, votes = patches.fuse_votes(rounds, atom_count, labels)
     log("voted: %d/%d atoms" % (int((assigned >= 0).sum()), atom_count))
@@ -344,7 +358,8 @@ def _name_atoms(mesh, frame, face_atom, tree, atom_count, backend, intent, up,
                             preview.orbit(6, 30.0, start_deg=15.0, up=up))]
             with ThreadPoolExecutor(max_workers=workers) as pool:
                 rounds2 = list(pool.map(
-                    lambda kc: ask(kc[0], kc[1], new_map, next_id, "sub",
+                    lambda kc: ask(kc[0], kc[1], new_map, next_id,
+                                   "sub-%s" % view_state,
                                    only=set(new_ids)), cameras2))
             _assigned2, votes2 = patches.fuse_votes(rounds2, next_id, labels)
             count, atom_map = next_id, new_map
@@ -372,6 +387,16 @@ def _name_atoms(mesh, frame, face_atom, tree, atom_count, backend, intent, up,
         mesh, frame, backend, atom_map, count, assigned, votes_all, labels,
         vocabulary, intent, up, weights, pixels=pixels, workers=workers,
         log=log)
+
+    # Corrections are immune to smoothing on purpose, so a stray one leaves a
+    # confident satellite; absorb fragments that are slivers next to their own
+    # label's real component.
+    valid = atom_map >= 0
+    atom_area = np.bincount(atom_map[valid],
+                            weights=np.asarray(mesh.area_faces)[valid],
+                            minlength=count)
+    assigned = consensus.absorb_islands(assigned, weights, atom_area,
+                                        len(labels), log=log)
 
     # An atom nothing could reach or correct keeps its contested parent's top
     # vote; anything still unlabelled stays honestly unpainted.
@@ -421,7 +446,7 @@ def _atom_atlas(mesh, face_atom, count, frame, out_dir, preview, up):
     occlusion = preview.ambient_occlusion(mesh, samples=30)
     path = os.path.join(out_dir, "atoms.png")
     preview.contact_sheet(mesh, face_rgb, preview.orbit(4, 18.0, up=up),
-                          size=470, occlusion=occlusion, columns=4).save(path)
+                          size=470, occlusion=occlusion, columns=4, up=up).save(path)
     return path
 
 
@@ -431,7 +456,7 @@ def _part_atlas(mesh, settled, claimed, labels, frame, out_dir, preview, up):
     occlusion = preview.ambient_occlusion(mesh, samples=30)
     preview.contact_sheet(mesh, colours[mesh.faces].mean(axis=1),
                           preview.orbit(4, 18.0, up=up), size=470,
-                          occlusion=occlusion, columns=4).save(
+                          occlusion=occlusion, columns=4, up=up).save(
         os.path.join(out_dir, "atlas.png"))
 
 
@@ -462,7 +487,7 @@ def _paint_and_export(input_path, out_dir, mesh, frame, face_part, labels,
     def write(lab_per_face, stem):
         rgb = preview.lab_to_srgb(lab_per_face)
         preview.contact_sheet(mesh, rgb, preview.orbit(8, 18.0, up=up),
-                              size=470, occlusion=occlusion, columns=4).save(
+                              size=470, occlusion=occlusion, columns=4, up=up).save(
             os.path.join(out_dir, "%s-turnaround.png" % stem))
         Image.fromarray(preview.render_asset(
             mesh, rgb, preview.orbit(1, 24.0, start_deg=200.0, up=up)[0],

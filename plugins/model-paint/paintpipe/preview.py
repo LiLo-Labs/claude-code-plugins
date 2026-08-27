@@ -119,17 +119,19 @@ def render_asset(mesh, face_rgb, direction, size=640, occlusion=None, up=(0, 0, 
 
 
 def contact_sheet(mesh, face_rgb, directions, size=640, occlusion=None, columns=3,
-                  gap=10, background=(247, 246, 244), frames=None):
+                  gap=10, background=(247, 246, 244), frames=None, up=(0, 0, 1)):
     """Several views laid out as one image.
 
     `frames` optionally pairs each direction with a (centre, zoom) so one sheet can mix
-    wide views and details.
+    wide views and details. `up` keeps every tile upright -- without it a tile
+    rolls to the default axis while the hero stands, and the sheet reads as
+    tumbled.
     """
     from PIL import Image
     if frames is None:
         frames = [(None, 1.0)] * len(directions)
     tiles = [render_asset(mesh, face_rgb, direction, size=size, occlusion=occlusion,
-                          centre=frame[0], zoom=frame[1])
+                          centre=frame[0], zoom=frame[1], up=up)
              for direction, frame in zip(directions, frames)]
     rows = (len(tiles) + columns - 1) // columns
     sheet = Image.new("RGB", (columns * size + (columns + 1) * gap,
