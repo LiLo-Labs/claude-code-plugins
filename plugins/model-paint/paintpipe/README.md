@@ -145,9 +145,15 @@ framing it frames the object. Measured, every aimed camera kept the full 57.7mm 
 and the overview's 0.222 mm/px footprint -- which is why zooming appeared to do nothing.
 With spatial sub-clustering the same cameras frame at ~21mm and 0.08 mm/px.
 
-## A full run
+## A full run of the superseded coarse stage (historical)
 
-`python3 -m paintpipe.cli --input samples/creature.stl --size-mm 60 --out run/`
+What `python3 -m paintpipe.cli` printed and wrote **under the converge flow this
+section documents, which the CLI no longer runs**. Today the same command runs
+the 3D-atom pipeline: it prints frame/atoms/naming/isolation/geometry lines,
+writes `scheme.json` as the run manifest plus `parts.npz`, and — without
+`--no-vision` — spends real vision calls. See the note at the top of this file
+and the plugin README for the current interface; this transcript is kept as the
+measured record of the coverage machinery.
 
 ```
 frame: [60.0, 55.1, 55.0] mm, size declared

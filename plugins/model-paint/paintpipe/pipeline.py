@@ -161,8 +161,17 @@ def repaint(input_path, out_dir, palette, overrides, size_mm=None,
                              % (name, sorted(by_name)))
         log("repaint %-24s -> %s" % (part, name))
         filaments[part] = name
-    chosen = {part: by_name[name] for part, name in filaments.items()
-              if name in by_name}
+    # Stored assignments must resolve against the palette just as strictly as
+    # explicit overrides do: silently dropping one would repaint a part the
+    # user never asked about with the body filament.
+    stale = sorted({name for name in filaments.values() if name not in by_name})
+    if stale:
+        raise SystemExit(
+            "the saved run uses filament(s) %s but --colors loaded %s; pass "
+            "the same filament names as the original run (or include the old "
+            "names) so unchanged parts keep their colour" % (stale,
+                                                             sorted(by_name)))
+    chosen = {part: by_name[name] for part, name in filaments.items()}
 
     source = trimesh.load(input_path, process=False, force="mesh")
     frame = frame_module.build_frame(source, target_size_mm=size_mm)
@@ -262,6 +271,13 @@ def _name_atoms(mesh, frame, face_atom, tree, atom_count, backend, intent, up,
         "zenithal", frame)) for d in render_module.fibonacci_directions(5)]
     vocabulary = backend.vocabulary(overviews, intent)
     labels = [part["label"] for part in vocabulary]
+    if not labels:
+        # The backend returns [] on any failed call. Stop before spending a
+        # dozen naming views on a run that can only end in an empty argmax.
+        raise SystemExit(
+            "the vision backend returned no part vocabulary -- the headless "
+            "call failed (see %s for the failure record); nothing to name"
+            % backend.directory)
     log("parts %s" % labels)
 
     def ask(view_key, camera, atom_map, count, tag, only=None):
