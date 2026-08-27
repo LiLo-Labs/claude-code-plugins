@@ -305,7 +305,8 @@ def locate_missing(backend, mesh, frame, missing, intent, notes, pixels=800, vie
     prompt = LOCATE_PROMPT % ("\n".join("- %s: %s" % (m, notes.get(m, ""))
                                         for m in missing),
                               intent or "not stated", pixels)
-    key = "locate-%s" % entities_module.digest_of(sorted(missing))[7:17]
+    key = "locate-%s" % entities_module.digest_of(
+        {"missing": sorted(missing), "prompt": prompt})[7:17]
     answer = backend._run(paths, prompt, key)
     if not answer:
         return {}
@@ -432,17 +433,71 @@ def recover_located(mesh, face_part, labels, backend, intent, frame, located, no
         stencil = spec.get("stencil_faces")
         if stencil is None or len(stencil) < 10:
             continue
-        sub_all = trimesh.Trimesh(vertices=mesh.vertices, faces=mesh.faces[stencil],
-                                  process=False)
-        local = list(range(len(stencil)))
-        ok = _confirm_claim(backend, sub_all, local, part, intent, spec["anchor"],
-                            max(spec["extent_mm"] * 1.3, 1e-2), pixels, frame)
+        # Solidify: pick-buffer faces are one-per-pixel and arrive as a speckle; a few
+        # adjacency rings close the holes so the stencil is a surface, not confetti.
+        adjacency = mesh.face_adjacency
+        chosen = np.zeros(len(mesh.faces), dtype=bool)
+        chosen[stencil] = True
+        for _ring in range(3):
+            touch = chosen[adjacency[:, 0]] | chosen[adjacency[:, 1]]
+            chosen[np.unique(adjacency[touch].ravel())] = True
+        solid = np.flatnonzero(chosen)
+        # Confirm IN CONTEXT. The first version rendered the stencil faces alone -- a
+        # red speck cloud floating in a void -- and asked "is this the tail?" of a
+        # reviewer who could not see the animal. Every design cut was refused for the
+        # obvious reason. The claim is judged on the whole model or not at all.
+        ok = _confirm_in_context(backend, mesh, solid, part, intent, spec["anchor"],
+                                 max(spec["extent_mm"] * 2.5, 5.0), pixels, frame)
         if ok:
-            for face in stencil:
+            for face in solid:
                 face_part[int(face)] = index[part]
-            report[part] = int(len(stencil))
+            report[part] = int(len(solid))
             report.setdefault("_drawn", []).append(part)
+        else:
+            report.setdefault("_drawn_rejected", []).append(part)
     return face_part, report
+
+
+def _confirm_in_context(backend, mesh, faces, part, intent, anchor, radius, pixels,
+                        frame):
+    """Whole model in frame, claimed faces red, one question."""
+    import io
+    from PIL import Image
+    from . import entities as entities_module
+    from . import render as render_module
+
+    mask = np.zeros(len(mesh.faces), dtype=bool)
+    mask[faces] = True
+    normals = mesh.face_normals[mask].mean(axis=0)
+    norm = np.linalg.norm(normals)
+    direction = -normals / norm if norm > 1e-9 else np.array([0.0, -1.0, -0.3])
+    camera = render_module.Camera(direction, [0, 0, 1], anchor, radius, pixels)
+    bundle = render_module.render_bundle(mesh, camera, "zenithal", frame)
+    lit = np.clip(bundle["rgb_lit"], 0, 1)
+    visible = bundle["visible"]
+    hit = bundle["hit_id"]
+    image = np.ones((pixels, pixels, 3))
+    grey = 0.35 + 0.55 * lit
+    image[visible] = grey[visible, None]
+    red = visible & mask[np.clip(hit, 0, len(mask) - 1)]
+    image[red] = np.stack([0.40 + 0.55 * lit[red], 0.12 * lit[red],
+                           0.08 * lit[red]], axis=1)
+    buffer = io.BytesIO()
+    Image.fromarray((image * 255).astype(np.uint8)).save(buffer, format="PNG")
+    key = "ctx-%s-%s" % (part.replace(" ", "_"),
+                         entities_module.digest_of(buffer.getvalue())[7:17])
+    path = os.path.join(backend.directory, "%s.png" % key)
+    with open(path, "wb") as handle:
+        handle.write(buffer.getvalue())
+    prompt = ("The RED region marks where the %s will be painted on this piece "
+              "(the feature may be subtle or purely painted-on; judge PLACEMENT).\n"
+              "The piece: %s\n\n"
+              "Is the red region in the right place and roughly the right size for "
+              "the %s?\n\n"
+              'Reply with ONLY a JSON object, no prose: {"correct": true} or '
+              '{"correct": false}' % (part, intent or "a model", part))
+    answer = backend._run([path], prompt, key)
+    return bool(answer and answer.get("correct"))
 
 
 def _prune_claim(backend, sub, local_patch, count, claimed_patches, part, intent,
