@@ -504,7 +504,11 @@ class HeadlessBackend(VisionBackend):
         prompt += ("\n\nReply with ONLY a JSON object, no prose and no code fences:\n"
                    '{"object": str, "parts": [{"label": str, "note": str, '
                    '"parent": str}]}')
-        answer = self._run(paths, prompt, "vocabulary")
+        # Keyed by the question: a changed intent or changed overviews must
+        # re-ask, not replay the first vocabulary this directory ever saw.
+        key = "vocabulary-%s" % entities_module.digest_of(
+            prompt.encode("utf-8") + b"".join(overviews))[7:19]
+        answer = self._run(paths, prompt, key)
         return [] if answer is None else answer.get("parts", [])
 
     def seeds(self, image_png, vocabulary, intent, view_note=""):
