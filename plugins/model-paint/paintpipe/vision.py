@@ -458,15 +458,22 @@ class HeadlessBackend(VisionBackend):
             finished = subprocess.run(command, capture_output=True, timeout=self.timeout)
         except subprocess.TimeoutExpired:
             self.failures += 1
+            self._log_failure(cache_key, "timeout after %ss" % self.timeout)
             return None
         self.calls += 1
         if finished.returncode != 0:
             self.failures += 1
+            self._log_failure(cache_key, "exit %d\nstderr: %s\nstdout: %s"
+                              % (finished.returncode,
+                                 finished.stderr.decode("utf-8", "replace")[:2000],
+                                 finished.stdout.decode("utf-8", "replace")[:500]))
             return None
         try:
             envelope = json.loads(finished.stdout.decode("utf-8", "replace"))
         except ValueError:
             self.failures += 1
+            self._log_failure(cache_key, "unparseable stdout: %s"
+                              % finished.stdout.decode("utf-8", "replace")[:2000])
             return None
         self.cost_usd += float(envelope.get("total_cost_usd", 0.0) or 0.0)
         answer = _loads_lenient(envelope.get("result", ""))
@@ -476,6 +483,12 @@ class HeadlessBackend(VisionBackend):
         with open(cached, "w") as handle:
             json.dump(answer, handle)
         return answer
+
+    def _log_failure(self, cache_key, text):
+        """A failed call leaves a note instead of silence. Silence cost a debugging
+        round: fifteen views came back with zero votes and nothing said why."""
+        with open(os.path.join(self.directory, "%s.failed.txt" % cache_key), "w") as f:
+            f.write(text)
 
     def vocabulary(self, overviews, intent):
         from . import entities as entities_module
