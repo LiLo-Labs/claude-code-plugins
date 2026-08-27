@@ -109,9 +109,9 @@ def paint(input_path, out_dir, intent="", size_mm=None, palette=(),
 
     # -- paint: unconstrained first, then the printer's reality ---------------
     manifest = _paint_and_export(
-        input_path, out_dir, mesh, field, frame, face_part, settled, claimed,
-        labels, vocabulary, palette, backend, intent, nozzle_mm, viewing_mm,
-        up=up, overviews=overviews, log=log)
+        input_path, out_dir, mesh, frame, face_part, labels, vocabulary,
+        palette, backend, intent, nozzle_mm, viewing_mm, up=up,
+        overviews=overviews, log=log)
     manifest["up_axis"] = [round(float(v), 6) for v in up]
 
     manifest.update({"atoms": atom_count, "naming": naming,
@@ -147,7 +147,6 @@ def repaint(input_path, out_dir, palette, overrides, size_mm=None,
 
     saved = np.load(os.path.join(out_dir, "parts.npz"), allow_pickle=True)
     face_part = saved["face_part"]
-    settled, claimed = saved["settled"], saved["claimed"]
     labels = [str(label) for label in saved["labels"]]
     with open(os.path.join(out_dir, "scheme.json")) as handle:
         manifest = json.load(handle)
@@ -184,9 +183,11 @@ def repaint(input_path, out_dir, palette, overrides, size_mm=None,
     occlusion = preview.ambient_occlusion(mesh, samples=40)
     table = np.array([chosen[label].lab if label in chosen
                       else palette[-1].lab for label in labels])
-    lab = table[settled].astype(float)
-    lab[~claimed] = np.array(palette[-1].lab)
-    rgb = preview.face_colours(mesh, lab)
+    lab = np.tile(np.asarray(palette[-1].lab, dtype=float),
+                  (len(face_part), 1))
+    painted_faces = face_part >= 0
+    lab[painted_faces] = table[face_part[painted_faces]]
+    rgb = preview.lab_to_srgb(lab)
     preview.contact_sheet(mesh, rgb, preview.orbit(8, 18.0, up=up), size=470,
                           occlusion=occlusion, columns=4).save(
         os.path.join(out_dir, "final-turnaround.png"))
@@ -316,6 +317,7 @@ def _name_atoms(mesh, frame, face_atom, tree, atom_count, backend, intent, up,
     log("contested atoms: %d" % len(contested))
     parent_of = {}
     atom_map, count = face_atom, atom_count
+    votes2 = None
     if len(contested):
         new_map = face_atom.copy()
         next_id = atom_count
@@ -343,41 +345,48 @@ def _name_atoms(mesh, frame, face_atom, tree, atom_count, backend, intent, up,
                 rounds2 = list(pool.map(
                     lambda kc: ask(kc[0], kc[1], new_map, next_id, "sub",
                                    only=set(new_ids)), cameras2))
-            assigned2, _votes2 = patches.fuse_votes(rounds2, next_id, labels)
-            full = np.full(next_id, -1, dtype=np.int32)
-            full[:atom_count] = assigned
-            for new_id in new_ids:
-                if assigned2[new_id] >= 0:
-                    full[new_id] = assigned2[new_id]
-            assigned, count, atom_map = full, next_id, new_map
+            _assigned2, votes2 = patches.fuse_votes(rounds2, next_id, labels)
+            count, atom_map = next_id, new_map
 
+    # Labels move a whole atom at a time from here on: every boundary in the
+    # result is an atom boundary, and atom boundaries are the 3D tree's own.
+    # (The old face-by-face flood raced label fronts across part boundaries
+    # and drew jagged bleed through features; consensus.py is its replacement.)
+    from . import consensus
+    votes_all = np.zeros((count, len(labels)))
+    votes_all[:votes.shape[0]] = votes
+    if votes2 is not None:
+        votes_all += votes2
+    weights = consensus.boundary_weights(mesh, atom_map, count)
+    voted = votes_all.sum(axis=1) > 0
+    assigned = np.where(voted, np.argmax(votes_all, axis=1),
+                        -1).astype(np.int32)
+    assigned = consensus.fill(assigned, weights, len(labels))
+    assigned = consensus.smooth(assigned, votes_all, weights)
+
+    # The agent inspects the coloured assignment and corrects it -- missed
+    # instances, one-sided pairs, features split between colours -- until it
+    # has nothing left to fix.
+    assigned, votes_all, audit_history = consensus.audit(
+        mesh, frame, backend, atom_map, count, assigned, votes_all, labels,
+        vocabulary, intent, up, weights, pixels=pixels, workers=workers,
+        log=log)
+
+    # An atom nothing could reach or correct keeps its contested parent's top
+    # vote; anything still unlabelled stays honestly unpainted.
+    still = np.flatnonzero(assigned < 0)
+    if len(still) and parent_of:
+        parent_top = np.argmax(votes, axis=1)
+        for atom in still:
+            parent = parent_of.get(int(atom))
+            if parent is not None and votes[parent].max() > 0:
+                assigned[atom] = parent_top[parent]
     face_part = np.where(assigned[atom_map] >= 0, assigned[atom_map],
                          -1).astype(np.int32)
 
-    # Unvoted faces inherit from labelled neighbours across face adjacency; a
-    # sub-atom no view could label falls back to its contested parent's top
-    # vote rather than staying unpainted.
-    edges = mesh.face_adjacency
-    for _ in range(48):
-        missing = face_part < 0
-        if not missing.any():
-            break
-        left = (face_part[edges[:, 0]] >= 0) & (face_part[edges[:, 1]] < 0)
-        right = (face_part[edges[:, 1]] >= 0) & (face_part[edges[:, 0]] < 0)
-        if not (left.any() or right.any()):
-            break
-        face_part[edges[left, 1]] = face_part[edges[left, 0]]
-        face_part[edges[right, 0]] = face_part[edges[right, 1]]
-    still = face_part < 0
-    if still.any() and parent_of:
-        parent_top = np.argmax(votes, axis=1)
-        for face in np.flatnonzero(still):
-            parent = parent_of.get(int(atom_map[face]))
-            if parent is not None and votes[parent].max() > 0:
-                face_part[face] = parent_top[parent]
-
     naming = {"views": len(cameras), "contested": int(len(contested)),
-              "voted_atoms": int((assigned >= 0).sum()), "atoms": int(count)}
+              "voted_atoms": int((assigned >= 0).sum()), "atoms": int(count),
+              "audit_corrections": audit_history}
     return face_part, labels, vocabulary, naming, overviews
 
 
@@ -425,10 +434,9 @@ def _part_atlas(mesh, settled, claimed, labels, frame, out_dir, preview, up):
         os.path.join(out_dir, "atlas.png"))
 
 
-def _paint_and_export(input_path, out_dir, mesh, field, frame, face_part,
-                      settled, claimed, labels, vocabulary, palette, backend,
-                      intent, nozzle_mm, viewing_mm, up=None, overviews=(),
-                      log=default_log):
+def _paint_and_export(input_path, out_dir, mesh, frame, face_part, labels,
+                      vocabulary, palette, backend, intent, nozzle_mm,
+                      viewing_mm, up=None, overviews=(), log=default_log):
     """§10 then §11: beautiful first, then limited; critic last; then the 3MF."""
     from types import SimpleNamespace
     from PIL import Image
@@ -440,8 +448,18 @@ def _paint_and_export(input_path, out_dir, mesh, field, frame, face_part,
         up = preview.up_axis(frame)
     occlusion = preview.ambient_occlusion(mesh, samples=40)
 
-    def write(lab_per_vertex, stem):
-        rgb = preview.face_colours(mesh, lab_per_vertex)
+    # Colours commit per FACE from the atom-crisp face_part -- never through a
+    # per-vertex argmax, which softened and shifted every part boundary by a
+    # vertex ring. What the renders show is exactly what the export paints.
+    def face_lab(table, default_lab):
+        out = np.tile(np.asarray(default_lab, dtype=float),
+                      (len(face_part), 1))
+        painted = face_part >= 0
+        out[painted] = np.asarray(table, dtype=float)[face_part[painted]]
+        return out
+
+    def write(lab_per_face, stem):
+        rgb = preview.lab_to_srgb(lab_per_face)
         preview.contact_sheet(mesh, rgb, preview.orbit(8, 18.0, up=up),
                               size=470, occlusion=occlusion, columns=4).save(
             os.path.join(out_dir, "%s-turnaround.png" % stem))
@@ -460,22 +478,21 @@ def _paint_and_export(input_path, out_dir, mesh, field, frame, face_part,
                                     entry["role"]))
     order = {entry["region"]: i for i, entry in enumerate(scheme)}
     wanted = np.array([scheme[order[label]]["lab"] for label in labels])
-    continuous = wanted[settled].astype(float)
-    continuous[~claimed] = np.array([64.0, 1.0, 2.0])
-    write(continuous, "continuous")
+    write(face_lab(wanted, [64.0, 1.0, 2.0]), "continuous")
     log("wrote continuous-turnaround.png, continuous-hero.png")
 
     if not palette:
         log("no filaments given: design only, not a plan")
         return {"regions": scheme, "painted": False}
 
-    share = {label: float(field.vertex_area[claimed & (settled == i)].sum())
+    areas = np.asarray(mesh.area_faces, dtype=float)
+    share = {label: float(areas[face_part == i].sum())
              for i, label in enumerate(labels)}
     for entry in scheme:
         entry["area_mm2"] = round(max(share.get(entry["region"], 0.0), 1.0), 2)
-    edges = mesh.edges_unique
-    a, b = settled[edges[:, 0]], settled[edges[:, 1]]
-    both = claimed[edges[:, 0]] & claimed[edges[:, 1]] & (a != b)
+    adjacency = mesh.face_adjacency
+    a, b = face_part[adjacency[:, 0]], face_part[adjacency[:, 1]]
+    both = (a >= 0) & (b >= 0) & (a != b)
     pairs = np.unique(np.stack([np.minimum(a[both], b[both]),
                                 np.maximum(a[both], b[both])], axis=1), axis=0)
     touching = [(labels[int(x)], labels[int(y)]) for x, y in pairs]
@@ -491,11 +508,9 @@ def _paint_and_export(input_path, out_dir, mesh, field, frame, face_part,
         log("  boundaries the palette cannot separate: %s" % clashes)
 
     def limited_lab():
-        table = np.array([chosen[label].lab if label in chosen
-                          else palette[-1].lab for label in labels])
-        out = table[settled].astype(float)
-        out[~claimed] = np.array(palette[-1].lab)
-        return out
+        table = [chosen[label].lab if label in chosen else palette[-1].lab
+                 for label in labels]
+        return face_lab(table, palette[-1].lab)
 
     write(limited_lab(), "limited")
     zero_faced = {row_label for i, row_label in enumerate(labels)

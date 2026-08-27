@@ -181,9 +181,18 @@ boundary.
    three elevation rings and says which atoms belong to which part of a
    vocabulary it proposed itself from overview renders plus your intent. Votes
    are fused statistically across all views: selection beats judgement.
-3. **Descend** — atoms whose votes straddle two parts are split along their own
-   sub-tree and re-asked with the new ids highlighted. Unvoted leftovers
-   inherit from labelled neighbours across face adjacency.
+3. **Descend, then consensus** (`consensus.py`) — atoms whose votes straddle
+   two parts are split along their own sub-tree and re-asked with the new ids
+   highlighted. From there labels move a whole atom at a time: unvoted atoms
+   adopt the boundary-majority label of their neighbours, weakly-voted atoms
+   surrounded by one label flip to it, and every part boundary in the result is
+   a 3D tree edge — parts stay crisp by construction. Then an audit loop: the
+   agent inspects the coloured assignment next to the id render and files
+   corrections (the barnacle left unpainted, the second horn labelled as an
+   ear, the spike wearing two colours) until it has nothing left to fix.
+   Because each part prints in exactly one filament, complete symmetric
+   labelling is what makes repeated features — all hooves, all spikes — come
+   out uniform on the printed part.
 4. **Refine** (`refine.py`) — parts the vocabulary promised but nobody found
    get a recovery ladder: a zoomed re-ask over the declared parent, then
    locate-then-zoom from a pixel box, a prune gate over claimed patches, and as
