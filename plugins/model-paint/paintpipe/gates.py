@@ -107,6 +107,44 @@ def identity_continuity(current_anchors, prior_anchors, inherited):
             "fraction": len(inherited) / max(len(current_anchors), 1)}
 
 
+def claimed_area(field, radius_mm, bands=None):
+    """How much of the surface any label actually claims (§13).
+
+    THIS IS THE GATE THAT CATCHES A SILENTLY EMPTY RUN, and it exists because one
+    happened. The dragon's band ladder collapsed to a single 1.02mm band; mask spread was
+    taken from the band, so every mask was a one-millimetre dot on a 187mm model. The run
+    reported a good vocabulary, twelve real anatomical parts, forty views and no errors --
+    and produced 16,136 observations where the shell produced 7.6 million, painting a
+    grey model with a few coloured specks on it.
+
+    Nothing else in the pipeline would have said so. Coverage measures whether the
+    surface was LOOKED at, not whether anything was concluded about it, and the two came
+    apart completely. A run that claims almost nothing has failed no matter how healthy
+    every other number is.
+    """
+    if not field.labels:
+        return {"claimed_fraction": 0.0, "labels": 0,
+                "verdict": "no labels were ever proposed"}
+    posterior = field.posterior(radius_mm, bands)
+    claimed = posterior.max(axis=0) > 0
+    fraction = float(field.vertex_area[claimed].sum()
+                     / max(field.total_area_mm2, 1e-9))
+    per_label = {label: round(float(np.sum(posterior[i] * field.vertex_area)
+                                    / max(field.total_area_mm2, 1e-9)), 5)
+                 for i, label in enumerate(field.labels)}
+    if fraction < 0.25:
+        verdict = ("only %.1f%% of the surface is claimed by any label; the masks are "
+                   "far too small for the model, which usually means the scale they "
+                   "were grown at does not match the size of the parts" % (100 * fraction))
+    elif fraction < 0.6:
+        verdict = "%.1f%% claimed; large areas have no label" % (100 * fraction)
+    else:
+        verdict = "%.1f%% claimed" % (100 * fraction)
+    return {"claimed_fraction": round(fraction, 5), "labels": len(field.labels),
+            "per_label": per_label, "verdict": verdict,
+            "healthy": bool(fraction >= 0.6)}
+
+
 def coverage_gate(state, policy):
     """The predicate's own report: samples, spread, and what was never seen."""
     per_band = state.satisfied(policy)

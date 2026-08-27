@@ -81,8 +81,34 @@ def pixel_graph(bundle, barrier):
     return graph, index
 
 
+def seed_extent_mm(bundle, points):
+    """How far apart an agent's seeds for one part are, on the surface, in millimetres.
+
+    THE PART TELLS YOU ITS OWN SCALE. When the agent puts four points on a dragon's head
+    it has said, without being asked, that the head is about that big; when it puts two
+    points on one spike it has said that too. Nothing else in the pipeline knows this --
+    the band ladder describes the scales at which the OBJECT has structure, not the size
+    of the thing being pointed at, and on the dragon those came apart badly. Its ladder
+    collapsed to a single 1.02mm band, so every mask was a one-millimetre dot on a
+    187mm model and the whole run produced 16,136 observations where the shell produced
+    7.6 million.
+    """
+    if len(points) < 2:
+        return None
+    surface = bundle["point"]
+    visible = bundle["visible"]
+    found = []
+    for x, y in points:
+        if 0 <= y < visible.shape[0] and 0 <= x < visible.shape[1] and visible[y, x]:
+            found.append(surface[y, x])
+    if len(found) < 2:
+        return None
+    found = np.asarray(found)
+    return float(np.linalg.norm(found.max(axis=0) - found.min(axis=0)))
+
+
 def synthesise_masks(bundle, band, seeds_by_label, policy, spread=None, barrier=None,
-                     graph=None):
+                     graph=None, spread_by_label=None):
     """Grow every label's seeds at once. Returns {label: confidence map}.
 
     Geodesic distance in the image, over a graph whose edge costs are the local boundary
@@ -104,7 +130,7 @@ def synthesise_masks(bundle, band, seeds_by_label, policy, spread=None, barrier=
     if not visible.any() or not labels:
         return {}
 
-    spread_mm = float(spread if spread is not None else band.wavelength_mm)
+    default_spread = float(spread if spread is not None else band.wavelength_mm)
     if graph is None:
         if barrier is None:
             barrier = barrier_map(bundle, band)
@@ -116,6 +142,11 @@ def synthesise_masks(bundle, band, seeds_by_label, policy, spread=None, barrier=
     height, width = visible.shape
     out = {}
     for label in labels:
+        spread_mm = default_spread
+        if spread_by_label and spread_by_label.get(label):
+            # Never smaller than the band: a part cannot be described more finely than
+            # the scale the evidence for it was admitted at.
+            spread_mm = max(default_spread, float(spread_by_label[label]) * 0.5)
         sources = []
         for x, y in seeds_by_label[label]:
             if 0 <= y < height and 0 <= x < width and index[y, x] >= 0:

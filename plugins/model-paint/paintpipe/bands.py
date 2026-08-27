@@ -205,8 +205,22 @@ def derive_bands(mesh, frame, policy, levels=18, views=8, pixels=900, store=None
             store.reject("band", "no peak cleared the prominence floor; "
                                  "object described at its dominant scale alone",
                          inputs=inputs, count=1)
+    # The ladder must SPAN the object, not only report its most prominent peak. Parts
+    # live between the finest detail and the whole piece, and a ladder that holds only
+    # the fine end cannot describe a head or a leg. The dragon's spectrum peaked at
+    # 1.02mm and that was the entire ladder, so every mask was grown at one millimetre
+    # on a 187mm model and the run claimed almost none of the surface.
+    #
+    # The dominant scale -- where cumulative cue energy is greatest -- is always a band.
+    # It is not a peak of ADDED energy and would never be found by the peak search, but
+    # it is the scale at which the object has the most structure, which is exactly what
+    # the coarse end of the ladder is for.
+    chosen = [(i, prominence) for i, prominence in peaks]
+    dominant = int(np.nanargmax(kept_energy))
+    if all(abs(np.log(kept_radii[i] / kept_radii[dominant])) > 0.35 for i, _p in chosen):
+        chosen.append((dominant, 0.0))
     bands = [Band(0, kept_radii[i], kept_energy[i], prominence)
-             for i, prominence in peaks]
+             for i, prominence in chosen]
     bands.sort(key=lambda b: -b.wavelength_mm)
     for order, band in enumerate(bands):
         band.index = order

@@ -69,7 +69,7 @@ def adjacency(field, labels, radius_mm):
     return touching
 
 
-def assign_paints(scheme, palette, touching, policy, distance_mm=None):
+def assign_paints(scheme, palette, touching, policy, distance_mm=None, areas=None):
     """Choose one paint per region: minimise colour error, keep neighbours separable.
 
     §11 says the palette fit is a CONSTRAINT, not a lookup, and the difference decides
@@ -88,20 +88,39 @@ def assign_paints(scheme, palette, touching, policy, distance_mm=None):
     labels = [entry["region"] for entry in scheme]
     wanted = [tuple(entry["lab"]) for entry in scheme]
     cost = np.array([[delta_e(want, paint.lab) for paint in palette] for want in wanted])
+
+    # COLOUR ERROR IS PERCEIVED BY AREA. Summing dE with every region counted equally
+    # makes a dragon's eye socket as expensive to get wrong as its whole body, so the
+    # optimiser spends its good colours on the large masses and hands the eye whatever is
+    # left -- measured, the eye came out grey at dE 32.6 and vanished entirely. Weighting
+    # by area states what is actually true: being wrong across a third of the model
+    # matters and being wrong across a tenth of a percent of it does not, which leaves
+    # small features nearly free to take whatever colour makes them READ.
+    if areas is None:
+        weight = np.array([float(entry.get("area_mm2", 1.0)) for entry in scheme])
+    else:
+        weight = np.array([float(areas.get(entry["region"], 1.0)) for entry in scheme])
+    weight = weight / max(weight.sum(), 1e-9)
+    weight = np.maximum(weight, 0.02)      # a floor, so nothing is wholly ignored
+    cost = cost * weight[:, None]
     neighbours = [(labels.index(a), labels.index(b)) for a, b in touching
                   if a in labels and b in labels]
 
     # A collapsed boundary costs more than any colour error can, so separability wins
     # every trade -- but among assignments that keep neighbours apart, colour decides.
     penalty = float(cost.max()) * len(labels) + 1.0
+    # An accent's whole job is to be seen, so losing ITS boundary costs more than losing
+    # an ordinary one and ties break in its favour.
+    accent = np.array([2.5 if entry.get("role") == "accent" else 1.0
+                       for entry in scheme])
     best, best_score = None, np.inf
     if len(labels) > 12:
         order = np.argsort(cost.min(axis=1))
         return {labels[i]: palette[int(np.argmin(cost[i]))] for i in order}, None
     for combination in itertools.product(range(len(palette)), repeat=len(labels)):
         score = float(sum(cost[i, combination[i]] for i in range(len(labels))))
-        clashes = sum(1 for a, b in neighbours if combination[a] == combination[b])
-        score += clashes * penalty
+        score += penalty * sum(max(accent[a], accent[b]) for a, b in neighbours
+                               if combination[a] == combination[b])
         if score < best_score:
             best, best_score = combination, score
     clashes = [(labels[a], labels[b]) for a, b in neighbours if best[a] == best[b]]
@@ -223,6 +242,47 @@ def reachability(region_membership, field, tip, level=0.5, samples=64):
         reached |= ~hit
     fraction = float(reached.mean())
     return fraction > 0.5, fraction
+
+
+def consolidate(field, owner, claimed, tip_radius_mm, policy, rounds=None):
+    """Commit to one label per vertex at a scale the nozzle can actually lay down (§11).
+
+    The label field is continuous, and taking an argmax at each vertex INDEPENDENTLY
+    throws that away: where two labels are close in posterior the winner flips from
+    vertex to vertex, and the result is salt-and-pepper. On the dragon, twelve labels
+    over a sparse field turned a clean mixture render into noise the moment it was
+    committed.
+
+    A speckle is not a printing defect to be tidied up afterwards, it is a region below
+    the minimum feature size, which §11 already says must merge into its parent. So the
+    commitment happens at the brush's own scale: each vertex takes the label holding the
+    most AREA within one tip radius of it. Nothing smaller than the nozzle survives,
+    because nothing smaller than the nozzle can be printed.
+    """
+    mesh = field.substrate
+    if field._neighbours is None:
+        field._build_neighbours()
+    indptr, indices = field._neighbours
+    if rounds is None:
+        rounds = int(np.clip(round(policy.merge_ratio * tip_radius_mm
+                                   / max(field._mean_edge, 1e-9)), 1, 24))
+    count = int(owner.max()) + 1 if len(owner) else 0
+    if count == 0:
+        return owner
+    area = field.vertex_area
+    # One-hot, area weighted, diffused over the surface, then re-committed.
+    mass = np.zeros((count, len(mesh.vertices)))
+    live = claimed
+    mass[owner[live], np.flatnonzero(live)] = area[live]
+    degree = np.maximum(np.diff(indptr), 1)
+    for _ in range(rounds):
+        pooled = np.add.reduceat(mass[:, indices], indptr[:-1], axis=1)
+        mass = 0.4 * mass + 0.6 * (pooled / degree)
+    out = owner.copy()
+    total = mass.sum(axis=0)
+    settled = total > 0
+    out[settled] = np.argmax(mass[:, settled], axis=0)
+    return out
 
 
 def bake(field, scheme, rho_work_mm, radius_mm):

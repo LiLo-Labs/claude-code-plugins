@@ -221,11 +221,13 @@ class VisionRegion(Region):
             confidence[label] = float(entry.get("confidence", 0.5))
         if not seeds:
             return
+        spreads = {label: vision_module.seed_extent_mm(bundle, points)
+                   for label, points in seeds.items()}
         # The barrier map and the pixel graph depend on the bundle and the band, not on
         # which part is being grown, so every label at this band shares one of each.
         graph = self._graph_for(bundle, band)
         masks = vision_module.synthesise_masks(bundle, band, seeds, self.policy,
-                                               graph=graph)
+                                               graph=graph, spread_by_label=spreads)
         for label, mask in masks.items():
             if mask.max() <= 0:
                 continue
