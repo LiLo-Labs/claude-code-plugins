@@ -2,6 +2,18 @@
 
 Implementation of the agentic paint-scheme pipeline, specification v0.2.
 
+> **Where the live path is now.** The default pipeline (`pipeline.py`, driven by
+> `cli.py`) segments in 3D — feature atoms cut from a persistence merge tree
+> (`segment3d.py`) — and has vision agents name the atoms from paired shaded +
+> numbered-id renders (`patches.py`), with contested atoms split along their own
+> sub-tree and re-asked. The multi-view observe/fuse/converge stage documented
+> below (`views.py`, `field.py`, per-pixel label proposals) was this project's
+> first working coarse stage and is kept as the record of how the invariants
+> were satisfied and what was measured; its screen-space machinery (rendering,
+> rigs, cues, bands, GSD) still powers every render the agents look at. The
+> frame/validation stage, the recovery ladder (`refine.py`), the painter,
+> limiter, critic and the verified 3MF export are the same in both accounts.
+
 Built to the spec's invariants rather than around them:
 
 - **I1 appearance is primary.** Every cue descends from a render buffer. `hit_id` is a

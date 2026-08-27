@@ -1,163 +1,563 @@
-"""The whole run: profile, observe, fuse, decide, realize (spec §2 figure 2).
+"""The whole run, in the order the agents actually decide things.
 
-Profile happens once; observe and fuse loop; the two backward edges -- resampling and
-merge-back -- are the only ones in the system.
+    segment  -- 3D feature atoms: a cut of the persistence merge tree, whose
+                boundaries are concave junctions and relief edges found in 3D
+                (segment3d). Geometry only ever PROPOSES pieces here; it never
+                names one.
+    name     -- the vision agent reads shaded + numbered-id renders from many
+                directions and says which atoms belong to which part; votes are
+                fused statistically across views (patches.fuse_votes).
+    descend  -- atoms whose votes straddle parts are split along their own
+                sub-tree and re-asked. The tree makes "colour the sub-part" a
+                descent, not a re-segmentation.
+    refine   -- parts the vocabulary promised but nobody found get the recovery
+                ladder: declared-parent zoom, locate-then-zoom, prune gate,
+                design cut confirmed in context (refine.refine_subparts).
+    paint    -- the painter colours the named parts unconstrained ("colour it
+                beautifully"); only then is the scheme limited to the loaded
+                filaments, and a critic reviews the finished renders and may
+                override assignments (§10 before §11, always).
+    export   -- painted 3MF whose geometry is verified identical to the input.
 
-Every stage mints entities, so the finished export walks back through `inputs` to the
-exact renders, masks, policy and profile that produced it. That is the whole of I7 in
-practice: not that records have names, but that the names connect.
+Where a constant appears it is a legibility or budget bound (how many ids fit
+readably in one render, how many views to buy), never a boundary: every part
+boundary comes from the merge tree, and every name from an agent looking at
+renders. That is the division of labour the whole project converged on --
+selection beats judgement, and geometry beats tiling.
 """
+
+import json
+import os
+import time
 
 import numpy as np
 
-from . import agents as agents_module
-from . import bands as bands_module
-from . import entities as entities_module
-from . import field as field_module
-from . import frame as frame_module
-from . import gates as gates_module
-from . import limiter as limiter_module
-from . import policy as policy_module
-from . import views as views_module
+
+def default_log(message):
+    print(message, flush=True)
 
 
-def profile_object(bundle, profile, policy, store, log=print):
-    """§4 / §12. Everything that happens once, before any agent considers semantics."""
-    meshes = bundle.load()
-    mesh = meshes[0]
-    object_entity = store.mint("object", params=bundle.params(),
-                               attrs={"paths": bundle.params()["paths"],
-                                      "intent": bundle.intent})
-    profile_entity = store.mint("profile", params=profile.params(),
-                                attrs={"unconstrained": profile.unconstrained})
-    policy_entity = store.mint("policy", params=policy.as_dict(),
-                               attrs=policy.as_dict())
+def paint(input_path, out_dir, intent="", size_mm=None, palette=(),
+          model="claude-opus-5", nozzle_mm=0.4, viewing_mm=500.0, pixels=900,
+          cap=250, workers=3, no_vision=False, log=default_log):
+    """One mesh and a brief in; a painted, geometry-identical 3MF out.
 
-    frame = frame_module.build_frame(mesh, target_size_mm=bundle.target_size_mm)
-    working = frame.working_mesh(mesh, store=store, inputs=[object_entity])
-    identity = agents_module.DEFAULT_AGENTS["identity"].read(None, frame)
-    frame_module.name_axes(frame, identity["axis_names"])
-    frame_entity = store.mint("frame", inputs=[object_entity], params=frame.params(),
-                              attrs={"extent_mm": frame.extent_mm.round(3).tolist(),
-                                     "size_source": frame.size_source})
-    log("frame: %s mm, size %s" % (frame.extent_mm.round(1).tolist(),
-                                   frame.size_source))
+    Returns a manifest dict (also written to out_dir/scheme.json). With
+    `no_vision` the run stops after segmentation with an atom atlas -- naming
+    is an act of looking, and there is no honest deterministic stand-in for it.
+    """
+    import trimesh
+    from . import entities, field as field_module, frame as frame_module
+    from . import policy as policy_module, preview, segment3d, vision
+
+    started = time.time()
+    os.makedirs(out_dir, exist_ok=True)
+    policy = policy_module.DEFAULT
+
+    # -- frame: units, scale, validation. Repairs never move a vertex. --------
+    source = trimesh.load(input_path, process=False, force="mesh")
+    store = entities.Store(os.path.join(out_dir, "entities"))
+    run = store.mint("run", params={"input": os.path.basename(input_path),
+                                    "method": "3d-atoms"})
+    frame = frame_module.build_frame(source, target_size_mm=size_mm)
+    working = frame.working_mesh(source, store=store, inputs=[run])
     for check in frame.checks:
         if not check.passed:
-            log("  validate %-18s %s  %s" % (check.name,
-                                             "repaired" if check.repaired else "FAILED",
-                                             check.detail))
+            log("  validate %-18s %-9s %s"
+                % (check.name, "repaired" if check.repaired else "FAILED",
+                   check.detail))
+    log("frame %s mm (%s)" % (frame.extent_mm.round(1).tolist(),
+                              frame.size_source))
 
-    found, spectrum = bands_module.derive_bands(working, frame, policy, store=store,
-                                                inputs=[object_entity])
-    band_entities = [store.mint("band", inputs=[frame_entity], params=band.params(),
-                                attrs=band.params()) for band in found]
-    log("bands: %s" % ["%.2fmm" % band.wavelength_mm for band in found])
+    field = field_module.LabelField(working, frame, policy, store=store,
+                                    inputs=[run])
+    mesh = field.substrate
 
-    rho, rho_paint, rho_work = bands_module.working_resolution(found, profile, policy)
-    log("working resolution: rho %.4fmm, paint %s, rho_work %.4fmm"
-        % (rho, "none" if rho_paint is None else "%.4fmm" % rho_paint, rho_work))
-    return {"mesh": mesh, "working": working, "frame": frame, "bands": found,
-            "spectrum": spectrum, "rho_work": rho_work,
-            "entities": {"object": object_entity, "frame": frame_entity,
-                         "profile": profile_entity, "policy": policy_entity,
-                         "bands": band_entities}}
+    # -- segment in 3D --------------------------------------------------------
+    face_atom, tree = segment3d.atoms(mesh, cap=cap, log=log)
+    atom_count = len(tree["node_of_atom"])
 
+    if no_vision:
+        atlas_path = _atom_atlas(mesh, face_atom, atom_count, frame, out_dir,
+                                 preview, preview.up_axis(frame))
+        log("no vision: segmentation only -- %d atoms, atlas at %s"
+            % (atom_count, atlas_path))
+        store.write()
+        return {"atoms": atom_count, "atlas": atlas_path, "painted": False}
 
-def run(bundle, profile, policy=None, root="run", rigs=("zenithal", "raking_a", "flat"),
-        pixels=700, max_rounds=4, log=print):
-    """The five phases end to end. Returns the export manifest and the store."""
-    policy = policy or policy_module.DEFAULT
-    store = entities_module.Store(root)
-    run_entity = store.mint("run", params={"spec": "0.2"})
+    backend = vision.HeadlessBackend(os.path.join(out_dir, "vision"),
+                                     model=model)
 
-    # --- profile -----------------------------------------------------------------
-    shape = profile_object(bundle, profile, policy, store, log=log)
-    frame, working, found = shape["frame"], shape["working"], shape["bands"]
+    # Which way is up is a fact about the depicted thing, not about the file's
+    # axis convention -- so it is looked at, not assumed.
+    up = _choose_up(mesh, frame, backend, log=log)
 
-    plan = agents_module.DEFAULT_AGENTS["planner"].plan(found, profile, bundle.intent,
-                                                        policy)
-    log("planner: %s" % plan["reason"])
-    for band, why in plan["skip"]:
-        store.reject("band", why, inputs=[run_entity], count=1)
-    attended = plan["attend"]
+    # -- name the pieces ------------------------------------------------------
+    face_part, labels, vocabulary, naming, overviews = _name_atoms(
+        mesh, frame, face_atom, tree, atom_count, backend, intent, up,
+        pixels=pixels, workers=workers, log=log)
 
-    # --- observe and fuse --------------------------------------------------------
-    label_field = field_module.LabelField(working, frame, policy, store=store,
-                                          inputs=[shape["entities"]["object"]])
-    region_agent = agents_module.DEFAULT_AGENTS["region"]
+    # -- second pass: recover what the vocabulary promised but nobody found ---
+    from . import refine as refine_module
+    face_part, recovered = refine_module.refine_subparts(
+        mesh, face_part, labels, vocabulary, backend, intent, frame=frame)
+    log("recovery: %s" % (json.dumps(recovered) if recovered
+                          else "nothing missing"))
 
-    def labeller(bundle_buffers, band):
-        return region_agent.propose(bundle_buffers, band)
+    settled, claimed, rows = _settle(field, mesh, face_part, labels, log=log)
+    _part_atlas(mesh, settled, claimed, labels, frame, out_dir, preview, up)
 
-    state, why = views_module.converge(label_field, working, frame, attended, policy,
-                                       labeller, rigs=rigs, pixels=pixels, store=store,
-                                       inputs=[run_entity], max_rounds=max_rounds,
-                                       log=log)
-    log("converge: %s after %d views, %d observations"
-        % (why, state.views, label_field.count))
+    # -- paint: unconstrained first, then the printer's reality ---------------
+    manifest = _paint_and_export(
+        input_path, out_dir, mesh, field, frame, face_part, settled, claimed,
+        labels, vocabulary, palette, backend, intent, nozzle_mm, viewing_mm,
+        up=up, overviews=overviews, log=log)
+    manifest["up_axis"] = [round(float(v), 6) for v in up]
 
-    # --- decide ------------------------------------------------------------------
-    radius = float(np.median([band.wavelength_mm for band in attended]))
-    critic = agents_module.DEFAULT_AGENTS["critic"].review(label_field, radius, policy)
-    for node_id, action, reason in critic["edits"]:
-        store.reject("region", "%s: %s" % (action, reason), inputs=[run_entity], count=1)
-    dropped = {node_id for node_id, action, _ in critic["edits"] if action == "drop"}
-    kept = [node_id for node_id in label_field.labels if node_id not in dropped]
-    log("critic: %d regions checked, %d edits" % (critic["checked"],
-                                                  len(critic["edits"])))
-
-    scheme = agents_module.DEFAULT_AGENTS["painter"].colour(label_field, kept, radius,
-                                                            bundle.intent)
-    for entry in scheme:
-        membership = label_field.region(entry["region"], radius)
-        entry["area_mm2"] = float(np.sum(membership * label_field.vertex_area))
-        store.mint("region", inputs=[run_entity],
-                   params={"label": entry["region"], "radius_mm": radius},
-                   attrs={"label": entry["region"], "role": entry["role"],
-                          "area_mm2": round(entry["area_mm2"], 3)})
-
-    # --- realize -----------------------------------------------------------------
-    scheme = limiter_module.fit_palette(scheme, profile, label_field, radius, policy,
-                                        store=store, inputs=[run_entity])
-    tip = profile.finest_tip()
-    for entry in scheme:
-        membership = label_field.region(entry["region"], radius)
-        entry["inscribed_radius_mm"] = limiter_module.min_feature(membership,
-                                                                  label_field)
-        if tip is not None:
-            floor = policy.merge_ratio * tip.tip_radius_mm
-            if entry["inscribed_radius_mm"] < floor:
-                entry["realizable"] = False
-                entry["note"] = "inscribed radius below the finest tip"
-                store.reject("region", "below the minimum feature the brush can paint",
-                             inputs=[run_entity], count=1)
-            ok, fraction = limiter_module.reachability(membership, label_field, tip)
-            entry["reachable_fraction"] = fraction
-            if not ok:
-                entry["realizable"] = False
-                entry["note"] = "no unoccluded brush approach"
-                store.reject("region", "unpaintable in place: no unoccluded approach",
-                             inputs=[run_entity], count=1)
-
-    colours, bake_info = limiter_module.bake(label_field, scheme, shape["rho_work"],
-                                             radius)
-    store.mint("bake", inputs=[run_entity], params=bake_info, attrs=bake_info)
-
-    coverage = gates_module.coverage_gate(state, policy)
-    manifest = limiter_module.export_guide(scheme, frame, label_field, radius, found,
-                                           coverage, store=store, inputs=[run_entity])
-    manifest["gates"] = {
-        "coverage": coverage,
-        "scale_coherence": gates_module.scale_coherence(label_field, attended),
-        "palette_margin": gates_module.palette_margin(scheme, profile, label_field,
-                                                      radius, policy),
-        "realizability": gates_module.realizability(scheme),
-        "boundary_stability": {
-            entry["region"]: gates_module.boundary_stability(label_field,
-                                                             entry["region"], radius)
-            for entry in scheme[:3]},
-    }
-    manifest["converged"] = why
+    manifest.update({"atoms": atom_count, "naming": naming,
+                     "recovered": recovered, "isolation": rows,
+                     "vocabulary": vocabulary,
+                     "seconds": round(time.time() - started, 1),
+                     "vision_calls": backend.calls,
+                     "vision_cost_usd": round(backend.cost_usd, 3)})
+    np.savez_compressed(os.path.join(out_dir, "parts.npz"),
+                        face_part=face_part, settled=settled, claimed=claimed,
+                        labels=np.array(labels, dtype=object))
     store.write()
-    return manifest, store, label_field, colours
+    with open(os.path.join(out_dir, "scheme.json"), "w") as handle:
+        json.dump(entities._plain(manifest), handle, indent=2, default=str)
+    log("\ndone in %.0fs, vision $%.2f -- %s"
+        % (manifest["seconds"], backend.cost_usd, out_dir))
+    return manifest
+
+
+def repaint(input_path, out_dir, palette, overrides, size_mm=None,
+            log=default_log):
+    """Re-map finished parts to filaments without re-running any vision.
+
+    `overrides` is {part label: filament name}. Loads parts.npz and scheme.json
+    from a previous run in `out_dir`, applies the changes, re-renders the final
+    views and re-exports the verified 3MF. This is what "make the eyes black"
+    costs after a run: seconds, not a re-segmentation.
+    """
+    import trimesh
+    from PIL import Image
+    from . import entities, field as field_module, frame as frame_module
+    from . import policy as policy_module, preview
+
+    saved = np.load(os.path.join(out_dir, "parts.npz"), allow_pickle=True)
+    face_part = saved["face_part"]
+    settled, claimed = saved["settled"], saved["claimed"]
+    labels = [str(label) for label in saved["labels"]]
+    with open(os.path.join(out_dir, "scheme.json")) as handle:
+        manifest = json.load(handle)
+    filaments = dict(manifest.get("filaments", {}))
+    by_name = {paint_choice.name: paint_choice for paint_choice in palette}
+    for part, name in overrides.items():
+        if part not in labels:
+            raise SystemExit("no part named %r; parts are %s" % (part, labels))
+        if name not in by_name:
+            raise SystemExit("no filament named %r; loaded: %s"
+                             % (name, sorted(by_name)))
+        log("repaint %-24s -> %s" % (part, name))
+        filaments[part] = name
+    chosen = {part: by_name[name] for part, name in filaments.items()
+              if name in by_name}
+
+    source = trimesh.load(input_path, process=False, force="mesh")
+    frame = frame_module.build_frame(source, target_size_mm=size_mm)
+    working = frame.working_mesh(source, store=entities.Store(
+        os.path.join(out_dir, "entities")))
+    field = field_module.LabelField(working, frame, policy_module.DEFAULT)
+    mesh = field.substrate
+    up = np.asarray(manifest.get("up_axis") or preview.up_axis(frame),
+                    dtype=float)
+    occlusion = preview.ambient_occlusion(mesh, samples=40)
+    table = np.array([chosen[label].lab if label in chosen
+                      else palette[-1].lab for label in labels])
+    lab = table[settled].astype(float)
+    lab[~claimed] = np.array(palette[-1].lab)
+    rgb = preview.face_colours(mesh, lab)
+    preview.contact_sheet(mesh, rgb, preview.orbit(8, 18.0, up=up), size=470,
+                          occlusion=occlusion, columns=4).save(
+        os.path.join(out_dir, "final-turnaround.png"))
+    Image.fromarray(preview.render_asset(
+        mesh, rgb, preview.orbit(1, 24.0, start_deg=200.0, up=up)[0],
+        size=950, occlusion=occlusion, up=up, zoom=1.25)).save(
+        os.path.join(out_dir, "final-hero.png"))
+
+    export = _export_3mf(input_path, out_dir, face_part, labels, chosen,
+                         palette, log=log)
+    manifest["filaments"] = filaments
+    manifest["export"] = export
+    with open(os.path.join(out_dir, "scheme.json"), "w") as handle:
+        json.dump(manifest, handle, indent=2, default=str)
+    return manifest
+
+
+UP_PROMPT = """Renders of the SAME 3D model, each numbered in its top-left \
+corner, each assuming a different up direction. In exactly one of them the \
+model sits the way it would actually stand or display: base at the bottom, \
+not tipped on its side or upside down.
+
+Reply with ONLY a JSON object, no prose, no code fences:
+{"upright": <the number>, "why": "<one line>"}"""
+
+
+def _choose_up(mesh, frame, backend, log=default_log):
+    """Ask the agent which orientation is upright, instead of trusting the
+    file's axis convention (STLs converted from Y-up sources lie about it)."""
+    from PIL import Image, ImageDraw
+    from . import entities, preview
+
+    prior = np.asarray(preview.up_axis(frame), dtype=float)
+    candidates = [prior]
+    for axis in ([0.0, 0.0, 1.0], [0.0, 0.0, -1.0], [0.0, 1.0, 0.0],
+                 [0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [-1.0, 0.0, 0.0]):
+        vector = np.asarray(axis)
+        if all(np.linalg.norm(vector - known) > 1e-6 for known in candidates):
+            candidates.append(vector)
+
+    neutral = np.tile(np.array([64.0, 1.0, 2.0]), (len(mesh.vertices), 1))
+    rgb = preview.face_colours(mesh, neutral)
+    paths, blobs = [], []
+    for index, candidate in enumerate(candidates):
+        direction = preview.orbit(1, 18.0, start_deg=200.0, up=candidate)[0]
+        image = Image.fromarray(preview.render_asset(
+            mesh, rgb, direction, size=380, up=candidate))
+        ImageDraw.Draw(image).text((8, 6), str(index), fill=(0, 0, 0))
+        path = os.path.join(backend.directory, "up-%d.png" % index)
+        image.save(path)
+        paths.append(path)
+        with open(path, "rb") as handle:
+            blobs.append(handle.read())
+    key = "up-%s" % entities.digest_of(b"".join(blobs))[7:19]
+    answer = backend._run(paths, UP_PROMPT, key) or {}
+    try:
+        pick = int(answer.get("upright", 0))
+    except (TypeError, ValueError):
+        pick = 0
+    if not 0 <= pick < len(candidates):
+        pick = 0
+    chosen = candidates[pick]
+    log("up axis: %s%s -- %s"
+        % (np.round(chosen, 3).tolist(),
+           "" if pick == 0 else " (file convention said %s)"
+           % np.round(prior, 3).tolist(),
+           str(answer.get("why", "no answer; kept the file convention"))[:70]))
+    return chosen
+
+
+def _name_atoms(mesh, frame, face_atom, tree, atom_count, backend, intent, up,
+                pixels=900, workers=3, log=default_log):
+    """Vocabulary, per-view votes, statistical fusion, contested descent."""
+    from concurrent.futures import ThreadPoolExecutor
+    from . import patches, preview, render as render_module, segment3d, vision
+
+    centre = mesh.vertices.mean(axis=0)
+    radius = float(np.ptp(mesh.vertices, axis=0).max()) / 2.0 * 1.05
+
+    overviews = [vision.render_png(render_module.render_bundle(
+        mesh, render_module.Camera(-d, [0, 0, 1], centre, radius, 640),
+        "zenithal", frame)) for d in render_module.fibonacci_directions(5)]
+    vocabulary = backend.vocabulary(overviews, intent)
+    labels = [part["label"] for part in vocabulary]
+    log("parts %s" % labels)
+
+    def ask(view_key, camera, atom_map, count, tag, only=None):
+        bundle = render_module.render_bundle(mesh, camera, "zenithal", frame)
+        shaded = vision.render_png(bundle)
+        lit = np.clip(bundle["rgb_lit"], 0, 1)
+        id_png, listed = patches.render_id_view(mesh, atom_map, count, camera,
+                                                lit, only=only)
+        votes = patches.ask_assignments(backend, shaded, id_png, listed,
+                                        vocabulary, intent,
+                                        "%s-%02d" % (tag, view_key))
+        log("  %s %02d: %d parts, %d votes"
+            % (tag, view_key, len(votes), sum(len(v) for v in votes.values())))
+        return (votes, 1.0)
+
+    # Three elevation rings so undersides and crowns are looked at, not
+    # inferred. The counts are a view budget, not a boundary.
+    directions = (preview.orbit(6, 18.0, up=up) + preview.orbit(3, 55.0, up=up)
+                  + preview.orbit(3, -20.0, up=up))
+    cameras = [(k, render_module.Camera(np.asarray(d, float), [0, 0, 1],
+                                        centre, radius, pixels))
+               for k, d in enumerate(directions)]
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        rounds = list(pool.map(
+            lambda kc: ask(kc[0], kc[1], face_atom, atom_count, "name"),
+            cameras))
+    assigned, votes = patches.fuse_votes(rounds, atom_count, labels)
+    log("voted: %d/%d atoms" % (int((assigned >= 0).sum()), atom_count))
+
+    # Contested descent: an atom whose votes straddle parts is split along its
+    # own sub-tree and the sub-atoms are re-asked with their ids highlighted.
+    top = votes.max(axis=1)
+    second = (np.partition(votes, -2, axis=1)[:, -2]
+              if votes.shape[1] >= 2 else 0 * top)
+    contested = np.flatnonzero((top > 0) & ((top - second) < 0.6 * top))
+    log("contested atoms: %d" % len(contested))
+    parent_of = {}
+    atom_map, count = face_atom, atom_count
+    if len(contested):
+        new_map = face_atom.copy()
+        next_id = atom_count
+        new_ids = []
+        for atom in contested:
+            subs = segment3d.descend(tree, int(atom), max_children=12)
+            if len(subs) < 2:
+                continue
+            for _sub, faces in subs.items():
+                keep = faces[face_atom[faces] == atom]
+                if len(keep) < 20:
+                    continue
+                new_map[keep] = next_id
+                parent_of[next_id] = int(atom)
+                new_ids.append(next_id)
+                next_id += 1
+        if new_ids:
+            log("descended into %d sub-atoms" % len(new_ids))
+            cameras2 = [(k, render_module.Camera(np.asarray(d, float),
+                                                 [0, 0, 1], centre, radius,
+                                                 pixels))
+                        for k, d in enumerate(
+                            preview.orbit(6, 30.0, start_deg=15.0, up=up))]
+            with ThreadPoolExecutor(max_workers=workers) as pool:
+                rounds2 = list(pool.map(
+                    lambda kc: ask(kc[0], kc[1], new_map, next_id, "sub",
+                                   only=set(new_ids)), cameras2))
+            assigned2, _votes2 = patches.fuse_votes(rounds2, next_id, labels)
+            full = np.full(next_id, -1, dtype=np.int32)
+            full[:atom_count] = assigned
+            for new_id in new_ids:
+                if assigned2[new_id] >= 0:
+                    full[new_id] = assigned2[new_id]
+            assigned, count, atom_map = full, next_id, new_map
+
+    face_part = np.where(assigned[atom_map] >= 0, assigned[atom_map],
+                         -1).astype(np.int32)
+
+    # Unvoted faces inherit from labelled neighbours across face adjacency; a
+    # sub-atom no view could label falls back to its contested parent's top
+    # vote rather than staying unpainted.
+    edges = mesh.face_adjacency
+    for _ in range(48):
+        missing = face_part < 0
+        if not missing.any():
+            break
+        left = (face_part[edges[:, 0]] >= 0) & (face_part[edges[:, 1]] < 0)
+        right = (face_part[edges[:, 1]] >= 0) & (face_part[edges[:, 0]] < 0)
+        if not (left.any() or right.any()):
+            break
+        face_part[edges[left, 1]] = face_part[edges[left, 0]]
+        face_part[edges[right, 0]] = face_part[edges[right, 1]]
+    still = face_part < 0
+    if still.any() and parent_of:
+        parent_top = np.argmax(votes, axis=1)
+        for face in np.flatnonzero(still):
+            parent = parent_of.get(int(atom_map[face]))
+            if parent is not None and votes[parent].max() > 0:
+                face_part[face] = parent_top[parent]
+
+    naming = {"views": len(cameras), "contested": int(len(contested)),
+              "voted_atoms": int((assigned >= 0).sum()), "atoms": int(count)}
+    return face_part, labels, vocabulary, naming, overviews
+
+
+def _settle(field, mesh, face_part, labels, log=default_log):
+    """Faces to vertices by vote, then the isolation report -- the objective
+    misclassification metric: a cleanly found part is one or a few pieces."""
+    from . import atlas
+    votes = np.zeros((len(mesh.vertices), len(labels)))
+    for column in range(3):
+        vertex = mesh.faces[:, column]
+        ok = face_part >= 0
+        np.add.at(votes, (vertex[ok], face_part[ok]), 1.0)
+    claimed = votes.sum(axis=1) > 0
+    settled = np.where(claimed, np.argmax(votes, axis=1), 0).astype(np.int32)
+    rows = atlas.isolation_report(field, settled, claimed, labels)
+    log("\n%-26s %7s %7s %8s" % ("PART", "AREA%", "PIECES", "LARGEST%"))
+    for row in sorted(rows, key=lambda r: -r["area_pct"]):
+        log("%-26s %7.2f %7d %8.1f" % (row["part"], row["area_pct"],
+                                       row["pieces"],
+                                       row["largest_piece_pct"]))
+    return settled, claimed, rows
+
+
+def _atom_atlas(mesh, face_atom, count, frame, out_dir, preview, up):
+    from . import atlas
+    table = np.array([atlas.DISTINCT[i % len(atlas.DISTINCT)]
+                      for i in range(max(count, 1))])
+    face_rgb = np.tile(np.asarray(atlas.NEUTRAL), (len(face_atom), 1))
+    labelled = face_atom >= 0
+    face_rgb[labelled] = table[face_atom[labelled]]
+    occlusion = preview.ambient_occlusion(mesh, samples=30)
+    path = os.path.join(out_dir, "atoms.png")
+    preview.contact_sheet(mesh, face_rgb, preview.orbit(4, 18.0, up=up),
+                          size=470, occlusion=occlusion, columns=4).save(path)
+    return path
+
+
+def _part_atlas(mesh, settled, claimed, labels, frame, out_dir, preview, up):
+    from . import atlas
+    colours, _ = atlas.colour_by_part(settled, claimed, labels)
+    occlusion = preview.ambient_occlusion(mesh, samples=30)
+    preview.contact_sheet(mesh, colours[mesh.faces].mean(axis=1),
+                          preview.orbit(4, 18.0, up=up), size=470,
+                          occlusion=occlusion, columns=4).save(
+        os.path.join(out_dir, "atlas.png"))
+
+
+def _paint_and_export(input_path, out_dir, mesh, field, frame, face_part,
+                      settled, claimed, labels, vocabulary, palette, backend,
+                      intent, nozzle_mm, viewing_mm, up=None, overviews=(),
+                      log=default_log):
+    """§10 then §11: beautiful first, then limited; critic last; then the 3MF."""
+    from types import SimpleNamespace
+    from PIL import Image
+    from . import agents, limiter, policy as policy_module, preview
+    from . import refine as refine_module
+
+    policy = policy_module.DEFAULT
+    if up is None:
+        up = preview.up_axis(frame)
+    occlusion = preview.ambient_occlusion(mesh, samples=40)
+
+    def write(lab_per_vertex, stem):
+        rgb = preview.face_colours(mesh, lab_per_vertex)
+        preview.contact_sheet(mesh, rgb, preview.orbit(8, 18.0, up=up),
+                              size=470, occlusion=occlusion, columns=4).save(
+            os.path.join(out_dir, "%s-turnaround.png" % stem))
+        Image.fromarray(preview.render_asset(
+            mesh, rgb, preview.orbit(1, 24.0, start_deg=200.0, up=up)[0],
+            size=950, occlusion=occlusion, up=up, zoom=1.25)).save(
+            os.path.join(out_dir, "%s-hero.png" % stem))
+
+    painter = agents.VisionPainter(backend)
+    holder = SimpleNamespace(labels=labels)
+    scheme = painter.colour(holder, labels, 3.0, intent, vocabulary=vocabulary,
+                            overviews=list(overviews))
+    log("\ncontinuous colour")
+    for entry in scheme:
+        log("  %-24s %-8s %-10s" % (entry["region"], entry.get("hex", ""),
+                                    entry["role"]))
+    order = {entry["region"]: i for i, entry in enumerate(scheme)}
+    wanted = np.array([scheme[order[label]]["lab"] for label in labels])
+    continuous = wanted[settled].astype(float)
+    continuous[~claimed] = np.array([64.0, 1.0, 2.0])
+    write(continuous, "continuous")
+    log("wrote continuous-turnaround.png, continuous-hero.png")
+
+    if not palette:
+        log("no filaments given: design only, not a plan")
+        return {"regions": scheme, "painted": False}
+
+    share = {label: float(field.vertex_area[claimed & (settled == i)].sum())
+             for i, label in enumerate(labels)}
+    for entry in scheme:
+        entry["area_mm2"] = round(max(share.get(entry["region"], 0.0), 1.0), 2)
+    edges = mesh.edges_unique
+    a, b = settled[edges[:, 0]], settled[edges[:, 1]]
+    both = claimed[edges[:, 0]] & claimed[edges[:, 1]] & (a != b)
+    pairs = np.unique(np.stack([np.minimum(a[both], b[both]),
+                                np.maximum(a[both], b[both])], axis=1), axis=0)
+    touching = [(labels[int(x)], labels[int(y)]) for x, y in pairs]
+    chosen, clashes = limiter.assign_paints(scheme, list(palette), touching,
+                                            policy, viewing_mm, areas=share)
+    log("\nlimited to %d filament(s)" % len(palette))
+    for entry in scheme:
+        paint_choice = chosen[entry["region"]]
+        log("  %-24s %-8s -> %-8s dE %5.1f"
+            % (entry["region"], entry.get("hex", ""), paint_choice.name,
+               limiter.delta_e(entry["lab"], paint_choice.lab)))
+    if clashes:
+        log("  boundaries the palette cannot separate: %s" % clashes)
+
+    def limited_lab():
+        table = np.array([chosen[label].lab if label in chosen
+                          else palette[-1].lab for label in labels])
+        out = table[settled].astype(float)
+        out[~claimed] = np.array(palette[-1].lab)
+        return out
+
+    write(limited_lab(), "limited")
+    zero_faced = {row_label for i, row_label in enumerate(labels)
+                  if share.get(row_label, 0.0) <= 0.0}
+    overrides, verdict = refine_module.review_scheme(
+        backend, [os.path.join(out_dir, "limited-hero.png"),
+                  os.path.join(out_dir, "limited-turnaround.png")],
+        scheme, chosen, list(palette), intent)
+    if verdict:
+        log("\ncritic: %s" % verdict)
+    for part, (paint_choice, why) in overrides.items():
+        marker = " [NO FACES -- override is a no-op]" if part in zero_faced \
+            else ""
+        log("  override %-24s -> %-7s %s%s" % (part, paint_choice.name,
+                                               why[:60], marker))
+        chosen[part] = paint_choice
+    write(limited_lab(), "final")
+    log("wrote final-turnaround.png, final-hero.png")
+
+    export = _export_3mf(input_path, out_dir, face_part, labels, chosen,
+                         palette, log=log)
+    return {"regions": [{k: v for k, v in entry.items() if k != "actor"}
+                        for entry in scheme],
+            "filaments": {entry["region"]: chosen[entry["region"]].name
+                          for entry in scheme},
+            "unseparated": clashes, "critic": verdict,
+            "overrides": {part: paint_choice.name
+                          for part, (paint_choice, _w) in overrides.items()},
+            "export": export, "painted": True}
+
+
+def _export_3mf(input_path, out_dir, face_part, labels, chosen, palette,
+                log=default_log):
+    """Write the painted 3MF and verify the geometry never moved."""
+    import sys
+    here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    scripts = os.path.join(here, "scripts")
+    if scripts not in sys.path:
+        sys.path.insert(0, scripts)
+    try:
+        from paintlib import build as builder, orca, threemf
+    except ImportError:
+        log("3MF writer unavailable; skipping export")
+        return {"written": False}
+
+    base = os.path.join(out_dir, "base.3mf")
+    painted = os.path.join(out_dir, "painted.3mf")
+    builder.from_stl(input_path, base,
+                     name=os.path.splitext(os.path.basename(input_path))[0])
+
+    slot = {paint_choice.name: i + 1 for i, paint_choice in enumerate(palette)}
+    default = slot[palette[-1].name]
+    assignments = {}
+    for face, part in enumerate(face_part):
+        if part < 0:
+            continue
+        label = labels[int(part)]
+        filament = slot[chosen[label].name] if label in chosen else default
+        if filament != default:
+            assignments[face] = filament
+
+    archive = threemf.ThreeMF(base)
+    archive.paint_object(archive.mesh_objects()[0], assignments)
+    orca.set_filaments(
+        archive,
+        [{"index": i + 1, "name": paint_choice.name,
+          "hex": _to_hex(paint_choice.lab)}
+         for i, paint_choice in enumerate(palette)],
+        default_filament=default)
+    archive.save(painted)
+
+    ok, why = threemf.geometry_matches(base, painted)
+    log("\n3MF %s -- %s" % ("IDENTICAL" if ok else "DIFFERS", why))
+    return {"written": True, "path": painted, "geometry_identical": bool(ok),
+            "detail": why}
+
+
+def _to_hex(lab):
+    from colour import Lab_to_XYZ, XYZ_to_sRGB
+    rgb = np.clip(XYZ_to_sRGB(Lab_to_XYZ(np.asarray(lab, dtype=float))), 0, 1)
+    return "#%02X%02X%02X" % tuple(int(round(v * 255)) for v in rgb)

@@ -7,6 +7,19 @@ Everything below was measured on real models, not assumed. Where a number appear
 it came from a run; where something failed, the failure is recorded so it is not
 repeated.
 
+> **Current state (2026-08).** The live path is `paintpipe/pipeline.py` behind
+> `python3 -m paintpipe.cli` (and the `/paint` command): 3D feature atoms cut
+> from a persistence merge tree (`paintpipe/segment3d.py`, importing the
+> validated `scripts/scale_space.py` + `index_regions.py` + `index_persist.py`),
+> named by vision agents over paired shaded + numbered-id renders with
+> statistical vote fusion and contested-atom descent, a recovery ladder for
+> promised-but-missing parts (`paintpipe/refine.py`), unconstrained colour
+> before palette limiting, a critic over the finished renders, and the verified
+> 3MF export. Measured on five models (shell 626,766 tris; dragon 475,270;
+> spot 374,784; blub 227,328; ogre 159,424) with geometry verified identical on
+> every export. The earlier flood/Voronoi coarse stages recorded below are
+> dead ends kept for the reasons written next to them.
+
 ## What this plugin is for
 
 A 3D printing hobbyist runs one slash command on an STL or 3MF and gets back a
