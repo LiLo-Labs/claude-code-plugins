@@ -101,7 +101,7 @@ def paint(input_path, out_dir, intent="", size_mm=None, palette=(),
     from . import refine as refine_module
     face_part, recovered = refine_module.refine_subparts(
         mesh, face_part, labels, vocabulary, backend, intent, frame=frame,
-        workers=workers)
+        workers=workers, up=up)
     log("recovery: %s" % (json.dumps(recovered) if recovered
                           else "nothing missing"))
 
@@ -238,9 +238,16 @@ def _choose_up(mesh, frame, backend, intent="", log=default_log):
     rgb = preview.face_colours(mesh, neutral)
     paths, blobs = [], []
     for index, candidate in enumerate(candidates):
-        direction = preview.orbit(1, 18.0, start_deg=200.0, up=candidate)[0]
-        image = Image.fromarray(preview.render_asset(
-            mesh, rgb, direction, size=380, up=candidate))
+        # Two azimuths per candidate: one view of a symmetric model can look
+        # plausible under an inverted up, and this one decision poisons every
+        # downstream judgement if it lands wrong.
+        tiles = [preview.render_asset(mesh, rgb, direction, size=380,
+                                      up=candidate)
+                 for direction in (preview.orbit(1, 18.0, start_deg=200.0,
+                                                 up=candidate)[0],
+                                   preview.orbit(1, 18.0, start_deg=90.0,
+                                                 up=candidate)[0])]
+        image = Image.fromarray(np.concatenate(tiles, axis=1))
         ImageDraw.Draw(image).text((8, 6), str(index), fill=(0, 0, 0))
         path = os.path.join(backend.directory, "up-%d.png" % index)
         image.save(path)
@@ -279,10 +286,11 @@ def _name_atoms(mesh, frame, face_atom, tree, atom_count, backend, intent, up,
     # agent never saw.
     from . import entities
     view_state = entities.digest_of({"up": np.round(np.asarray(up), 4).tolist(),
-                                     "pixels": int(pixels)})[7:13]
+                                     "pixels": int(pixels),
+                                     "camera": "up-hinted"})[7:13]
 
     overviews = [vision.render_png(render_module.render_bundle(
-        mesh, render_module.Camera(-d, [0, 0, 1], centre, radius, 640),
+        mesh, render_module.Camera(-d, up, centre, radius, 640),
         "zenithal", frame)) for d in render_module.fibonacci_directions(5)]
     vocabulary = backend.vocabulary(overviews, intent)
     labels = [part["label"] for part in vocabulary]
@@ -312,7 +320,7 @@ def _name_atoms(mesh, frame, face_atom, tree, atom_count, backend, intent, up,
     # inferred. The counts are a view budget, not a boundary.
     directions = (preview.orbit(6, 18.0, up=up) + preview.orbit(3, 55.0, up=up)
                   + preview.orbit(3, -20.0, up=up))
-    cameras = [(k, render_module.Camera(np.asarray(d, float), [0, 0, 1],
+    cameras = [(k, render_module.Camera(np.asarray(d, float), up,
                                         centre, radius, pixels))
                for k, d in enumerate(directions)]
     with ThreadPoolExecutor(max_workers=workers) as pool:
@@ -352,7 +360,7 @@ def _name_atoms(mesh, frame, face_atom, tree, atom_count, backend, intent, up,
         if new_ids:
             log("descended into %d sub-atoms" % len(new_ids))
             cameras2 = [(k, render_module.Camera(np.asarray(d, float),
-                                                 [0, 0, 1], centre, radius,
+                                                 up, centre, radius,
                                                  pixels))
                         for k, d in enumerate(
                             preview.orbit(6, 30.0, start_deg=15.0, up=up))]

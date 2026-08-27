@@ -33,7 +33,7 @@ def parent_of(vocabulary):
 
 
 def refine_subparts(mesh, face_part, labels, vocabulary, backend, intent,
-                    frame=None, views=4, pixels=760, workers=3):
+                    frame=None, views=4, pixels=760, workers=3, up=(0, 0, 1)):
     """Zoom onto each parent whose children came back empty; re-patch, re-ask, splice.
 
     Returns the updated per-face part index and a report of what was recovered. Faces
@@ -111,7 +111,7 @@ def refine_subparts(mesh, face_part, labels, vocabulary, backend, intent,
                       + [{"label": c, "note": notes.get(c, "")} for c in children])
         rounds = []
         for k, direction in enumerate(render_module.fibonacci_directions(views)):
-            camera = render_module.Camera(-direction, [0, 0, 1], centre, radius, pixels)
+            camera = render_module.Camera(-direction, up, centre, radius, pixels)
             bundle = render_module.render_bundle(sub, camera, "zenithal", frame)
             shaded = vision_module.render_png(bundle)
             lit = np.clip(bundle["rgb_lit"], 0, 1)
@@ -146,7 +146,7 @@ def refine_subparts(mesh, face_part, labels, vocabulary, backend, intent,
         confirmed, rejected = {}, {}
         for child, local_faces in moved.items():
             ok = _confirm_claim(backend, sub, local_faces, child, intent, centre,
-                                radius, pixels, frame)
+                                radius, pixels, frame, up=up)
             if ok:
                 confirmed[child] = [int(parent_faces[f]) for f in local_faces]
             else:
@@ -180,11 +180,12 @@ def refine_subparts(mesh, face_part, labels, vocabulary, backend, intent,
     interim = np.bincount(face_part[face_part >= 0], minlength=len(labels))
     still = [label for label in empty if interim[index[label]] == 0]
     if still:
-        located = locate_missing(backend, mesh, frame, still, intent, notes_all)
+        located = locate_missing(backend, mesh, frame, still, intent, notes_all,
+                                 up=up)
         if located:
             face_part, located_report = recover_located(
                 mesh, face_part, labels, backend, intent, frame, located,
-                notes_all, workers=workers)
+                notes_all, workers=workers, up=up)
             report["_located"] = located_report
         skipped = [label for label in still if label not in located]
         if skipped:
@@ -198,7 +199,7 @@ def refine_subparts(mesh, face_part, labels, vocabulary, backend, intent,
 
 
 def _confirm_claim(backend, sub, local_faces, child, intent, centre, radius, pixels,
-                   frame):
+                   frame, up=(0, 0, 1)):
     """Show the claimed faces highlighted and ask if they are the named part."""
     import io
     from PIL import Image
@@ -211,7 +212,7 @@ def _confirm_claim(backend, sub, local_faces, child, intent, centre, radius, pix
     normals = sub.face_normals[mask].mean(axis=0)
     norm = np.linalg.norm(normals)
     direction = -normals / norm if norm > 1e-9 else np.array([0.0, -1.0, -0.3])
-    camera = render_module.Camera(direction, [0, 0, 1], centre, radius, pixels)
+    camera = render_module.Camera(direction, up, centre, radius, pixels)
     bundle = render_module.render_bundle(sub, camera, "zenithal", frame)
     lit = np.clip(bundle["rgb_lit"], 0, 1)
     visible = bundle["visible"]
@@ -300,7 +301,8 @@ Reply with ONLY a JSON object, no prose, no code fences:
 {"locations": [{"part": str, "view": int, "box": [int, int, int, int]}]}"""
 
 
-def locate_missing(backend, mesh, frame, missing, intent, notes, pixels=800, views=5):
+def locate_missing(backend, mesh, frame, missing, intent, notes, pixels=800, views=5,
+                   up=(0, 0, 1)):
     """Ask WHERE each missing part is; backproject the box to a 3D ball.
 
     This replaces host adoption for parts the hierarchy cannot place. Adoption failed
@@ -319,7 +321,7 @@ def locate_missing(backend, mesh, frame, missing, intent, notes, pixels=800, vie
     directions = render_module.fibonacci_directions(views)
     bundles, paths = [], []
     for k, direction in enumerate(directions):
-        camera = render_module.Camera(-direction, [0, 0, 1], centre, radius, pixels)
+        camera = render_module.Camera(-direction, up, centre, radius, pixels)
         bundle = render_module.render_bundle(mesh, camera, "zenithal", frame)
         bundles.append(bundle)
         path = os.path.join(backend.directory, "locate-view-%d.png" % k)
@@ -370,7 +372,7 @@ def locate_missing(backend, mesh, frame, missing, intent, notes, pixels=800, vie
 
 
 def recover_located(mesh, face_part, labels, backend, intent, frame, located, notes,
-                    pixels=760, views=3, workers=3):
+                    pixels=760, views=3, workers=3, up=(0, 0, 1)):
     """Zoom a camera at each located ball and ask the patch question there.
 
     The ball is spatial -- faces near the anchor, whatever label they carry -- so
@@ -414,7 +416,7 @@ def recover_located(mesh, face_part, labels, backend, intent, frame, located, no
         for k, tilt in enumerate((0.0, 0.5, -0.5)[:views]):
             direction = base + side * tilt
             direction /= np.linalg.norm(direction)
-            camera = render_module.Camera(direction, [0, 0, 1], anchor, zoom_r, pixels)
+            camera = render_module.Camera(direction, up, anchor, zoom_r, pixels)
             bundle = render_module.render_bundle(sub, camera, "zenithal", frame)
             shaded = vision_module.render_png(bundle)
             lit = np.clip(bundle["rgb_lit"], 0, 1)
@@ -442,7 +444,8 @@ def recover_located(mesh, face_part, labels, backend, intent, frame, located, no
         # intersection survives. Selection beats judgement at the exit exactly as it
         # did at the entry.
         kept_patches = _prune_claim(backend, sub, local_patch, count, claimed_patches,
-                                    part, intent, anchor, zoom_r, pixels, frame)
+                                    part, intent, anchor, zoom_r, pixels, frame,
+                                    up=up)
         kept = [int(ball[f]) for f in range(len(ball))
                 if int(local_patch[f]) in kept_patches]
         return part, kept, len(claimed_patches)
@@ -482,7 +485,7 @@ def recover_located(mesh, face_part, labels, backend, intent, frame, located, no
             if stencil is None or len(stencil) < 10:
                 continue
             faces, tag = _pick_design_cut(backend, mesh, frame, part, spec,
-                                          intent, pixels)
+                                          intent, pixels, up=up)
             if faces is not None:
                 for face in faces:
                     face_part[int(face)] = index[part]
@@ -526,7 +529,8 @@ def _design_candidates(mesh, spec):
     return kept[:5]
 
 
-def _pick_design_cut(backend, mesh, frame, part, spec, intent, pixels):
+def _pick_design_cut(backend, mesh, frame, part, spec, intent, pixels,
+                     up=(0, 0, 1)):
     """Render every candidate red-in-context from the locating view; one pick."""
     import io
     from PIL import Image, ImageDraw
@@ -538,7 +542,7 @@ def _pick_design_cut(backend, mesh, frame, part, spec, intent, pixels):
         return None, ""
     direction = np.asarray(spec["direction"], dtype=float)
     radius = max(spec["extent_mm"] * 2.5, 5.0)
-    camera = render_module.Camera(direction, [0, 0, 1], spec["anchor"], radius,
+    camera = render_module.Camera(direction, up, spec["anchor"], radius,
                                   pixels)
     bundle = render_module.render_bundle(mesh, camera, "zenithal", frame)
     lit = np.clip(bundle["rgb_lit"], 0, 1)
@@ -590,7 +594,7 @@ def _pick_design_cut(backend, mesh, frame, part, spec, intent, pixels):
 
 
 def _confirm_in_context(backend, mesh, faces, part, intent, anchor, radius, pixels,
-                        frame):
+                        frame, up=(0, 0, 1)):
     """Whole model in frame, claimed faces red, one question."""
     import io
     from PIL import Image
@@ -602,7 +606,7 @@ def _confirm_in_context(backend, mesh, faces, part, intent, anchor, radius, pixe
     normals = mesh.face_normals[mask].mean(axis=0)
     norm = np.linalg.norm(normals)
     direction = -normals / norm if norm > 1e-9 else np.array([0.0, -1.0, -0.3])
-    camera = render_module.Camera(direction, [0, 0, 1], anchor, radius, pixels)
+    camera = render_module.Camera(direction, up, anchor, radius, pixels)
     bundle = render_module.render_bundle(mesh, camera, "zenithal", frame)
     lit = np.clip(bundle["rgb_lit"], 0, 1)
     visible = bundle["visible"]
@@ -632,7 +636,7 @@ def _confirm_in_context(backend, mesh, faces, part, intent, anchor, radius, pixe
 
 
 def _prune_claim(backend, sub, local_patch, count, claimed_patches, part, intent,
-                 anchor, zoom_r, pixels, frame):
+                 anchor, zoom_r, pixels, frame, up=(0, 0, 1)):
     """Show the claim as numbered patches; keep only the ids the reviewer confirms."""
     from . import entities as entities_module
     from . import patches as patch_module
@@ -644,7 +648,7 @@ def _prune_claim(backend, sub, local_patch, count, claimed_patches, part, intent
     normals = sub.face_normals[mask_faces].mean(axis=0)
     norm = np.linalg.norm(normals)
     direction = -normals / norm if norm > 1e-9 else np.array([0.0, -1.0, -0.3])
-    camera = render_module.Camera(direction, [0, 0, 1], anchor, zoom_r, pixels)
+    camera = render_module.Camera(direction, up, anchor, zoom_r, pixels)
     bundle = render_module.render_bundle(sub, camera, "zenithal", frame)
     lit = np.clip(bundle["rgb_lit"], 0, 1)
     id_png, listed = patch_module.render_id_view(sub, local_patch, count, camera, lit)

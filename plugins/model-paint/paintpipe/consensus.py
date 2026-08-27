@@ -263,7 +263,7 @@ def audit(mesh, frame, backend, atom_map, count, assigned, votes, labels,
     while round_id < hard_cap:
         directions = preview.orbit(views, 22.0, start_deg=30.0 + 40.0 * round_id,
                                    up=up)
-        cameras = [render_module.Camera(np.asarray(d, float), [0, 0, 1], centre,
+        cameras = [render_module.Camera(np.asarray(d, float), up, centre,
                                         radius, pixels) for d in directions]
 
         # The cache key carries the assignment state: a replayed round must
