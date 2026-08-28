@@ -226,8 +226,17 @@ def final_review(backend, mesh, frame, up, face_part, labels, chosen, palette,
                 acted += 1
             elif action == "relocate":
                 from . import refine as refine_module
+                relocate = getattr(refine_module, "relocate_part", None)
+                if relocate is None:
+                    # A long-running process can hold an older refine module
+                    # than the inspect module it lazily imported; a finding
+                    # is still a finding, so it goes to the backlog instead
+                    # of crashing a finished run at the last stage.
+                    report["needs_capability"].append(
+                        "relocate %s: %s" % (part, finding.get("note", "")))
+                    continue
                 note = str(finding.get("note", "")) or why
-                moved = refine_module.relocate_part(
+                moved = relocate(
                     backend, mesh, frame, face_part, labels, part, note,
                     intent, up=up, log=log)
                 if moved:
