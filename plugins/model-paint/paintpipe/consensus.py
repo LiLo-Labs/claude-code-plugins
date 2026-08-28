@@ -144,7 +144,7 @@ def absorb_islands(assigned, weights, atom_area, label_count, min_share=0.15,
     return assigned
 
 
-def smooth_boundaries(mesh, face_part, iterations=12, crease_deg=40.0):
+def smooth_boundaries(mesh, face_part, iterations=12, crease_deg=None):
     """Relax label boundaries at face level where the surface is smooth.
 
     Atom borders are honest where they follow creases and relief; on smooth
@@ -157,6 +157,11 @@ def smooth_boundaries(mesh, face_part, iterations=12, crease_deg=40.0):
     """
     adjacency = mesh.face_adjacency
     angles = mesh.face_adjacency_angles
+    if crease_deg is None:
+        # "Crease" means sharp FOR THIS SURFACE: a fixed number froze a
+        # gently-blended sculpt solid. The threshold is the tail of the
+        # mesh's own dihedral distribution.
+        crease_deg = max(float(np.degrees(np.quantile(angles, 0.90))), 10.0)
     smooth_edge = angles < np.radians(crease_deg)
     face_part = face_part.copy()
     neighbours = [[] for _ in range(len(mesh.faces))]
@@ -188,7 +193,7 @@ def smooth_boundaries(mesh, face_part, iterations=12, crease_deg=40.0):
     return face_part
 
 
-def feather_lab(mesh, lab_face, face_part, iterations=6, crease_deg=40.0):
+def feather_lab(mesh, lab_face, face_part, iterations=6, crease_deg=None):
     """Soften colour across smooth part boundaries; stay crisp at creases.
 
     A painted figure blends where the anatomy blends -- the muzzle fades into
@@ -200,6 +205,8 @@ def feather_lab(mesh, lab_face, face_part, iterations=6, crease_deg=40.0):
     """
     adjacency = mesh.face_adjacency
     angles = mesh.face_adjacency_angles
+    if crease_deg is None:
+        crease_deg = max(float(np.degrees(np.quantile(angles, 0.90))), 10.0)
     smooth = angles < np.radians(crease_deg)
     pairs = adjacency[smooth]
     differs = face_part[pairs[:, 0]] != face_part[pairs[:, 1]]

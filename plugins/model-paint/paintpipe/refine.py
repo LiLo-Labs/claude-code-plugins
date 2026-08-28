@@ -190,6 +190,41 @@ def refine_subparts(mesh, face_part, labels, vocabulary, backend, intent,
         skipped = [label for label in still if label not in located]
         if skipped:
             report["_not_located"] = skipped
+    # PAIR COMPLETION. The vocabulary says how many instances anatomy has;
+    # a paired part with one found instance is a miss the coarse pass cannot
+    # see. The locator is pointed at the OTHER instance specifically.
+    expected = {part.get("label"): part.get("expected_count")
+                for part in vocabulary or []}
+    import scipy.sparse as _sparse
+    for label, want in expected.items():
+        if not want or want < 2 or label not in index:
+            continue
+        faces_here = np.flatnonzero(face_part == index[label])
+        if len(faces_here) < 20:
+            continue
+        inside = np.zeros(len(mesh.faces), dtype=bool)
+        inside[faces_here] = True
+        both = inside[adjacency[:, 0]] & inside[adjacency[:, 1]]
+        local = {int(f): i for i, f in enumerate(faces_here)}
+        rows_l = [local[int(a)] for a, b in adjacency[both]]
+        cols_l = [local[int(b)] for a, b in adjacency[both]]
+        graph = _sparse.coo_matrix((np.ones(len(rows_l)), (rows_l, cols_l)),
+                                   shape=(len(faces_here), len(faces_here)))
+        n_comp, _comp = _sparse.csgraph.connected_components(graph,
+                                                             directed=False)
+        if n_comp >= want:
+            continue
+        missing_note = ("the OTHER %s -- %d of %d instances are already "
+                        "labelled; box only a missing one" %
+                        (label, n_comp, want))
+        located = locate_missing(backend, mesh, frame, [label], intent,
+                                 {label: missing_note}, up=up)
+        if located:
+            face_part, pair_report = recover_located(
+                mesh, face_part, labels, backend, intent, frame, located,
+                {label: missing_note}, workers=workers, up=up)
+            report.setdefault("_pair_completion", {})[label] = pair_report
+
     # Loud failure beats a quiet wrong answer: name every part still empty.
     final_areas = np.bincount(face_part[face_part >= 0], minlength=len(labels))
     for label in labels:
@@ -296,6 +331,14 @@ def verify_instances(mesh, face_part, labels, backend, intent, frame,
         radius = max(float(np.linalg.norm(span)) * 1.6, 0.35 * extent)
         answer = _identify_region(backend, mesh, members, options, intent,
                                   centre, radius, pixels, frame, up=up)
+        if answer is not None and answer != label:
+            # A move needs agreement from a second angle: one view's
+            # confident mistake is how horns became eyes.
+            second = _identify_region(backend, mesh, members, options, intent,
+                                      centre, radius, pixels, frame, up=up,
+                                      spin=137.0)
+            if second != answer:
+                answer = None
         return label_id, label, members, answer
 
     report = {}
@@ -345,7 +388,7 @@ def verify_instances(mesh, face_part, labels, backend, intent, frame,
 
 
 def _identify_region(backend, mesh, members, options, intent, anchor, radius,
-                     pixels, frame, up=(0, 0, 1)):
+                     pixels, frame, up=(0, 0, 1), spin=0.0):
     """Show the region red in its best view; the reviewer picks its part.
 
     Returns the chosen label, or None when no view shows the region or the
@@ -372,7 +415,8 @@ def _identify_region(backend, mesh, members, options, intent, anchor, radius,
         return parallel + ortho * np.cos(angle) + side * np.sin(angle)
 
     best = None
-    for direction in (base, spun(50), spun(-50), spun(120), spun(-120)):
+    for direction in (spun(spin), spun(spin + 50), spun(spin - 50),
+                      spun(spin + 120), spun(spin - 120)):
         direction = direction / max(np.linalg.norm(direction), 1e-12)
         camera = render_module.Camera(direction, up, anchor, radius, pixels)
         bundle = render_module.render_bundle(mesh, camera, "zenithal", frame)
@@ -852,7 +896,8 @@ def _confirm_in_context(backend, mesh, faces, part, intent, anchor, radius, pixe
         return parallel + ortho * np.cos(angle) + side * np.sin(angle)
 
     best = None
-    for direction in (base, spun(50), spun(-50), spun(120), spun(-120)):
+    for direction in (spun(spin), spun(spin + 50), spun(spin - 50),
+                      spun(spin + 120), spun(spin - 120)):
         direction = direction / max(np.linalg.norm(direction), 1e-12)
         camera = render_module.Camera(direction, up, anchor, radius, pixels)
         bundle = render_module.render_bundle(mesh, camera, "zenithal", frame)

@@ -289,7 +289,12 @@ findable in individual views later; one that is never found is recorded as absen
 bone, eye, teeth, cloth, rock, shell, scale. Parts sharing a material are normally \
 PAINTED ALIKE: a bald crown is the same skin as the cheeks, and a recess in skin is \
 still skin (shadow does the separating, not pigment). Reserve distinct materials for \
-parts that genuinely differ in substance."""
+parts that genuinely differ in substance.
+- `expected_count` is how many separate instances of this part the OBJECT has -- 2 \
+for paired eyes or horns, 4 for a quadruped's hooves, a number for repeated studs or \
+segments you can count, null when genuinely unknowable. This is anatomy, not a guess \
+quota: it lets later stages notice a missing second eye or a part shattered far \
+beyond its real count."""
 
 SEED_PROMPT = """You are looking at ONE orthographic render of a 3D model, lit as it \
 would be primed for painting. The image is {size} by {size} pixels.
@@ -548,7 +553,8 @@ class HeadlessBackend(VisionBackend):
             prompt += "\n\nWhat the painter said they want: %s" % intent
         prompt += ("\n\nReply with ONLY a JSON object, no prose and no code fences:\n"
                    '{"object": str, "parts": [{"label": str, "note": str, '
-                   '"parent": str, "material": str}]}')
+                   '"parent": str, "material": str, '
+                   '"expected_count": int or null}]}')
         # Keyed by the question: a changed intent or changed overviews must
         # re-ask, not replay the first vocabulary this directory ever saw.
         key = "vocabulary-%s" % entities_module.digest_of(
