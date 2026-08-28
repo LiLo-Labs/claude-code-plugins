@@ -1050,7 +1050,8 @@ def _classify_patches_batched(backend, mesh, frame, patches, label, intent,
 
 
 def relocate_part(backend, mesh, frame, face_part, labels, part, note, intent,
-                  up=(0, 0, 1), pixels=800, log=print, features=None):
+                  up=(0, 0, 1), pixels=800, log=print, features=None,
+                  tree=None):
     """The full ladder for a part whose label is not on its geometry.
 
     The dragon's "eyes" held two patches on its neck while the real eye
@@ -1078,7 +1079,8 @@ def relocate_part(backend, mesh, frame, face_part, labels, part, note, intent,
     for spec in specs:
         faces, tag = _pick_design_cut(backend, mesh, frame, part, spec,
                                       intent, pixels, up=up,
-                                      features=features, exemplar=exemplar)
+                                      features=features, exemplar=exemplar,
+                                      tree=tree)
         if faces is None:
             continue
         faces = np.asarray(faces)
@@ -1208,11 +1210,81 @@ def _twin_candidates(mesh, spec, features, exemplar):
     return out[:2]
 
 
-def _design_candidates(mesh, spec, features=None, exemplar=None):
+def _node_candidates(mesh, spec, tree, exemplar_area=None):
+    """Candidates that are NODES of the persistence merge tree near the
+    anchor. The tree's boundaries are the geometry's own -- the dragon's
+    eyes were nodes 53 and 54 the whole time, crisp and symmetric, while
+    every disc, band and flood drawn around them stayed ragged. A feature
+    that exists as a node is painted exactly; these candidates outrank
+    every synthetic drawing.
+    """
+    import sys
+    here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    scripts = os.path.join(here, "scripts")
+    if scripts not in sys.path:
+        sys.path.insert(0, scripts)
+    import index_persist
+
+    children = tree["children"]
+    base = tree["base"]
+    regions = int(tree["regions"])
+    areas = np.asarray(mesh.area_faces)
+    centres = mesh.triangles.mean(axis=1)
+    from collections import defaultdict
+    region_faces = defaultdict(list)
+    for face, r in enumerate(base):
+        region_faces[int(r)].append(face)
+
+    def faces_of(node):
+        leaves = []
+        index_persist.leaves_of(children, int(node), regions, leaves)
+        collected = []
+        for leaf in leaves:
+            collected.extend(region_faces[int(leaf)])
+        return np.array(collected, dtype=int)
+
+    parents = {}
+    for node in range(len(children)):
+        k0, k1 = children[node]
+        if k0 >= 0:
+            parents[int(k0)] = node
+        if k1 >= 0:
+            parents[int(k1)] = node
+    near = np.flatnonzero(np.linalg.norm(centres - spec["anchor"], axis=1)
+                          < 0.5 * spec["extent_mm"])
+    if len(near) == 0:
+        return []
+    reference = exemplar_area if exemplar_area else float(areas[near].sum())
+    seen, picks = set(), []
+    for node0 in {int(base[f]) for f in near}:
+        node = node0
+        while node is not None and node not in seen:
+            seen.add(node)
+            nf = faces_of(node)
+            area = float(areas[nf].sum())
+            if area > 6.0 * reference:
+                break
+            if 0.25 * reference <= area <= 4.0 * reference:
+                centre = centres[nf].mean(axis=0)
+                if np.linalg.norm(centre - spec["anchor"]) \
+                        < 0.7 * spec["extent_mm"]:
+                    picks.append((abs(np.log(area / max(reference, 1e-9))),
+                                  nf))
+            node = parents.get(node)
+    picks.sort(key=lambda pair: pair[0])
+    return [(nf, "tree-node") for _score, nf in picks[:3]]
+
+
+def _design_candidates(mesh, spec, features=None, exemplar=None, tree=None):
     """Several plausible drawings of a located, geometry-less feature."""
     adjacency = mesh.face_adjacency
     stencil = np.asarray(spec["stencil_faces"], dtype=int)
     out = []
+    if tree is not None:
+        exemplar_area = (float(np.asarray(mesh.area_faces)[exemplar].sum())
+                         if exemplar is not None and len(exemplar) else None)
+        out.extend(_node_candidates(mesh, spec, tree,
+                                    exemplar_area=exemplar_area))
     if features is not None and exemplar is not None and len(exemplar) >= 40:
         out.extend(_twin_candidates(mesh, spec, features, exemplar))
     for rings, tag in ((1, "tight"), (3, "solid"), (5, "wide")):
@@ -1241,7 +1313,7 @@ def _design_candidates(mesh, spec, features=None, exemplar=None):
 
 
 def _pick_design_cut(backend, mesh, frame, part, spec, intent, pixels,
-                     up=(0, 0, 1), features=None, exemplar=None):
+                     up=(0, 0, 1), features=None, exemplar=None, tree=None):
     """Render every candidate red-in-context from the locating view; one pick."""
     import io
     from PIL import Image, ImageDraw
@@ -1249,7 +1321,7 @@ def _pick_design_cut(backend, mesh, frame, part, spec, intent, pixels,
     from . import render as render_module
 
     candidates = _design_candidates(mesh, spec, features=features,
-                                    exemplar=exemplar)
+                                    exemplar=exemplar, tree=tree)
     if not candidates:
         return None, ""
     direction = np.asarray(spec["direction"], dtype=float)

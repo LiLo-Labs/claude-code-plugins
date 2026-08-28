@@ -151,7 +151,8 @@ def paint(input_path, out_dir, intent="", size_mm=None, palette=(),
     manifest = _paint_and_export(
         input_path, out_dir, mesh, frame, face_part, labels, vocabulary,
         palette, backend, intent, nozzle_mm, viewing_mm, up=up,
-        overviews=overviews, features=tree.get("features"), log=log)
+        overviews=overviews, features=tree.get("features"), tree=tree,
+        log=log)
     manifest["up_axis"] = [round(float(v), 6) for v in up]
 
     manifest.update({"atoms": atom_count, "naming": naming,
@@ -547,7 +548,7 @@ def _part_atlas(mesh, settled, claimed, labels, frame, out_dir, preview, up):
 def _paint_and_export(input_path, out_dir, mesh, frame, face_part, labels,
                       vocabulary, palette, backend, intent, nozzle_mm,
                       viewing_mm, up=None, overviews=(), features=None,
-                      log=default_log):
+                      tree=None, log=default_log):
     """§10 then §11: beautiful first, then limited; critic last; then the 3MF."""
     from types import SimpleNamespace
     from PIL import Image
@@ -747,7 +748,8 @@ def _paint_and_export(input_path, out_dir, mesh, frame, face_part, labels,
     log("\nfinal inspection")
     face_overrides, inspection = inspect_module.final_review(
         backend, mesh, frame, up, face_part, labels, chosen, palette,
-        occlusion, intent, out_dir, render_final, log, features=features)
+        occlusion, intent, out_dir, render_final, log, features=features,
+        tree=tree)
     if face_overrides or any(r["acted"] for r in inspection["rounds"]):
         render_final(face_overrides)
         log("re-rendered final after inspection")
