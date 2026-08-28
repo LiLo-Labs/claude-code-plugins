@@ -469,6 +469,17 @@ def recover_scattered_families(mesh, face_part, labels, backend, intent, frame,
                                 minlength=n_comp)
         patches = [pool_faces[comp == c] for c in range(n_comp)
                    if 0.35 * median_piece <= comp_area[c] <= 3.0 * median_piece]
+        # A family piece is a compact blob; a band-matched component whose
+        # reach dwarfs its area is a filament crawling along crease lines --
+        # invisible at its own zoom and never the thing being hunted.
+        stringy = len(patches)
+        patches = [p for p in patches
+                   if float(np.linalg.norm(np.ptp(centres[p], axis=0))) ** 2
+                   <= 12.0 * float(areas[p].sum())]
+        stringy -= len(patches)
+        if stringy:
+            log("  scatter sweep %-22s: %d filament component(s) dropped"
+                % (label, stringy))
         patches.sort(key=lambda p: -float(areas[p].sum()))
         if not patches:
             continue
@@ -975,6 +986,7 @@ def _classify_patches_batched(backend, mesh, frame, patches, label, intent,
     from . import entities as entities_module
 
     agreed_sets = []
+    unrenderable = 0
     for spin in (0.0, 137.0):
         members = set()
         for start in range(0, len(patches), per_sheet):
@@ -983,6 +995,7 @@ def _classify_patches_batched(backend, mesh, frame, patches, label, intent,
             for offset, patch in enumerate(chunk):
                 tile = _patch_tile(mesh, frame, patch, up, spin, extent)
                 if tile is None:
+                    unrenderable += 1
                     continue
                 picture = Image.fromarray(tile)
                 ImageDraw.Draw(picture).text((8, 6),
@@ -1026,6 +1039,12 @@ def _classify_patches_batched(backend, mesh, frame, patches, label, intent,
                 if number in numbers:
                     members.add(number)
         agreed_sets.append(members)
+    if unrenderable:
+        # An all-refused sheet means something different when the tiles never
+        # rendered: thin filament components are invisible at their own zoom,
+        # and a silent zero here cost a debugging session.
+        log("  scatter sweep: %d/%d tile(s) unrenderable (thin or occluded "
+            "patches)" % (unrenderable, 2 * len(patches)))
     both = agreed_sets[0] & agreed_sets[1]
     return [patches[number] for number in sorted(both)]
 
