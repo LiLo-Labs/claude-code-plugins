@@ -393,3 +393,70 @@ def audit(mesh, frame, backend, atom_map, count, assigned, votes, labels,
                                    or history[-1] * 2 > history[-2]):
             break
     return assigned, votes, history
+
+
+def unify_blades(mesh, face_part, log=None):
+    """A thin blade is ONE thing: both sides and the rim wear one label.
+
+    Fins, ears, frills and flexi tabs are two-sided sheets. Labels drift per
+    side and per rim -- the fish's tail-fin label ended up on the dorsal
+    blade's back face and the pectoral label ran down the flank as a rim
+    stripe. Thickness is measured by casting each face's ray inward; a face
+    whose opposite wall is closer than a few face-lengths is sheet material,
+    the ray pairing welds the two sides into one unit, and each unit takes
+    its area-majority label. Every threshold is relative to the face's own
+    scale; the mesh is untouched.
+    """
+    import scipy.sparse as sparse
+    normals = mesh.face_normals
+    centres = mesh.triangles.mean(axis=1)
+    scale = np.sqrt(np.maximum(mesh.area_faces, 1e-12))
+    origins = centres - normals * (scale[:, None] * 0.05)
+    locations, ray_ids, hit_faces = mesh.ray.intersects_location(
+        ray_origins=origins, ray_directions=-normals, multiple_hits=False)
+    thickness = np.full(len(mesh.faces), np.inf)
+    partner = np.full(len(mesh.faces), -1, dtype=np.int64)
+    if len(ray_ids):
+        travel = np.linalg.norm(locations - origins[ray_ids], axis=1)
+        thickness[ray_ids] = travel
+        partner[ray_ids] = hit_faces
+    local = 3.0 * scale
+    sheet = thickness < local
+    if log:
+        log("  blades: %.1f%% of faces are sheet material"
+            % (100.0 * sheet.mean()))
+    if not sheet.any():
+        return face_part
+    adjacency = mesh.face_adjacency
+    a, b = adjacency[:, 0], adjacency[:, 1]
+    keep = sheet[a] & sheet[b]
+    rows = list(a[keep])
+    cols = list(b[keep])
+    pair_ok = sheet & (partner >= 0)
+    pair_ok &= np.where(partner >= 0, sheet[np.clip(partner, 0, None)], False)
+    rows += list(np.flatnonzero(pair_ok))
+    cols += list(partner[pair_ok])
+    graph = sparse.coo_matrix((np.ones(len(rows)), (rows, cols)),
+                              shape=(len(mesh.faces), len(mesh.faces)))
+    count, component = sparse.csgraph.connected_components(graph,
+                                                           directed=False)
+    face_part = face_part.copy()
+    areas = np.asarray(mesh.area_faces)
+    changed = 0
+    for comp in np.unique(component[sheet]):
+        members = np.flatnonzero((component == comp) & sheet)
+        if len(members) < 12:
+            continue
+        held = face_part[members]
+        ok = held >= 0
+        if not ok.any():
+            continue
+        tally = np.bincount(held[ok], weights=areas[members][ok])
+        majority = int(tally.argmax())
+        flips = int((held[ok] != majority).sum())
+        if flips:
+            face_part[members] = majority
+            changed += flips
+    if log and changed:
+        log("  blades: %d faces unified onto their blade's label" % changed)
+    return face_part

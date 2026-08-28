@@ -128,6 +128,10 @@ def paint(input_path, out_dir, intent="", size_mm=None, palette=(),
                  != face_part[mesh.face_adjacency[:, 1]]).sum())
     log("boundary relax: %d -> %d boundary edges" % (before, after))
 
+    # A thin blade -- a fin, an ear, a frill -- is one thing: both sides and
+    # the rim wear one label.
+    face_part = consensus_module.unify_blades(mesh, face_part, log=log)
+
     settled, claimed, rows = _settle(field, mesh, face_part, labels, log=log)
     _part_atlas(mesh, settled, claimed, labels, frame, out_dir, preview, up)
 
