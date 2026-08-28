@@ -117,6 +117,17 @@ def paint(input_path, out_dir, intent="", size_mm=None, palette=(),
         recovered = dict(recovered or {})
         recovered["_instances_refused"] = refused
 
+    # Boundaries that follow creases stay; boundaries scribbled across smooth
+    # skin straighten. Two contrasting filaments meeting on a staircase edge
+    # is what jagged paint looks like on the print.
+    from . import consensus as consensus_module
+    before = int((face_part[mesh.face_adjacency[:, 0]]
+                  != face_part[mesh.face_adjacency[:, 1]]).sum())
+    face_part = consensus_module.smooth_boundaries(mesh, face_part)
+    after = int((face_part[mesh.face_adjacency[:, 0]]
+                 != face_part[mesh.face_adjacency[:, 1]]).sum())
+    log("boundary relax: %d -> %d boundary edges" % (before, after))
+
     settled, claimed, rows = _settle(field, mesh, face_part, labels, log=log)
     _part_atlas(mesh, settled, claimed, labels, frame, out_dir, preview, up)
 

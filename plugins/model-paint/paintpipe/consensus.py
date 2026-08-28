@@ -144,6 +144,50 @@ def absorb_islands(assigned, weights, atom_area, label_count, min_share=0.15,
     return assigned
 
 
+def smooth_boundaries(mesh, face_part, iterations=12, crease_deg=40.0):
+    """Relax label boundaries at face level where the surface is smooth.
+
+    Atom borders are honest where they follow creases and relief; on smooth
+    blended skin they are diffusion-tile scribbles, and a staircase edge
+    between two contrasting filaments is glaring on the print. A face flips
+    to the label carried by the majority of its neighbours only when none of
+    the crossed edges is a real crease, so a boundary that sits on a feature
+    stays exactly where the 3D segmentation put it and a boundary crossing
+    open skin straightens out.
+    """
+    adjacency = mesh.face_adjacency
+    angles = mesh.face_adjacency_angles
+    smooth_edge = angles < np.radians(crease_deg)
+    face_part = face_part.copy()
+    neighbours = [[] for _ in range(len(mesh.faces))]
+    for (a, b), ok in zip(adjacency, smooth_edge):
+        if ok:
+            neighbours[int(a)].append(int(b))
+            neighbours[int(b)].append(int(a))
+    for _sweep in range(iterations):
+        left = face_part[adjacency[:, 0]]
+        right = face_part[adjacency[:, 1]]
+        on_boundary = np.zeros(len(mesh.faces), dtype=bool)
+        cross = left != right
+        on_boundary[adjacency[cross, 0]] = True
+        on_boundary[adjacency[cross, 1]] = True
+        changed = 0
+        for face in np.flatnonzero(on_boundary):
+            near = neighbours[face]
+            if len(near) < 2:
+                continue
+            votes = {}
+            for other in near:
+                votes[face_part[other]] = votes.get(face_part[other], 0) + 1
+            best, count = max(votes.items(), key=lambda item: item[1])
+            if count >= 2 and best != face_part[face] and best >= 0:
+                face_part[face] = best
+                changed += 1
+        if not changed:
+            break
+    return face_part
+
+
 def render_label_view(mesh, atom_map, assigned, camera, lit):
     """The current assignment as the agent will judge it: legend colours, atom
     borders, unassigned in neutral."""
