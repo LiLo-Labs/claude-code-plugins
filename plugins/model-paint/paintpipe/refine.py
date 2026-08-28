@@ -464,28 +464,52 @@ def recover_scattered_families(mesh, face_part, labels, backend, intent, frame,
         pool_faces = np.flatnonzero(candidate)
         if len(pool_faces) < 8:
             continue
-        # A signature that matches a large share of the whole surface is not
-        # a signature -- it is the model's ordinary texture (a flexi toy's
-        # every label matches its every segment). Sweeping on it wastes the
-        # budget refusing lookalikes one at a time; skip and say so.
-        pool_area = float(areas[pool_faces].sum())
-        if pool_area > 0.15 * painted_area:
-            log("  scatter sweep %-22s: signature matches %.0f%% of the "
-                "surface -- not distinctive, skipped"
-                % (label, 100.0 * pool_area / painted_area))
-            continue
         n_comp, comp = components_of(pool_faces)
         comp_area = np.bincount(comp, weights=areas[pool_faces],
                                 minlength=n_comp)
         patches = [pool_faces[comp == c] for c in range(n_comp)
                    if 0.35 * median_piece <= comp_area[c] <= 3.0 * median_piece]
         patches.sort(key=lambda p: -float(areas[p].sum()))
+        if not patches:
+            continue
+        family_pieces = max(1, len(np.unique(
+            components_of(members)[1])))
+        # Far more look-alikes than the family has pieces means the
+        # signature is noise, whatever its total area (the shell's drifted
+        # umbo matched two thousand flecks): nothing visual can rescue that.
+        if len(patches) > 10 * family_pieces:
+            log("  scatter sweep %-22s: %d look-alikes against %d family "
+                "piece(s) -- signature is noise, skipped"
+                % (label, len(patches), family_pieces))
+            continue
+        pool_area = float(areas[pool_faces].sum())
+        if pool_area > 0.15 * painted_area:
+            # The signature is not distinctive enough to trust patch by
+            # patch (on an everywhere-encrusted piece it matches a third of
+            # the surface), but the CANDIDATES are still worth looking at --
+            # so classify them the cheap way: numbered tiles, a dozen per
+            # ask, two spins, keep the intersection.
+            log("  scatter sweep %-22s: signature broad (%.0f%% of surface); "
+                "classifying %d patches by numbered sheet"
+                % (label, 100.0 * pool_area / painted_area,
+                   min(len(patches), 36)))
+            agreed = _classify_patches_batched(
+                backend, mesh, frame, patches[:36], label, intent,
+                extent, up=up, log=log)
+            recovered = 0
+            for patch in agreed:
+                face_part[patch] = label_id
+                recovered += 1
+                report.setdefault(label, []).append(
+                    {"faces": int(len(patch))})
+            log("  scatter sweep %-22s: %d/%d sheet patches confirmed "
+                "and recovered" % (label, recovered,
+                                   min(len(patches), 36)))
+            continue
         if len(patches) > max_checks:
             log("  scatter sweep %-22s: budget hit, %d of %d look-alike "
                 "patches checked" % (label, max_checks, len(patches)))
             patches = patches[:max_checks]
-        if not patches:
-            continue
 
         def confirm(patch):
             host_votes = np.bincount(face_part[patch], minlength=len(labels))
@@ -898,6 +922,112 @@ def recover_located(mesh, face_part, labels, backend, intent, frame, located, no
         else:
             report.setdefault("_drawn_rejected", []).append(part)
     return face_part, report
+
+
+def _patch_tile(mesh, frame, patch, up, spin, extent, pixels=300):
+    """One zoomed tile: the patch red in its local context, from its facing."""
+    from . import render as render_module
+
+    mask = np.zeros(len(mesh.faces), dtype=bool)
+    mask[patch] = True
+    normals = mesh.face_normals[mask].mean(axis=0)
+    norm = np.linalg.norm(normals)
+    base = -normals / norm if norm > 1e-9 else np.array([0.0, -1.0, -0.3])
+    axis = np.asarray(up, dtype=float)
+    axis = axis / max(np.linalg.norm(axis), 1e-12)
+    angle = np.radians(spin)
+    parallel = axis * float(base @ axis)
+    ortho = base - parallel
+    side = np.cross(axis, ortho)
+    direction = parallel + ortho * np.cos(angle) + side * np.sin(angle)
+    direction = direction / max(np.linalg.norm(direction), 1e-12)
+    centres = mesh.triangles.mean(axis=1)
+    centre = centres[patch].mean(axis=0)
+    span = float(np.linalg.norm(np.ptp(centres[patch], axis=0)))
+    radius = max(span * 2.2, 0.06 * extent)
+    camera = render_module.Camera(direction, up, centre, radius, pixels)
+    bundle = render_module.render_bundle(mesh, camera, "zenithal", frame)
+    visible = bundle["visible"]
+    hit = bundle["hit_id"]
+    red = visible & mask[np.clip(hit, 0, len(mask) - 1)]
+    if int(red.sum()) < 60:
+        return None
+    lit = np.clip(bundle["rgb_lit"], 0, 1)
+    image = np.ones((pixels, pixels, 3))
+    grey = 0.35 + 0.55 * lit
+    image[visible] = grey[visible, None]
+    image[red] = np.stack([0.40 + 0.55 * lit[red], 0.12 * lit[red],
+                           0.08 * lit[red]], axis=1)
+    return (image * 255).astype(np.uint8)
+
+
+def _classify_patches_batched(backend, mesh, frame, patches, label, intent,
+                              extent, up=(0, 0, 1), per_sheet=12, log=print):
+    """Numbered tile sheets: one ask classifies a dozen candidates.
+
+    Each tile shows one candidate patch red in its own zoomed context; the
+    reviewer lists the numbers that are truly the family. Two spins of the
+    same tiles must agree before a patch moves -- the same two-angle rule
+    every other move obeys, at a twelfth of the calls.
+    """
+    import io
+    from PIL import Image, ImageDraw
+    from . import entities as entities_module
+
+    agreed_sets = []
+    for spin in (0.0, 137.0):
+        members = set()
+        for start in range(0, len(patches), per_sheet):
+            chunk = patches[start:start + per_sheet]
+            tiles, numbers = [], []
+            for offset, patch in enumerate(chunk):
+                tile = _patch_tile(mesh, frame, patch, up, spin, extent)
+                if tile is None:
+                    continue
+                picture = Image.fromarray(tile)
+                ImageDraw.Draw(picture).text((8, 6),
+                                             str(start + offset),
+                                             fill=(0, 0, 0))
+                tiles.append(picture)
+                numbers.append(start + offset)
+            if not tiles:
+                continue
+            columns = 4
+            rows = (len(tiles) + columns - 1) // columns
+            size = tiles[0].width
+            sheet = Image.new("RGB", (columns * size, rows * size),
+                              (255, 255, 255))
+            for i, picture in enumerate(tiles):
+                sheet.paste(picture, ((i % columns) * size,
+                                      (i // columns) * size))
+            buffer = io.BytesIO()
+            sheet.save(buffer, format="PNG")
+            prompt = ("Each numbered tile shows a zoomed view of the same 3D "
+                      "piece with ONE red candidate region.\n"
+                      "The piece: %s\n\n"
+                      "Which numbered regions are truly instances of: %s? "
+                      "Judge each tile on its own; listing none is a valid "
+                      "answer.\n\n"
+                      'Reply with ONLY a JSON object, no prose: '
+                      '{"members": [<numbers>]}'
+                      % (intent or "a model", label))
+            key = "sheet-%s" % entities_module.digest_of(
+                buffer.getvalue() + prompt.encode("utf-8"))[7:19]
+            path = os.path.join(backend.directory, "%s.png" % key)
+            if not os.path.exists(path):
+                with open(path, "wb") as handle:
+                    handle.write(buffer.getvalue())
+            answer = backend._run([path], prompt, key)
+            for value in (answer or {}).get("members", []) or []:
+                try:
+                    number = int(value)
+                except (TypeError, ValueError):
+                    continue
+                if number in numbers:
+                    members.add(number)
+        agreed_sets.append(members)
+    both = agreed_sets[0] & agreed_sets[1]
+    return [patches[number] for number in sorted(both)]
 
 
 def relocate_part(backend, mesh, frame, face_part, labels, part, note, intent,
