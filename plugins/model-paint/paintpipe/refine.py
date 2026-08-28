@@ -186,6 +186,8 @@ def refine_subparts(mesh, face_part, labels, vocabulary, backend, intent,
             face_part, located_report = recover_located(
                 mesh, face_part, labels, backend, intent, frame, located,
                 notes_all, workers=workers, up=up)
+            report.setdefault("_design_faces", []).extend(
+                located_report.pop("_design_faces", []))
             report["_located"] = located_report
         skipped = [label for label in still if label not in located]
         if skipped:
@@ -226,6 +228,8 @@ def refine_subparts(mesh, face_part, labels, vocabulary, backend, intent,
             face_part, pair_report = recover_located(
                 mesh, face_part, labels, backend, intent, frame, located,
                 {label: missing_note}, workers=workers, up=up)
+            report.setdefault("_design_faces", []).extend(
+                pair_report.pop("_design_faces", []))
             report.setdefault("_pair_completion", {})[label] = pair_report
 
     # Loud failure beats a quiet wrong answer: name every part still empty.
@@ -923,16 +927,46 @@ def recover_located(mesh, face_part, labels, backend, intent, frame, located, no
             faces, tag = _pick_design_cut(backend, mesh, frame, part, spec,
                                           intent, pixels, up=up)
             if faces is not None:
+                if tag != "tree-node":
+                    faces = _smooth_mask(mesh, np.asarray(faces))
                 for face in faces:
                     face_part[int(face)] = index[part]
                 drawn += int(len(faces))
                 report.setdefault("_drawn", []).append(
                     "%s#%d(%s)" % (part, slot, tag))
+                if tag != "tree-node":
+                    # A painted-on feature has no region to snap to; these
+                    # faces are exempt from the base-region projection.
+                    report.setdefault("_design_faces", []).extend(
+                        int(face) for face in faces)
         if drawn:
             report[part] = drawn
         else:
             report.setdefault("_drawn_rejected", []).append(part)
     return face_part, report
+
+
+def _smooth_mask(mesh, faces, rounds=3):
+    """Clean a face mask's silhouette the way a painter trims a stencil.
+
+    A design cut is a mask over smooth geometry -- there is no region edge
+    to snap to, so its edge quality must come from its own construction.
+    Majority smoothing over face adjacency drops protruding teeth and fills
+    notches without moving the mask's body.
+    """
+    adjacency = mesh.face_adjacency
+    mask = np.zeros(len(mesh.faces), dtype=bool)
+    mask[faces] = True
+    for _round in range(rounds):
+        votes = np.zeros(len(mask))
+        total = np.zeros(len(mask))
+        np.add.at(votes, adjacency[:, 0], mask[adjacency[:, 1]].astype(float))
+        np.add.at(votes, adjacency[:, 1], mask[adjacency[:, 0]].astype(float))
+        np.add.at(total, adjacency[:, 0], 1.0)
+        np.add.at(total, adjacency[:, 1], 1.0)
+        share = votes / np.maximum(total, 1.0)
+        mask = np.where(total > 0, share >= 0.5, mask)
+    return np.flatnonzero(mask)
 
 
 def _patch_tile(mesh, frame, patch, up, spin, extent, pixels=300):
@@ -1091,6 +1125,12 @@ def relocate_part(backend, mesh, frame, face_part, labels, part, note, intent,
         faces = faces[near]
         if len(faces) == 0:
             continue
+        # A tree node is already a geometric unit; anything synthetic is a
+        # painter's mask and gets a painter's edge.
+        if tag != "tree-node":
+            faces = _smooth_mask(mesh, faces)
+            if len(faces) == 0:
+                continue
         # A relocation that would dwarf everything the label held before
         # the ladder started is a forced choice gone wrong, not a finding
         # (32k faces became "limpets" off one agreeable view).

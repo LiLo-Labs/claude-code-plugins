@@ -104,8 +104,23 @@ def paint(input_path, out_dir, intent="", size_mm=None, palette=(),
     face_part, recovered = refine_module.refine_subparts(
         mesh, face_part, labels, vocabulary, backend, intent, frame=frame,
         workers=workers, up=up)
-    log("recovery: %s" % (json.dumps(recovered) if recovered
-                          else "nothing missing"))
+    log("recovery: %s" % (json.dumps(
+        {k: v for k, v in recovered.items() if k != "_design_faces"})
+        if recovered else "nothing missing"))
+
+    # LABELS LIVE ON THE TREE. Every geometric claim above moved faces; the
+    # projection makes each base region take its area-majority label, so
+    # every label edge is a region edge again -- a real geometric boundary,
+    # never a ragged selection. Design cuts (features painted onto smooth
+    # geometry, which have no region to snap to) are the one exemption.
+    areas_arr = np.asarray(mesh.area_faces, dtype=float)
+    design_keep = np.zeros(len(mesh.faces), dtype=bool)
+    for face in (recovered or {}).get("_design_faces", []):
+        design_keep[int(face)] = True
+    face_part = segment3d.snap_to_base(tree, face_part, areas_arr,
+                                       keep=design_keep)
+    log("labels snapped to base regions (%d design faces kept)"
+        % int(design_keep.sum()))
 
     # Every instance of every small part gets its own zoomed look; a refused
     # instance reverts to the label around it. The audit judges from model
@@ -128,6 +143,8 @@ def paint(input_path, out_dir, intent="", size_mm=None, palette=(),
     if swept:
         recovered = dict(recovered or {})
         recovered["_scatter_swept"] = swept
+    face_part = segment3d.snap_to_base(tree, face_part, areas_arr,
+                                       keep=design_keep)
 
     # Boundaries that follow creases stay; boundaries scribbled across smooth
     # skin straighten. Two contrasting filaments meeting on a staircase edge

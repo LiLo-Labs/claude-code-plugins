@@ -179,6 +179,38 @@ def _atoms_uncached(mesh, cap=300, base_k=15.0, min_faces=60, scales=12,
     return face_atom, tree
 
 
+def snap_to_base(tree, face_part, areas, keep=None):
+    """Labels live on the merge tree's base regions; faces only follow.
+
+    Naming votes on atoms, but every downstream mutation -- recovery
+    claims, design cuts, sweeps, welds -- was free to move single faces,
+    and single-face moves are where every ragged boundary came from: a
+    boundary that is not a region edge is not a geometric edge at all.
+    This projection assigns each base region its area-majority label, so
+    whatever a stage just did, the label field it hands on is a cut of
+    the tree again. Faces never move alone -- with one exception: `keep`
+    marks faces whose label is a DESIGN decision (a pattern painted onto
+    smooth geometry has no tree node to snap to), and those keep their
+    label untouched.
+    """
+    base = np.asarray(tree["base"], dtype=np.int64)
+    regions = int(tree["regions"])
+    areas = np.asarray(areas, dtype=np.float64)
+    best = np.full(regions, -1.0)
+    winner = np.full(regions, -1, dtype=np.asarray(face_part).dtype)
+    for label in np.unique(face_part):
+        chosen = face_part == label
+        mass = np.bincount(base[chosen], weights=areas[chosen],
+                           minlength=regions)
+        take = mass > best
+        winner[take] = label
+        best[take] = mass[take]
+    snapped = winner[base]
+    if keep is not None and np.any(keep):
+        snapped[keep] = face_part[keep]
+    return snapped
+
+
 def descend(tree, atom_id, max_children=32):
     """One atom's own sub-atoms, from its sub-tree: the parent/child colouring hook."""
     import index_persist
