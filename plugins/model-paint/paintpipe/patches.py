@@ -300,3 +300,58 @@ def contested_views(mesh, face_patch, ids, views=6):
         out.append((direction, centre, radius))
         remaining &= ~group
     return out
+
+
+BATCH_NOTE = """You get SEVERAL views. Each view is a PAIR of images in order: \
+first its plain shaded render, then the same view divided into numbered \
+patches. Views are numbered from 0 in the order given. Answer EVERY view \
+separately -- ids are only valid within their own view.
+
+Reply with ONLY a JSON object, no prose, no code fences:
+{"views": [{"view": int, "assignments": [{"part": str, \
+"patch_ids": [int, ...]}]}]}"""
+
+
+def ask_assignments_batch(backend, views, vocabulary, intent, key):
+    """Several views, one call. `views` is [(shaded_png, id_png, listed)].
+
+    Returns a list of {part: [ids]} aligned with `views`. A call is the unit
+    of latency and of cost overhead, and the per-view judgement is unchanged:
+    the model still answers each view against its own id render.
+    """
+    import os
+    paths = []
+    legible = []
+    for view_id, (shaded, id_png, listed) in enumerate(views):
+        for suffix, blob in (("shaded", shaded), ("ids", id_png)):
+            path = os.path.join(backend.directory,
+                                "%s-v%d-%s.png" % (key, view_id, suffix))
+            if not os.path.exists(path):
+                with open(path, "wb") as handle:
+                    handle.write(blob)
+            paths.append(path)
+        legible.append(set(int(i) for i in listed))
+    lines = "\n".join("- %s: %s" % (part["label"], part.get("note", ""))
+                      for part in vocabulary)
+    base = ASSIGN_PROMPT % (lines, intent or "not stated")
+    # Strip the single-view reply contract; the batch contract replaces it.
+    base = base.split("Reply with ONLY")[0]
+    prompt = base + BATCH_NOTE
+    answer = backend._run(paths, prompt, key)
+    out = [{} for _view in views]
+    if not answer:
+        return out
+    for block in answer.get("views", []):
+        try:
+            view_id = int(block.get("view", -1))
+        except (TypeError, ValueError):
+            continue
+        if not 0 <= view_id < len(views):
+            continue
+        for entry in block.get("assignments", []):
+            part = entry.get("part", "")
+            ids = [int(i) for i in entry.get("patch_ids", [])
+                   if int(i) in legible[view_id]]
+            if part and ids:
+                out[view_id].setdefault(part, []).extend(ids)
+    return out

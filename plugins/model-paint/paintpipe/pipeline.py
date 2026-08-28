@@ -341,7 +341,7 @@ def _name_atoms(mesh, frame, face_atom, tree, atom_count, backend, intent, up,
     from . import entities
     view_state = entities.digest_of({"up": np.round(np.asarray(up), 4).tolist(),
                                      "pixels": int(pixels),
-                                     "camera": "up-hinted",
+                                     "camera": "up-hinted-batch3",
                                      "labels": labels})[7:13]
     if not labels:
         # The backend returns [] on any failed call. Stop before spending a
@@ -352,31 +352,45 @@ def _name_atoms(mesh, frame, face_atom, tree, atom_count, backend, intent, up,
             % backend.directory)
     log("parts %s" % labels)
 
-    def ask(view_key, camera, atom_map, count, tag, only=None):
+    def _render_view(camera, atom_map, count, only=None):
         bundle = render_module.render_bundle(mesh, camera, "zenithal", frame)
         shaded = vision.render_png(bundle)
         lit = np.clip(bundle["rgb_lit"], 0, 1)
         id_png, listed = patches.render_id_view(mesh, atom_map, count, camera,
                                                 lit, only=only)
-        votes = patches.ask_assignments(backend, shaded, id_png, listed,
-                                        vocabulary, intent,
-                                        "%s-%02d" % (tag, view_key))
-        log("  %s %02d: %d parts, %d votes"
-            % (tag, view_key, len(votes), sum(len(v) for v in votes.values())))
-        return (votes, 1.0)
+        return shaded, id_png, listed
+
+    def batched_votes(camera_list, atom_map, count, tag, only=None):
+        # A call is the unit of latency; three views share one. The judgement
+        # per view is unchanged -- ids stay scoped to their own id render.
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            rendered = list(pool.map(
+                lambda c: _render_view(c, atom_map, count, only=only),
+                camera_list))
+        chunks = [rendered[i:i + 3] for i in range(0, len(rendered), 3)]
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            answers = list(pool.map(
+                lambda pair: patches.ask_assignments_batch(
+                    backend, pair[1], vocabulary, intent,
+                    "%s-b%02d" % (tag, pair[0])),
+                enumerate(chunks)))
+        rounds_out = []
+        for chunk_votes in answers:
+            for votes in chunk_votes:
+                log("  %s: %d parts, %d votes"
+                    % (tag, len(votes),
+                       sum(len(v) for v in votes.values())))
+                rounds_out.append((votes, 1.0))
+        return rounds_out
 
     # Three elevation rings so undersides and crowns are looked at, not
     # inferred. The counts are a view budget, not a boundary.
     directions = (preview.orbit(6, 18.0, up=up) + preview.orbit(3, 55.0, up=up)
                   + preview.orbit(3, -20.0, up=up))
-    cameras = [(k, render_module.Camera(np.asarray(d, float), up,
-                                        centre, radius, pixels))
-               for k, d in enumerate(directions)]
-    with ThreadPoolExecutor(max_workers=workers) as pool:
-        rounds = list(pool.map(
-            lambda kc: ask(kc[0], kc[1], face_atom, atom_count,
-                           "name-%s" % view_state),
-            cameras))
+    cameras = [render_module.Camera(np.asarray(d, float), up, centre,
+                                    radius, pixels) for d in directions]
+    rounds = batched_votes(cameras, face_atom, atom_count,
+                           "name-%s" % view_state)
     assigned, votes = patches.fuse_votes(rounds, atom_count, labels)
     log("voted: %d/%d atoms" % (int((assigned >= 0).sum()), atom_count))
 
@@ -408,16 +422,13 @@ def _name_atoms(mesh, frame, face_atom, tree, atom_count, backend, intent, up,
                 next_id += 1
         if new_ids:
             log("descended into %d sub-atoms" % len(new_ids))
-            cameras2 = [(k, render_module.Camera(np.asarray(d, float),
-                                                 up, centre, radius,
-                                                 pixels))
-                        for k, d in enumerate(
-                            preview.orbit(6, 30.0, start_deg=15.0, up=up))]
-            with ThreadPoolExecutor(max_workers=workers) as pool:
-                rounds2 = list(pool.map(
-                    lambda kc: ask(kc[0], kc[1], new_map, next_id,
-                                   "sub-%s" % view_state,
-                                   only=set(new_ids)), cameras2))
+            cameras2 = [render_module.Camera(np.asarray(d, float), up,
+                                             centre, radius, pixels)
+                        for d in preview.orbit(6, 30.0, start_deg=15.0,
+                                               up=up)]
+            rounds2 = batched_votes(cameras2, new_map, next_id,
+                                    "sub-%s" % view_state,
+                                    only=set(new_ids))
             _assigned2, votes2 = patches.fuse_votes(rounds2, next_id, labels)
             count, atom_map = next_id, new_map
 
