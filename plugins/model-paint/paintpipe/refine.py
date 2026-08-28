@@ -466,6 +466,16 @@ def recover_scattered_families(mesh, face_part, labels, backend, intent, frame,
         pool_faces = np.flatnonzero(candidate)
         if len(pool_faces) < 8:
             continue
+        # A signature that matches a large share of the whole surface is not
+        # a signature -- it is the model's ordinary texture (a flexi toy's
+        # every label matches its every segment). Sweeping on it wastes the
+        # budget refusing lookalikes one at a time; skip and say so.
+        pool_area = float(areas[pool_faces].sum())
+        if pool_area > 0.15 * painted_area:
+            log("  scatter sweep %-22s: signature matches %.0f%% of the "
+                "surface -- not distinctive, skipped"
+                % (label, 100.0 * pool_area / painted_area))
+            continue
         n_comp, comp = components_of(pool_faces)
         comp_area = np.bincount(comp, weights=areas[pool_faces],
                                 minlength=n_comp)

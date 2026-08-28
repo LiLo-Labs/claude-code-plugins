@@ -48,9 +48,12 @@ For each finding, act with one of:
 - {"action": "repaint", "part": str, "filament": str, "why": str}
 - {"action": "darken_recesses", "part": str, "filament": str, \
 "depth": "deep" or "shallow", "why": str} -- deep hits only true cavities, \
-shallow also shades strong concavities
+shallow also shades strong concavities; only compact cavity floors are \
+painted, and the action refuses parts whose "recesses" are scattered creases
 - {"action": "absorb_fragments", "part": str, "keep": int, "why": str} -- \
 keep the part's `keep` largest pieces, dissolve the rest into surroundings
+- {"action": "clear_recesses", "part": str, "why": str} -- undo this part's \
+recess darkening; use it when an earlier darkening reads as splotches
 - {"action": "needs_capability", "note": str} -- something real that none of \
 these levers can fix; describe it precisely
 
@@ -58,6 +61,37 @@ An empty list means the piece passes. Do not restate what is already right.
 
 Reply with ONLY a JSON object, no prose, no code fences:
 {"verdict": str, "findings": [ ... ]}"""
+
+
+def _compact_pools(mesh, recess):
+    """Keep only cavity-sized components of a recess selection.
+
+    Components are measured against the largest pool: anything under a tenth
+    of it is a speck. If even the survivors are nothing but specks relative
+    to the selection, the "cavity" was scattered creases -- return nothing.
+    """
+    import scipy.sparse as sparse
+    if len(recess) == 0:
+        return recess
+    inside = np.zeros(len(mesh.faces), dtype=bool)
+    inside[recess] = True
+    adjacency = mesh.face_adjacency
+    both = inside[adjacency[:, 0]] & inside[adjacency[:, 1]]
+    local = {int(f): i for i, f in enumerate(recess)}
+    rows = [local[int(a)] for a, b in adjacency[both]]
+    cols = [local[int(b)] for a, b in adjacency[both]]
+    graph = sparse.coo_matrix((np.ones(len(rows)), (rows, cols)),
+                              shape=(len(recess), len(recess)))
+    n_comp, comp = sparse.csgraph.connected_components(graph, directed=False)
+    areas = np.asarray(mesh.area_faces)[recess]
+    sizes = np.bincount(comp, weights=areas, minlength=n_comp)
+    largest = float(sizes.max())
+    keep = np.flatnonzero(sizes >= 0.1 * largest)
+    kept = recess[np.isin(comp, keep)]
+    # More surviving pools than plausible cavities means a scatter.
+    if len(keep) > 8:
+        return recess[:0]
+    return kept
 
 
 def final_review(backend, mesh, frame, up, face_part, labels, chosen, palette,
@@ -111,6 +145,7 @@ def final_review(backend, mesh, frame, up, face_part, labels, chosen, palette,
             paths.append(path)
         return paths
 
+    history = []
     for round_id in range(rounds):
         final_paths = render_final(face_overrides)
         paths = list(final_paths) + part_zooms()
@@ -121,6 +156,12 @@ def final_review(backend, mesh, frame, up, face_part, labels, chosen, palette,
                           for label in labels)
         prompt = INSPECT_PROMPT % (intent or "not stated", lines,
                                    ", ".join(p.name for p in palette))
+        if history:
+            prompt += ("\n\nActions already taken in earlier rounds (the "
+                       "current images include their effect; do not repeat "
+                       "one, and reverse one only if the images show it made "
+                       "things worse):\n"
+                       + "\n".join("- %s" % h for h in history))
         blob = prompt.encode("utf-8")
         for path in paths:
             with open(path, "rb") as handle:
@@ -156,13 +197,38 @@ def final_review(backend, mesh, frame, up, face_part, labels, chosen, palette,
                     continue
                 depth = finding.get("depth", "deep")
                 quantile = 0.18 if depth == "deep" else 0.40
-                cut = np.quantile(occlusion[faces], quantile)
+                # The quantile keeps the cut relative to the part, but a
+                # cavity is also enclosed in absolute terms -- occlusion is
+                # sky visibility, scale-free -- so a mostly-convex part whose
+                # "deepest" faces still see half the sky yields nothing.
+                ceiling = 0.35 if depth == "deep" else 0.55
+                cut = min(float(np.quantile(occlusion[faces], quantile)),
+                          ceiling)
                 recess = faces[occlusion[faces] <= cut]
+                # A real cavity is a few compact pools. On a mostly-convex
+                # part the quantile selects scattered creases instead, and
+                # painting those black splotches the whole part (the cow's
+                # brow paid for this). Keep only components that hold their
+                # own against the largest pool; refuse a scatter outright.
+                recess = _compact_pools(mesh, recess)
+                if len(recess) == 0:
+                    log("  inspector darken %-22s refused: recesses are "
+                        "scattered creases, not cavities" % part)
+                    continue
                 for face in recess:
                     face_overrides[int(face)] = slot[paint.name]
                 log("  inspector darken %-22s %5d faces -> %-7s %s"
                     % (part, len(recess), paint.name, why))
                 acted += 1
+            elif action == "clear_recesses" and len(faces):
+                inside = set(int(f) for f in faces)
+                cleared = [f for f in face_overrides if f in inside]
+                for face in cleared:
+                    del face_overrides[face]
+                log("  inspector clear  %-22s %5d override faces removed %s"
+                    % (part, len(cleared), why))
+                if cleared:
+                    acted += 1
             elif action == "absorb_fragments" and len(faces):
                 import scipy.sparse as sparse
                 keep = max(1, int(finding.get("keep", 1)))
@@ -201,6 +267,14 @@ def final_review(backend, mesh, frame, up, face_part, labels, chosen, palette,
                 log("  inspector absorb %-22s kept %d, dissolved %d faces %s"
                     % (part, keep, dissolved, why))
                 acted += 1
+        for finding in findings:
+            if finding.get("action") in ("repaint", "darken_recesses",
+                                         "absorb_fragments",
+                                         "clear_recesses"):
+                history.append("%s %s (%s)"
+                               % (finding.get("action"),
+                                  finding.get("part", ""),
+                                  str(finding.get("why", ""))[:60]))
         report["rounds"].append({"verdict": verdict,
                                  "findings": len(findings),
                                  "acted": acted})
