@@ -214,8 +214,11 @@ def refine_subparts(mesh, face_part, labels, vocabulary, backend, intent,
                                                              directed=False)
         if n_comp >= want:
             continue
-        missing_note = ("the OTHER %s -- %d of %d instances are already "
-                        "labelled; box only a missing one" %
+        missing_note = ("another %s -- %d of the %d instances you yourself "
+                        "counted in the overviews are already labelled; box "
+                        "only one you can actually SEE that is not labelled. "
+                        "If your count was wrong and there are no more, skip "
+                        "this part -- that is a correct answer" %
                         (label, n_comp, want))
         located = locate_missing(backend, mesh, frame, [label], intent,
                                  {label: missing_note}, up=up)

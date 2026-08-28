@@ -260,7 +260,9 @@ Report:
 - identity: two to four sentences on what the object is, its overall form, and \
 which direction it faces.
 - landmarks: the distinct anatomical or structural features you are SURE of, \
-each with where it sits on the object.
+each with where it sits on the object and, where you can genuinely count them \
+in the views, HOW MANY there are ("one central eye", "three horns", "sixteen \
+segments"). Count what you see; never what such an object usually has.
 - cautions: look-alike traps on THIS model -- surface folds that mimic a face, \
 sockets that mimic eyes, anything a labeller in a hurry would get wrong, and \
 what each such region really is.
@@ -290,11 +292,11 @@ bone, eye, teeth, cloth, rock, shell, scale. Parts sharing a material are normal
 PAINTED ALIKE: a bald crown is the same skin as the cheeks, and a recess in skin is \
 still skin (shadow does the separating, not pigment). Reserve distinct materials for \
 parts that genuinely differ in substance.
-- `expected_count` is how many separate instances of this part the OBJECT has -- 2 \
-for paired eyes or horns, 4 for a quadruped's hooves, a number for repeated studs or \
-segments you can count, null when genuinely unknowable. This is anatomy, not a guess \
-quota: it lets later stages notice a missing second eye or a part shattered far \
-beyond its real count."""
+- `expected_count` is how many separate instances of this part you COUNTED by \
+looking at these renders -- never what such a part "usually" has. A one-eyed ogre \
+has 1 eye; a three-horned alien has 3 horns; convention is not evidence. Use null \
+whenever you could not actually count them in the views. Later stages use this only \
+to notice a mismatch between what was counted and what was found."""
 
 SEED_PROMPT = """You are looking at ONE orthographic render of a 3D model, lit as it \
 would be primed for painting. The image is {size} by {size} pixels.
