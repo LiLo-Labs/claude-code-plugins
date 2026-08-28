@@ -100,7 +100,7 @@ def _compact_pools(mesh, recess):
 
 def final_review(backend, mesh, frame, up, face_part, labels, chosen, palette,
                  occlusion, intent, out_dir, render_final, log,
-                 rounds=3, workers=3):
+                 rounds=3, workers=3, features=None):
     """Look, act, re-render, look again. Returns (face_overrides, report).
 
     `chosen` is mutated in place (part -> Paint). `face_overrides` maps face
@@ -238,7 +238,7 @@ def final_review(backend, mesh, frame, up, face_part, labels, chosen, palette,
                 note = str(finding.get("note", "")) or why
                 moved = relocate(
                     backend, mesh, frame, face_part, labels, part, note,
-                    intent, up=up, log=log)
+                    intent, up=up, log=log, features=features)
                 if moved:
                     acted += 1
             elif action == "clear_recesses" and len(faces):

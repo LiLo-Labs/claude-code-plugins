@@ -1050,7 +1050,7 @@ def _classify_patches_batched(backend, mesh, frame, patches, label, intent,
 
 
 def relocate_part(backend, mesh, frame, face_part, labels, part, note, intent,
-                  up=(0, 0, 1), pixels=800, log=print):
+                  up=(0, 0, 1), pixels=800, log=print, features=None):
     """The full ladder for a part whose label is not on its geometry.
 
     The dragon's "eyes" held two patches on its neck while the real eye
@@ -1073,10 +1073,12 @@ def relocate_part(backend, mesh, frame, face_part, labels, part, note, intent,
     # Plausibility is judged against the labelling as it stood before any
     # move, the same snapshot rule verify_instances lives by.
     before_area = float(areas[face_part == part_id].sum())
+    exemplar = np.flatnonzero(face_part == part_id)
     moved, anchors = 0, []
     for spec in specs:
         faces, tag = _pick_design_cut(backend, mesh, frame, part, spec,
-                                      intent, pixels, up=up)
+                                      intent, pixels, up=up,
+                                      features=features, exemplar=exemplar)
         if faces is None:
             continue
         faces = np.asarray(faces)
@@ -1137,11 +1139,82 @@ def relocate_part(backend, mesh, frame, face_part, labels, part, note, intent,
     return moved
 
 
-def _design_candidates(mesh, spec):
+def _twin_candidates(mesh, spec, features, exemplar):
+    """Candidates drawn from what a CONFIRMED sibling instance measures like.
+
+    The dragon's second eye was found this way: the exemplar's signature
+    band, matched near the located anchor, traces the socket RING around
+    the smooth dome -- so both the band's own compact components and the
+    components ENCLOSED by them (mostly ring-bounded) are offered. This is
+    how a sub-atom feature gets a correctly-shaped drawing at all: rings
+    and discs grown from a pixel stencil cannot follow a sculpted margin.
+    """
+    import scipy.sparse as sparse
+    adjacency = mesh.face_adjacency
+    areas = np.asarray(mesh.area_faces)
+    centres = mesh.triangles.mean(axis=1)
+    region = np.flatnonzero(np.linalg.norm(centres - spec["anchor"], axis=1)
+                            < 0.6 * spec["extent_mm"])
+    if len(region) < 60:
+        return []
+    sig = features[exemplar]
+    band = np.ones(len(region), dtype=bool)
+    for column in range(features.shape[1]):
+        lo, hi = np.percentile(sig[:, column], [8.0, 92.0])
+        pad = 0.25 * (hi - lo)
+        band &= ((features[region, column] >= lo - pad)
+                 & (features[region, column] <= hi + pad))
+
+    def components(members):
+        if len(members) == 0:
+            return []
+        inside = np.zeros(len(mesh.faces), dtype=bool)
+        inside[members] = True
+        both = inside[adjacency[:, 0]] & inside[adjacency[:, 1]]
+        local = {int(f): i for i, f in enumerate(members)}
+        rows = [local[int(a)] for a, b in adjacency[both]]
+        cols = [local[int(b)] for a, b in adjacency[both]]
+        graph = sparse.coo_matrix((np.ones(len(rows)), (rows, cols)),
+                                  shape=(len(members), len(members)))
+        n, comp = sparse.csgraph.connected_components(graph, directed=False)
+        return [members[comp == c] for c in range(n)]
+
+    ring = set(region[band].tolist())
+    target = float(areas[exemplar].sum())
+    out = []
+    for enclosed_mode, pool in ((False, region[band]),
+                                (True, region[~band])):
+        for members in components(pool):
+            if len(members) < 40:
+                continue
+            ratio = float(areas[members].sum()) / max(target, 1e-9)
+            if not (0.25 <= ratio <= 3.0):
+                continue
+            if enclosed_mode:
+                mm = np.zeros(len(mesh.faces), dtype=bool)
+                mm[members] = True
+                edge = mm[adjacency[:, 0]] ^ mm[adjacency[:, 1]]
+                outside = np.where(mm[adjacency[edge][:, 0]],
+                                   adjacency[edge][:, 1],
+                                   adjacency[edge][:, 0])
+                if len(outside) == 0 or np.mean(
+                        [int(f) in ring for f in outside]) < 0.5:
+                    continue
+                out.append((members, "twin-enclosed"))
+            else:
+                out.append((members, "twin-band"))
+    out.sort(key=lambda pair: abs(np.log(
+        float(areas[pair[0]].sum()) / max(target, 1e-9))))
+    return out[:2]
+
+
+def _design_candidates(mesh, spec, features=None, exemplar=None):
     """Several plausible drawings of a located, geometry-less feature."""
     adjacency = mesh.face_adjacency
     stencil = np.asarray(spec["stencil_faces"], dtype=int)
     out = []
+    if features is not None and exemplar is not None and len(exemplar) >= 40:
+        out.extend(_twin_candidates(mesh, spec, features, exemplar))
     for rings, tag in ((1, "tight"), (3, "solid"), (5, "wide")):
         chosen = np.zeros(len(mesh.faces), dtype=bool)
         chosen[stencil] = True
@@ -1168,14 +1241,15 @@ def _design_candidates(mesh, spec):
 
 
 def _pick_design_cut(backend, mesh, frame, part, spec, intent, pixels,
-                     up=(0, 0, 1)):
+                     up=(0, 0, 1), features=None, exemplar=None):
     """Render every candidate red-in-context from the locating view; one pick."""
     import io
     from PIL import Image, ImageDraw
     from . import entities as entities_module
     from . import render as render_module
 
-    candidates = _design_candidates(mesh, spec)
+    candidates = _design_candidates(mesh, spec, features=features,
+                                    exemplar=exemplar)
     if not candidates:
         return None, ""
     direction = np.asarray(spec["direction"], dtype=float)
