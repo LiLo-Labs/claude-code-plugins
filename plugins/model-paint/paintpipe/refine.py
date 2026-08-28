@@ -454,15 +454,13 @@ def recover_scattered_families(mesh, face_part, labels, backend, intent, frame,
     report = {}
     for label_id, label, members, median_piece in families:
         feats = features[members]
-        c_lo, c_hi = np.percentile(feats[:, 0], [12.0, 88.0])
-        s_lo, s_hi = np.percentile(feats[:, 1], [12.0, 88.0])
-        c_pad, s_pad = 0.2 * (c_hi - c_lo), 0.2 * (s_hi - s_lo)
-        candidate = ((face_part >= 0)
-                     & ~np.isin(face_part, list(family_ids))
-                     & (features[:, 0] >= c_lo - c_pad)
-                     & (features[:, 0] <= c_hi + c_pad)
-                     & (features[:, 1] >= s_lo - s_pad)
-                     & (features[:, 1] <= s_hi + s_pad))
+        candidate = (face_part >= 0) & ~np.isin(face_part,
+                                                list(family_ids))
+        for column in range(features.shape[1]):
+            lo, hi = np.percentile(feats[:, column], [12.0, 88.0])
+            pad = 0.2 * (hi - lo)
+            candidate &= ((features[:, column] >= lo - pad)
+                          & (features[:, column] <= hi + pad))
         pool_faces = np.flatnonzero(candidate)
         if len(pool_faces) < 8:
             continue

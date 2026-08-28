@@ -65,7 +65,7 @@ def atoms(mesh, cap=300, base_k=15.0, min_faces=60, scales=12, log=None):
     key = hashlib.sha256()
     key.update(np.ascontiguousarray(mesh.vertices).tobytes())
     key.update(np.ascontiguousarray(mesh.faces).tobytes())
-    key.update(("%s|%s|%s|%s|fastscale-v2" % (cap, base_k, min_faces,
+    key.update(("%s|%s|%s|%s|fastscale-v3" % (cap, base_k, min_faces,
                                                scales)).encode())
     cache_dir = os.path.join(os.path.expanduser("~"), ".cache", "model-paint")
     os.makedirs(cache_dir, exist_ok=True)
@@ -161,13 +161,21 @@ def _atoms_uncached(mesh, cap=300, base_k=15.0, min_faces=60, scales=12,
     if log:
         log("  atoms: %d (from %d tree nodes over %d forest roots)"
             % (len(node_of_atom), used, len(roots)))
+    # Per-face geometric signature, kept because recovery needs it: a
+    # scattered texture family (barnacle fields) is found again by what its
+    # confirmed members MEASURE like, not by adjacency. Radius and relief
+    # sign alone matched a third of an everywhere-encrusted shell, so the
+    # third axis is response strength -- how sharply featured the surface is
+    # at its characteristic scale -- which separates a granular field from a
+    # smooth dome that happens to share its radius.
+    response = index["response"]
+    peak = np.argmax(response, axis=0)
+    strength = response[peak, np.arange(response.shape[1])]
     tree = {"children": children, "base": base, "regions": regions,
             "node_of_atom": node_of_atom, "area": area,
-            # Per-face geometric signature, kept because recovery needs it:
-            # a scattered texture family (barnacle fields) is found again by
-            # what its confirmed members MEASURE like, not by adjacency.
             "features": np.stack([index["characteristic_mm"],
-                                  index["signed"]], axis=1).astype(np.float32)}
+                                  index["signed"],
+                                  strength], axis=1).astype(np.float32)}
     return face_atom, tree
 
 
