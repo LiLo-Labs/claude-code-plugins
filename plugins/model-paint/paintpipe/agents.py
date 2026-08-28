@@ -352,9 +352,15 @@ class VisionPainter(Painter):
             "skin -- shadow separates forms, pigment does not have to. Restraint "
             "reads as quality: two or three colours used truthfully beat six used "
             "for coverage.\n"
-            "- `role` is one of base, shade, highlight, accent.\n\n"
+            "- `role` is one of base, shade, highlight, accent.\n"
+            "- A REAL painter never leaves a large part flat: give each region a "
+            "`shade_hex` (the colour its recesses sink toward) and a "
+            "`highlight_hex` (the colour its upward-facing crests catch), close "
+            "kin of the base -- zenithal shading, not a second paint job.\n\n"
             'Reply with ONLY a JSON object, no prose and no code fences:\n'
-            '{"regions": [{"label": str, "hex": "#RRGGBB", "role": str, "why": str}]}'
+            '{"regions": [{"label": str, "hex": "#RRGGBB", '
+            '"shade_hex": "#RRGGBB", "highlight_hex": "#RRGGBB", '
+            '"role": str, "why": str}]}'
             % (lines, intent or "not stated"))
         paths = []
         if overviews:
@@ -377,9 +383,14 @@ class VisionPainter(Painter):
         scheme = []
         for order, label in enumerate(labels):
             entry = chosen.get(label) or {}
-            lab = _hex_to_lab(entry.get("hex", "#808080"))
+            base_hex = entry.get("hex", "#808080")
+            lab = _hex_to_lab(base_hex)
             scheme.append({"region": label, "role": entry.get("role", "base"),
-                           "lab": lab, "hex": entry.get("hex", "#808080"),
+                           "lab": lab, "hex": base_hex,
+                           "shade_lab": _hex_to_lab(entry.get("shade_hex")
+                                                    or base_hex),
+                           "highlight_lab": _hex_to_lab(
+                               entry.get("highlight_hex") or base_hex),
                            "why": entry.get("why", ""), "actor": self.actor})
         return scheme
 

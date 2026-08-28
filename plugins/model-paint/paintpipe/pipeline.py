@@ -561,7 +561,30 @@ def _paint_and_export(input_path, out_dir, mesh, frame, face_part, labels,
                                     entry["role"]))
     order = {entry["region"]: i for i, entry in enumerate(scheme)}
     wanted = np.array([scheme[order[label]]["lab"] for label in labels])
-    write(face_lab(wanted, [64.0, 1.0, 2.0]), "continuous")
+    # The unlimited stage shades WITHIN parts the way a painter would: recesses
+    # sink toward each part's shade colour, upward crests catch its highlight.
+    # Flat unlimited colour was a contradiction -- infinite palette spent at
+    # part granularity.
+    shade = np.array([scheme[order[label]].get("shade_lab",
+                                               scheme[order[label]]["lab"])
+                      for label in labels])
+    highlight = np.array([scheme[order[label]].get("highlight_lab",
+                                                   scheme[order[label]]["lab"])
+                          for label in labels])
+    continuous = face_lab(wanted, [64.0, 1.0, 2.0])
+    painted_faces = face_part >= 0
+    if painted_faces.any():
+        sink = np.clip(1.0 - occlusion[painted_faces], 0.0, 1.0)[:, None]
+        lift = np.clip(mesh.face_normals[painted_faces]
+                       @ (np.asarray(up, dtype=float)
+                          / max(np.linalg.norm(up), 1e-12)), 0.0, 1.0)[:, None]
+        parts_here = face_part[painted_faces]
+        base_here = continuous[painted_faces]
+        continuous[painted_faces] = (
+            base_here
+            + (shade[parts_here] - base_here) * 0.65 * sink
+            + (highlight[parts_here] - base_here) * 0.45 * lift)
+    write(continuous, "continuous")
     log("wrote continuous-turnaround.png, continuous-hero.png")
 
     if not palette:
