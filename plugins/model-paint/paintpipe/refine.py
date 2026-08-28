@@ -1133,9 +1133,14 @@ def relocate_part(backend, mesh, frame, face_part, labels, part, note, intent,
                 continue
         # A relocation that would dwarf everything the label held before
         # the ladder started is a forced choice gone wrong, not a finding
-        # (32k faces became "limpets" off one agreeable view).
+        # (32k faces became "limpets" off one agreeable view). But the
+        # ratio only means something when the label held anything real: a
+        # near-empty label is exactly the case relocation exists for, and
+        # there the located box and the two-angle confirm are the guards.
         cut_area = float(areas[faces].sum())
-        if before_area > 0 and cut_area > 5.0 * before_area:
+        box_area = float(spec["extent_mm"]) ** 2
+        label_was_real = before_area > 0.1 * box_area
+        if label_was_real and cut_area > 5.0 * before_area:
             log("  relocate %-22s: cut %s (%d faces) dwarfs the label's "
                 "prior holding; refused as implausible"
                 % (part, tag, len(faces)))
