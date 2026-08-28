@@ -1,6 +1,6 @@
 # The circumstances under which this pipeline fails
 
-Every failure in the validation sweep reduced to one of seven structural
+Every failure in the validation sweep reduced to one of eight structural
 circumstances. None of them is a model being bad at looking; each is a
 mismatch between where the evidence lives and where the decision is made.
 Each carries the invariant that now guards it, and the incident that paid
@@ -109,3 +109,27 @@ paint alike, enforced after all argument ends; painter and critic are told
 no filament needs a job; the unlimited stage shades within parts and
 feathers across smooth boundaries, and a design critic must pass the
 continuous result before the limiter runs.
+
+## 8. A scattered family loses to its host
+
+A part that is a FAMILY of many small pieces -- barnacle fields, rivet
+rows, scale patches -- has no single blob to win. Per-atom majority voting
+hands most members to the label they grow on, because each piece alone is
+too small to carry its atom; the label survives as a token few instances
+and the print shows the family in two colours.
+
+*Incident:* the shell's barnacle fields: ~1% of the surface carried the
+barnacle label while sister fields sat unlabelled inside "growth terraces",
+so repainting the label recoloured only a handful of clusters.
+*Invariant:* the confirmed members define a geometric signature
+(characteristic radius and relief sign), look-alike patches on host labels
+are sized against the family's own pieces, and each candidate passes the
+two-angle selection gate before any face moves
+(`refine.recover_scattered_families`).
+
+A cousin incident with the same shape but the opposite direction: the
+material-harmonization pass overruled the critic's barnacle promotion
+because the vocabulary had tagged barnacles "shell" material. A material
+tag is a prior written before anyone saw the finished piece; the critic's
+override is an observation of it. Observation outranks assertion (see 3),
+so critic-overridden parts are exempt from harmonization.

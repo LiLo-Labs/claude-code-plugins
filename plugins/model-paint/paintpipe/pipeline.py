@@ -117,6 +117,18 @@ def paint(input_path, out_dir, intent="", size_mm=None, palette=(),
         recovered = dict(recovered or {})
         recovered["_instances_refused"] = refused
 
+    # A scattered texture family (barnacle fields, rivet rows) loses most of
+    # its members to the labels they grow on -- each piece alone is too small
+    # to win its atom. The confirmed pieces define a geometric signature, and
+    # look-alike patches on host labels are recovered through the same
+    # two-angle selection gate every other move goes through.
+    face_part, swept = refine_module.recover_scattered_families(
+        mesh, face_part, labels, backend, intent, frame,
+        tree.get("features"), up=up, workers=workers, log=log)
+    if swept:
+        recovered = dict(recovered or {})
+        recovered["_scatter_swept"] = swept
+
     # Boundaries that follow creases stay; boundaries scribbled across smooth
     # skin straighten. Two contrasting filaments meeting on a staircase edge
     # is what jagged paint looks like on the print.
@@ -682,6 +694,11 @@ def _paint_and_export(input_path, out_dir, mesh, frame, face_part, labels,
     # adopt the material's area-majority filament, whatever aesthetic
     # arguments upstream tried -- restraint is the look, and shadow does the
     # separating. Accent-role parts (an iris, teeth) keep their own colour.
+    # Parts the critic explicitly moved are exempt: the material tag is a
+    # prior written before anyone saw the finished piece, and the critic's
+    # override is an observation of it -- observation outranks assertion
+    # (the shell's barnacles were tagged "shell" material and harmonized
+    # back into the dome the critic had just separated them from).
     material_of = {part.get("label"): (part.get("material") or "").strip()
                    for part in vocabulary or []}
     role_of = {entry["region"]: entry.get("role", "") for entry in scheme}
@@ -703,6 +720,8 @@ def _paint_and_export(input_path, out_dir, mesh, frame, face_part, labels,
         majority = max(weight, key=weight.get)
         paint_majority = next(p for p in palette if p.name == majority)
         for label in members:
+            if label in overrides:
+                continue
             if label in chosen and chosen[label].name != majority:
                 log("  material %-10s %-24s %s -> %s"
                     % (material, label, chosen[label].name, majority))

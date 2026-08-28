@@ -390,6 +390,125 @@ def verify_instances(mesh, face_part, labels, backend, intent, frame,
     return face_part, report
 
 
+def recover_scattered_families(mesh, face_part, labels, backend, intent, frame,
+                               features, up=(0, 0, 1), pixels=800,
+                               max_checks=20, workers=3, log=print):
+    """Find the rest of a scattered texture family by what it MEASURES like.
+
+    A label like 'barnacle patches' is not one blob but a family of dozens of
+    small encrustations, and per-atom majority voting hands most of them to
+    the label they grow ON -- each cluster alone is too small to win its atom.
+    The members that DID win define a geometric signature (characteristic
+    radius and relief sign from the scale index); faces of host labels that
+    match it form candidate patches, sized against the family's own pieces,
+    and each candidate is confirmed from two angles by a reviewer choosing
+    between the family and its host before a single face moves. Everything is
+    relative to the family itself: no absolute size appears anywhere.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+    import scipy.sparse as sparse
+
+    if features is None:
+        log("  scatter sweep: no geometric signature available; skipped")
+        return face_part, {}
+    areas = np.asarray(mesh.area_faces, dtype=float)
+    adjacency = mesh.face_adjacency
+    centres = mesh.triangles.mean(axis=1)
+    extent = float(np.linalg.norm(np.ptp(mesh.vertices, axis=0)))
+    painted_area = float(areas[face_part >= 0].sum())
+
+    def components_of(members):
+        inside = np.zeros(len(mesh.faces), dtype=bool)
+        inside[members] = True
+        both = inside[adjacency[:, 0]] & inside[adjacency[:, 1]]
+        local = {int(f): i for i, f in enumerate(members)}
+        rows = [local[int(a)] for a, b in adjacency[both]]
+        cols = [local[int(b)] for a, b in adjacency[both]]
+        graph = sparse.coo_matrix((np.ones(len(rows)), (rows, cols)),
+                                  shape=(len(members), len(members)))
+        n_comp, comp = sparse.csgraph.connected_components(graph,
+                                                           directed=False)
+        return n_comp, comp
+
+    families = []
+    for label_id, label in enumerate(labels):
+        members = np.flatnonzero(face_part == label_id)
+        if len(members) < 30:
+            continue
+        family_area = float(areas[members].sum())
+        if family_area > 0.10 * painted_area:
+            continue
+        n_comp, comp = components_of(members)
+        if n_comp < 5:
+            continue
+        comp_area = np.bincount(comp, weights=areas[members],
+                                minlength=n_comp)
+        median_piece = float(np.median(comp_area))
+        if median_piece > 0.02 * painted_area:
+            continue
+        families.append((label_id, label, members, median_piece))
+    if not families:
+        return face_part, {}
+
+    family_ids = {label_id for label_id, *_rest in families}
+    report = {}
+    for label_id, label, members, median_piece in families:
+        feats = features[members]
+        c_lo, c_hi = np.percentile(feats[:, 0], [12.0, 88.0])
+        s_lo, s_hi = np.percentile(feats[:, 1], [12.0, 88.0])
+        c_pad, s_pad = 0.2 * (c_hi - c_lo), 0.2 * (s_hi - s_lo)
+        candidate = ((face_part >= 0)
+                     & ~np.isin(face_part, list(family_ids))
+                     & (features[:, 0] >= c_lo - c_pad)
+                     & (features[:, 0] <= c_hi + c_pad)
+                     & (features[:, 1] >= s_lo - s_pad)
+                     & (features[:, 1] <= s_hi + s_pad))
+        pool_faces = np.flatnonzero(candidate)
+        if len(pool_faces) < 8:
+            continue
+        n_comp, comp = components_of(pool_faces)
+        comp_area = np.bincount(comp, weights=areas[pool_faces],
+                                minlength=n_comp)
+        patches = [pool_faces[comp == c] for c in range(n_comp)
+                   if 0.35 * median_piece <= comp_area[c] <= 3.0 * median_piece]
+        patches.sort(key=lambda p: -float(areas[p].sum()))
+        if len(patches) > max_checks:
+            log("  scatter sweep %-22s: budget hit, %d of %d look-alike "
+                "patches checked" % (label, max_checks, len(patches)))
+            patches = patches[:max_checks]
+        if not patches:
+            continue
+
+        def confirm(patch):
+            host_votes = np.bincount(face_part[patch], minlength=len(labels))
+            host = labels[int(host_votes.argmax())]
+            options = [label, host] if host != label else [label]
+            centre = centres[patch].mean(axis=0)
+            span = float(np.linalg.norm(np.ptp(centres[patch], axis=0)))
+            radius = max(span * 1.6, 0.35 * extent)
+            first = _identify_region(backend, mesh, patch, options, intent,
+                                     centre, radius, pixels, frame, up=up)
+            if first != label:
+                return patch, None
+            second = _identify_region(backend, mesh, patch, options, intent,
+                                      centre, radius, pixels, frame, up=up,
+                                      spin=137.0)
+            return patch, (label if second == label else None)
+
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            results = list(pool.map(confirm, patches))
+        recovered = 0
+        for patch, answer in results:
+            if answer is None:
+                continue
+            face_part[patch] = label_id
+            recovered += 1
+            report.setdefault(label, []).append({"faces": int(len(patch))})
+        log("  scatter sweep %-22s: %d/%d look-alike patches confirmed "
+            "and recovered" % (label, recovered, len(patches)))
+    return face_part, report
+
+
 def _identify_region(backend, mesh, members, options, intent, anchor, radius,
                      pixels, frame, up=(0, 0, 1), spin=0.0):
     """Show the region red in its best view; the reviewer picks its part.

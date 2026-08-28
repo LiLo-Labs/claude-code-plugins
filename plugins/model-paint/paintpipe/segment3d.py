@@ -65,7 +65,7 @@ def atoms(mesh, cap=300, base_k=15.0, min_faces=60, scales=12, log=None):
     key = hashlib.sha256()
     key.update(np.ascontiguousarray(mesh.vertices).tobytes())
     key.update(np.ascontiguousarray(mesh.faces).tobytes())
-    key.update(("%s|%s|%s|%s|fastscale-v1" % (cap, base_k, min_faces,
+    key.update(("%s|%s|%s|%s|fastscale-v2" % (cap, base_k, min_faces,
                                                scales)).encode())
     cache_dir = os.path.join(os.path.expanduser("~"), ".cache", "model-paint")
     os.makedirs(cache_dir, exist_ok=True)
@@ -77,7 +77,7 @@ def atoms(mesh, cap=300, base_k=15.0, min_faces=60, scales=12, log=None):
         tree = {"children": saved["children"], "base": saved["base"],
                 "regions": int(saved["regions"]),
                 "node_of_atom": [int(v) for v in saved["node_of_atom"]],
-                "area": saved["area"]}
+                "area": saved["area"], "features": saved["features"]}
         return saved["face_atom"], tree
     face_atom, tree = _atoms_uncached(mesh, cap=cap, base_k=base_k,
                                       min_faces=min_faces, scales=scales,
@@ -87,7 +87,7 @@ def atoms(mesh, cap=300, base_k=15.0, min_faces=60, scales=12, log=None):
                         regions=np.int64(tree["regions"]),
                         node_of_atom=np.asarray(tree["node_of_atom"],
                                                 dtype=np.int64),
-                        area=tree["area"])
+                        area=tree["area"], features=tree["features"])
     return face_atom, tree
 
 
@@ -162,7 +162,12 @@ def _atoms_uncached(mesh, cap=300, base_k=15.0, min_faces=60, scales=12,
         log("  atoms: %d (from %d tree nodes over %d forest roots)"
             % (len(node_of_atom), used, len(roots)))
     tree = {"children": children, "base": base, "regions": regions,
-            "node_of_atom": node_of_atom, "area": area}
+            "node_of_atom": node_of_atom, "area": area,
+            # Per-face geometric signature, kept because recovery needs it:
+            # a scattered texture family (barnacle fields) is found again by
+            # what its confirmed members MEASURE like, not by adjacency.
+            "features": np.stack([index["characteristic_mm"],
+                                  index["signed"]], axis=1).astype(np.float32)}
     return face_atom, tree
 
 
