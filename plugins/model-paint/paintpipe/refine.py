@@ -981,3 +981,57 @@ def review_scheme(backend, render_paths, scheme, chosen, palette, intent):
         if part and paint is not None:
             overrides[part] = (paint, change.get("why", ""))
     return overrides, answer.get("verdict", "")
+
+
+CONTINUOUS_REVIEW = """You are reviewing the UNCONSTRAINED colour design of a \
+3D piece -- no printer, no palette limits, pure painted-asset quality. The \
+images show it shaded with each part's base, shade and highlight colours \
+blended over the surface.
+
+The piece: %s
+
+Current design (per part: base / shade / highlight):
+%s
+
+Judge it as a finished painted collectible: soft natural transitions, material \
+truth (one material reads as one substance), believable colour temperature in \
+recesses and crests, features legible. Where it fails, change the part's \
+colours -- kin adjustments beat replacements. Change only what needs changing.
+
+Reply with ONLY a JSON object, no prose, no code fences:
+{"verdict": str, "changes": [{"part": str, "hex": "#RRGGBB", \
+"shade_hex": "#RRGGBB", "highlight_hex": "#RRGGBB", "why": str}]}"""
+
+
+def review_continuous(backend, render_paths, scheme, intent):
+    """The design is judged AS A DESIGN, before any filament exists."""
+    from . import entities as entities_module
+    from .agents import _hex_to_lab
+    lines = "\n".join("- %-24s %s / %s / %s" % (
+        entry["region"], entry.get("hex", "?"),
+        entry.get("shade_hex", entry.get("hex", "?")),
+        entry.get("highlight_hex", entry.get("hex", "?")))
+        for entry in scheme)
+    prompt = CONTINUOUS_REVIEW % (intent or "not stated", lines)
+    blob = prompt.encode("utf-8")
+    for path in render_paths:
+        with open(path, "rb") as handle:
+            blob += handle.read()
+    answer = backend._run(list(render_paths), prompt,
+                          "designcrit-%s" % entities_module.digest_of(blob)[7:19])
+    if not answer:
+        return 0, "design review unavailable"
+    by_region = {entry["region"]: entry for entry in scheme}
+    changed = 0
+    for change in answer.get("changes", []):
+        entry = by_region.get(change.get("part", ""))
+        if entry is None:
+            continue
+        for key, lab_key in (("hex", "lab"), ("shade_hex", "shade_lab"),
+                             ("highlight_hex", "highlight_lab")):
+            value = change.get(key)
+            if value:
+                entry[key] = value
+                entry[lab_key] = _hex_to_lab(value)
+        changed += 1
+    return changed, answer.get("verdict", "")

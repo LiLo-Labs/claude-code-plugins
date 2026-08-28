@@ -188,6 +188,39 @@ def smooth_boundaries(mesh, face_part, iterations=12, crease_deg=40.0):
     return face_part
 
 
+def feather_lab(mesh, lab_face, face_part, iterations=6, crease_deg=40.0):
+    """Soften colour across smooth part boundaries; stay crisp at creases.
+
+    A painted figure blends where the anatomy blends -- the muzzle fades into
+    the head -- and breaks hard only where the surface itself breaks. Colour
+    diffuses across smooth edges within a narrow band around label
+    boundaries; a crease edge never mixes, so an eye rim or a shell lip stays
+    a clean line. Geometry is untouched; this shades the CONTINUOUS design
+    only.
+    """
+    adjacency = mesh.face_adjacency
+    angles = mesh.face_adjacency_angles
+    smooth = angles < np.radians(crease_deg)
+    pairs = adjacency[smooth]
+    differs = face_part[pairs[:, 0]] != face_part[pairs[:, 1]]
+    band = np.zeros(len(mesh.faces), dtype=bool)
+    band[pairs[differs].ravel()] = True
+    for _ring in range(iterations):
+        touched = band[pairs[:, 0]] | band[pairs[:, 1]]
+        band[pairs[touched].ravel()] = True
+    lab = np.asarray(lab_face, dtype=float).copy()
+    for _sweep in range(iterations):
+        total = lab.copy()
+        counts = np.ones(len(lab))
+        np.add.at(total, pairs[:, 0], lab[pairs[:, 1]])
+        np.add.at(total, pairs[:, 1], lab[pairs[:, 0]])
+        np.add.at(counts, pairs[:, 0], 1.0)
+        np.add.at(counts, pairs[:, 1], 1.0)
+        mixed = total / counts[:, None]
+        lab[band] = mixed[band]
+    return lab
+
+
 def render_label_view(mesh, atom_map, assigned, camera, lit):
     """The current assignment as the agent will judge it: legend colours, atom
     borders, unassigned in neutral."""

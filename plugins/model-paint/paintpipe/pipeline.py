@@ -571,21 +571,49 @@ def _paint_and_export(input_path, out_dir, mesh, frame, face_part, labels,
     highlight = np.array([scheme[order[label]].get("highlight_lab",
                                                    scheme[order[label]]["lab"])
                           for label in labels])
-    continuous = face_lab(wanted, [64.0, 1.0, 2.0])
-    painted_faces = face_part >= 0
-    if painted_faces.any():
-        sink = np.clip(1.0 - occlusion[painted_faces], 0.0, 1.0)[:, None]
-        lift = np.clip(mesh.face_normals[painted_faces]
-                       @ (np.asarray(up, dtype=float)
-                          / max(np.linalg.norm(up), 1e-12)), 0.0, 1.0)[:, None]
-        parts_here = face_part[painted_faces]
-        base_here = continuous[painted_faces]
-        continuous[painted_faces] = (
-            base_here
-            + (shade[parts_here] - base_here) * 0.65 * sink
-            + (highlight[parts_here] - base_here) * 0.45 * lift)
-    write(continuous, "continuous")
+    from . import consensus as consensus_module
+
+    def bake_continuous():
+        order_now = {entry["region"]: i for i, entry in enumerate(scheme)}
+        base_table = np.array([scheme[order_now[label]]["lab"]
+                               for label in labels])
+        shade_table = np.array([scheme[order_now[label]].get(
+            "shade_lab", scheme[order_now[label]]["lab"]) for label in labels])
+        light_table = np.array([scheme[order_now[label]].get(
+            "highlight_lab", scheme[order_now[label]]["lab"])
+            for label in labels])
+        baked = face_lab(base_table, [64.0, 1.0, 2.0])
+        painted_faces = face_part >= 0
+        if painted_faces.any():
+            sink = np.clip(1.0 - occlusion[painted_faces], 0.0, 1.0)[:, None]
+            lift = np.clip(mesh.face_normals[painted_faces]
+                           @ (np.asarray(up, dtype=float)
+                              / max(np.linalg.norm(up), 1e-12)),
+                           0.0, 1.0)[:, None]
+            parts_here = face_part[painted_faces]
+            base_here = baked[painted_faces]
+            baked[painted_faces] = (
+                base_here
+                + (shade_table[parts_here] - base_here) * 0.65 * sink
+                + (light_table[parts_here] - base_here) * 0.45 * lift)
+        return consensus_module.feather_lab(mesh, baked, face_part)
+
+    write(bake_continuous(), "continuous")
     log("wrote continuous-turnaround.png, continuous-hero.png")
+
+    # THE DESIGN MUST STAND ON ITS OWN before any filament exists: a critic
+    # reviews the continuous renders as a painted asset and adjusts colours;
+    # only a design worth having gets limited.
+    design_changes, design_verdict = refine_module.review_continuous(
+        backend, [os.path.join(out_dir, "continuous-hero.png"),
+                  os.path.join(out_dir, "continuous-turnaround.png")],
+        scheme, intent)
+    if design_verdict:
+        log("design critic: %s" % design_verdict)
+    if design_changes:
+        log("design critic adjusted %d part(s); re-baking continuous"
+            % design_changes)
+        write(bake_continuous(), "continuous")
 
     if not palette:
         log("no filaments given: design only, not a plan")
