@@ -347,6 +347,11 @@ class VisionPainter(Painter):
             "restrained so it reads.\n"
             "- Neighbouring regions need enough separation in value, not just in hue, "
             "or the form flattens out.\n"
+            "- PAINT BY MATERIAL. Parts made of the same stuff wear the same colour: "
+            "a bald crown is the same skin as the cheeks, a recess in skin is still "
+            "skin -- shadow separates forms, pigment does not have to. Restraint "
+            "reads as quality: two or three colours used truthfully beat six used "
+            "for coverage.\n"
             "- `role` is one of base, shade, highlight, accent.\n\n"
             'Reply with ONLY a JSON object, no prose and no code fences:\n'
             '{"regions": [{"label": str, "hex": "#RRGGBB", "role": str, "why": str}]}'

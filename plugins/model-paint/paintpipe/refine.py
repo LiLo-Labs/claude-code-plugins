@@ -949,7 +949,9 @@ reads better -- eyes that vanish, parts that merge into their background, a fila
 wasted where it does no work. If it already reads well, say so and change nothing.
 
 Reply with ONLY a JSON object, no prose, no code fences:
-{"verdict": str, "changes": [{"part": str, "filament": str, "why": str}]}"""
+{"verdict": str, "changes": [{"part": str, "filament": str, "why": str}]}
+Judge with a painter's restraint: parts of the same material should normally share one filament (skin stays skin everywhere, including bald crowns and recesses -- shadow does the separating), and NO filament needs a job. Never spread colours to use them up; override toward fewer colours when the piece reads as patchwork.
+"""
 
 
 def review_scheme(backend, render_paths, scheme, chosen, palette, intent):

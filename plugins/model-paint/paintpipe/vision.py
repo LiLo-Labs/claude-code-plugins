@@ -284,7 +284,12 @@ Rules that matter:
 - Prefer few, real parts over many speculative ones. A part you name here must be \
 findable in individual views later; one that is never found is recorded as absent.
 - Include parts that appear in only some views.
-- `parent` is another label from your own list, or "" for a top-level part."""
+- `parent` is another label from your own list, or "" for a top-level part.
+- `material` names what the part is made of on the depicted thing -- skin, horn, \
+bone, eye, teeth, cloth, rock, shell, scale. Parts sharing a material are normally \
+PAINTED ALIKE: a bald crown is the same skin as the cheeks, and a recess in skin is \
+still skin (shadow does the separating, not pigment). Reserve distinct materials for \
+parts that genuinely differ in substance."""
 
 SEED_PROMPT = """You are looking at ONE orthographic render of a 3D model, lit as it \
 would be primed for painting. The image is {size} by {size} pixels.
@@ -543,7 +548,7 @@ class HeadlessBackend(VisionBackend):
             prompt += "\n\nWhat the painter said they want: %s" % intent
         prompt += ("\n\nReply with ONLY a JSON object, no prose and no code fences:\n"
                    '{"object": str, "parts": [{"label": str, "note": str, '
-                   '"parent": str}]}')
+                   '"parent": str, "material": str}]}')
         # Keyed by the question: a changed intent or changed overviews must
         # re-ask, not replay the first vocabulary this directory ever saw.
         key = "vocabulary-%s" % entities_module.digest_of(

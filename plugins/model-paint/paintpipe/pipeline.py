@@ -610,6 +610,37 @@ def _paint_and_export(input_path, out_dir, mesh, frame, face_part, labels,
         log("  override %-24s -> %-7s %s%s" % (part, paint_choice.name,
                                                why[:60], marker))
         chosen[part] = paint_choice
+
+    # MATERIAL TRUTH, enforced. A bald crown is the same skin as the cheeks;
+    # a recess in skin is still skin. Non-accent parts sharing a material
+    # adopt the material's area-majority filament, whatever aesthetic
+    # arguments upstream tried -- restraint is the look, and shadow does the
+    # separating. Accent-role parts (an iris, teeth) keep their own colour.
+    material_of = {part.get("label"): (part.get("material") or "").strip()
+                   for part in vocabulary or []}
+    role_of = {entry["region"]: entry.get("role", "") for entry in scheme}
+    groups = {}
+    for label in labels:
+        material = material_of.get(label, "")
+        if material and role_of.get(label) != "accent":
+            groups.setdefault(material, []).append(label)
+    for material, members in groups.items():
+        if len(members) < 2:
+            continue
+        weight = {}
+        for label in members:
+            if label in chosen:
+                name = chosen[label].name
+                weight[name] = weight.get(name, 0.0) + share.get(label, 0.0)
+        if not weight:
+            continue
+        majority = max(weight, key=weight.get)
+        paint_majority = next(p for p in palette if p.name == majority)
+        for label in members:
+            if label in chosen and chosen[label].name != majority:
+                log("  material %-10s %-24s %s -> %s"
+                    % (material, label, chosen[label].name, majority))
+                chosen[label] = paint_majority
     write(limited_lab(), "final")
     log("wrote final-turnaround.png, final-hero.png")
 
