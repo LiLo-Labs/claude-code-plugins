@@ -395,9 +395,79 @@ def verify_instances(mesh, face_part, labels, backend, intent, frame,
     return face_part, report
 
 
+def _family_node_candidates(mesh, tree, features, exemplar, median_piece,
+                            face_part, family_label_ids, cap=60):
+    """Whole tree nodes that measure like the family's confirmed pieces.
+
+    A colony is a NODE: classifying band-grown blobs split single colonies
+    into two colours (half a barnacle cluster labelled, half left as shell).
+    Node areas come straight from the merge tree, so candidates are cheap;
+    each is offered whole and, if confirmed, labelled whole.
+    """
+    import sys
+    here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    scripts = os.path.join(here, "scripts")
+    if scripts not in sys.path:
+        sys.path.insert(0, scripts)
+    import index_persist
+
+    children = tree["children"]
+    base = tree["base"]
+    regions = int(tree["regions"])
+    node_area = np.asarray(tree["area"], dtype=float)
+    from collections import defaultdict
+    region_faces = defaultdict(list)
+    for face, r in enumerate(base):
+        region_faces[int(r)].append(face)
+
+    def faces_of(node):
+        leaves = []
+        index_persist.leaves_of(children, int(node), regions, leaves)
+        collected = []
+        for leaf in leaves:
+            collected.extend(region_faces[int(leaf)])
+        return np.array(collected, dtype=int)
+
+    sig = features[exemplar]
+    bands = [np.percentile(sig[:, c], [10.0, 90.0])
+             for c in range(features.shape[1])]
+    qualified = [node for node in range(len(node_area))
+                 if 0.35 * median_piece <= node_area[node]
+                 <= 3.0 * median_piece]
+    scored = []
+    for node in qualified:
+        nf = faces_of(node)
+        if len(nf) < 40:
+            continue
+        already = np.isin(face_part[nf], list(family_label_ids)).mean()
+        if already > 0.3:
+            continue
+        ok = True
+        for c, (lo, hi) in enumerate(bands):
+            pad = 0.25 * (hi - lo)
+            mean = float(features[nf, c].mean())
+            if not (lo - pad <= mean <= hi + pad):
+                ok = False
+                break
+        if ok:
+            scored.append((abs(np.log(node_area[node]
+                                      / max(median_piece, 1e-9))), nf))
+    scored.sort(key=lambda pair: pair[0])
+    taken = np.zeros(len(mesh.faces), dtype=bool)
+    out = []
+    for _score, nf in scored:
+        if taken[nf].mean() > 0.2:
+            continue
+        taken[nf] = True
+        out.append(nf)
+        if len(out) >= cap:
+            break
+    return out
+
+
 def recover_scattered_families(mesh, face_part, labels, backend, intent, frame,
                                features, up=(0, 0, 1), pixels=800,
-                               max_checks=20, workers=3, log=print):
+                               max_checks=20, workers=3, log=print, tree=None):
     """Find the rest of a scattered texture family by what it MEASURES like.
 
     A label like 'barnacle patches' is not one blob but a family of dozens of
@@ -458,6 +528,26 @@ def recover_scattered_families(mesh, face_part, labels, backend, intent, frame,
     family_ids = {label_id for label_id, *_rest in families}
     report = {}
     for label_id, label, members, median_piece in families:
+        if tree is not None:
+            node_patches = _family_node_candidates(
+                mesh, tree, features, members, median_piece, face_part,
+                family_ids)
+            if node_patches:
+                log("  scatter sweep %-22s: %d whole-node candidates by "
+                    "numbered sheet" % (label, len(node_patches)))
+                agreed = _classify_patches_batched(
+                    backend, mesh, frame, node_patches[:36], label, intent,
+                    extent, up=up, log=log)
+                recovered = 0
+                for patch in agreed:
+                    face_part[patch] = label_id
+                    recovered += 1
+                    report.setdefault(label, []).append(
+                        {"faces": int(len(patch))})
+                log("  scatter sweep %-22s: %d/%d nodes confirmed and "
+                    "recovered" % (label, recovered,
+                                   min(len(node_patches), 36)))
+                continue
         feats = features[members]
         candidate = (face_part >= 0) & ~np.isin(face_part,
                                                 list(family_ids))

@@ -139,7 +139,7 @@ def paint(input_path, out_dir, intent="", size_mm=None, palette=(),
     # two-angle selection gate every other move goes through.
     face_part, swept = refine_module.recover_scattered_families(
         mesh, face_part, labels, backend, intent, frame,
-        tree.get("features"), up=up, workers=workers, log=log)
+        tree.get("features"), up=up, workers=workers, log=log, tree=tree)
     if swept:
         recovered = dict(recovered or {})
         recovered["_scatter_swept"] = swept
