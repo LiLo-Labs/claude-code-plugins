@@ -1050,6 +1050,10 @@ def relocate_part(backend, mesh, frame, face_part, labels, part, note, intent,
         log("  relocate %-22s: nowhere located; nothing moved" % part)
         return 0
     centres = mesh.triangles.mean(axis=1)
+    areas = np.asarray(mesh.area_faces, dtype=float)
+    # Plausibility is judged against the labelling as it stood before any
+    # move, the same snapshot rule verify_instances lives by.
+    before_area = float(areas[face_part == part_id].sum())
     moved, anchors = 0, []
     for spec in specs:
         faces, tag = _pick_design_cut(backend, mesh, frame, part, spec,
@@ -1057,12 +1061,35 @@ def relocate_part(backend, mesh, frame, face_part, labels, part, note, intent,
         if faces is None:
             continue
         faces = np.asarray(faces)
-        verdict = _confirm_in_context(
-            backend, mesh, faces, part, intent, spec["anchor"],
-            max(spec["extent_mm"] * 2.5, 8.0), pixels, frame, up=up)
-        if verdict is not True:
-            log("  relocate %-22s: cut %s at %s not confirmed (%s)"
-                % (part, tag, np.round(spec["anchor"], 1), verdict))
+        # A cut stays within reach of the box that located it: ring-grown
+        # stencils can crawl arbitrarily far across a big host.
+        near = (np.linalg.norm(centres[faces] - spec["anchor"], axis=1)
+                <= spec["extent_mm"] * 2.5)
+        faces = faces[near]
+        if len(faces) == 0:
+            continue
+        # A relocation that would dwarf everything the label held before
+        # the ladder started is a forced choice gone wrong, not a finding
+        # (32k faces became "limpets" off one agreeable view).
+        cut_area = float(areas[faces].sum())
+        if before_area > 0 and cut_area > 5.0 * before_area:
+            log("  relocate %-22s: cut %s (%d faces) dwarfs the label's "
+                "prior holding; refused as implausible"
+                % (part, tag, len(faces)))
+            continue
+        # A move needs agreement from a second angle, like every other
+        # move in this pipeline.
+        radius = max(spec["extent_mm"] * 2.5, 8.0)
+        first = _confirm_in_context(backend, mesh, faces, part, intent,
+                                    spec["anchor"], radius, pixels, frame,
+                                    up=up)
+        second = _confirm_in_context(backend, mesh, faces, part, intent,
+                                     spec["anchor"], radius, pixels, frame,
+                                     up=up, spin=137.0) \
+            if first is True else False
+        if first is not True or second is not True:
+            log("  relocate %-22s: cut %s at %s not confirmed (%s/%s)"
+                % (part, tag, np.round(spec["anchor"], 1), first, second))
             continue
         face_part[faces] = part_id
         moved += len(faces)
