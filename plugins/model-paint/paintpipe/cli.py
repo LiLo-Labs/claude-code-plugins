@@ -64,7 +64,7 @@ def main(argv=None):
     parser.add_argument("--cap", type=int, default=250,
                         help="most atoms offered in one id render; a "
                              "legibility bound, never a boundary")
-    parser.add_argument("--workers", type=int, default=4,
+    parser.add_argument("--workers", type=int, default=8,
                         help="concurrent vision calls")
     parser.add_argument("--model", default="claude-opus-5",
                         help="vision model for the naming, painter and critic "

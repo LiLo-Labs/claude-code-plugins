@@ -48,15 +48,51 @@ def _session_arrays(mesh):
 
 
 def scale_index(mesh, scales=12, log=None):
-    """The 3D scale-space index, via the v0 builder."""
-    import scale_space
+    """The 3D scale-space index, multigrid (paintpipe.fastscale): identical
+    ladder and outputs to the v0 builder, coarse rungs on quotient graphs."""
+    from . import fastscale
     session = _session_arrays(mesh)
     if log:
         log("  scale index over %d faces..." % len(mesh.faces))
-    return scale_space.build(session, scales=scales), session
+    return fastscale.build(session, scales=scales, log=log), session
 
 
 def atoms(mesh, cap=300, base_k=15.0, min_faces=60, scales=12, log=None):
+    """Cached front door: the atoms of a mesh are a pure function of its
+    geometry and these parameters, so they are computed once per mesh EVER,
+    whatever output directory a run uses."""
+    import hashlib
+    key = hashlib.sha256()
+    key.update(np.ascontiguousarray(mesh.vertices).tobytes())
+    key.update(np.ascontiguousarray(mesh.faces).tobytes())
+    key.update(("%s|%s|%s|%s|fastscale-v1" % (cap, base_k, min_faces,
+                                               scales)).encode())
+    cache_dir = os.path.join(os.path.expanduser("~"), ".cache", "model-paint")
+    os.makedirs(cache_dir, exist_ok=True)
+    cache = os.path.join(cache_dir, "atoms-%s.npz" % key.hexdigest()[:20])
+    if os.path.exists(cache):
+        if log:
+            log("  atoms from cache: %s" % cache)
+        saved = np.load(cache, allow_pickle=False)
+        tree = {"children": saved["children"], "base": saved["base"],
+                "regions": int(saved["regions"]),
+                "node_of_atom": [int(v) for v in saved["node_of_atom"]],
+                "area": saved["area"]}
+        return saved["face_atom"], tree
+    face_atom, tree = _atoms_uncached(mesh, cap=cap, base_k=base_k,
+                                      min_faces=min_faces, scales=scales,
+                                      log=log)
+    np.savez_compressed(cache, face_atom=face_atom,
+                        children=tree["children"], base=tree["base"],
+                        regions=np.int64(tree["regions"]),
+                        node_of_atom=np.asarray(tree["node_of_atom"],
+                                                dtype=np.int64),
+                        area=tree["area"])
+    return face_atom, tree
+
+
+def _atoms_uncached(mesh, cap=300, base_k=15.0, min_faces=60, scales=12,
+                    log=None):
     """Feature-aligned atoms: a cut of the persistence merge tree, at most `cap` wide.
 
     Returns (face_atom, tree) where `tree` carries what a caller needs to descend into
