@@ -710,8 +710,30 @@ def _paint_and_export(input_path, out_dir, mesh, frame, face_part, labels,
     write(limited_lab(), "final")
     log("wrote final-turnaround.png, final-hero.png")
 
+    # THE FINAL INSPECTOR (§12): everything above answered a scripted
+    # question; this stage is asked the open one -- what would a customer
+    # flag? -- and holds the same levers the person driving the CLI does.
+    # It looks at the finished renders, acts, re-renders, and looks again.
+    from . import inspect as inspect_module
+
+    def render_final(face_overrides):
+        lab = limited_lab()
+        for face, filament in face_overrides.items():
+            lab[face] = np.asarray(palette[filament - 1].lab, dtype=float)
+        write(lab, "final")
+        return [os.path.join(out_dir, "final-hero.png"),
+                os.path.join(out_dir, "final-turnaround.png")]
+
+    log("\nfinal inspection")
+    face_overrides, inspection = inspect_module.final_review(
+        backend, mesh, frame, up, face_part, labels, chosen, palette,
+        occlusion, intent, out_dir, render_final, log)
+    if face_overrides or any(r["acted"] for r in inspection["rounds"]):
+        render_final(face_overrides)
+        log("re-rendered final after inspection")
+
     export = _export_3mf(input_path, out_dir, face_part, labels, chosen,
-                         palette, log=log)
+                         palette, face_overrides=face_overrides, log=log)
     return {"regions": [{k: v for k, v in entry.items() if k != "actor"}
                         for entry in scheme],
             "filaments": {entry["region"]: chosen[entry["region"]].name
@@ -719,11 +741,12 @@ def _paint_and_export(input_path, out_dir, mesh, frame, face_part, labels,
             "unseparated": clashes, "critic": verdict,
             "overrides": {part: paint_choice.name
                           for part, (paint_choice, _w) in overrides.items()},
+            "inspection": inspection,
             "export": export, "painted": True}
 
 
 def _export_3mf(input_path, out_dir, face_part, labels, chosen, palette,
-                log=default_log):
+                face_overrides=None, log=default_log):
     """Write the painted 3MF and verify the geometry never moved."""
     import sys
     here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -751,6 +774,13 @@ def _export_3mf(input_path, out_dir, face_part, labels, chosen, palette,
         filament = slot[chosen[label].name] if label in chosen else default
         if filament != default:
             assignments[face] = filament
+    # Face-level decisions (the inspector's recess darkening) override the
+    # part-level mapping face by face; the renders and the print agree.
+    for face, filament in (face_overrides or {}).items():
+        if filament != default:
+            assignments[int(face)] = filament
+        else:
+            assignments.pop(int(face), None)
 
     archive = threemf.ThreeMF(base)
     archive.paint_object(archive.mesh_objects()[0], assignments)
