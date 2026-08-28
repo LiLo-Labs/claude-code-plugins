@@ -290,7 +290,10 @@ def verify_instances(mesh, face_part, labels, backend, intent, frame,
                              and labels[i] != label][:5]
         centre = centres[members].mean(axis=0)
         span = np.ptp(centres[members], axis=0)
-        radius = max(float(np.linalg.norm(span)) * 1.6, 0.04 * extent)
+        # The frame must show WHERE the instance sits, not just its surface:
+        # judged from a tight close-up, an ear's inner cup passes for an eye
+        # -- placement is half of what identity means.
+        radius = max(float(np.linalg.norm(span)) * 1.6, 0.35 * extent)
         answer = _identify_region(backend, mesh, members, options, intent,
                                   centre, radius, pixels, frame, up=up)
         return label_id, label, members, answer
@@ -313,6 +316,10 @@ def verify_instances(mesh, face_part, labels, backend, intent, frame,
             with ThreadPoolExecutor(max_workers=workers) as pool:
                 results += list(pool.map(lambda j: check(*j),
                                          escalate[:max_checks]))
+        # Plausibility is judged against the labelling as it stood BEFORE any
+        # correction: applying one implausible move must not inflate the
+        # target enough to legitimise the next.
+        snapshot = face_part.copy()
         for label_id, label, members, answer in results:
             if answer is None:
                 continue
@@ -323,7 +330,7 @@ def verify_instances(mesh, face_part, labels, backend, intent, frame,
             # label already holds is a forced choice gone wrong, not a
             # finding -- leave the instance alone and say so.
             instance_area = float(areas[members].sum())
-            target_area = float(areas[face_part == target].sum())
+            target_area = float(areas[snapshot == target].sum())
             if target_area > 0 and instance_area > 5.0 * target_area:
                 log("  instance check: %s x%d faces -> %s refused as "
                     "implausible (target holds far less); left unchanged"
