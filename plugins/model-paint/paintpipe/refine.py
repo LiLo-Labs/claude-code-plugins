@@ -902,6 +902,67 @@ def recover_located(mesh, face_part, labels, backend, intent, frame, located, no
     return face_part, report
 
 
+def relocate_part(backend, mesh, frame, face_part, labels, part, note, intent,
+                  up=(0, 0, 1), pixels=800, log=print):
+    """The full ladder for a part whose label is not on its geometry.
+
+    The dragon's "eyes" held two patches on its neck while the real eye
+    bosses sat unlabelled inside "head": no colour choice can fix a label
+    pointing at the wrong faces. This locates the part fresh (ignoring where
+    its label currently sits), draws candidate cuts, confirms each in
+    context, moves the confirmed faces onto the label, and returns the
+    label's strays -- faces far from every confirmed instance -- to their
+    surrounding label. Returns the number of faces moved onto the part.
+    """
+    part_id = labels.index(part)
+    found = locate_missing(backend, mesh, frame, [part], intent,
+                           {part: note}, pixels=pixels, up=up)
+    specs = found.get(part, [])
+    if not specs:
+        log("  relocate %-22s: nowhere located; nothing moved" % part)
+        return 0
+    centres = mesh.triangles.mean(axis=1)
+    moved, anchors = 0, []
+    for spec in specs:
+        faces, tag = _pick_design_cut(backend, mesh, frame, part, spec,
+                                      intent, pixels, up=up)
+        if faces is None:
+            continue
+        faces = np.asarray(faces)
+        verdict = _confirm_in_context(
+            backend, mesh, faces, part, intent, spec["anchor"],
+            max(spec["extent_mm"] * 2.5, 8.0), pixels, frame, up=up)
+        if verdict is not True:
+            log("  relocate %-22s: cut %s at %s not confirmed (%s)"
+                % (part, tag, np.round(spec["anchor"], 1), verdict))
+            continue
+        face_part[faces] = part_id
+        moved += len(faces)
+        anchors.append(spec)
+    if moved:
+        adjacency = mesh.face_adjacency
+        members = np.flatnonzero(face_part == part_id)
+        near = np.zeros(len(members), dtype=bool)
+        for spec in anchors:
+            near |= (np.linalg.norm(centres[members] - spec["anchor"], axis=1)
+                     < spec["extent_mm"] * 2.0)
+        strays = members[~near]
+        if len(strays):
+            inside = np.zeros(len(mesh.faces), dtype=bool)
+            inside[strays] = True
+            edge = inside[adjacency[:, 0]] ^ inside[adjacency[:, 1]]
+            outside = np.where(inside[adjacency[edge][:, 0]],
+                               adjacency[edge][:, 1], adjacency[edge][:, 0])
+            neighbours = face_part[outside]
+            neighbours = neighbours[(neighbours >= 0)
+                                    & (neighbours != part_id)]
+            if len(neighbours):
+                face_part[strays] = int(np.bincount(neighbours).argmax())
+        log("  relocate %-22s: %d faces onto %d confirmed instance(s), "
+            "%d strays returned" % (part, moved, len(anchors), len(strays)))
+    return moved
+
+
 def _design_candidates(mesh, spec):
     """Several plausible drawings of a located, geometry-less feature."""
     adjacency = mesh.face_adjacency
@@ -997,7 +1058,7 @@ def _pick_design_cut(backend, mesh, frame, part, spec, intent, pixels,
 
 
 def _confirm_in_context(backend, mesh, faces, part, intent, anchor, radius, pixels,
-                        frame, up=(0, 0, 1)):
+                        frame, up=(0, 0, 1), spin=0.0):
     """Whole model in frame, claimed faces red, one question.
 
     Returns True (confirmed), False (refused), or None: no candidate view

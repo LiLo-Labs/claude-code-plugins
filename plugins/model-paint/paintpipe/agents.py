@@ -385,12 +385,22 @@ class VisionPainter(Painter):
             entry = chosen.get(label) or {}
             base_hex = entry.get("hex", "#808080")
             lab = _hex_to_lab(base_hex)
+            shade = _hex_to_lab(entry.get("shade_hex") or base_hex)
+            light = _hex_to_lab(entry.get("highlight_hex") or base_hex)
+            # Painters keep answering the triad question with three copies of
+            # the base, and a flat part reads as coloured plastic (every model
+            # in the validation sweep drew the same design-critic complaint).
+            # A degenerate triad is replaced with honest zenithal steps --
+            # cooler and darker in the recesses, warmer and lighter on the
+            # crests -- which the design critic is free to re-tune.
+            import numpy as _np
+            if _np.allclose(shade, lab, atol=1.0):
+                shade = [max(lab[0] - 18.0, 4.0), lab[1] * 0.9, lab[2] - 7.0]
+            if _np.allclose(light, lab, atol=1.0):
+                light = [min(lab[0] + 13.0, 97.0), lab[1] * 0.92, lab[2] + 5.0]
             scheme.append({"region": label, "role": entry.get("role", "base"),
                            "lab": lab, "hex": base_hex,
-                           "shade_lab": _hex_to_lab(entry.get("shade_hex")
-                                                    or base_hex),
-                           "highlight_lab": _hex_to_lab(
-                               entry.get("highlight_hex") or base_hex),
+                           "shade_lab": shade, "highlight_lab": light,
                            "why": entry.get("why", ""), "actor": self.actor})
         return scheme
 

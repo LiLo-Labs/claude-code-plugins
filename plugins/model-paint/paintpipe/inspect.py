@@ -54,6 +54,10 @@ painted, and the action refuses parts whose "recesses" are scattered creases
 keep the part's `keep` largest pieces, dissolve the rest into surroundings
 - {"action": "clear_recesses", "part": str, "why": str} -- undo this part's \
 recess darkening; use it when an earlier darkening reads as splotches
+- {"action": "relocate", "part": str, "note": str, "why": str} -- the part's \
+paint is NOT on the part's real geometry (its colour sits somewhere else, or \
+the named feature renders bare). `note` describes where the feature really \
+is, precisely, for a locating camera
 - {"action": "needs_capability", "note": str} -- something real that none of \
 these levers can fix; describe it precisely
 
@@ -220,6 +224,14 @@ def final_review(backend, mesh, frame, up, face_part, labels, chosen, palette,
                 log("  inspector darken %-22s %5d faces -> %-7s %s"
                     % (part, len(recess), paint.name, why))
                 acted += 1
+            elif action == "relocate":
+                from . import refine as refine_module
+                note = str(finding.get("note", "")) or why
+                moved = refine_module.relocate_part(
+                    backend, mesh, frame, face_part, labels, part, note,
+                    intent, up=up, log=log)
+                if moved:
+                    acted += 1
             elif action == "clear_recesses" and len(faces):
                 inside = set(int(f) for f in faces)
                 cleared = [f for f in face_overrides if f in inside]
@@ -270,7 +282,7 @@ def final_review(backend, mesh, frame, up, face_part, labels, chosen, palette,
         for finding in findings:
             if finding.get("action") in ("repaint", "darken_recesses",
                                          "absorb_fragments",
-                                         "clear_recesses"):
+                                         "clear_recesses", "relocate"):
                 history.append("%s %s (%s)"
                                % (finding.get("action"),
                                   finding.get("part", ""),
