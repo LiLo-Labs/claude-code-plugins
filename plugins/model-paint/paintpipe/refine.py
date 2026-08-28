@@ -33,7 +33,8 @@ def parent_of(vocabulary):
 
 
 def refine_subparts(mesh, face_part, labels, vocabulary, backend, intent,
-                    frame=None, views=4, pixels=760, workers=3, up=(0, 0, 1)):
+                    frame=None, views=4, pixels=760, workers=3, up=(0, 0, 1),
+                    tree=None):
     """Zoom onto each parent whose children came back empty; re-patch, re-ask, splice.
 
     Returns the updated per-face part index and a report of what was recovered. Faces
@@ -185,7 +186,7 @@ def refine_subparts(mesh, face_part, labels, vocabulary, backend, intent,
         if located:
             face_part, located_report = recover_located(
                 mesh, face_part, labels, backend, intent, frame, located,
-                notes_all, workers=workers, up=up)
+                notes_all, workers=workers, up=up, tree=tree)
             report.setdefault("_design_faces", []).extend(
                 located_report.pop("_design_faces", []))
             report["_located"] = located_report
@@ -227,7 +228,7 @@ def refine_subparts(mesh, face_part, labels, vocabulary, backend, intent,
         if located:
             face_part, pair_report = recover_located(
                 mesh, face_part, labels, backend, intent, frame, located,
-                {label: missing_note}, workers=workers, up=up)
+                {label: missing_note}, workers=workers, up=up, tree=tree)
             report.setdefault("_design_faces", []).extend(
                 pair_report.pop("_design_faces", []))
             report.setdefault("_pair_completion", {})[label] = pair_report
@@ -812,7 +813,7 @@ def locate_missing(backend, mesh, frame, missing, intent, notes, pixels=800, vie
 
 
 def recover_located(mesh, face_part, labels, backend, intent, frame, located, notes,
-                    pixels=760, views=3, workers=3, up=(0, 0, 1)):
+                    pixels=760, views=3, workers=3, up=(0, 0, 1), tree=None):
     """Zoom a camera at each located ball and ask the patch question there.
 
     The ball is spatial -- faces near the anchor, whatever label they carry -- so
@@ -925,7 +926,7 @@ def recover_located(mesh, face_part, labels, backend, intent, frame, located, no
             if stencil is None or len(stencil) < 10:
                 continue
             faces, tag = _pick_design_cut(backend, mesh, frame, part, spec,
-                                          intent, pixels, up=up)
+                                          intent, pixels, up=up, tree=tree)
             if faces is not None:
                 if tag != "tree-node":
                     faces = _smooth_mask(mesh, np.asarray(faces))
@@ -934,9 +935,12 @@ def recover_located(mesh, face_part, labels, backend, intent, frame, located, no
                 drawn += int(len(faces))
                 report.setdefault("_drawn", []).append(
                     "%s#%d(%s)" % (part, slot, tag))
-                if tag != "tree-node":
+                if tag != "tree-node" and len(faces) <= 0.02 * len(mesh.faces):
                     # A painted-on feature has no region to snap to; these
-                    # faces are exempt from the base-region projection.
+                    # faces are exempt from the base-region projection. The
+                    # exemption is for PATTERN-sized cuts only: a "design
+                    # cut" the size of a body part is a mislabel wearing a
+                    # costume, and it snaps like everything else.
                     report.setdefault("_design_faces", []).extend(
                         int(face) for face in faces)
         if drawn:

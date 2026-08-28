@@ -103,7 +103,7 @@ def paint(input_path, out_dir, intent="", size_mm=None, palette=(),
     from . import refine as refine_module
     face_part, recovered = refine_module.refine_subparts(
         mesh, face_part, labels, vocabulary, backend, intent, frame=frame,
-        workers=workers, up=up)
+        workers=workers, up=up, tree=tree)
     log("recovery: %s" % (json.dumps(
         {k: v for k, v in recovered.items() if k != "_design_faces"})
         if recovered else "nothing missing"))
