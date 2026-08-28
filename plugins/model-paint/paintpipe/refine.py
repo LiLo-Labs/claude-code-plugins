@@ -432,8 +432,8 @@ def _family_node_candidates(mesh, tree, features, exemplar, median_piece,
     bands = [np.percentile(sig[:, c], [10.0, 90.0])
              for c in range(features.shape[1])]
     qualified = [node for node in range(len(node_area))
-                 if 0.35 * median_piece <= node_area[node]
-                 <= 3.0 * median_piece]
+                 if 0.5 * median_piece <= node_area[node]
+                 <= 2.5 * median_piece]
     scored = []
     for node in qualified:
         nf = faces_of(node)
@@ -521,16 +521,21 @@ def recover_scattered_families(mesh, face_part, labels, backend, intent, frame,
         median_piece = float(np.median(comp_area))
         if median_piece > 0.02 * painted_area:
             continue
-        families.append((label_id, label, members, median_piece))
+        # The family's own pieces may be fragments of colonies; the largest
+        # pieces are the most likely to be WHOLE, so they anchor the size
+        # of what the sweep hunts (a median of fragments hunts fragments).
+        anchor_piece = float(np.percentile(comp_area, 90.0))
+        families.append((label_id, label, members, median_piece,
+                         anchor_piece))
     if not families:
         return face_part, {}
 
     family_ids = {label_id for label_id, *_rest in families}
     report = {}
-    for label_id, label, members, median_piece in families:
+    for label_id, label, members, median_piece, anchor_piece in families:
         if tree is not None:
             node_patches = _family_node_candidates(
-                mesh, tree, features, members, median_piece, face_part,
+                mesh, tree, features, members, anchor_piece, face_part,
                 family_ids)
             if node_patches:
                 log("  scatter sweep %-22s: %d whole-node candidates by "
