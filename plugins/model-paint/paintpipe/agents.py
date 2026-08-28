@@ -398,11 +398,23 @@ class VisionPainter(Painter):
                 shade = [max(lab[0] - 18.0, 4.0), lab[1] * 0.9, lab[2] - 7.0]
             if _np.allclose(light, lab, atol=1.0):
                 light = [min(lab[0] + 13.0, 97.0), lab[1] * 0.92, lab[2] + 5.0]
+            # The stored hexes must describe the triad actually baked -- the
+            # design critic reads them next to the renders, and a table that
+            # says flat while the images shade is a critic misinformed.
             scheme.append({"region": label, "role": entry.get("role", "base"),
                            "lab": lab, "hex": base_hex,
                            "shade_lab": shade, "highlight_lab": light,
+                           "shade_hex": _lab_to_hex(shade),
+                           "highlight_hex": _lab_to_hex(light),
                            "why": entry.get("why", ""), "actor": self.actor})
         return scheme
+
+
+def _lab_to_hex(lab):
+    import numpy as np
+    from colour import Lab_to_XYZ, XYZ_to_sRGB
+    rgb = np.clip(XYZ_to_sRGB(Lab_to_XYZ(np.asarray(lab, dtype=float))), 0, 1)
+    return "#%02X%02X%02X" % tuple(int(round(v * 255)) for v in rgb)
 
 
 def _hex_to_lab(value):
