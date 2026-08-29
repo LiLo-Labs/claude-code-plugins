@@ -194,7 +194,7 @@ def paint(input_path, out_dir, intent="", size_mm=None, palette=(),
         input_path, out_dir, mesh, frame, face_part, labels, vocabulary,
         palette, backend, intent, nozzle_mm, viewing_mm, up=up,
         overviews=overviews, features=tree.get("features"), tree=tree,
-        log=log)
+        rig_poses=rig_poses, log=log)
     manifest["up_axis"] = [round(float(v), 6) for v in up]
 
     manifest.update({"atoms": atom_count, "naming": naming,
@@ -688,7 +688,7 @@ def _part_atlas(mesh, settled, claimed, labels, frame, out_dir, preview, up):
 def _paint_and_export(input_path, out_dir, mesh, frame, face_part, labels,
                       vocabulary, palette, backend, intent, nozzle_mm,
                       viewing_mm, up=None, overviews=(), features=None,
-                      tree=None, log=default_log):
+                      tree=None, rig_poses=(), log=default_log):
     """§10 then §11: beautiful first, then limited; critic last; then the 3MF."""
     from types import SimpleNamespace
     from PIL import Image
@@ -710,9 +710,18 @@ def _paint_and_export(input_path, out_dir, mesh, frame, face_part, labels,
         out[painted] = np.asarray(table, dtype=float)[face_part[painted]]
         return out
 
+    # THE CRITIC LOOKS FROM THE SAME PLACES THE SURVEY LOOKED. A turnaround on
+    # its own fresh orbit shows the model from vantages no identify pass ever
+    # used, so "the spikes read wrong from behind" is a claim about a view that
+    # exists in no index and cannot be routed back to a part. Sharing the rig's
+    # poses makes the colour loop and the identify loop the same conversation
+    # about the same surface; falling back to an orbit only if there is no rig.
+    vantages = ([pose.camera.forward for pose in rig_poses] if rig_poses
+                else preview.orbit(8, 18.0, up=up))
+
     def write(lab_per_face, stem):
         rgb = preview.lab_to_srgb(lab_per_face)
-        preview.contact_sheet(mesh, rgb, preview.orbit(8, 18.0, up=up),
+        preview.contact_sheet(mesh, rgb, vantages,
                               size=470, occlusion=occlusion, columns=4, up=up).save(
             os.path.join(out_dir, "%s-turnaround.png" % stem))
         Image.fromarray(preview.render_asset(

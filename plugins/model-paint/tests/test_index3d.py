@@ -196,6 +196,29 @@ class TestScore(unittest.TestCase):
         self.assertEqual(partial[4], 1)
 
 
+class TestNearestByArea(unittest.TestCase):
+    """The fallback that sizes an unconfirmed group from the confirmed ones."""
+
+    areas = np.array([1.0, 2.0, 4.0, 40.0, 400.0])
+
+    def test_picks_the_rung_closest_in_ratio(self):
+        self.assertEqual(index3d.nearest_by_area([0, 1, 2], self.areas, 3.5), 2)
+        self.assertEqual(index3d.nearest_by_area([0, 1, 2], self.areas, 1.1), 0)
+
+    def test_ratio_not_difference(self):
+        """Against a target of 4, the rung at 40 is off by a factor of 10 and
+        the rung at 1 by a factor of 4, so 1 wins -- even though 40 is far
+        closer in absolute area terms to nothing in particular. Absolute
+        difference would rank 40 as 36 away and 1 as 3 away and agree here by
+        accident; the case that separates them is a target between two rungs
+        spanning orders of magnitude."""
+        self.assertEqual(index3d.nearest_by_area([3, 4], self.areas, 63.2), 3)
+        self.assertEqual(index3d.nearest_by_area([3, 4], self.areas, 127.0), 4)
+
+    def test_a_single_rung_is_returned_unchanged(self):
+        self.assertEqual(index3d.nearest_by_area([1], self.areas, 999.0), 1)
+
+
 class _StubBackend:
     """Answers some looks and fails others, the way a real one does."""
 

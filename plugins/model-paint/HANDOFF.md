@@ -12,13 +12,43 @@ repeated.
 > from a persistence merge tree (`paintpipe/segment3d.py`, importing the
 > validated `scripts/scale_space.py` + `index_regions.py` + `index_persist.py`),
 > named by vision agents over paired shaded + numbered-id renders with
-> statistical vote fusion and contested-atom descent, a recovery ladder for
-> promised-but-missing parts (`paintpipe/refine.py`), unconstrained colour
-> before palette limiting, a critic over the finished renders, and the verified
-> 3MF export. Measured on five models (shell 626,766 tris; dragon 475,270;
-> spot 374,784; blub 227,328; ogre 159,424) with geometry verified identical on
-> every export. The earlier flood/Voronoi coarse stages recorded below are
-> dead ends kept for the reasons written next to them.
+> statistical vote fusion and contested-atom descent, then **one observation
+> rig and one coordinate system for every stage that has to look**
+> (`paintpipe/rig.py`), a **consensus survey** for parts no atom carries
+> (`paintpipe/index3d.py`), the recovery ladder for whatever the survey does
+> not reach (`paintpipe/refine.py`), unconstrained colour before palette
+> limiting, a critic over the finished renders from the rig's own poses, and
+> the verified 3MF export. Measured on five models (shell 626,766 tris; dragon
+> 475,270; spot 374,784; blub 227,328; ogre 159,424) with geometry verified
+> identical on every export.
+>
+> **Nothing in the live path draws a boundary any more.** The stencils grown at
+> one, three and five adjacency rings, the discs of camera-facing surface, the
+> crease-bounded floods and the painter's silhouette trim are all deleted, and
+> with them the design-cut exemption from the base-region projection. Every
+> claim that reaches the label field is a union of base regions, so every label
+> edge is an edge the geometry drew. What replaced them is not a better drawing
+> but a different question: the agent POINTS at instances from many poses and
+> lightings, the points land in the shared index, and each instance's extent is
+> climbed on the merge tree until another view's testimony says stop -- or, for
+> a lone instance nothing contradicts, until a rendered ladder of candidate
+> nodes is shown and the agent picks the rung that is one whole feature. There
+> is no threshold anywhere in that sequence.
+>
+> **Ground truth, at last.** `samples/creature.stl` is `tests/make_fixture.py`'s
+> own output -- a body, two horns, two eyes -- so its answer is known. The
+> survey returns exactly two horns at 48 faces each and exactly two eyes at 320
+> faces each, from eight looks, with no false positives and nothing missed.
+> That is the first end-to-end measurement in this project against a known
+> answer rather than against a render someone judged by eye.
+>
+> **Install `embreex`.** It replaces trimesh's pure-python ray engine, and the
+> rig casts one pose per camera. Measured here on `samples/creature.stl`: a
+> 256px cast went 2.6s -> 0.07s, a 37x speedup. A 12-view rig on the dragon
+> builds in 4 seconds with it and minutes without. See `requirements-test.txt`.
+>
+> The earlier flood/Voronoi coarse stages recorded below are dead ends kept for
+> the reasons written next to them.
 
 ## What this plugin is for
 

@@ -350,6 +350,18 @@ def climb(resolved, tree):
     return stopped, ladders, chains
 
 
+def nearest_by_area(rungs, areas, typical):
+    """The rung whose area is closest to `typical`, compared as a RATIO.
+
+    Log-ratio rather than difference, because these sizes differ by factors:
+    a spike is a spike whether it is 4mm2 or 40, and a rung twice the target
+    is exactly as wrong as one half of it. Absolute difference would make
+    every large rung look equally bad and pick the smallest.
+    """
+    return int(min(rungs, key=lambda r: abs(np.log(
+        max(float(areas[int(r)]), 1e-9) / max(float(typical), 1e-9)))))
+
+
 def _framed_pose(mesh, tree, wide, regions, pixels=420, context=2.5):
     """A close pose on one candidate, looking from where it is already visible.
 
@@ -545,28 +557,31 @@ def settle(backend, mesh, tree, views, poses, clicks, answered, feature, hint,
     # climbing, i.e. its ladder still has rungs above where it stopped.
     settled, notes = {}, {}
     if confirm:
-        # A group whose climb was stopped by another view's testimony needs no
-        # picture: the separation rule already bound, and its ladder has no
-        # rungs left above where it stopped. Only the open-ended climbs are
-        # bought, and they are bought in parallel -- they are independent
-        # questions about different parts of the model, and asking 40 of them
-        # one after another was most of the wall clock of a survey.
-        open_ended, ordered = [], sorted(grouped.items(),
-                                         key=lambda kv: -len(kv[1]))
+        # THE CLIMB GIVES AN UPPER BOUND, NEVER A LOWER ONE. It stops below the
+        # first node that merges two instances one view kept apart, so the
+        # instance is somewhere in [the clicked region, the climbed node] -- and
+        # where no view contradicted it, the climbed node can be most of the
+        # model. The ladder's job is to choose within that interval, so a group
+        # whose climb never left its own region has nothing to choose and needs
+        # no picture; every other group does.
+        #
+        # They are bought in parallel: independent questions about different
+        # parts of the model, and asking sixty of them one after another was
+        # most of the wall clock of a survey.
+        climbed, ordered = [], sorted(grouped.items(),
+                                      key=lambda kv: -len(kv[1]))
         for node, members in ordered:
             if len(ladders[members[0]]) <= 1:
                 settled[node] = node
             else:
-                open_ended.append((node, members))
-        if len(open_ended) > confirm_cap:
-            # Beyond the cap the climbed node stands as-is. It is the honest
-            # fallback -- it is where another view's testimony put it -- and
-            # the count is reported so a run that hit the cap says so.
-            log("  %d open-ended climbs; confirming the %d best supported"
-                % (len(open_ended), confirm_cap))
-            for node, _members in open_ended[confirm_cap:]:
-                settled[node] = node
-            open_ended = open_ended[:confirm_cap]
+                climbed.append((node, members))
+        capped = []
+        if len(climbed) > confirm_cap:
+            log("  %d climbs to settle; confirming the %d best supported by "
+                "sight and sizing the rest from what they confirm"
+                % (len(climbed), confirm_cap))
+            capped = climbed[confirm_cap:]
+            climbed = climbed[:confirm_cap]
 
         def _confirm(job):
             node, members = job
@@ -575,15 +590,38 @@ def settle(backend, mesh, tree, views, poses, clicks, answered, feature, hint,
                 intent, out_dir,
                 tag="%s-%d" % (rig_module.digest(feature)[:6], node), log=log)
 
-        if open_ended:
+        if climbed:
             from concurrent.futures import ThreadPoolExecutor
             with ThreadPoolExecutor(max_workers=max(1, int(workers))) as pool:
-                for node, (picked, why) in pool.map(_confirm, open_ended):
+                for node, (picked, why) in pool.map(_confirm, climbed):
                     if picked is None:
                         notes[node] = why
                         continue
                     settled[node] = picked
                     notes[picked] = why
+
+        if capped:
+            # Instances of one repeating feature are the same kind of thing, so
+            # the size the agent CONFIRMED on this model is the best evidence
+            # available about the size of the ones it was not shown. Each
+            # remaining group takes the rung of its own ladder closest in area
+            # to that median -- its own boundary, at a size that was measured
+            # rather than assumed. Falling back to the climbed node instead
+            # would take the upper bound every time, which is exactly the
+            # over-merge the ladder exists to prevent.
+            areas = np.asarray(tree["area"], dtype=float)
+            picked_areas = [float(areas[int(v)]) for v in settled.values()
+                            if int(v) < len(areas)]
+            if picked_areas:
+                typical = float(np.median(picked_areas))
+                for node, members in capped:
+                    settled[node] = nearest_by_area(ladders[members[0]],
+                                                    areas, typical)
+                log("  sized %d unconfirmed group(s) at the confirmed median "
+                    "of %.1f mm2" % (len(capped), typical))
+            else:
+                for node, _members in capped:
+                    settled[node] = node
     else:
         settled = {node: node for node in grouped}
 
