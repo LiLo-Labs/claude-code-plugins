@@ -50,6 +50,79 @@ repeated.
 > The earlier flood/Voronoi coarse stages recorded below are dead ends kept for
 > the reasons written next to them.
 
+## Measured: the survey, on two models, against known answers
+
+Every number here came from a run in this repo, with `embreex` installed and
+`claude -p` as the vision backend. Reproduce with `samples/`.
+
+### creature.stl -- known ground truth, and the answer is exact
+
+`samples/creature.stl` is `tests/make_fixture.py`'s own output: an icosphere
+body, two cones for horns, two small spheres for eyes, concatenated rather
+than unioned so every original triangle survives. The right answer is
+therefore known exactly, which is what makes this the first honest end-to-end
+measurement in the project -- everything before it was judged by eye.
+
+Eight looks (4 poses x 2 lightings), 512px:
+
+    horns   2 instances, 96 faces   = 48 + 48, the two cones exactly
+    eyes    2 instances, 640 faces  = 320 + 320, the two spheres exactly
+
+No false positives, nothing missed, every look agreeing (share 1.0 on the
+horns). **This run also found circumstance 11**: at eight workers, six of
+sixteen calls failed, and because a failed call sat in the consensus
+denominator an eye was dropped at share 0.33 having been correctly found by
+both looks that answered. The fix is in `ask_views`/`score`; the exact result
+above is what the same rig returns once failures stop voting.
+
+### baby-dragon.stl -- the case that defeated the drawn proposers
+
+475,270 triangles, 1,291 base regions, 29 forest roots. Twelve looks (6 poses
+x 2 lightings) at 768px, ONE multi-feature ask per look covering both
+features: 178 points for "dorsal spike" and 14 for "eye", 12 of 12 looks
+answered, whole survey 111s.
+
+**The eyes come back as merge-tree nodes 53 and 54.** Those are the same two
+nodes named in circumstance 9 as the ones that "existed all along" while a
+whole session of discs, bands and floods was refused by the confirm gate. The
+survey reaches them by pointing at them and climbing, first time, with no
+drawing and no swept radius.
+
+The spikes show what the ladder buys. Of 61 climbs to settle, 8 were confirmed
+by sight and the other 53 sized at the confirmed median (118.0 mm2). The
+agent's own reasons are the evidence that the confirm gate is doing real work
+rather than rubber-stamping:
+
+> "Candidates 1-3 tint only part of the spike's height while 5 balloons onto a
+> whole tail segment and neighbouring spikes; 4 covers the single spike from
+> base to tip and nothing else."
+
+That is a boundary decision made by looking, with no threshold anywhere in it.
+
+**Boundary quality is solved; recall is not, and the limit is looks.** Settling
+the SAME cached points at different consensus gates costs no vision calls at
+all, so the trade is measurable directly:
+
+    min_votes  min_share | instances  faces   % of surface
+    2          0.30      | 16         22328   4.70      <- default
+    2          0.20      | 25         33364   7.02
+    1          0.20      | 26         33545   7.06
+    1          0.10      | 58         74540   15.68
+    1          0.00      | 64         82484   17.36
+
+Render both and the story is plain. At the default the orange sits on whole
+dorsal spikes, tip to base, crisp, with nothing on the flanks -- but only
+about a third of the ridge is claimed. At 1/0.10 the ridge fills in and the
+count (58) reaches the old hand-swept best (53 spikes at radius 1.3), and
+orange also appears on **claws, feet and the skull ridge**, which are not
+dorsal spikes. Loosening the gate buys coverage with precision.
+
+The right reading is that six poses give a spike on one flank two or three
+chances to be seen, so `min_votes=2, min_share=0.30` binds hard on geometry
+that is simply not visible often enough. **The knob to turn first is
+`per_ring`, not the gate.** Every dropped instance is kept in the survey
+record with its votes and its share, so that decision is made against numbers.
+
 ## What this plugin is for
 
 A 3D printing hobbyist runs one slash command on an STL or 3MF and gets back a

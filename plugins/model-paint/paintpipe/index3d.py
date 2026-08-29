@@ -17,7 +17,15 @@ already there before anyone looked.
     a region  the point named         ->  a leaf of the merge tree
     a node    the instance really is  ->  climbed to, and confirmed by sight
 
-THREE QUESTIONS, THREE MECHANISMS, NONE OF THEM A THRESHOLD.
+THREE QUESTIONS, THREE MECHANISMS. THE BOUNDARY QUESTION HAS NO THRESHOLD.
+
+Stated exactly, because the distinction is the whole point: *where* a feature
+is and *how big* it is are settled entirely by evidence, and *whether it is
+really there* is settled by a vote count and a share, which are thresholds and
+are named as such below. Every previous attempt in this project put a number
+on the boundary, and the number is what made the boundaries ragged. Putting
+one on existence costs a missed instance, which is recoverable and reported;
+putting one on extent costs a wrong edge on the print, which is not.
 
 *Where are they?* Asked of many looks -- azimuth, elevation, roll and lighting
 all move (see rig.py) -- because one look is an opinion and six that agree are
@@ -38,7 +46,11 @@ seen, never because a constant was reached.
 *Is it really there?* Consensus, scored honestly: a node's votes are counted
 only against the views that could actually have seen it, read off the depth
 buffer, so an instance hidden in five looks is judged on the looks where it
-showed instead of being punished for the five.
+showed instead of being punished for the five. `min_votes` and `min_share` ARE
+thresholds, and they are the conservative kind -- on the dragon's dorsal
+spikes they kept 16 instances and dropped 48 for want of agreement. Every
+dropped instance is kept in the survey record with its votes and its share, so
+raising the gate is a decision made against numbers rather than a guess.
 """
 
 import json
@@ -48,6 +60,11 @@ from collections import defaultdict
 import numpy as np
 
 from . import rig as rig_module
+
+
+def _silent(*_args):
+    """A log that says nothing. `log=None` is a caller's right, and guarding
+    every call site with `if log:` is how three of them got missed."""
 
 
 FIND_PROMPT = """This is a %(pixels)dx%(pixels)d rendered view of a 3D model, \
@@ -510,6 +527,7 @@ def survey_many(backend, mesh, tree, views, poses, features, intent, out_dir,
     The looks are what cost money and time, so they are shared; everything
     after them is per-feature and independent.
     """
+    log = log or _silent
     os.makedirs(out_dir, exist_ok=True)
     clicks, answered = ask_views_many(backend, views, features, intent,
                                       workers=workers, log=log)
@@ -532,6 +550,12 @@ def settle(backend, mesh, tree, views, poses, clicks, answered, feature, hint,
     Split out from `survey` so that one shared set of looks can settle many
     features (see `survey_many`) without asking for the pictures again.
     """
+    # Owns its directory rather than trusting a caller to have made it: the
+    # ladder sheets are written from inside the confirm pool, where a missing
+    # directory surfaces as a thread exception halfway through a survey that
+    # has already been paid for.
+    log = log or _silent
+    os.makedirs(out_dir, exist_ok=True)
     base = rig_module.region_of_face(tree)
     resolved, missed = resolve(clicks, views, tree, base)
     if log:
