@@ -454,7 +454,14 @@ def _name_atoms(mesh, frame, face_atom, tree, atom_count, backend, intent, up,
     label_area = np.bincount(provisional[voted], weights=atom_area[voted],
                              minlength=len(labels))
     share = label_area / max(float(label_area.sum()), 1e-9)
-    swallowing = np.flatnonzero(share > 0.5)
+    # A third of a model is already too much for one name: the shell's
+    # "limpet rosettes" -- rosettes! -- took 38% of it and painted the dome
+    # orange, sitting just under a half-share test. Descending a label that
+    # IS legitimately large (a body, a skin) is harmless: its sub-atoms
+    # simply vote the same name again, and the re-ask is two batched calls
+    # against the same cameras. Being liberal here costs little and catches
+    # the failure that ruins a model.
+    swallowing = np.flatnonzero(share > 0.33)
     if len(swallowing):
         wide = np.flatnonzero(np.isin(provisional, swallowing) & (top > 0))
         wide = wide[np.argsort(-atom_area[wide])][:32]
