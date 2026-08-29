@@ -10,9 +10,14 @@
     descend  -- atoms whose votes straddle parts are split along their own
                 sub-tree and re-asked. The tree makes "colour the sub-part" a
                 descent, not a re-segmentation.
-    refine   -- parts the vocabulary promised but nobody found get the recovery
-                ladder: declared-parent zoom, locate-then-zoom, prune gate,
-                design cut confirmed in context (refine.refine_subparts).
+    survey   -- parts the vocabulary promised that no atom carries are found by
+                LOOKING: one rig of poses x lightings (rig.observe), points
+                fused in the shared base-region index, extents climbed on the
+                merge tree and confirmed by sight (index3d.survey_many).
+    refine   -- whatever the survey did not reach gets the recovery ladder:
+                declared-parent zoom, locate-then-zoom, prune gate, and a cut
+                chosen from merge-tree candidates confirmed in context
+                (refine.refine_subparts). Nothing in it draws a boundary.
     paint    -- the painter colours the named parts unconstrained ("colour it
                 beautifully"); only then is the scheme limited to the loaded
                 filaments, and a critic reviews the finished renders and may
@@ -99,6 +104,27 @@ def paint(input_path, out_dir, intent="", size_mm=None, palette=(),
         mesh, frame, face_atom, tree, atom_count, backend, intent, up,
         pixels=pixels, workers=workers, log=log)
 
+    # -- the rig: one set of looks, shared by every stage that has to see ----
+    # Built once, here, and passed down. Two stages that build their own
+    # cameras express their claims in two different places and can never
+    # contradict each other; on one rig, "the agent pointed here" means the
+    # same thing to the survey, the recovery ladder and the colour critic.
+    from . import rig as rig_module
+    views, rig_poses = rig_module.observe(mesh, up, os.path.join(out_dir, "rig"),
+                                          pixels=pixels, log=log)
+
+    # -- survey: parts the vocabulary promised that no atom carries ----------
+    # Before the ladder, not after, because of circumstance 9's invariant:
+    # proposals come from the geometry's own structures first. A part missed by
+    # the atom vote is usually smaller than the atoms that voted, and the
+    # survey finds it by looking from every angle and letting the merge tree
+    # say where it ends -- which is the whole remedy, arrived at without
+    # drawing anything.
+    face_part, labels, surveyed = _survey_missing(
+        mesh, tree, face_part, labels, vocabulary, backend, intent,
+        views, rig_poses, os.path.join(out_dir, "survey"), workers=workers,
+        log=log)
+
     # -- second pass: recover what the vocabulary promised but nobody found ---
     from . import refine as refine_module
     face_part, recovered = refine_module.refine_subparts(
@@ -108,19 +134,19 @@ def paint(input_path, out_dir, intent="", size_mm=None, palette=(),
         {k: v for k, v in recovered.items() if k != "_design_faces"})
         if recovered else "nothing missing"))
 
-    # LABELS LIVE ON THE TREE. Every geometric claim above moved faces; the
-    # projection makes each base region take its area-majority label, so
-    # every label edge is a region edge again -- a real geometric boundary,
-    # never a ragged selection. Design cuts (features painted onto smooth
-    # geometry, which have no region to snap to) are the one exemption.
+    # LABELS LIVE ON THE TREE, WITHOUT EXCEPTION. Every geometric claim above
+    # moved faces; the projection makes each base region take its area-majority
+    # label, so every label edge is a region edge again -- a real geometric
+    # boundary, never a ragged selection.
+    #
+    # There is no design-cut exemption any more, because there are no design
+    # cuts: the stencils, rings and discs that needed protecting from this
+    # projection are gone (refine._geometry_candidates), and every proposal
+    # that reaches here is already a union of base regions. Circumstance 10 is
+    # closed by construction rather than by a capped exemption.
     areas_arr = np.asarray(mesh.area_faces, dtype=float)
-    design_keep = np.zeros(len(mesh.faces), dtype=bool)
-    for face in (recovered or {}).get("_design_faces", []):
-        design_keep[int(face)] = True
-    face_part = segment3d.snap_to_base(tree, face_part, areas_arr,
-                                       keep=design_keep)
-    log("labels snapped to base regions (%d design faces kept)"
-        % int(design_keep.sum()))
+    face_part = segment3d.snap_to_base(tree, face_part, areas_arr)
+    log("labels snapped to base regions")
 
     # Every instance of every small part gets its own zoomed look; a refused
     # instance reverts to the label around it. The audit judges from model
@@ -143,8 +169,7 @@ def paint(input_path, out_dir, intent="", size_mm=None, palette=(),
     if swept:
         recovered = dict(recovered or {})
         recovered["_scatter_swept"] = swept
-    face_part = segment3d.snap_to_base(tree, face_part, areas_arr,
-                                       keep=design_keep)
+    face_part = segment3d.snap_to_base(tree, face_part, areas_arr)
 
     # Boundaries that follow creases stay; boundaries scribbled across smooth
     # skin straighten. Two contrasting filaments meeting on a staircase edge
@@ -173,6 +198,7 @@ def paint(input_path, out_dir, intent="", size_mm=None, palette=(),
     manifest["up_axis"] = [round(float(v), 6) for v in up]
 
     manifest.update({"atoms": atom_count, "naming": naming,
+                     "surveyed": surveyed,
                      "recovered": recovered, "isolation": rows,
                      "vocabulary": vocabulary,
                      "seconds": round(time.time() - started, 1),
@@ -556,6 +582,63 @@ def _name_atoms(mesh, frame, face_atom, tree, atom_count, backend, intent, up,
               "voted_atoms": int((assigned >= 0).sum()), "atoms": int(count),
               "audit_corrections": audit_history}
     return face_part, labels, vocabulary, naming, overviews, intent
+
+
+def _survey_missing(mesh, tree, face_part, labels, vocabulary, backend, intent,
+                    views, poses, out_dir, workers=3, cap=6, log=default_log):
+    """Promised parts that no atom carries, found by looking from every angle.
+
+    The atom vote can only name things at least as big as an atom, so a
+    vocabulary entry with no faces is the ordinary outcome for anything
+    smaller -- eyes on a 250-atom dragon, colonies on a reef panel. Every such
+    part is surveyed here, all of them sharing ONE set of looks, and each
+    instance's extent comes from the merge tree rather than from a drawing.
+
+    `cap` bounds how many parts one run will survey. The looks are shared, so
+    the cost of another part is its settling and its ladder confirms rather
+    than another dozen renders -- but it is not nothing, and a vocabulary that
+    promised twenty parts is a naming problem, not a recovery problem.
+    """
+    from . import index3d
+
+    if not vocabulary:
+        return face_part, labels, {}
+    labels = list(labels)
+    counted = (np.bincount(face_part[face_part >= 0], minlength=len(labels))
+               if len(labels) else np.zeros(0, dtype=int))
+    missing = []
+    for part in vocabulary:
+        label = str(part.get("label", "")).strip()
+        if not label:
+            continue
+        if label in labels and counted[labels.index(label)] > 0:
+            continue
+        missing.append((label, str(part.get("note", "") or "")))
+    if not missing:
+        return face_part, labels, {}
+    if len(missing) > cap:
+        log("survey: %d parts promised but uncarried; surveying the first %d"
+            % (len(missing), cap))
+        missing = missing[:cap]
+    log("survey: looking for %s" % ", ".join(name for name, _n in missing))
+
+    found = index3d.survey_many(backend, mesh, tree, views, poses, missing,
+                                intent, out_dir, workers=workers, log=log)
+    report = {}
+    for label, _note in missing:
+        unit, instances, _detail = found.get(label, (None, [], {}))
+        if unit is None or not len(instances):
+            report[label] = 0
+            continue
+        if label not in labels:
+            labels.append(label)
+        face_part[unit >= 0] = labels.index(label)
+        report[label] = int((unit >= 0).sum())
+    carried = {k: v for k, v in report.items() if v}
+    log("survey: recovered %s" % (", ".join("%s=%d faces" % (k, v)
+                                            for k, v in carried.items())
+                                  if carried else "nothing"))
+    return face_part, labels, report
 
 
 def _settle(field, mesh, face_part, labels, log=default_log):
