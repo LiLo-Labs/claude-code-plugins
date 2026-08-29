@@ -7,6 +7,9 @@ the pixel coordinate of each instance it can see, and the render's own buffers
 turn that pixel into a face on the mesh. Vision answers where and which;
 geometry answers how far the instance extends.
 
+No region is painted until it has been SEEN and confirmed as one instance:
+the tree extracts exact parts, and a look decides which of them are the thing.
+
 One look is never enough, and that is the point of rotating. The same field is
 visited from many directions and at two scales -- the whole piece, then zoomed
 quarters where small instances are legible -- and every hit is reduced to a 3D
@@ -147,90 +150,172 @@ def survey(backend, mesh, frame, up, feature, hint, intent, out_dir,
     return (np.array(kept_face, dtype=np.int64), np.array(kept_point), family)
 
 
-def grow(mesh, seeds, characteristic, family, base=None, reach_scale=1.35,
-         foot_deg=32.0):
-    """Each seed becomes a unit, out to the crease at the feature's foot."""
-    from collections import deque
+def units_from_tree(mesh, tree, seeds, family, log=print):
+    """Each seed resolves to the merge-tree node that IS its instance.
 
+    A flood needs a reach and a stopping rule, and both are guesses that
+    over- or under-paint. The tree already holds the answer: walking up from
+    the seed's own base region, each ancestor is a larger real piece of the
+    surface, and the one whose area matches the family's scale is the
+    instance. Its boundary is the geometry's boundary -- nothing spills,
+    nothing is cut short -- and two seeds on one instance land on one node,
+    so duplicates collapse for free.
+    """
+    import sys
+    here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    scripts = os.path.join(here, "scripts")
+    if scripts not in sys.path:
+        sys.path.insert(0, scripts)
+    import index_persist
+
+    children = tree["children"]
+    base = np.asarray(tree["base"], dtype=np.int64)
+    regions = int(tree["regions"])
+    node_area = np.asarray(tree["area"], dtype=float)
     areas = np.asarray(mesh.area_faces, dtype=float)
-    tri = mesh.triangles.mean(axis=1)
-    adjacency = mesh.face_adjacency
-    angles = np.degrees(np.asarray(mesh.face_adjacency_angles))
-    convex = np.asarray(mesh.face_adjacency_convex)
-    nbr = [[] for _ in range(len(areas))]
-    for (a, b), is_convex, angle in zip(adjacency, convex, angles):
-        nbr[a].append((b, is_convex, angle))
-        nbr[b].append((a, is_convex, angle))
+    parents = {}
+    for node in range(len(children)):
+        left, right = children[node]
+        if left >= 0:
+            parents[int(left)] = node
+        if right >= 0:
+            parents[int(right)] = node
+
+    from collections import defaultdict
+    region_faces = defaultdict(list)
+    for face, region in enumerate(base):
+        region_faces[int(region)].append(face)
+
+    target = float(np.pi * family * family)
+    chosen = {}
+    for seed in seeds:
+        node = int(base[int(seed)])
+        best, best_score = None, None
+        while node is not None:
+            area = float(node_area[node])
+            if area <= 4.0 * target:
+                score = abs(np.log(max(area, 1e-6) / target))
+                if best_score is None or score < best_score:
+                    best, best_score = node, score
+            else:
+                break
+            node = parents.get(node)
+        if best is not None:
+            chosen.setdefault(best, 0)
+            chosen[best] += 1
+    log("  %d seeds -> %d distinct tree nodes (target %.1f mm2)"
+        % (len(seeds), len(chosen), target))
 
     unit = np.full(len(areas), -1, dtype=np.int64)
     made = 0
-    for seed in seeds:
-        if unit[seed] >= 0:
+    for node in chosen:
+        leaves = []
+        index_persist.leaves_of(children, int(node), regions, leaves)
+        faces = []
+        for leaf in leaves:
+            faces.extend(region_faces[int(leaf)])
+        faces = np.array([f for f in faces if unit[f] < 0], dtype=np.int64)
+        if len(faces) < 8:
             continue
-        # Every instance of one kind grows to the same reach -- uniformity
-        # by construction, not by a repair afterwards.
-        scale = family
-        reach = max(scale * reach_scale, 0.8)
-        origin = tri[seed]
-        seen, queue, found = {int(seed)}, deque([int(seed)]), []
-        while queue:
-            face = queue.popleft()
-            found.append(face)
-            for other, is_convex, angle in nbr[face]:
-                if other in seen or unit[other] >= 0:
-                    continue
-                if np.linalg.norm(tri[other] - origin) > reach:
-                    continue
-                # Never leave the feature's own scale. A face on the host
-                # body measures far coarser than a face on the feature, so
-                # this is what stops a unit bleeding out over the surface
-                # it sits on when no crease happens to be in the way.
-                if characteristic[other] > scale * 2.0:
-                    continue
-                # Leave the feature's own recess freely; beyond it, a concave
-                # crease is the foot where the feature meets what it sits on.
-                if (not is_convex) and angle > foot_deg \
-                        and np.linalg.norm(tri[face] - origin) > scale * 0.55:
-                    continue
-                seen.add(other)
-                queue.append(other)
-        found = np.array([f for f in found if unit[f] < 0], dtype=np.int64)
-        if len(found) < 8:
-            continue
-        unit[found] = made
+        unit[faces] = made
         made += 1
-    # A ball of reach spills wherever no crease falls. Trim every unit to the
-    # mesh's OWN regions: a base region joins the unit only if the unit holds
-    # most of it, so a unit ends where the geometry says a region ends. This
-    # is the same law the label field obeys -- boundaries are region edges.
-    if base is not None and made:
-        base = np.asarray(base, dtype=np.int64)
-        regions = int(base.max()) + 1
-        for number in range(made):
-            inside = unit == number
-            if not inside.any():
-                continue
-            held = np.bincount(base[inside], weights=areas[inside],
-                               minlength=regions)
-            total = np.bincount(base, weights=areas, minlength=regions)
-            share = held / np.maximum(total, 1e-9)
-            unit[inside] = -1
-            take = np.isin(base, np.flatnonzero(share >= 0.5)) & \
-                (unit < 0)
-            unit[take] = number
-
-    # A unit far larger than its peers grew somewhere it should not have.
-    if made:
-        sizes = np.bincount(unit[unit >= 0], weights=areas[unit >= 0],
-                            minlength=made)
-        typical = float(np.median(sizes[sizes > 0]))
-        for number in np.flatnonzero(sizes > 4.0 * typical):
-            unit[unit == number] = -1
-        order = -np.ones(made, dtype=np.int64)
-        alive = [n for n in range(made) if (unit == n).any()]
-        for new, old in enumerate(alive):
-            order[old] = new
-        keep = unit >= 0
-        unit[keep] = order[unit[keep]]
-        made = len(alive)
     return unit, made
+
+
+CONFIRM_PROMPT = """Each numbered panel shows the same 3D piece with ONE \
+candidate region highlighted in red, seen close up.
+
+The piece: %s
+
+Which numbered panels show exactly ONE complete %s and nothing else? \
+Reject a panel if the red covers bare surface around the feature, if it \
+covers several of them at once, if it covers only part of one, or if it is \
+not that feature at all.
+
+Reply with ONLY a JSON object, no prose: {"yes": [<numbers>]}
+An empty list is a correct answer."""
+
+
+def confirm_units(backend, mesh, frame, up, unit, count, feature, intent,
+                  out_dir, occlusion=None, per_sheet=12, pixels=300,
+                  workers=8, log=print):
+    """Show every extracted part; keep only the ones confirmed as the feature."""
+    import io
+    from concurrent.futures import ThreadPoolExecutor
+    from PIL import Image, ImageDraw
+    from . import entities as entities_module
+    from . import preview, render as render_module
+
+    tri = mesh.triangles.mean(axis=1)
+    extent = float(np.linalg.norm(np.ptp(mesh.vertices, axis=0)))
+
+    def tile(number):
+        faces = np.flatnonzero(unit == number)
+        if len(faces) < 6:
+            return None
+        centre = tri[faces].mean(axis=0)
+        span = float(np.linalg.norm(np.ptp(tri[faces], axis=0)))
+        normal = mesh.face_normals[faces].mean(axis=0)
+        norm = np.linalg.norm(normal)
+        direction = -normal / norm if norm > 1e-9 else np.array([0., -1., -.3])
+        camera = render_module.Camera(direction, up, centre,
+                                      max(span * 2.0, 0.03 * extent), pixels)
+        bundle = render_module.render_bundle(mesh, camera, "zenithal", frame)
+        visible, hit = bundle["visible"], bundle["hit_id"]
+        mask = np.zeros(len(mesh.faces), dtype=bool)
+        mask[faces] = True
+        red = visible & mask[np.clip(hit, 0, len(mask) - 1)]
+        if int(red.sum()) < 40:
+            return None
+        lit = np.clip(bundle["rgb_lit"], 0, 1)
+        image = np.ones((pixels, pixels, 3))
+        image[visible] = (0.35 + 0.55 * lit)[visible, None]
+        image[red] = np.stack([0.40 + 0.55 * lit[red], 0.12 * lit[red],
+                               0.08 * lit[red]], axis=1)
+        return (image * 255).astype(np.uint8)
+
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        drawn = list(pool.map(tile, range(count)))
+    ready = [(n, art) for n, art in enumerate(drawn) if art is not None]
+    log("  %d of %d parts renderable for confirmation" % (len(ready), count))
+
+    keep = set()
+    for start in range(0, len(ready), per_sheet):
+        chunk = ready[start:start + per_sheet]
+        tiles, numbers = [], []
+        for offset, (number, art) in enumerate(chunk):
+            picture = Image.fromarray(art)
+            draw = ImageDraw.Draw(picture)
+            draw.rectangle([3, 3, 27, 21], fill=(255, 255, 255))
+            draw.text((8, 6), str(offset), fill=(0, 0, 0))
+            tiles.append(picture)
+            numbers.append(number)
+        columns = 4
+        rows = (len(tiles) + columns - 1) // columns
+        board = Image.new("RGB", (columns * pixels, rows * pixels),
+                          (255, 255, 255))
+        for i, picture in enumerate(tiles):
+            board.paste(picture, ((i % columns) * pixels,
+                                  (i // columns) * pixels))
+        buffer = io.BytesIO()
+        board.save(buffer, format="PNG")
+        prompt = CONFIRM_PROMPT % (intent or "a model", feature)
+        key = "confirm-%s" % entities_module.digest_of(
+            buffer.getvalue() + prompt.encode("utf-8"))[7:19]
+        path = os.path.join(out_dir, "%s.png" % key)
+        if not os.path.exists(path):
+            with open(path, "wb") as handle:
+                handle.write(buffer.getvalue())
+        answer = backend._run([path], prompt, key)
+        for value in (answer or {}).get("yes", []) or []:
+            try:
+                index = int(value)
+            except (TypeError, ValueError):
+                continue
+            if 0 <= index < len(numbers):
+                keep.add(numbers[index])
+    log("  confirmed %d of %d parts as %s" % (len(keep), len(ready), feature))
+    out = np.full(len(unit), -1, dtype=np.int64)
+    for new, number in enumerate(sorted(keep)):
+        out[unit == number] = new
+    return out, len(keep)
