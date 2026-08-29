@@ -435,6 +435,33 @@ def _name_atoms(mesh, frame, face_atom, tree, atom_count, backend, intent, up,
               if votes.shape[1] >= 2 else 0 * top)
     contested = np.flatnonzero((top > 0) & ((top - second) < 0.6 * top))
     log("contested atoms: %d" % len(contested))
+
+    # A label that swallows most of the model is a CATCH-ALL, not a part: it
+    # means the features that matter are smaller than the atoms voting on
+    # them, so no vote can ever reach them. A reef panel's colonies are ~700
+    # faces against ~4800-face atoms, and both a cold and a warm run put ~90%
+    # of that panel under one name while every colony family stayed a
+    # rounding error. Descending the biggest atoms of such a label gives its
+    # sub-atoms their own vote -- the same remedy contested atoms get.
+    face_areas = np.asarray(mesh.area_faces, dtype=float)
+    seen = face_atom >= 0
+    atom_area = np.bincount(face_atom[seen], weights=face_areas[seen],
+                            minlength=atom_count)
+    provisional = votes.argmax(axis=1)
+    # Atoms nobody voted on argmax to label 0; counting them would invent a
+    # catch-all out of silence. Only voted atoms carry area here.
+    voted = top > 0
+    label_area = np.bincount(provisional[voted], weights=atom_area[voted],
+                             minlength=len(labels))
+    share = label_area / max(float(label_area.sum()), 1e-9)
+    swallowing = np.flatnonzero(share > 0.5)
+    if len(swallowing):
+        wide = np.flatnonzero(np.isin(provisional, swallowing) & (top > 0))
+        wide = wide[np.argsort(-atom_area[wide])][:32]
+        log("catch-all %s holds %.0f%% of the surface -- descending its %d "
+            "largest atoms" % ([labels[int(i)] for i in swallowing],
+                               100.0 * share[swallowing].sum(), len(wide)))
+        contested = np.unique(np.concatenate([contested, wide]))
     parent_of = {}
     atom_map, count = face_atom, atom_count
     votes2 = None
@@ -442,7 +469,13 @@ def _name_atoms(mesh, frame, face_atom, tree, atom_count, backend, intent, up,
         new_map = face_atom.copy()
         next_id = atom_count
         new_ids = []
+        # The sub-atoms are re-asked in the SAME id renders as the first
+        # pass, so their count is bounded by the same legibility budget the
+        # atom cap enforces: past it the glyphs shrink and the votes rot.
+        budget = max(120, atom_count)
         for atom in contested:
+            if len(new_ids) >= budget:
+                break
             subs = segment3d.descend(tree, int(atom), max_children=12)
             if len(subs) < 2:
                 continue
