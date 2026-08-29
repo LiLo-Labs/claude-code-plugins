@@ -1,21 +1,22 @@
-"""Index every instance of a repeating feature, by looking and pointing.
+"""Index repeating features by consensus over a GLOBAL index of tree nodes.
 
-Segmentation can propose regions, but it cannot tell a barnacle from the
-crevice beside it -- that is a question about what the thing IS, and the only
-honest way to answer it is to look. So the agent looks and POINTS: it returns
-the pixel coordinate of each instance it can see, and the render's own buffers
-turn that pixel into a face on the mesh. Vision answers where and which;
-geometry answers how far the instance extends.
+The merge tree gives every point on the surface a stable id at any chosen
+scale: face -> base region -> the ancestor node whose area matches the family.
+That id is the same id from every camera, so it is an index the whole survey
+can vote into. Vision points at instances in a picture; the pixel becomes a
+face; the face becomes a node; the node collects votes.
 
-No region is painted until it has been SEEN and confirmed as one instance:
-the tree extracts exact parts, and a look decides which of them are the thing.
+Consensus is the point of moving the camera. Azimuth, elevation, roll and
+zoom are all varied, so two views of one instance are genuinely different
+looks and not the same look twice. A node seen in several views and pointed
+at in several is an instance. A node pointed at once and never again was a
+misplaced click. And because a node's visibility is known exactly -- it is in
+the depth buffer or it is not -- votes are scored against the views that could
+actually have seen it, so an instance hidden in five views is not punished for
+the five, only judged on the ones where it showed.
 
-One look is never enough, and that is the point of rotating. The same field is
-visited from many directions and at two scales -- the whole piece, then zoomed
-quarters where small instances are legible -- and every hit is reduced to a 3D
-POINT. A coordinate in space is invariant to the camera that found it, so an
-instance seen from four angles is one instance, not four, and an instance
-hidden in three views only has to be visible in the fourth.
+Nothing is flood filled. A unit's boundary is its node's boundary, which is
+the geometry's own.
 """
 
 import os
@@ -23,86 +24,106 @@ import os
 import numpy as np
 
 
-FIND_PROMPT = """This is a %dx%d rendered view of part of a 3D model.
+FIND_PROMPT = """This is a %dx%d rendered view of a 3D model.
 
 The piece: %s
 
 Find every %s. %s
 
-For each one, give the pixel coordinate of a point ON it -- as close to its
+For each one, give the pixel coordinate of a point ON it, as close to its
 centre as you can. x is measured from the left edge, y from the top edge. The
-coordinate must land on the feature itself, not beside it. Include one only if
-you can actually see it in THIS image; a partly hidden one counts if its
-centre is visible. Do not guess at things off the edge of the frame.
+coordinate must land on the feature itself. Only include one if you can see it
+in THIS image.
 
 Reply with ONLY a JSON object, no prose:
 {"found": [{"n": 1, "x": <int>, "y": <int>}, ...]}
 An empty list is a correct answer if this view shows none."""
 
 
-def _look(backend, mesh, frame, camera, feature, hint, intent, pixels,
-          out_dir, tag):
-    """One view: render, ask for coordinates, backproject to faces."""
+def cameras(mesh, up, pixels, views=6, zoom_tiles=3):
+    """Genuinely different looks: azimuth, elevation, roll and zoom all move.
+
+    Two cameras that differ only in azimuth see the same foreshortening and
+    the same self-occlusion pattern, so agreeing with each other means less
+    than it appears. Rolling the camera and changing the elevation makes each
+    look an independent test of the same claim.
+    """
+    from . import preview, render as render_module
+
+    centre = mesh.vertices.mean(axis=0)
+    radius = float(np.ptp(mesh.vertices, axis=0).max()) / 2 * 1.05
+    axis = np.asarray(up, dtype=float)
+    axis = axis / max(np.linalg.norm(axis), 1e-12)
+
+    out = []
+    for elevation, start, roll in ((14.0, 0.0, 0.0), (38.0, 27.0, 22.0),
+                                   (-24.0, 53.0, -18.0)):
+        for direction in preview.orbit(views, elevation, start_deg=start,
+                                       up=axis):
+            spun = axis
+            if abs(roll) > 1e-6:
+                angle = np.radians(roll)
+                side = np.cross(axis, np.asarray(direction, float))
+                norm = np.linalg.norm(side)
+                if norm > 1e-9:
+                    side = side / norm
+                    spun = axis * np.cos(angle) + side * np.sin(angle)
+            out.append((render_module.Camera(np.asarray(direction, float),
+                                             spun, centre, radius, pixels),
+                        np.asarray(direction, float), spun))
+    return out, centre, radius
+
+
+def node_index(mesh, tree, family):
+    """The global index: every face -> the tree node that is its instance.
+
+    One array, computed once, shared by every camera. Two views pointing at
+    one instance return the same id without any matching step.
+    """
+    base = np.asarray(tree["base"], dtype=np.int64)
+    children = tree["children"]
+    node_area = np.asarray(tree["area"], dtype=float)
+    parents = {}
+    for node in range(len(children)):
+        left, right = children[node]
+        if left >= 0:
+            parents[int(left)] = node
+        if right >= 0:
+            parents[int(right)] = node
+
+    target = float(np.pi * family * family)
+    region_node = np.full(int(base.max()) + 1, -1, dtype=np.int64)
+    for region in range(len(region_node)):
+        node, best, score = region, None, None
+        while node is not None:
+            area = float(node_area[node])
+            if area > 4.0 * target:
+                break
+            here = abs(np.log(max(area, 1e-6) / target))
+            if score is None or here < score:
+                best, score = node, here
+            node = parents.get(node)
+        region_node[region] = best if best is not None else region
+    return region_node[base], region_node
+
+
+def survey(backend, mesh, frame, up, feature, hint, intent, out_dir, tree,
+           characteristic, views=6, pixels=900, zoom_tiles=3, workers=8,
+           min_votes=2, min_share=0.34, log=print):
+    """Look from many different cameras; let tree nodes collect the votes."""
+    import io
+    from concurrent.futures import ThreadPoolExecutor
     from PIL import Image
     from . import entities as entities_module
     from . import render as render_module
 
-    bundle = render_module.render_bundle(mesh, camera, "zenithal", frame)
-    visible = bundle["visible"]
-    if not visible.any():
-        return []
-    lit = np.clip(bundle["rgb_lit"], 0, 1)
-    image = np.ones((pixels, pixels, 3))
-    image[visible] = (0.32 + 0.60 * lit)[visible, None]
-    path = os.path.join(out_dir, "look-%s.png" % tag)
-    Image.fromarray((image * 255).astype(np.uint8)).save(path)
-
-    prompt = FIND_PROMPT % (pixels, pixels, intent or "a model", feature,
-                            hint or "")
-    key = "find-%s" % entities_module.digest_of(
-        open(path, "rb").read() + prompt.encode("utf-8"))[7:19]
-    answer = backend._run([path], prompt, key)
-    hits = []
-    for entry in (answer or {}).get("found", []) or []:
-        try:
-            x, y = int(entry["x"]), int(entry["y"])
-        except (KeyError, TypeError, ValueError):
-            continue
-        if not (0 <= x < pixels and 0 <= y < pixels):
-            continue
-        face = int(bundle["hit_id"][y, x])
-        if face < 0:
-            continue
-        hits.append((face, np.asarray(bundle["point"][y, x], dtype=float)))
-    return hits
-
-
-def survey(backend, mesh, frame, up, feature, hint, intent, out_dir,
-           characteristic, views=6, pixels=900, zoom_tiles=2, workers=8,
-           log=print):
-    """Look from many directions at two scales; return deduped seed faces.
-
-    Instances are merged by 3D PROXIMITY relative to their own feature size,
-    so the same one found from six cameras stays one.
-    """
-    from concurrent.futures import ThreadPoolExecutor
-    from . import preview, render as render_module
-
     os.makedirs(out_dir, exist_ok=True)
-    centre = mesh.vertices.mean(axis=0)
-    radius = float(np.ptp(mesh.vertices, axis=0).max()) / 2 * 1.05
-    directions = list(preview.orbit(views, 18.0, up=up)) \
-        + list(preview.orbit(max(2, views // 2), 55.0, start_deg=30.0, up=up))
+    wide, centre, radius = cameras(mesh, up, pixels, views, zoom_tiles)
 
-    # Build every camera first -- wide plus zoomed quarters per direction --
-    # then look through all of them at once. The asks are independent.
+    # Wide views only AIM: their coordinates are worth millimetres on the
+    # model, which is wider than the feature. Every ask happens in a zoom.
     jobs = []
-    for index, direction in enumerate(directions):
-        camera = render_module.Camera(np.asarray(direction, float), up,
-                                      centre, radius, pixels)
-        # The wide view only AIMS: a coordinate returned from it is worth a
-        # few millimetres on the model, which is wider than the feature.
-        # Indexing happens in the zoom, where a barnacle is a hundred pixels.
+    for index, (camera, direction, spun) in enumerate(wide):
         bundle = render_module.render_bundle(mesh, camera, "zenithal", frame)
         points, seen = bundle["point"], bundle["visible"]
         for row in range(zoom_tiles):
@@ -115,207 +136,71 @@ def survey(backend, mesh, frame, up, feature, hint, intent, out_dir,
                 if mask.sum() < 400:
                     continue
                 target = np.median(block[mask], axis=0)
-                jobs.append((render_module.Camera(
-                    np.asarray(direction, float), up, target,
-                    radius / 2.3, pixels), "z%d-%d%d" % (index, row, col)))
-    log("  %d zoomed views over %d directions" % (len(jobs), len(directions)))
-    seeds = []
-    with ThreadPoolExecutor(max_workers=workers) as pool:
-        for hits in pool.map(lambda job: _look(backend, mesh, frame, job[0],
-                                               feature, hint, intent, pixels,
-                                               out_dir, job[1]), jobs):
-            seeds.extend(hits)
+                jobs.append((render_module.Camera(direction, spun, target,
+                                                  radius / 2.6, pixels),
+                             "%d-%d%d" % (index, row, col)))
+    log("  %d looks over %d cameras (azimuth, elevation, roll, zoom)"
+        % (len(jobs), len(wide)))
 
-    # The feature's own scale is whatever the CONSENSUS of hits measures --
-    # learned from what vision found, not assumed. A hit that lands on
-    # something far coarser than that consensus is a misplaced click on the
-    # host body, and growing from it would swallow the host.
-    if not seeds:
-        return np.array([], dtype=np.int64), np.array([]), 0.0
-    # One scale for the whole family, taken as the 70th percentile of what the
-    # hits measure: the median is dragged down by hits that land in the gaps
-    # between instances, and a family of one kind of thing IS one size.
-    scales = np.array([float(characteristic[f]) for f, _p in seeds])
-    family = float(np.percentile(scales, 70.0))
-    log("  family scale %.2fmm from %d hits" % (family, len(seeds)))
-    kept_face, kept_point = [], []
-    for face, point in seeds:
-        if any(np.linalg.norm(point - other) < family * 0.9
-               for other in kept_point):
-            continue
-        kept_face.append(face)
-        kept_point.append(point)
-    log("  %d hits over %d views -> %d distinct instances"
-        % (len(seeds), len(directions), len(kept_face)))
-    return (np.array(kept_face, dtype=np.int64), np.array(kept_point), family)
-
-
-def units_from_tree(mesh, tree, seeds, family, log=print):
-    """Each seed resolves to the merge-tree node that IS its instance.
-
-    A flood needs a reach and a stopping rule, and both are guesses that
-    over- or under-paint. The tree already holds the answer: walking up from
-    the seed's own base region, each ancestor is a larger real piece of the
-    surface, and the one whose area matches the family's scale is the
-    instance. Its boundary is the geometry's boundary -- nothing spills,
-    nothing is cut short -- and two seeds on one instance land on one node,
-    so duplicates collapse for free.
-    """
-    import sys
-    here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    scripts = os.path.join(here, "scripts")
-    if scripts not in sys.path:
-        sys.path.insert(0, scripts)
-    import index_persist
-
-    children = tree["children"]
-    base = np.asarray(tree["base"], dtype=np.int64)
-    regions = int(tree["regions"])
-    node_area = np.asarray(tree["area"], dtype=float)
-    areas = np.asarray(mesh.area_faces, dtype=float)
-    parents = {}
-    for node in range(len(children)):
-        left, right = children[node]
-        if left >= 0:
-            parents[int(left)] = node
-        if right >= 0:
-            parents[int(right)] = node
-
-    from collections import defaultdict
-    region_faces = defaultdict(list)
-    for face, region in enumerate(base):
-        region_faces[int(region)].append(face)
-
-    target = float(np.pi * family * family)
-    chosen = {}
-    for seed in seeds:
-        node = int(base[int(seed)])
-        best, best_score = None, None
-        while node is not None:
-            area = float(node_area[node])
-            if area <= 4.0 * target:
-                score = abs(np.log(max(area, 1e-6) / target))
-                if best_score is None or score < best_score:
-                    best, best_score = node, score
-            else:
-                break
-            node = parents.get(node)
-        if best is not None:
-            chosen.setdefault(best, 0)
-            chosen[best] += 1
-    log("  %d seeds -> %d distinct tree nodes (target %.1f mm2)"
-        % (len(seeds), len(chosen), target))
-
-    unit = np.full(len(areas), -1, dtype=np.int64)
-    made = 0
-    for node in chosen:
-        leaves = []
-        index_persist.leaves_of(children, int(node), regions, leaves)
-        faces = []
-        for leaf in leaves:
-            faces.extend(region_faces[int(leaf)])
-        faces = np.array([f for f in faces if unit[f] < 0], dtype=np.int64)
-        if len(faces) < 8:
-            continue
-        unit[faces] = made
-        made += 1
-    return unit, made
-
-
-CONFIRM_PROMPT = """Each numbered panel shows the same 3D piece with ONE \
-candidate region highlighted in red, seen close up.
-
-The piece: %s
-
-Which numbered panels show exactly ONE complete %s and nothing else? \
-Reject a panel if the red covers bare surface around the feature, if it \
-covers several of them at once, if it covers only part of one, or if it is \
-not that feature at all.
-
-Reply with ONLY a JSON object, no prose: {"yes": [<numbers>]}
-An empty list is a correct answer."""
-
-
-def confirm_units(backend, mesh, frame, up, unit, count, feature, intent,
-                  out_dir, occlusion=None, per_sheet=12, pixels=300,
-                  workers=8, log=print):
-    """Show every extracted part; keep only the ones confirmed as the feature."""
-    import io
-    from concurrent.futures import ThreadPoolExecutor
-    from PIL import Image, ImageDraw
-    from . import entities as entities_module
-    from . import preview, render as render_module
-
-    tri = mesh.triangles.mean(axis=1)
-    extent = float(np.linalg.norm(np.ptp(mesh.vertices, axis=0)))
-
-    def tile(number):
-        faces = np.flatnonzero(unit == number)
-        if len(faces) < 6:
-            return None
-        centre = tri[faces].mean(axis=0)
-        span = float(np.linalg.norm(np.ptp(tri[faces], axis=0)))
-        normal = mesh.face_normals[faces].mean(axis=0)
-        norm = np.linalg.norm(normal)
-        direction = -normal / norm if norm > 1e-9 else np.array([0., -1., -.3])
-        camera = render_module.Camera(direction, up, centre,
-                                      max(span * 2.0, 0.03 * extent), pixels)
+    def look(job):
+        camera, tag = job
         bundle = render_module.render_bundle(mesh, camera, "zenithal", frame)
-        visible, hit = bundle["visible"], bundle["hit_id"]
-        mask = np.zeros(len(mesh.faces), dtype=bool)
-        mask[faces] = True
-        red = visible & mask[np.clip(hit, 0, len(mask) - 1)]
-        if int(red.sum()) < 40:
+        visible = bundle["visible"]
+        if not visible.any():
             return None
         lit = np.clip(bundle["rgb_lit"], 0, 1)
         image = np.ones((pixels, pixels, 3))
-        image[visible] = (0.35 + 0.55 * lit)[visible, None]
-        image[red] = np.stack([0.40 + 0.55 * lit[red], 0.12 * lit[red],
-                               0.08 * lit[red]], axis=1)
-        return (image * 255).astype(np.uint8)
+        image[visible] = (0.32 + 0.60 * lit)[visible, None]
+        path = os.path.join(out_dir, "look-%s.png" % tag)
+        Image.fromarray((image * 255).astype(np.uint8)).save(path)
+        prompt = FIND_PROMPT % (pixels, pixels, intent or "a model", feature,
+                                hint or "")
+        key = "find-%s" % entities_module.digest_of(
+            open(path, "rb").read() + prompt.encode("utf-8"))[7:19]
+        answer = backend._run([path], prompt, key)
+        hits = []
+        for entry in (answer or {}).get("found", []) or []:
+            try:
+                x, y = int(entry["x"]), int(entry["y"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            if 0 <= x < pixels and 0 <= y < pixels:
+                face = int(bundle["hit_id"][y, x])
+                if face >= 0:
+                    hits.append(face)
+        return hits, np.unique(bundle["hit_id"][visible])
 
     with ThreadPoolExecutor(max_workers=workers) as pool:
-        drawn = list(pool.map(tile, range(count)))
-    ready = [(n, art) for n, art in enumerate(drawn) if art is not None]
-    log("  %d of %d parts renderable for confirmation" % (len(ready), count))
+        results = [r for r in pool.map(look, jobs) if r is not None]
 
-    keep = set()
-    for start in range(0, len(ready), per_sheet):
-        chunk = ready[start:start + per_sheet]
-        tiles, numbers = [], []
-        for offset, (number, art) in enumerate(chunk):
-            picture = Image.fromarray(art)
-            draw = ImageDraw.Draw(picture)
-            draw.rectangle([3, 3, 27, 21], fill=(255, 255, 255))
-            draw.text((8, 6), str(offset), fill=(0, 0, 0))
-            tiles.append(picture)
-            numbers.append(number)
-        columns = 4
-        rows = (len(tiles) + columns - 1) // columns
-        board = Image.new("RGB", (columns * pixels, rows * pixels),
-                          (255, 255, 255))
-        for i, picture in enumerate(tiles):
-            board.paste(picture, ((i % columns) * pixels,
-                                  (i // columns) * pixels))
-        buffer = io.BytesIO()
-        board.save(buffer, format="PNG")
-        prompt = CONFIRM_PROMPT % (intent or "a model", feature)
-        key = "confirm-%s" % entities_module.digest_of(
-            buffer.getvalue() + prompt.encode("utf-8"))[7:19]
-        path = os.path.join(out_dir, "%s.png" % key)
-        if not os.path.exists(path):
-            with open(path, "wb") as handle:
-                handle.write(buffer.getvalue())
-        answer = backend._run([path], prompt, key)
-        for value in (answer or {}).get("yes", []) or []:
-            try:
-                index = int(value)
-            except (TypeError, ValueError):
-                continue
-            if 0 <= index < len(numbers):
-                keep.add(numbers[index])
-    log("  confirmed %d of %d parts as %s" % (len(keep), len(ready), feature))
-    out = np.full(len(unit), -1, dtype=np.int64)
-    for new, number in enumerate(sorted(keep)):
-        out[unit == number] = new
-    return out, len(keep)
+    # The family's scale, from what the hits themselves measure. The 70th
+    # percentile rather than the median: hits that land in the gaps between
+    # instances measure small and drag a median down.
+    every = [face for hits, _seen in results for face in hits]
+    if not every:
+        return np.full(len(mesh.faces), -1, dtype=np.int64), 0, 0.0
+    family = float(np.percentile(characteristic[np.array(every)], 70.0))
+    face_node, _region_node = node_index(mesh, tree, family)
+    log("  family scale %.2fmm; %d hits over %d looks"
+        % (family, len(every), len(results)))
+
+    total = int(face_node.max()) + 1
+    votes = np.zeros(total, dtype=np.int64)
+    shown = np.zeros(total, dtype=np.int64)
+    for hits, visible_faces in results:
+        pointed = np.unique(face_node[np.array(hits, dtype=np.int64)]) \
+            if hits else np.array([], dtype=np.int64)
+        votes[pointed] += 1
+        here = np.unique(face_node[visible_faces[visible_faces >= 0]])
+        shown[here] += 1
+
+    share = votes / np.maximum(shown, 1)
+    winners = np.flatnonzero((votes >= min_votes) & (share >= min_share))
+    log("  %d nodes pointed at; %d pass consensus (>=%d votes, >=%.0f%% of "
+        "views that could see them)"
+        % (int((votes > 0).sum()), len(winners), min_votes, 100 * min_share))
+
+    unit = np.full(len(mesh.faces), -1, dtype=np.int64)
+    for number, node in enumerate(winners):
+        unit[face_node == node] = number
+    return unit, len(winners), family
