@@ -29,12 +29,20 @@ rather than against the whole model, and because a real feature is contiguous.
 Growth stopping at the edge of the field is a feature, not a limitation: it is
 what makes the selection something a person can predict and correct.
 
-When an ensemble's boundary support is available (support10x.npy beside the
-session), growth also refuses to cross an edge the scales agree on. That is what
-stops a runaway: descriptor similarity alone will happily walk from a barnacle
+When edge strengths are available (edge_strength.npy beside the session, from
+experiments/edgestrength.py), growth also refuses to cross a major edge. That is
+what stops a runaway: descriptor similarity alone will happily walk from a barnacle
 field onto the rib beside it if the two happen to score alike, but the boundary
-between them is one that every zoom level draws, and an edge drawn at every scale
-is not one a selection should step over.
+between them survives even a very coarse segmentation, and an edge that coarse is
+not one a selection should step over.
+
+Edge strength is the coarsest patch count at which the two sides come apart, so a
+*low* number is a major edge -- a crease that separates at 250 patches is real
+structure, while one that only appears at 4,600 is the segmentation running out of
+things to cut. The earlier statistic, how often an ensemble kept two faces together
+(support10x.npy), is not usable here: it is dominated by the coarsest scales, and
+measured on the shell it put 0.0% of pairs below the blocking threshold, so it
+blocked nothing at all.
 
 Every run writes a verification render, because a selection nobody looked at is
 not a selection anyone should paint from.
@@ -74,6 +82,62 @@ def load_context(session_dir):
     return session, labels, fields
 
 
+def patch_contacts(labels, pairs, strength=None):
+    """Which patches touch which, and how major the edge between them is.
+
+    `strength` is a per-face-pair edge strength: the coarsest patch count at which
+    the two faces came apart, so a low number means a major edge. A contact between
+    two patches spans many face-pairs, and its strength is their median rather than
+    their mean, because pairs that never separate carry infinity and would poison an
+    average. The median says what the contact does as a whole: if most of it comes
+    apart at a coarse scale it is an edge, and if most of it never comes apart it is
+    not, however strong a few stray pairs along it look.
+    """
+    left, right = labels[pairs[:, 0]], labels[pairs[:, 1]]
+    crossing = left != right
+
+    touching = {}
+    for a, b in zip(left[crossing], right[crossing]):
+        touching.setdefault(int(a), set()).add(int(b))
+        touching.setdefault(int(b), set()).add(int(a))
+
+    contact_strength = {}
+    if strength is not None:
+        samples = {}
+        for a, b, value in zip(left[crossing], right[crossing], strength[crossing]):
+            key = (int(min(a, b)), int(max(a, b)))
+            samples.setdefault(key, []).append(float(value))
+        contact_strength = {key: float(np.median(values))
+                            for key, values in samples.items()}
+    return touching, contact_strength
+
+
+def grow_local(chosen, similar, touching, contact_strength, respect_edges):
+    """Spread from the clicked patches to touching, similar patches.
+
+    Growth stops at a contact that already comes apart at `respect_edges` patches
+    or coarser. Contacts with no recorded strength default to infinity, which reads
+    as "no edge here" and lets growth through -- the conservative direction, since
+    an unmeasured contact should not silently behave like a wall.
+    """
+    reached = set(chosen)
+    queue = list(chosen)
+    while queue:
+        patch = queue.pop()
+        for neighbour in touching.get(patch, ()):
+            if neighbour in reached or not similar[neighbour]:
+                continue
+            if contact_strength:
+                key = (min(patch, neighbour), max(patch, neighbour))
+                if contact_strength.get(key, np.inf) <= respect_edges:
+                    continue        # a coarse scale already draws an edge here
+            reached.add(neighbour)
+            queue.append(neighbour)
+    keep = np.zeros(len(similar), dtype=bool)
+    keep[sorted(reached)] = True
+    return keep
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -90,9 +154,9 @@ def main():
                         help="also require the patch to sit within this distance")
     parser.add_argument("--same-height", type=float, default=None,
                         help="also require a similar height, as a fraction 0..1")
-    parser.add_argument("--respect-support", type=float, default=0.5,
-                        help="refuse to grow across a patch edge whose ensemble "
-                             "support is below this; 0 disables")
+    parser.add_argument("--respect-edges", type=float, default=1000.0,
+                        help="refuse to grow across a patch edge that already comes "
+                             "apart at this patch count or coarser; 0 disables")
     parser.add_argument("--max-share", type=float, default=0.35,
                         help="refuse a selection larger than this share of the model")
     parser.add_argument("--replace", action="store_true")
@@ -132,44 +196,17 @@ def main():
     similar = distance <= (args.tolerance * scale)
 
     if args.grow == "local":
-        # Which patches touch which, from the face graph, and how strongly the
-        # ensemble believes each contact is really a boundary.
         pairs = session["pairs"]
-        left, right = labels[pairs[:, 0]], labels[pairs[:, 1]]
-        crossing = left != right
-
-        support_path = os.path.join(args.session, "support10x.npy")
-        support = np.load(support_path) if os.path.exists(support_path) else None
-        contact_support = {}
-        if support is not None and args.respect_support > 0:
-            for a, b, value in zip(left[crossing], right[crossing], support[crossing]):
-                key = (int(min(a, b)), int(max(a, b)))
-                total, count = contact_support.get(key, (0.0, 0))
-                contact_support[key] = (total + float(value), count + 1)
-            contact_support = {key: total / count
-                               for key, (total, count) in contact_support.items()}
-
-        touching = {}
-        for a, b in zip(left[crossing], right[crossing]):
-            touching.setdefault(int(a), set()).add(int(b))
-            touching.setdefault(int(b), set()).add(int(a))
-
-        reached = set(chosen)
-        queue = list(chosen)
-        while queue:
-            patch = queue.pop()
-            for neighbour in touching.get(patch, ()):
-                if neighbour in reached or not similar[neighbour]:
-                    continue
-                if contact_support:
-                    key = (min(patch, neighbour), max(patch, neighbour))
-                    if contact_support.get(key, 1.0) < args.respect_support:
-                        continue        # every scale draws an edge here
-                reached.add(neighbour)
-                queue.append(neighbour)
-        keep = np.zeros(len(similar), dtype=bool)
-        keep[sorted(reached)] = True
-        similar = keep
+        strength_path = os.path.join(args.session, "edge_strength.npy")
+        strength = np.load(strength_path) if os.path.exists(strength_path) else None
+        touching, contact_strength = patch_contacts(labels, pairs, strength)
+        if args.respect_edges <= 0:
+            contact_strength = {}
+        elif strength is None:
+            sys.stderr.write("patch_select: no edge_strength.npy in the session; "
+                             "growth will not stop at major edges\n")
+        similar = grow_local(chosen, similar, touching, contact_strength,
+                             args.respect_edges)
 
     patch_centres = np.array([stat["centre"] if stat else [0.0, 0.0, 0.0]
                               for stat in stats])
