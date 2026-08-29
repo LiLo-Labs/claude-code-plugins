@@ -396,7 +396,7 @@ def verify_instances(mesh, face_part, labels, backend, intent, frame,
 
 
 def _family_node_candidates(mesh, tree, features, exemplar, median_piece,
-                            face_part, family_label_ids, cap=60):
+                            face_part, family_label_ids, cap=400):
     """Whole tree nodes that measure like the family's confirmed pieces.
 
     A colony is a NODE: classifying band-grown blobs split single colonies
@@ -431,6 +431,10 @@ def _family_node_candidates(mesh, tree, features, exemplar, median_piece,
     sig = features[exemplar]
     bands = [np.percentile(sig[:, c], [10.0, 90.0])
              for c in range(features.shape[1])]
+    # `median_piece` here is the COLONY size implied by the family's own
+    # characteristic radius (scale-space index), not the size of the
+    # fragments the family currently holds: sizing the hunt by fragments
+    # hunts fragments, and every sheet came back a sliver on a dome's edge.
     qualified = [node for node in range(len(node_area))
                  if 0.5 * median_piece <= node_area[node]
                  <= 2.5 * median_piece]
@@ -534,14 +538,23 @@ def recover_scattered_families(mesh, face_part, labels, backend, intent, frame,
     report = {}
     for label_id, label, members, median_piece, anchor_piece in families:
         if tree is not None:
+            # A colony's SIZE comes from the scale-space index, which
+            # measured the characteristic radius of the feature each face
+            # belongs to. The family's confirmed faces vote on that radius;
+            # the disc it implies is what a whole colony covers.
+            radius = float(np.median(features[members, 0]))
+            colony_area = float(np.pi * radius * radius)
+            log("  scatter sweep %-22s: colony scale r=%.1fmm -> %.0f mm2"
+                % (label, radius, colony_area))
             node_patches = _family_node_candidates(
-                mesh, tree, features, members, anchor_piece, face_part,
+                mesh, tree, features, members, colony_area, face_part,
                 family_ids)
             if node_patches:
                 log("  scatter sweep %-22s: %d whole-node candidates by "
                     "numbered sheet" % (label, len(node_patches)))
+                sampled = node_patches[:36]
                 agreed = _classify_patches_batched(
-                    backend, mesh, frame, node_patches[:36], label, intent,
+                    backend, mesh, frame, sampled, label, intent,
                     extent, up=up, log=log)
                 recovered = 0
                 for patch in agreed:
@@ -549,9 +562,42 @@ def recover_scattered_families(mesh, face_part, labels, backend, intent, frame,
                     recovered += 1
                     report.setdefault(label, []).append(
                         {"faces": int(len(patch))})
-                log("  scatter sweep %-22s: %d/%d nodes confirmed and "
-                    "recovered" % (label, recovered,
-                                   min(len(node_patches), 36)))
+                log("  scatter sweep %-22s: %d/%d sampled nodes confirmed"
+                    % (label, recovered, len(sampled)))
+                # A dense panel has hundreds of colonies and cannot afford a
+                # look at each. The confirmed nodes define the family
+                # PRECISELY -- same measured signature, same size -- so
+                # remaining candidates that are statistically
+                # indistinguishable from them are the same thing, and are
+                # taken without a further ask. Inference from verified
+                # evidence, on a tight band with no padding: a candidate
+                # must sit inside the confirmed set's own middle half.
+                if len(agreed) >= 3:
+                    confirmed = np.concatenate(agreed)
+                    tight = [np.percentile(features[confirmed, c],
+                                           [25.0, 75.0])
+                             for c in range(features.shape[1])]
+                    sizes = np.array([float(np.asarray(mesh.area_faces)[p]
+                                            .sum()) for p in agreed])
+                    lo_a, hi_a = 0.7 * sizes.min(), 1.4 * sizes.max()
+                    seen = {id(p) for p in sampled}
+                    extended = 0
+                    for patch in node_patches:
+                        if id(patch) in seen:
+                            continue
+                        area = float(np.asarray(mesh.area_faces)[patch].sum())
+                        if not (lo_a <= area <= hi_a):
+                            continue
+                        if all(lo <= float(features[patch, c].mean()) <= hi
+                               for c, (lo, hi) in enumerate(tight)):
+                            face_part[patch] = label_id
+                            extended += 1
+                            report.setdefault(label, []).append(
+                                {"faces": int(len(patch)), "by": "match"})
+                    if extended:
+                        log("  scatter sweep %-22s: %d further node(s) "
+                            "matched the confirmed signature exactly"
+                            % (label, extended))
                 continue
         feats = features[members]
         candidate = (face_part >= 0) & ~np.isin(face_part,
