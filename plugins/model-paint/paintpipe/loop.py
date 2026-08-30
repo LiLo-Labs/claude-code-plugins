@@ -256,15 +256,32 @@ def paint_units(tree):
     cached = tree.get("_units")
     if cached is not None:
         return cached
+    regions_total = int(tree["regions"])
+    if "birth" not in tree or "used" not in tree:
+        # A tree built before persistence was kept, or a synthetic one. Fall
+        # back to the base region itself: finer than ideal, but a click still
+        # lands somewhere real and the loop can still add to it. Crashing
+        # because an old cache lacks a field is not an option a run can take.
+        owner = np.arange(regions_total, dtype=np.int64)
+        tree["_units"] = owner
+        return owner
     from . import segment3d  # noqa: F401  (puts scripts/ on sys.path)
     import index_persist
 
+    # Persistence is measured as a log ratio against `floor`, so a floor of
+    # zero divides by zero. Real weights are positive, but a mesh with one
+    # zero-weight border would take the whole run down for it, so the floor is
+    # nudged off zero here rather than left to chance.
+    floor = float(tree.get("floor", 0.0))
+    ceiling = float(tree.get("ceiling", 1.0))
+    if not np.isfinite(floor) or floor <= 0:
+        floor = 1e-9
+    if not np.isfinite(ceiling) or ceiling <= floor:
+        ceiling = floor * 1e6
     chosen = index_persist.select(tree["children"], tree["birth"],
                                   tree["death"], tree["area"],
-                                  int(tree["used"]), float(tree["floor"]),
-                                  float(tree["ceiling"]))
-    regions = int(tree["regions"])
-    owner = np.arange(regions, dtype=np.int64)
+                                  int(tree["used"]), floor, ceiling)
+    owner = np.arange(regions_total, dtype=np.int64)
     for node in chosen:
         for leaf in rig_module.node_regions(tree, int(node)):
             owner[int(leaf)] = int(node)

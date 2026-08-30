@@ -34,9 +34,19 @@ def small_tree(regions=8, per_region=4):
         children[node] = (current, nxt)
         area[node] = area[current] + area[nxt]
         current, node = node, node + 1
+    # Persistence fields too, so the tests exercise the same path a real tree
+    # takes rather than the fallback.
+    birth = np.zeros(total)
+    death = np.full(total, np.inf)
+    for node in range(regions, total):
+        birth[node] = float(node - regions + 1)
+        for side in children[node]:
+            if side >= 0:
+                death[int(side)] = birth[node]
     return {"children": children,
             "base": np.repeat(np.arange(regions, dtype=np.int64), per_region),
-            "regions": regions, "area": area}
+            "regions": regions, "area": area, "birth": birth, "death": death,
+            "used": total, "floor": 0.5, "ceiling": float(regions) + 1.0}
 
 
 class TestPalette(unittest.TestCase):
@@ -133,6 +143,24 @@ class _Pose:
     @property
     def visible(self):
         return self.hit_id >= 0
+
+
+class TestPaintUnits(unittest.TestCase):
+    def test_a_tree_without_persistence_falls_back_rather_than_crashing(self):
+        """An older cached tree has no birth/death. A run must not die on it."""
+        tree = small_tree()
+        for key in ("birth", "used"):
+            tree.pop(key, None)
+        units = loop.paint_units(tree)
+        self.assertEqual(len(units), tree["regions"])
+
+    def test_a_unit_is_bounded(self):
+        """No single click may paint the whole model -- the runaway that made
+        every earlier run overwrite its own parts."""
+        tree = small_tree(regions=16)
+        units = loop.paint_units(tree)
+        biggest = max(np.bincount(units, minlength=len(units)))
+        self.assertLess(biggest, tree["regions"])
 
 
 class TestApplyFixesRuns(unittest.TestCase):
