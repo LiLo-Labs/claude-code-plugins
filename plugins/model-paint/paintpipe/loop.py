@@ -235,6 +235,43 @@ def show(mesh, up, field, labels, out_dir, tag, views=3, pixels=520):
     return path, poses, (pixels, gap)
 
 
+def paint_units(tree):
+    """The unit a single click paints: a persistence object, cached on the tree.
+
+    NOT an ancestor at some multiple of the clicked region's area. That
+    assumed the ancestor chain contains a node of roughly the size wanted, and
+    in an agglomerative tree it does not: a region's parent is already the
+    accumulated giant, so every click resolved to either one tiny region or a
+    huge blob with nothing in between. It is the same chain pathology that
+    broke the sizing ladder and the first painting, showing up a third time --
+    "barnacle clusters" took 28.2% of the shell and overwrote the shell body
+    to 0.0%.
+
+    Persistence objects are the unit this repo already validated: nodes that
+    survive a long way up the tree before being absorbed, so each is a thing
+    rather than an arbitrary cut. On the shell the largest is 5.1% of the
+    surface against the 82.1% of the area-based cut, which is the difference
+    between a click that paints a barnacle and a click that paints the model.
+    """
+    cached = tree.get("_units")
+    if cached is not None:
+        return cached
+    from . import segment3d  # noqa: F401  (puts scripts/ on sys.path)
+    import index_persist
+
+    chosen = index_persist.select(tree["children"], tree["birth"],
+                                  tree["death"], tree["area"],
+                                  int(tree["used"]), float(tree["floor"]),
+                                  float(tree["ceiling"]))
+    regions = int(tree["regions"])
+    owner = np.arange(regions, dtype=np.int64)
+    for node in chosen:
+        for leaf in rig_module.node_regions(tree, int(node)):
+            owner[int(leaf)] = int(node)
+    tree["_units"] = owner
+    return owner
+
+
 def resolve_point(tree, poses, geometry, view, x, y, growth=8.0):
     """A pointed-at place -> the faces it means. Shared by adding and removing.
 
@@ -249,8 +286,6 @@ def resolve_point(tree, poses, geometry, view, x, y, growth=8.0):
     away half of every round's corrections; a point given in the plain panel or
     already panel-local is recovered rather than lost.
     """
-    from . import index3d
-
     pixels, gap = geometry
     if not (0 <= view < len(poses)):
         return None
@@ -267,10 +302,7 @@ def resolve_point(tree, poses, geometry, view, x, y, growth=8.0):
     region = rig_module.point_to_region(poses[view], base, local_x, local_y)
     if region < 0:
         return None
-    areas = np.asarray(tree["area"], dtype=float)
-    chain = rig_module.ancestors(tree, int(region))
-    node = index3d.nearest_by_area(chain, areas,
-                                   float(areas[int(region)]) * float(growth))
+    node = int(paint_units(tree)[int(region)])
     return rig_module.face_mask(tree, rig_module.node_regions(tree, node))
 
 

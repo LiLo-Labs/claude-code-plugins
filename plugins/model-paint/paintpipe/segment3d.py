@@ -364,7 +364,7 @@ def atoms(mesh, cap=300, base_k=15.0, min_faces=None, scales=12, log=None,
     # The evidence is part of what the atoms ARE, so it is part of their
     # identity. A cache key that ignored it would serve geometry-only atoms to
     # a caller that paid to render the model, silently and forever.
-    key.update(("%s|%s|%s|%s|%s|%s|%s|%s|%s|fastscale-v5"
+    key.update(("%s|%s|%s|%s|%s|%s|%s|%s|%s|fastscale-v6"
                 % (cap, base_k, min_faces, scales, nozzle_mm, target_regions,
                    refine, refine_rounds,
                    camera_weight if evidence is not None else "geom")).encode())
@@ -381,7 +381,10 @@ def atoms(mesh, cap=300, base_k=15.0, min_faces=None, scales=12, log=None,
         tree = {"children": saved["children"], "base": saved["base"],
                 "regions": int(saved["regions"]),
                 "node_of_atom": [int(v) for v in saved["node_of_atom"]],
-                "area": saved["area"], "features": saved["features"]}
+                "area": saved["area"], "features": saved["features"],
+                "birth": saved["birth"], "death": saved["death"],
+                "used": int(saved["used"]), "floor": float(saved["floor"]),
+                "ceiling": float(saved["ceiling"])}
         return saved["face_atom"], tree
     face_atom, tree = _atoms_uncached(mesh, cap=cap, base_k=base_k,
                                       min_faces=min_faces, scales=scales,
@@ -396,7 +399,11 @@ def atoms(mesh, cap=300, base_k=15.0, min_faces=None, scales=12, log=None,
                         regions=np.int64(tree["regions"]),
                         node_of_atom=np.asarray(tree["node_of_atom"],
                                                 dtype=np.int64),
-                        area=tree["area"], features=tree["features"])
+                        area=tree["area"], features=tree["features"],
+                        birth=tree["birth"], death=tree["death"],
+                        used=np.int64(tree["used"]),
+                        floor=np.float64(tree["floor"]),
+                        ceiling=np.float64(tree["ceiling"]))
     return face_atom, tree
 
 
@@ -519,6 +526,9 @@ def _atoms_uncached(mesh, cap=300, base_k=15.0, min_faces=None, scales=12,
     strength = response[peak, np.arange(response.shape[1])]
     tree = {"children": children, "base": base, "regions": regions,
             "node_of_atom": node_of_atom, "area": area,
+            "birth": birth, "death": death, "used": int(used),
+            "floor": float(region_weights.min()) if len(region_weights) else 0.0,
+            "ceiling": float(region_weights.max()) if len(region_weights) else 1.0,
             "features": np.stack([index["characteristic_mm"],
                                   index["signed"],
                                   strength], axis=1).astype(np.float32)}
