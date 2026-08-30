@@ -235,29 +235,15 @@ def show(mesh, up, field, labels, out_dir, tag, views=3, pixels=520):
     return path, poses, (pixels, gap)
 
 
-def apply_fixes(field, tree, poses, geometry, fixes, labels, growth=8.0,
-                log=None):
-    """Turn pointed-at places into edits of the field.
+def resolve_point(tree, poses, geometry, view, x, y, growth=8.0):
+    """A pointed-at place -> the faces it means. Shared by adding and removing.
 
-    A correction lands on one base region, and one region is far too small to
-    be a useful edit, so it takes the ancestor a fixed FACTOR larger in area.
-    The factor is scale-free -- eight times whatever was clicked -- so the same
-    number moves a barnacle-sized chunk when a barnacle was clicked and a
-    dome-sized chunk when the dome was clicked, which is the property that
-    makes it work on any model at any size.
-
-    It does not have to be right. That is the point of the loop: a part that
-    is still short next round gets pointed at somewhere else, and the chunks
-    union. Clicking a few places and taking a safe chunk at each is how a
-    person fills a large area too.
+    Both operations have to agree about what a point covers. When they did not
+    -- add painted a node, remove restored every face of the whole part -- a
+    single "this has spread too far" wiped the entire colour, and four of the
+    shell's parts came back at 0.0% having been painted correctly first.
     """
-    from . import index3d
-
-    pixels, gap = geometry
-    base = rig_module.region_of_face(tree)
-    areas = np.asarray(tree["area"], dtype=float)
     applied = 0
-
     for fix in fixes:
         try:
             view = int(fix["view"])
@@ -265,26 +251,6 @@ def apply_fixes(field, tree, poses, geometry, fixes, labels, growth=8.0,
             wanted = fix.get("colour")
         except (KeyError, TypeError, ValueError):
             continue
-        if not (0 <= view < len(poses)):
-            continue
-        # Map a coordinate on the SHEET back to the panel it belongs to. The
-        # right-hand panel of view v starts at gap + v*(2*pixels+gap) + pixels,
-        # and subtracting only one panel width -- which is what this did -- is
-        # right for view 0 and wildly wrong for every view after it. Four of
-        # eight corrections were dropped on the floor because of it.
-        stride = 2 * pixels + gap
-        origin = gap + view * stride + pixels
-        local_x, local_y = x - origin, y - gap
-        if not (0 <= local_x < pixels):
-            plain = gap + view * stride
-            local_x = x - plain if 0 <= x - plain < pixels else x % pixels
-        if not (0 <= local_y < pixels):
-            local_y = y % pixels
-        region = rig_module.point_to_region(poses[view], base, local_x,
-                                            local_y)
-        if region < 0:
-            continue
-
         if wanted == "new" or wanted is None:
             slot = len(labels)
             labels.append("colour %d" % (slot + 1))
@@ -295,12 +261,10 @@ def apply_fixes(field, tree, poses, geometry, fixes, labels, growth=8.0,
                 continue
             if not (0 <= slot < len(labels)):
                 continue
-
-        chain = rig_module.ancestors(tree, int(region))
-        target = float(areas[int(region)]) * float(growth)
-        node = index3d.nearest_by_area(chain, areas, target)
-        field[rig_module.face_mask(tree,
-                                   rig_module.node_regions(tree, node))] = slot
+        mask = resolve_point(tree, poses, geometry, view, x, y, growth=growth)
+        if mask is None:
+            continue
+        field[mask] = slot
         applied += 1
     if log:
         log("    applied %d/%d correction(s)" % (applied, len(fixes)))
@@ -497,11 +461,17 @@ def add_part(backend, mesh, tree, up, field, labels, part, intent, out_dir,
     # the rock base, so telling the loop "this barnacle colour has spread onto
     # the shell" turned that shell surface into rock. Undo has to be undo.
     for fix in removes:
-        field, labels, _n = apply_fixes(field, tree, poses, geometry,
-                                        [dict(fix, colour=slot + 1)], labels,
-                                        growth=growth, log=None)
-        touched = field == slot
-        field[touched] = before[touched]
+        try:
+            mask = resolve_point(tree, poses, geometry, int(fix["view"]),
+                                 int(fix["x"]), int(fix["y"]), growth=growth)
+        except (KeyError, TypeError, ValueError):
+            continue
+        if mask is None:
+            continue
+        # Only the patch pointed at goes back, and only where THIS part had
+        # taken it. Restoring every face of the colour undid the whole part.
+        undo = mask & (field == slot)
+        field[undo] = before[undo]
     fixes = adds + removes
     if log:
         log("    %-32s %d point(s), %d fix(es)"
