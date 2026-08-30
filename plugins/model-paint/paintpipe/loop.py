@@ -32,6 +32,22 @@ Three properties follow, and each removes machinery rather than adding it:
     There is no sizing question. "How big is this part" is never asked in the
     abstract; it is answered by looking at whether the colour covers the thing
     in the picture, which is the same way a person answers it.
+
+That last property took three tries to actually honour, because "paint here"
+still had to mean SOME amount of surface, and every fixed answer was wrong:
+
+    the ancestor at 8x the clicked area gave one colour 82% of the shell;
+    the persistence object -- median 0.0005% of the surface -- left every
+    part a few percent and the base coat holding 83.7%.
+
+Both picked an extent in the abstract, which is the very thing the loop was
+supposed to stop doing. So a click is no longer a patch at all. It is a CLAIM,
+and `claim()` hands every base region on the model to whichever claim it is
+most continuous with, measured by the border strength at which the two finally
+merge in the model's own tree. A part's extent is then decided by where the
+OTHER parts were pointed at -- the shell reaches exactly as far as the nearest
+barnacle click lets it -- which is how a person decides it too, and it needs no
+constant, no size, and no question about how big anything is.
 """
 
 import json
@@ -289,6 +305,189 @@ def paint_units(tree):
     return owner
 
 
+
+def claim(tree, seeds, count=None, fallback=None):
+    """Give EVERY base region to the part it is most continuous with. No unit size.
+
+    This replaces the idea that a click paints a fixed-size chunk. There is no
+    size that works: an ancestor at 8x the clicked area put 82% of the shell in
+    one colour, and a persistence object -- median 0.0005% of the surface --
+    left every part under-filled while the base coat kept 83.7%. Both are the
+    same mistake, which is choosing an extent in the abstract rather than from
+    the model.
+
+    So a click stops being a patch and becomes a CLAIM, and every region is
+    handed to the claim it is most continuous with. Continuity is measured on
+    the model's own borders: the cost of reaching a region from a seed is the
+    total border strength that has to be crossed to get there, so a claim
+    spreads freely across a smooth surface and stops where a real edge stands
+    -- unless nothing else claims the far side, in which case it keeps going,
+    which is right too.
+
+    NOT the merge tree, which is built from these same borders and then throws
+    almost all of them away. Two regions in a tree are only ever as far apart
+    as the single strongest border between them, and at the top of an
+    agglomerative tree that is one long chain, so the cost collapses: measured
+    on the shell, 58.5% of the surface tied for the minimum and 35.9% of it in
+    a five-way tie, which left whatever broke the tie choosing the colour.
+    It did: one part took 62.2% of the model. The borders themselves do not
+    collapse, so the claim is settled on them.
+
+    Three things fall out, none of them tuned:
+
+        Nothing is left over. Every region is reachable from some seed, so the
+        base coat stops absorbing whatever the clicks failed to reach.
+
+        Nothing runs away. A claim can only take surface that is cheaper to
+        reach from it than from any other part's seeds, so a barnacle seed
+        cannot cross onto the shell while a shell seed sits there -- the
+        strong border between them is exactly what stops it.
+
+        One click is enough for a big flat part, and many clicks still help a
+        scattered one, without either being asked how big it is. The extent
+        comes from where the OTHER parts were pointed at, which is how a person
+        decides where the shell stops and the barnacles start.
+
+    `seeds` maps label index -> base regions. Ties go to the higher label,
+    because parts are painted background-first and later coats go on top.
+    Returns an owner array over base regions; `fallback` is what to give a
+    region no claim can reach at all, and -1 (nothing) if not given.
+    """
+    regions = int(tree["regions"])
+    if count is None:
+        count = (max(seeds) + 1) if seeds else 0
+    live = {int(label): np.asarray(want, dtype=np.int64).ravel()
+            for label, want in seeds.items()
+            if len(np.asarray(want, dtype=np.int64).ravel())}
+    if not count or not live:
+        return np.full(regions, -1 if fallback is None else int(fallback),
+                       dtype=np.int64)
+
+    pairs = tree.get("region_pairs")
+    weights = tree.get("region_weights")
+    if pairs is None or weights is None:
+        return _claim_on_tree(tree, live, count, fallback)
+
+    from scipy.sparse import coo_matrix
+    from scipy.sparse.csgraph import dijkstra
+
+    pairs = np.asarray(pairs, dtype=np.int64)
+    weights = np.asarray(weights, dtype=float)
+    # A zero-weight border is free to cross, and a chain of them would let one
+    # claim travel the model for nothing. The smallest border this model
+    # actually has is the natural price of a step -- read off the model, not
+    # picked -- so crossing is never free and distance still counts.
+    step = float(weights[weights > 0].min()) if (weights > 0).any() else 1.0
+    graph = coo_matrix((weights + step, (pairs[:, 0], pairs[:, 1])),
+                       shape=(regions, regions)).tocsr()
+
+    # Sources in label order, so a region tying between two claims is resolved
+    # by which source scipy reports -- pinned below rather than left to chance.
+    sources, owner_of = [], []
+    for label in sorted(live):
+        for region in live[label]:
+            if 0 <= int(region) < regions:
+                sources.append(int(region))
+                owner_of.append(int(label))
+    if not sources:
+        return np.full(regions, -1 if fallback is None else int(fallback),
+                       dtype=np.int64)
+    owner_of = np.asarray(owner_of, dtype=np.int64)
+    sources = np.asarray(sources, dtype=np.int64)
+
+    distance = np.full((len(live), regions), np.inf)
+    order = sorted(live)
+    for slot, label in enumerate(order):
+        mine = sources[owner_of == label]
+        distance[slot] = dijkstra(graph, directed=False, indices=mine,
+                                  min_only=True)
+    reached = np.isfinite(distance).any(axis=0)
+    # Ties to the LATER part: paint order is overlap precedence, so a detail
+    # equally continuous with the surface it sits on wins the surface. Here
+    # that decides a sliver rather than a third of the model.
+    pick = (len(order) - 1) - np.argmin(distance[::-1], axis=0)
+    owner = np.asarray(order, dtype=np.int64)[pick]
+    # A merge FOREST, not a tree: a detached island is reachable from no seed
+    # at all. Left at -1 it renders unpainted and prints unpainted, so the
+    # caller hands it to the base coat -- "everything starts as the first
+    # part" -- rather than to whichever part is nearest in space, a guess.
+    owner[~reached] = -1 if fallback is None else int(fallback)
+    return owner.astype(np.int64)
+
+
+def _claim_on_tree(tree, live, count, fallback):
+    """The same competition on the merge tree, for a tree with no border graph.
+
+    Only reached by a cache written before the graph was kept. It is the
+    metric that collapses into ties, so it is a fallback and not a choice.
+    """
+    regions = int(tree["regions"])
+    children = np.asarray(tree["children"], dtype=np.int64)
+    used = int(tree.get("used", len(children)))
+    birth = np.asarray(tree.get("birth", np.zeros(len(children))), dtype=float)
+
+    has = np.zeros((used, count), dtype=bool)
+    for label, want in live.items():
+        for region in want:
+            if 0 <= int(region) < regions:
+                has[int(region), int(label)] = True
+    for node in range(regions, used):
+        left, right = children[node]
+        if left >= 0 and right >= 0:
+            has[node] = has[left] | has[right]
+
+    cost = np.where(has, birth[:used, None], np.inf)
+    for node in range(used - 1, regions - 1, -1):
+        left, right = children[node]
+        if left < 0 or right < 0:
+            continue
+        here = cost[node]
+        for child in (int(left), int(right)):
+            missing = ~has[child]
+            cost[child] = np.where(missing, np.minimum(cost[child], here),
+                                   cost[child])
+    leaves = cost[:regions]
+    unreachable = ~np.isfinite(leaves).any(axis=1)
+    owner = (count - 1) - np.argmin(leaves[:, ::-1], axis=1)
+    owner[unreachable] = -1 if fallback is None else int(fallback)
+    return owner.astype(np.int64)
+
+
+def seed_regions(tree, poses, geometry, points):
+    """Pointed-at places -> base regions. One click is one region, nothing grown."""
+    base = rig_module.region_of_face(tree)
+    pixels, gap = geometry
+    stride = 2 * pixels + gap
+    out = []
+    for point in points:
+        try:
+            view = int(point["view"])
+            x, y = int(point["x"]), int(point["y"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if not (0 <= view < len(poses)):
+            continue
+        origin = gap + view * stride + pixels
+        local_x, local_y = x - origin, y - gap
+        if not (0 <= local_x < pixels):
+            plain = gap + view * stride
+            local_x = x - plain if 0 <= x - plain < pixels else x % pixels
+        if not (0 <= local_y < pixels):
+            local_y = y % pixels
+        region = rig_module.point_to_region(poses[view], base, local_x, local_y)
+        if region >= 0:
+            out.append(int(region))
+    return out
+
+
+def field_of(tree, owner, face_count):
+    """Base-region owners -> per-face labels."""
+    base = rig_module.region_of_face(tree)
+    field = np.full(face_count, -1, dtype=np.int64)
+    inside = base < len(owner)
+    field[inside] = owner[base[inside]]
+    return field
+
 def resolve_point(tree, poses, geometry, view, x, y, growth=8.0):
     """A pointed-at place -> the faces it means. Shared by adding and removing.
 
@@ -443,9 +642,15 @@ The piece: %(intent)s
 
 I am about to paint: %(name)s -- %(where)s
 
-Point at it. Give a pixel coordinate IN THE RIGHT-HAND image of each view where
-this part is, one point per separate piece of it you can see. If the part is a
-field of many small things, point at several of them across the model.
+SCRIBBLE OVER IT, the way you would with a brush. Give pixel coordinates IN THE
+RIGHT-HAND image of each view that land ON this part -- not one or two, but
+enough to cover it: %(want)d or more per view if it is large or spread out,
+tracing along it and across it. On a field of many small things (a row of
+spikes, a patch of barnacles), put points on many of them, all over the model.
+
+Every point must be ON the part. A point that strays onto its neighbour paints
+the neighbour, so stay inside; leave gaps rather than risk the edge, because
+the gaps get filled in from the points either side.
 
 If a view does not show it, give nothing for that view.
 
@@ -501,38 +706,59 @@ def see(backend, mesh, up, intent, out_dir, views=4, pixels=700, log=print):
     return parts
 
 
-def add_part(backend, mesh, tree, up, field, labels, part, intent, out_dir,
-             tag, growth=8.0, budget=6, log=print):
-    """Paint ONE part, look at it, fix it. The additive step.
+def add_part(backend, mesh, tree, up, seeds, labels, part, intent, out_dir,
+             tag, budget=6, views=3, log=print):
+    """Paint ONE part, look at it, fix it, and re-settle the whole surface.
 
     A person does not paint everything and then audit everything; they lay one
     colour, check that colour, fix it, and move on. Checking one colour against
-    a picture is a far easier question than checking eight, and the answer is
-    correspondingly better.
+    a picture is a far easier question than checking eight.
+
+    What changed is what "lay a colour" means. It used to stamp a fixed-size
+    chunk at each point, which is why the same loop first ran away (28% of the
+    shell called barnacles) and then under-filled (every part a few percent,
+    the base coat 83.7%). Now a point is a claim, every region on the model is
+    re-awarded to its most continuous claim, and the extent of this part comes
+    from where the OTHER parts were pointed at. So the picture changes globally
+    after every correction, which is the point: a fix to the shell moves the
+    barnacle border too, exactly as it does on a real model.
+
+    Returns (seeds, labels, field, points_made).
     """
     slot = len(labels)
     labels.append(part["name"])
+    count = len(labels)
 
+    before = (claim(tree, seeds, count=count, fallback=0)
+              if seeds else None)
+    field = (field_of(tree, before, len(mesh.faces)) if before is not None
+             else np.full(len(mesh.faces), -1, dtype=np.int64))
     path, poses, geometry = show(mesh, up, field, labels, out_dir,
-                                 "%s-before" % tag)
+                                 "%s-before" % tag, views=views)
+    # A large flat part wants covering; a scattered detail wants examples on
+    # many of its members. Both are "more points than a click", which is the
+    # measured lesson: from 5-11 seeds on 11876 regions, every way of spreading
+    # a claim -- the merge tree, shortest path over the borders, and matching
+    # the surface signature -- drew distance bands instead of parts, because
+    # sparse seeds make any of them a Voronoi diagram.
     prompt = WHERE % {"count": len(poses), "intent": intent or "a 3D model",
-                      "name": part["name"], "where": part["where"]}
+                      "name": part["name"], "where": part["where"],
+                      "want": 30 if part.get("detail") == "detailed" else 20}
     with open(path, "rb") as handle:
         key = "where-%s" % rig_module.digest(handle.read(), part["name"])
     answer = backend._run([path], prompt, key) or {}
-    points = [{"view": p.get("view"), "x": p.get("x"), "y": p.get("y"),
-               "colour": slot + 1} for p in (answer.get("points") or [])]
+    points = seed_regions(tree, poses, geometry, answer.get("points") or [])
     if not points:
         if log:
             log("    %s: not pointed at in any view" % part["name"])
         labels.pop()
-        return field, labels, 0
-    before = field.copy()
-    field, labels, applied = apply_fixes(field, tree, poses, geometry, points,
-                                         labels, growth=growth, log=None)
+        return seeds, labels, field, 0
+    seeds[slot] = sorted(set(points))
 
+    owner = claim(tree, seeds, count=count, fallback=0)
+    field = field_of(tree, owner, len(mesh.faces))
     path, poses, geometry = show(mesh, up, field, labels, out_dir,
-                                 "%s-after" % tag)
+                                 "%s-after" % tag, views=views)
     prompt = CHECK % {"name": part["name"], "swatch": "colour %d" % (slot + 1),
                       "intent": intent or "a 3D model", "budget": budget}
     with open(path, "rb") as handle:
@@ -540,38 +766,35 @@ def add_part(backend, mesh, tree, up, field, labels, part, intent, out_dir,
     answer = backend._run([path], prompt, key) or {}
     adds, removes = [], []
     for fix in (answer.get("fixes") or [])[:budget]:
-        kind = str(fix.get("kind", "add")).lower()
-        fix = dict(fix)
-        if kind == "remove":
+        if str(fix.get("kind", "add")).lower() == "remove":
             removes.append(fix)
         else:
-            fix["colour"] = slot + 1
             adds.append(fix)
-    if adds:
-        field, labels, _n = apply_fixes(field, tree, poses, geometry, adds,
-                                        labels, growth=growth, log=None)
-    # "remove" RESTORES WHAT WAS UNDERNEATH, which is not the same as painting
-    # the first colour. Sending it to colour 1 handed every over-painted patch
-    # to whichever part happened to be painted first -- on the shell that was
-    # the rock base, so telling the loop "this barnacle colour has spread onto
-    # the shell" turned that shell surface into rock. Undo has to be undo.
-    for fix in removes:
-        try:
-            mask = resolve_point(tree, poses, geometry, int(fix["view"]),
-                                 int(fix["x"]), int(fix["y"]), growth=growth)
-        except (KeyError, TypeError, ValueError):
+
+    grown = seed_regions(tree, poses, geometry, adds)
+    if grown:
+        seeds[slot] = sorted(set(seeds[slot]) | set(grown))
+    # "remove" RESTORES WHAT WAS UNDERNEATH. Sending it to colour 1 handed
+    # every over-painted patch to whichever part was painted first -- on the
+    # shell the rock base -- so "this barnacle colour has spread onto the
+    # shell" turned that shell surface into rock. Undo has to be undo, and
+    # here undo is re-asserting the claim this part took the ground from.
+    for region in seed_regions(tree, poses, geometry, removes):
+        # RETRACT FIRST. Re-asserting the old claim while leaving this part's
+        # own click in place is not undo: both parts then hold the region, and
+        # ties go to the later one, so the correction changed nothing at all.
+        seeds[slot] = [r for r in seeds.get(slot, []) if r != region]
+        prior = int(before[region]) if before is not None else -1
+        if prior < 0 or prior == slot:
             continue
-        if mask is None:
-            continue
-        # Only the patch pointed at goes back, and only where THIS part had
-        # taken it. Restoring every face of the colour undid the whole part.
-        undo = mask & (field == slot)
-        field[undo] = before[undo]
-    fixes = adds + removes
+        seeds[prior] = sorted(set(seeds.get(prior, [])) | {region})
+
+    owner = claim(tree, seeds, count=count, fallback=0)
+    field = field_of(tree, owner, len(mesh.faces))
     if log:
-        log("    %-32s %d point(s), %d fix(es)"
-            % (part["name"], len(points), len(fixes)))
-    return field, labels, applied
+        log("    %-32s %d point(s), %d add, %d remove"
+            % (part["name"], len(points), len(adds), len(removes)))
+    return seeds, labels, field, len(points)
 
 
 def paint(backend, mesh, tree, up, intent, out_dir, views=3, budget=6,
@@ -581,21 +804,33 @@ def paint(backend, mesh, tree, up, intent, out_dir, views=3, budget=6,
     See what parts there are and how much detail each has; paint them in the
     order given, background first so later coats land on top; and after each
     colour, look at that colour and fix it before starting the next.
+
+    Nothing anywhere sets a size. Every part's extent is settled by the
+    competition between the places the parts were pointed at, so the same
+    procedure sizes a 4mm barnacle and a 190mm shell without being told which
+    is which -- which is the only way it can work on a model nobody has seen.
     """
     os.makedirs(out_dir, exist_ok=True)
     parts = see(backend, mesh, up, intent, out_dir, views=views, log=log)
     if not parts:
         return None, []
 
-    # The base coat: everything starts as the first part, so nothing is ever
-    # unclaimed and "remove" always has somewhere to put a face back.
-    field = np.zeros(len(mesh.faces), dtype=np.int64)
-    labels = [parts[0]["name"]]
-    for index, part in enumerate(parts[1:max_parts], start=1):
-        field, labels, _n = add_part(backend, mesh, tree, up, field, labels,
-                                     part, intent, out_dir, str(index),
-                                     budget=budget, log=log)
+    seeds, labels = {}, []
+    field = np.full(len(mesh.faces), -1, dtype=np.int64)
+    for index, part in enumerate(parts[:max_parts]):
+        seeds, labels, field, _n = add_part(
+            backend, mesh, tree, up, seeds, labels, part, intent, out_dir,
+            str(index), budget=budget, views=views, log=log)
     show(mesh, up, field, labels, out_dir, "final", views=views)
+    if log:
+        areas = mesh.area_faces
+        total = float(areas.sum()) or 1.0
+        for slot, name in enumerate(labels):
+            log("  %-32s %5.1f%%"
+                % (name, 100.0 * float(areas[field == slot].sum()) / total))
+        left = 100.0 * float(areas[field < 0].sum()) / total
+        if left > 0.05:
+            log("  %-32s %5.1f%%" % ("(unclaimed)", left))
     with open(os.path.join(out_dir, "painted.json"), "w") as handle:
         json.dump({"parts": parts, "colours": labels}, handle, indent=2)
     return field, labels

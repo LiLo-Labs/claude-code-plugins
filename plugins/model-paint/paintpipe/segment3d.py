@@ -368,6 +368,7 @@ def atoms(mesh, cap=300, base_k=15.0, min_faces=None, scales=12, log=None,
                 % (cap, base_k, min_faces, scales, nozzle_mm, target_regions,
                    refine, refine_rounds,
                    camera_weight if evidence is not None else "geom")).encode())
+    key.update(b"border-graph-v1")
     if evidence is not None:
         key.update(np.ascontiguousarray(
             np.asarray(evidence["evidence"], dtype=np.float32)).tobytes())
@@ -382,6 +383,8 @@ def atoms(mesh, cap=300, base_k=15.0, min_faces=None, scales=12, log=None,
                 "regions": int(saved["regions"]),
                 "node_of_atom": [int(v) for v in saved["node_of_atom"]],
                 "area": saved["area"], "features": saved["features"],
+                "region_pairs": saved["region_pairs"],
+                "region_weights": saved["region_weights"],
                 "birth": saved["birth"], "death": saved["death"],
                 "used": int(saved["used"]), "floor": float(saved["floor"]),
                 "ceiling": float(saved["ceiling"])}
@@ -400,6 +403,8 @@ def atoms(mesh, cap=300, base_k=15.0, min_faces=None, scales=12, log=None,
                         node_of_atom=np.asarray(tree["node_of_atom"],
                                                 dtype=np.int64),
                         area=tree["area"], features=tree["features"],
+                        region_pairs=tree["region_pairs"],
+                        region_weights=tree["region_weights"],
                         birth=tree["birth"], death=tree["death"],
                         used=np.int64(tree["used"]),
                         floor=np.float64(tree["floor"]),
@@ -526,6 +531,14 @@ def _atoms_uncached(mesh, cap=300, base_k=15.0, min_faces=None, scales=12,
     strength = response[peak, np.arange(response.shape[1])]
     tree = {"children": children, "base": base, "regions": regions,
             "node_of_atom": node_of_atom, "area": area,
+            # THE BORDER GRAPH ITSELF, not just the tree built from it. The
+            # merge tree throws away everything except the minimax path
+            # between two regions, and at the top of an agglomerative tree
+            # that is one long chain, so thousands of regions share a single
+            # cost and whatever breaks the tie decides the colour. Keeping
+            # the graph lets a claim be settled on the borders it actually
+            # has to cross, which is the same evidence without the collapse.
+            "region_pairs": region_pairs, "region_weights": region_weights,
             "birth": birth, "death": death, "used": int(used),
             "floor": float(region_weights.min()) if len(region_weights) else 0.0,
             "ceiling": float(region_weights.max()) if len(region_weights) else 1.0,

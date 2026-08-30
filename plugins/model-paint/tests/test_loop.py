@@ -215,3 +215,217 @@ class TestApplyFixesRuns(unittest.TestCase):
         mask = loop.resolve_point(self.tree, [pose], self.geometry,
                                   0, 8 + 40 + 10, 8 + 10)
         self.assertIsNone(mask)
+
+
+def two_lobe_tree(per_region=4):
+    """Two clusters joined weakly at the top -- the shape every real model has.
+
+    Within a lobe the borders are weak (0.1..0.3); between the lobes there is
+    one strong border (0.9). That is a shell and its rock, or a barnacle and
+    the shell it sits on, and it is the structure competition has to respect.
+    """
+    regions, total = 8, 15
+    children = np.full((total, 2), -1, dtype=np.int64)
+    birth = np.zeros(total)
+    build = [(8, 0, 1, 0.1), (9, 8, 2, 0.2), (10, 9, 3, 0.3),
+             (11, 4, 5, 0.1), (12, 11, 6, 0.2), (13, 12, 7, 0.3),
+             (14, 10, 13, 0.9)]
+    area = np.zeros(total)
+    area[:regions] = 1.0
+    for node, left, right, weight in build:
+        children[node] = (left, right)
+        birth[node] = weight
+        area[node] = area[left] + area[right]
+    # The border graph the tree was built from, which is what claims are
+    # actually settled on -- the tree keeps only the strongest border between
+    # any two regions and that collapses into ties.
+    pairs = np.array([(0, 1), (1, 2), (2, 3), (4, 5), (5, 6), (6, 7), (3, 4)],
+                     dtype=np.int64)
+    weights = np.array([0.1, 0.2, 0.3, 0.1, 0.2, 0.3, 0.9])
+    return {"children": children,
+            "base": np.repeat(np.arange(regions, dtype=np.int64), per_region),
+            "regions": regions, "area": area, "birth": birth,
+            "region_pairs": pairs, "region_weights": weights,
+            "death": np.full(total, np.inf), "used": total,
+            "floor": 0.05, "ceiling": 1.0}
+
+
+class TestClaim(unittest.TestCase):
+    """A click is a claim, not a patch.
+
+    Both previous units failed for the same reason -- they fixed an extent in
+    the abstract. An ancestor at 8x the clicked area gave one colour 82% of the
+    shell; a persistence object, median 0.0005% of the surface, left every part
+    under-filled and the base coat holding 83.7%. These pin the properties that
+    replace choosing a size at all.
+    """
+
+    def test_one_click_takes_its_whole_lobe(self):
+        """The under-fill regression: a single point on a large flat part has
+        to fill that part, without anyone saying how big it is."""
+        tree = two_lobe_tree()
+        owner = loop.claim(tree, {0: [0], 1: [4]}, count=2)
+        self.assertTrue((owner[:4] == 0).all(), owner)
+        self.assertTrue((owner[4:] == 1).all(), owner)
+
+    def test_a_part_cannot_eat_across_a_strong_border(self):
+        """The runaway regression: many clicks on one lobe still stop at the
+        border, because the other lobe's seed is more continuous with it."""
+        tree = two_lobe_tree()
+        owner = loop.claim(tree, {0: [0, 1, 2, 3], 1: [7]}, count=2)
+        self.assertTrue((owner[4:] == 1).all(), owner)
+
+    def test_nothing_is_left_over(self):
+        tree = two_lobe_tree()
+        owner = loop.claim(tree, {1: [5]}, count=3)
+        self.assertTrue((owner == 1).all(), owner)
+
+    def test_seeds_keep_their_own_region(self):
+        tree = two_lobe_tree()
+        owner = loop.claim(tree, {0: [0], 1: [1], 2: [4]}, count=3)
+        self.assertEqual(int(owner[0]), 0)
+        self.assertEqual(int(owner[1]), 1)
+        self.assertEqual(int(owner[4]), 2)
+
+    def test_ties_go_to_the_later_part(self):
+        """Paint order is overlap precedence: a detail equally continuous with
+        the surface it sits on is on top of it."""
+        tree = two_lobe_tree()
+        owner = loop.claim(tree, {0: [0], 1: [0]}, count=2)
+        self.assertEqual(int(owner[0]), 1)
+
+    def test_the_border_graph_wins_over_the_tree(self):
+        """Where the two disagree, the borders decide. The tree keeps only the
+        strongest border between any two regions, and on the shell that metric
+        tied on 58.5% of the surface -- a third of it five ways -- so the
+        tie-break, not the model, handed one part 62.2% of it."""
+        tree = two_lobe_tree()
+        # Move the strong border: on the graph the wall now stands between 1
+        # and 2, while the tree still says it stands between 3 and 4.
+        tree["region_weights"] = np.array([0.1, 0.9, 0.3, 0.1, 0.2, 0.3, 0.2])
+        seeds = {0: [0], 1: [7]}
+        graph = loop.claim(tree, seeds, count=2)
+        collapsed = loop._claim_on_tree(
+            tree, {k: np.asarray(v) for k, v in seeds.items()}, 2, None)
+        self.assertTrue((collapsed == [0, 0, 0, 0, 1, 1, 1, 1]).all(),
+                        collapsed)
+        self.assertTrue((graph == [0, 0, 0, 1, 1, 1, 1, 1]).all(), graph)
+
+    def test_a_tree_with_no_border_graph_still_partitions(self):
+        """An atom cache written before the graph was kept. It falls back to
+        the collapsed metric rather than failing a run."""
+        tree = two_lobe_tree()
+        tree.pop("region_pairs")
+        tree.pop("region_weights")
+        owner = loop.claim(tree, {0: [0], 1: [4]}, count=2)
+        self.assertTrue((owner >= 0).all(), owner)
+        self.assertEqual(int(owner[0]), 0)
+        self.assertEqual(int(owner[4]), 1)
+
+    def test_no_seeds_claims_nothing(self):
+        tree = two_lobe_tree()
+        owner = loop.claim(tree, {}, count=2)
+        self.assertTrue((owner == -1).all())
+
+    def test_chain_tree_still_partitions(self):
+        """The chain at the top of an agglomerative tree broke three previous
+        mechanisms; competition must at least still cover the surface."""
+        tree = small_tree(regions=8)
+        owner = loop.claim(tree, {0: [0], 1: [7]}, count=2)
+        self.assertTrue((owner >= 0).all())
+        self.assertEqual(int(owner[7]), 1)
+        self.assertEqual(int(owner[0]), 0)
+
+    def test_an_island_no_claim_can_reach_falls_back_to_the_base_coat(self):
+        """A merge FOREST leaves detached components unreachable. Unpainted is
+        not a colour a printer can lay, so they go to the first part."""
+        tree = two_lobe_tree()
+        tree["children"][14] = (-1, -1)          # sever the two lobes
+        tree["region_pairs"] = tree["region_pairs"][:-1]
+        tree["region_weights"] = tree["region_weights"][:-1]
+        owner = loop.claim(tree, {1: [4]}, count=2, fallback=0)
+        self.assertTrue((owner[:4] == 0).all(), owner)
+        self.assertTrue((owner[4:] == 1).all(), owner)
+
+    def test_field_covers_every_face(self):
+        tree = two_lobe_tree()
+        owner = loop.claim(tree, {0: [0], 1: [4]}, count=2)
+        field = loop.field_of(tree, owner, len(tree["base"]))
+        self.assertTrue((field >= 0).all())
+        self.assertEqual(int((field == 0).sum()), 16)
+        self.assertEqual(int((field == 1).sum()), 16)
+
+
+class _Mesh(object):
+    def __init__(self, faces):
+        self.faces = np.zeros((faces, 3), dtype=np.int64)
+        self.area_faces = np.ones(faces)
+
+
+class TestAddPartRuns(unittest.TestCase):
+    """The entry point, not just its helpers. apply_fixes once vanished from
+    this module and every test still passed, because nothing called the thing
+    a run actually calls."""
+
+    def setUp(self):
+        self.tree = two_lobe_tree(per_region=4)
+        self.mesh = _Mesh(len(self.tree["base"]))
+        self.geometry = (40, 8)
+        self.poses = [_Pose(), _Pose(), _Pose()]
+        # Every pixel of the fake pose hits face 0, whose base region is 0.
+        self.answers = {}
+
+        def fake_show(mesh, up, field, labels, out_dir, tag, views=3,
+                      pixels=520):
+            return os.path.join(HERE, "..", "README.md"), self.poses, self.geometry
+
+        self._show = loop.show
+        loop.show = fake_show
+
+    def tearDown(self):
+        loop.show = self._show
+
+    def _backend(self, where_points, fixes=()):
+        answers = {"where": {"points": list(where_points)},
+                   "check": {"fixes": list(fixes)}}
+
+        class Fake(object):
+            def _run(self, paths, prompt, key):
+                return answers[key.split("-")[0]]
+        return Fake()
+
+    def test_a_pointed_at_part_claims_surface(self):
+        part = {"name": "lobe", "where": "left", "detail": "flat", "order": 1}
+        seeds, labels, field, points = loop.add_part(
+            self._backend([{"view": 0, "x": 8 + 40 + 10, "y": 8 + 10}]),
+            self.mesh, self.tree, (0, 0, 1), {}, [], part, "test",
+            "/tmp/unused", "0", log=None)
+        self.assertEqual(points, 1)
+        self.assertEqual(labels, ["lobe"])
+        self.assertTrue((field == 0).all(), "one seed must take the surface")
+
+    def test_a_part_nobody_points_at_takes_no_colour(self):
+        part = {"name": "ghost", "where": "nowhere", "detail": "flat",
+                "order": 2}
+        seeds, labels, _field, points = loop.add_part(
+            self._backend([]), self.mesh, self.tree, (0, 0, 1),
+            {0: [4]}, ["base"], part, "test", "/tmp/unused", "1", log=None)
+        self.assertEqual(points, 0)
+        self.assertEqual(labels, ["base"])
+        self.assertNotIn(1, seeds)
+
+    def test_remove_hands_the_ground_back_to_who_had_it(self):
+        """Not to colour 1. Sending undo to the first colour turned shell into
+        rock every time a detail was said to have spread."""
+        part = {"name": "detail", "where": "on the lobe", "detail": "detailed",
+                "order": 2}
+        point = {"view": 0, "x": 8 + 40 + 10, "y": 8 + 10}
+        seeds, labels, field, _points = loop.add_part(
+            self._backend([point], [dict(point, kind="remove")]),
+            self.mesh, self.tree, (0, 0, 1), {0: [3], 1: [4]},
+            ["rock", "shell"], part, "test", "/tmp/unused", "2", log=None)
+        self.assertEqual(len(labels), 3)
+        # Region 0 was pointed at, then removed; it goes back to whoever held
+        # it before this part existed, which is "rock" (seeded in the lobe).
+        self.assertIn(0, seeds[0])
+        self.assertEqual(int(field[0]), 0)
