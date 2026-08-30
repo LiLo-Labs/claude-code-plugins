@@ -120,3 +120,70 @@ class TestUndo(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class _Pose:
+    """A 40x40 view where every pixel is face 0."""
+    name = "p"
+
+    def __init__(self):
+        self.hit_id = np.zeros((40, 40), dtype=np.int64)
+        self.camera = type("C", (), {"pixels": 40})()
+
+    @property
+    def visible(self):
+        return self.hit_id >= 0
+
+
+class TestApplyFixesRuns(unittest.TestCase):
+    """This suite passed with a green tick while apply_fixes did not exist --
+    an edit had eaten the function and nothing here called it. A module's entry
+    points need exercising, not just its helpers."""
+
+    def setUp(self):
+        self.tree = small_tree(regions=8, per_region=4)
+        self.poses = [_Pose(), _Pose(), _Pose()]
+        self.geometry = (40, 8)
+
+    def test_a_fix_paints_the_field(self):
+        field = np.zeros(len(self.tree["base"]), dtype=np.int64)
+        labels = ["base", "part"]
+        fix = {"view": 0, "x": 8 + 40, "y": 8 + 20, "colour": 2}
+        field, labels, applied = loop.apply_fixes(
+            field, self.tree, self.poses, self.geometry, [fix], labels)
+        self.assertEqual(applied, 1)
+        self.assertIn(1, field.tolist())
+
+    def test_a_coordinate_in_a_later_view_is_not_dropped(self):
+        """The offset bug: view 1's right panel starts a whole stride along,
+        and subtracting one panel width silently discarded the correction."""
+        field = np.zeros(len(self.tree["base"]), dtype=np.int64)
+        labels = ["base", "part"]
+        stride = 2 * 40 + 8
+        fix = {"view": 1, "x": 8 + stride + 40 + 5, "y": 8 + 20, "colour": 2}
+        _f, _l, applied = loop.apply_fixes(
+            field, self.tree, self.poses, self.geometry, [fix], labels)
+        self.assertEqual(applied, 1)
+
+    def test_a_new_colour_extends_the_label_list(self):
+        field = np.zeros(len(self.tree["base"]), dtype=np.int64)
+        labels = ["base"]
+        fix = {"view": 0, "x": 8 + 40 + 5, "y": 8 + 5, "colour": "new"}
+        _f, labels, applied = loop.apply_fixes(
+            field, self.tree, self.poses, self.geometry, [fix], labels)
+        self.assertEqual(applied, 1)
+        self.assertEqual(len(labels), 2)
+
+    def test_resolve_point_returns_a_face_mask(self):
+        mask = loop.resolve_point(self.tree, self.poses, self.geometry,
+                                  0, 8 + 40 + 10, 8 + 10)
+        self.assertIsNotNone(mask)
+        self.assertEqual(len(mask), len(self.tree["base"]))
+        self.assertTrue(mask.any())
+
+    def test_an_off_surface_point_is_refused_not_guessed(self):
+        pose = _Pose()
+        pose.hit_id[:] = -1
+        mask = loop.resolve_point(self.tree, [pose], self.geometry,
+                                  0, 8 + 40 + 10, 8 + 10)
+        self.assertIsNone(mask)

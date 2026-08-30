@@ -242,6 +242,52 @@ def resolve_point(tree, poses, geometry, view, x, y, growth=8.0):
     -- add painted a node, remove restored every face of the whole part -- a
     single "this has spread too far" wiped the entire colour, and four of the
     shell's parts came back at 0.0% having been painted correctly first.
+
+    The coordinate arrives in SHEET space, whose right-hand panel for view v
+    starts at gap + v*(2*pixels+gap) + pixels. Subtracting one panel width is
+    right for view 0 and wrong for every view after it, which silently threw
+    away half of every round's corrections; a point given in the plain panel or
+    already panel-local is recovered rather than lost.
+    """
+    from . import index3d
+
+    pixels, gap = geometry
+    if not (0 <= view < len(poses)):
+        return None
+    stride = 2 * pixels + gap
+    origin = gap + view * stride + pixels
+    local_x, local_y = x - origin, y - gap
+    if not (0 <= local_x < pixels):
+        plain = gap + view * stride
+        local_x = x - plain if 0 <= x - plain < pixels else x % pixels
+    if not (0 <= local_y < pixels):
+        local_y = y % pixels
+
+    base = rig_module.region_of_face(tree)
+    region = rig_module.point_to_region(poses[view], base, local_x, local_y)
+    if region < 0:
+        return None
+    areas = np.asarray(tree["area"], dtype=float)
+    chain = rig_module.ancestors(tree, int(region))
+    node = index3d.nearest_by_area(chain, areas,
+                                   float(areas[int(region)]) * float(growth))
+    return rig_module.face_mask(tree, rig_module.node_regions(tree, node))
+
+
+def apply_fixes(field, tree, poses, geometry, fixes, labels, growth=8.0,
+                log=None):
+    """Turn pointed-at places into edits of the field.
+
+    A correction lands on one base region, and one region is far too small to
+    be a useful edit, so it takes the ancestor a fixed FACTOR larger in area.
+    The factor is scale-free -- eight times whatever was clicked -- so the same
+    number moves a barnacle-sized chunk when a barnacle was clicked and a
+    dome-sized chunk when the dome was clicked, which is what lets it work on
+    any model at any size.
+
+    It does not have to be right. That is the point of the loop: a part still
+    short next round gets pointed at somewhere else and the chunks union, which
+    is how a person fills a large area too.
     """
     applied = 0
     for fix in fixes:
