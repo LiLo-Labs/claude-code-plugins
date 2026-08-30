@@ -50,9 +50,14 @@ multi-colour printing.
 
 The piece as a whole: %(intent)s
 
-This view shows %(where)s. The LEFT image is the plain shaded surface. The
-RIGHT image is exactly the same view, with the %(count)d pieces this part
-divides into shown in different colours and numbered.
+This shows %(where)s from %(views)d different directions, laid out left to
+right. In each PAIR of images the left one is the plain shaded surface and the
+right one is exactly the same view with the pieces coloured and numbered.
+
+THE NUMBERS MEAN THE SAME PIECE IN EVERY VIEW. A piece may be visible in only
+one of them -- something on the far side appears only in the view that faces
+it -- so use whichever view shows a given number best. The numbers present are:
+%(numbers)s
 
 For each numbered piece, say what it is and whether it is finished:
 
@@ -64,13 +69,13 @@ For each numbered piece, say what it is and whether it is finished:
   "noise"  -- it is not a real part: a sliver, a shading artefact, or a piece
               of the neighbouring part that got included by accident
 
-Judge the SHAPE in the left image; the colours on the right only tell you
-which pixels belong to which numbered piece. Name what the geometry actually
+Judge the SHAPE in the plain images; the colours only tell you which pixels
+belong to which numbered piece. Name what the geometry actually
 shows, not what a dragon usually has.
 
 Reply with ONLY a JSON object, no prose:
 {"pieces": [{"n": <number>, "name": "<short name>", "kind": "whole|group|noise"}, ...]}
-Every numbered piece must appear exactly once."""
+Every number listed above must appear exactly once."""
 
 
 class Part:
@@ -170,15 +175,94 @@ def forest_roots(tree):
     return sorted(roots, key=lambda n: -areas[n])
 
 
-def render_pieces(mesh, tree, node, pieces, up, out_dir, tag, pixels=560,
-                  context=1.35, frame_on=-1):
-    """Plain shading beside the same view divided and numbered.
+def mirror_plane(mesh, samples=3000, accept=0.02, seed=3):
+    """The model's own plane of symmetry, or None if it has none.
 
-    BOTH panels, always. The shape is what identifies a part -- a spike is a
-    spike because of how it catches the light -- and a render that replaces
-    shading with flat category colour throws exactly that away. Showing the
-    two side by side lets the agent read the shape on the left and say which
-    numbered piece it means on the right.
+    A person paints the far horn without walking round the model, because they
+    know it is the near horn mirrored. That is not a guess -- it is a fact
+    about the geometry, and it is cheap to establish: mirror a sample of the
+    surface through a candidate plane and measure how far the mirrored points
+    land from the real surface. On a symmetric figurine the answer is
+    essentially zero; on an asymmetric one it is not, and then this returns
+    None and nothing downstream assumes anything.
+
+    Only planes through the centroid along the frame's own axes are tried.
+    The working mesh is already in its intrinsic frame, so a figurine's
+    sagittal plane is one of them, and searching arbitrary orientations would
+    cost far more for cases this pipeline does not have.
+    """
+    from scipy.spatial import cKDTree
+
+    points = np.asarray(mesh.triangles, dtype=float).mean(axis=1)
+    if len(points) > samples:
+        rng = np.random.default_rng(seed)
+        points = points[rng.choice(len(points), samples, replace=False)]
+    tree_kd = cKDTree(np.asarray(mesh.triangles, dtype=float).mean(axis=1))
+    centre = np.asarray(mesh.vertices, dtype=float).mean(axis=0)
+    extent = float(np.ptp(mesh.vertices, axis=0).max()) or 1.0
+
+    best = None
+    for axis in np.eye(3):
+        offset = points - centre
+        mirrored = centre + offset - 2.0 * np.outer(offset @ axis, axis)
+        distance, _index = tree_kd.query(mirrored)
+        score = float(np.mean(distance)) / extent
+        if best is None or score < best[0]:
+            best = (score, axis)
+    score, axis = best
+    if score > accept:
+        return None
+    return {"point": centre, "normal": axis, "score": round(score, 5)}
+
+
+def mirror_regions(mesh, tree, regions, plane, tolerance=0.015):
+    """The base regions that are the mirror image of these, where they match.
+
+    Every mirrored face has to LAND on real surface before its region is
+    claimed. Without that test a near-symmetric model would have parts
+    reflected into thin air, which is exactly the kind of confident nonsense
+    that a claim nobody looked at produces.
+    """
+    from scipy.spatial import cKDTree
+
+    if plane is None:
+        return np.array([], dtype=np.int64)
+    faces = np.flatnonzero(rig_module.face_mask(tree, regions))
+    if not len(faces):
+        return np.array([], dtype=np.int64)
+    centres = np.asarray(mesh.triangles, dtype=float).mean(axis=1)
+    point, normal = plane["point"], plane["normal"]
+    offset = centres[faces] - point
+    mirrored = point + offset - 2.0 * np.outer(offset @ normal, normal)
+    extent = float(np.ptp(mesh.vertices, axis=0).max()) or 1.0
+    distance, index = cKDTree(centres).query(mirrored)
+    good = distance <= tolerance * extent
+    if not good.any():
+        return np.array([], dtype=np.int64)
+    base = rig_module.region_of_face(tree)
+    return np.unique(base[index[good]]).astype(np.int64)
+
+
+def render_pieces(mesh, tree, node, pieces, up, out_dir, tag, pixels=470,
+                  context=1.35, frame_on=-1, views=3, min_pixels=60):
+    """Every piece shown from a view that can actually SEE it, numbered alike.
+
+    One camera per node was the bug behind two visible failures: a horn on the
+    far side of the head was never shown, so the agent described only the near
+    one, and pieces round the back came back named with total confidence from
+    a view in which they did not appear at all. An unseen piece is not a piece
+    the model should be asked about.
+
+    So several complementary directions are rendered, chosen greedily to cover
+    the pieces rather than spread evenly -- the second view is whichever one
+    shows most of what the first view missed. THE NUMBERING IS SHARED across
+    views, which costs nothing here and is the entire payoff of the single
+    index: piece 3 is tree node 3 whether it is seen from the front or the
+    back, so the agent can name it from whichever panel shows it best.
+
+    Returns (path, {piece slot: pixels seen anywhere}). A piece missing from
+    that mapping was invisible in every view offered and must not be asked
+    about -- the caller drops it rather than inviting an invented answer.
     """
     from PIL import Image, ImageDraw
     from . import render as render_module
@@ -190,79 +274,104 @@ def render_pieces(mesh, tree, node, pieces, up, out_dir, tag, pixels=560,
         target = node if frame_on == -1 else frame_on
         faces = np.flatnonzero(rig_module.face_mask(
             tree, rig_module.node_regions(tree, target)))
-    centres = mesh.triangles[faces].mean(axis=1)
-    centre = centres.mean(axis=0)
-    spread = float(np.linalg.norm(np.ptp(centres, axis=0))) / 2.0
+    centres_all = mesh.triangles.mean(axis=1)
+    centre = centres_all[faces].mean(axis=0)
+    spread = float(np.linalg.norm(np.ptp(centres_all[faces], axis=0))) / 2.0
     whole = float(np.ptp(mesh.vertices, axis=0).max()) / 2.0
     radius = float(np.clip(spread * context, whole * 0.03, whole * 1.06))
-
-    # Look from where this part is actually visible, not from a fixed front.
-    scouts = render_module.fibonacci_directions(12)
-    best, seen = None, -1
-    inside = np.zeros(len(mesh.faces), dtype=bool)
-    inside[faces] = True
-    for direction in scouts:
-        camera = render_module.Camera(direction, up, centre, radius, 128)
-        hit = render_module.geometry_bundle(mesh, camera,
-                                            cavity_taps=0)["hit_id"]
-        shown = hit[hit >= 0]
-        here = int(inside[shown].sum()) if len(shown) else 0
-        if here > seen:
-            best, seen = direction, here
-    camera = render_module.Camera(best, up, centre, radius, pixels)
-    geometry = render_module.geometry_bundle(mesh, camera, cavity_taps=0)
-    pose = rig_module.Pose("part", camera, geometry)
-    shaded = rig_module.light(pose, "studio")
 
     piece_of = np.full(len(mesh.faces), -1, dtype=np.int64)
     for slot, piece in enumerate(pieces):
         piece_of[rig_module.face_mask(
             tree, rig_module.node_regions(tree, piece))] = slot
 
-    hit = pose.hit_id
-    visible = pose.visible
-    plain = np.full((pixels, pixels, 3), 0.97)
-    plain[visible] = np.clip(shaded, 0, 1)[visible, None]
-
-    divided = plain.copy()
-    where = np.full((pixels, pixels), -1, dtype=np.int64)
-    where[visible] = piece_of[hit[visible]]
-    palette = _palette(len(pieces))
-    for slot in range(len(pieces)):
-        mask = where == slot
-        if not mask.any():
+    # Scout cheaply, then take the views that between them show the most
+    # pieces. Greedy on unseen pieces, so a part hidden at the back pulls in
+    # the view that reveals it instead of being outvoted by the front.
+    scouts = render_module.fibonacci_directions(16)
+    seen_by = []
+    for direction in scouts:
+        camera = render_module.Camera(direction, up, centre, radius, 140)
+        hit = render_module.geometry_bundle(mesh, camera,
+                                            cavity_taps=0)["hit_id"]
+        shown = hit[hit >= 0]
+        if not len(shown):
+            seen_by.append(set())
             continue
-        tint = palette[slot]
-        shade = np.clip(shaded, 0, 1)[mask][:, None]
-        divided[mask] = np.clip(tint * (0.40 + 0.75 * shade), 0, 1)
-    edge = np.zeros((pixels, pixels), dtype=bool)
-    for dy, dx in ((0, 1), (1, 0)):
-        rolled = np.roll(np.roll(where, dy, axis=0), dx, axis=1)
-        edge |= visible & (rolled != where)
-    divided[edge] *= 0.25
+        slots, counts = np.unique(piece_of[shown], return_counts=True)
+        seen_by.append({int(sl) for sl, c in zip(slots, counts)
+                        if sl >= 0 and c >= 4})
 
-    sheet = Image.new("RGB", (pixels * 2 + 24, pixels + 16), (247, 246, 244))
-    sheet.paste(Image.fromarray((plain * 255).astype(np.uint8)), (8, 8))
-    sheet.paste(Image.fromarray((divided * 255).astype(np.uint8)),
-                (pixels + 16, 8))
+    chosen, covered = [], set()
+    for _pick in range(int(views)):
+        gains = [len(s - covered) for s in seen_by]
+        best = int(np.argmax(gains))
+        if gains[best] <= 0 and chosen:
+            break
+        chosen.append(best)
+        covered |= seen_by[best]
+        seen_by[best] = set()
+
+    panels, visible_px = [], {}
+    for which in chosen:
+        camera = render_module.Camera(scouts[which], up, centre, radius, pixels)
+        geometry = render_module.geometry_bundle(mesh, camera, cavity_taps=0)
+        pose = rig_module.Pose("part", camera, geometry)
+        shaded = rig_module.light(pose, "studio")
+        hit, visible = pose.hit_id, pose.visible
+
+        plain = np.full((pixels, pixels, 3), 0.97)
+        plain[visible] = np.clip(shaded, 0, 1)[visible, None]
+        divided = plain.copy()
+        where = np.full((pixels, pixels), -1, dtype=np.int64)
+        where[visible] = piece_of[hit[visible]]
+        palette = _palette(len(pieces))
+        for slot in range(len(pieces)):
+            mask = where == slot
+            count = int(mask.sum())
+            if not count:
+                continue
+            visible_px[slot] = visible_px.get(slot, 0) + count
+            shade = np.clip(shaded, 0, 1)[mask][:, None]
+            divided[mask] = np.clip(palette[slot] * (0.40 + 0.75 * shade),
+                                    0, 1)
+        edge = np.zeros((pixels, pixels), dtype=bool)
+        for dy, dx in ((0, 1), (1, 0)):
+            rolled = np.roll(np.roll(where, dy, axis=0), dx, axis=1)
+            edge |= visible & (rolled != where)
+        divided[edge] *= 0.25
+        panels.append((plain, divided, where))
+
+    columns = len(panels)
+    gap = 10
+    sheet = Image.new("RGB", (columns * (pixels * 2 + gap) + gap,
+                              pixels + 2 * gap), (247, 246, 244))
+    draw_targets = []
+    for index, (plain, divided, where) in enumerate(panels):
+        x0 = gap + index * (pixels * 2 + gap)
+        sheet.paste(Image.fromarray((plain * 255).astype(np.uint8)), (x0, gap))
+        sheet.paste(Image.fromarray((divided * 255).astype(np.uint8)),
+                    (x0 + pixels, gap))
+        draw_targets.append((x0 + pixels, where))
+
     draw = ImageDraw.Draw(sheet)
-    listed = []
-    for slot in range(len(pieces)):
-        mask = where == slot
-        if int(mask.sum()) < 40:
-            continue
-        ys, xs = np.nonzero(mask)
-        x, y = int(np.median(xs)) + pixels + 16, int(np.median(ys)) + 8
-        label = str(slot + 1)
-        box = draw.textbbox((0, 0), label)
-        pad = 5
-        draw.rectangle([x - pad, y - pad, x + (box[2] - box[0]) + pad,
-                        y + (box[3] - box[1]) + pad], fill=(15, 15, 18))
-        draw.text((x, y), label, fill=(255, 255, 255))
-        listed.append(slot)
+    for x0, where in draw_targets:
+        for slot in range(len(pieces)):
+            mask = where == slot
+            if int(mask.sum()) < min_pixels:
+                continue
+            ys, xs = np.nonzero(mask)
+            x, y = int(np.median(xs)) + x0, int(np.median(ys)) + gap
+            label = str(slot + 1)
+            box = draw.textbbox((0, 0), label)
+            pad = 5
+            draw.rectangle([x - pad, y - pad, x + (box[2] - box[0]) + pad,
+                            y + (box[3] - box[1]) + pad], fill=(15, 15, 18))
+            draw.text((x, y), label, fill=(255, 255, 255))
     path = os.path.join(out_dir, "part-%s.png" % tag)
     sheet.save(path)
-    return path, listed
+    legible = {slot: px for slot, px in visible_px.items() if px >= min_pixels}
+    return path, legible
 
 
 def _palette(count):
@@ -274,7 +383,7 @@ def _palette(count):
 
 
 def walk(backend, mesh, tree, up, intent, out_dir, root=None, want=6,
-         max_depth=4, min_faces=80, log=print):
+         max_depth=4, min_faces=80, views=3, symmetry=True, log=print):
     """Top down from the whole object, stopping wherever the agent says whole.
 
     Returns the root `Part`. Cost is one look per node descended, and the
@@ -285,6 +394,13 @@ def walk(backend, mesh, tree, up, intent, out_dir, root=None, want=6,
     os.makedirs(out_dir, exist_ok=True)
     areas = np.asarray(tree["area"], dtype=float)
     roots = forest_roots(tree) if root is None else [int(root)]
+
+    plane = mirror_plane(mesh) if symmetry else None
+    if plane is not None:
+        log("  symmetry plane found (residual %.4f of model size); parts named "
+            "on one side will be mirrored to the other" % plane["score"])
+    elif symmetry:
+        log("  no symmetry plane: nothing will be mirrored")
 
     # The top level is the FOREST, and it needs no picture to be chosen: the
     # bodies of a print-in-place model are given by the geometry, not by a
@@ -311,13 +427,24 @@ def walk(backend, mesh, tree, up, intent, out_dir, root=None, want=6,
         # A forest level is framed on the whole model, not on one of its bodies.
         frame_on = None if forest else current.node
         path, listed = render_pieces(mesh, tree, current.node, pieces, up,
-                                     out_dir, tag, frame_on=frame_on)
+                                     out_dir, tag, frame_on=frame_on,
+                                     views=views)
         if not listed:
             continue
+        views_used = min(views, max(1, len(listed)))
+        # A piece nothing could see is not offered. Asking about it invites a
+        # confident answer about a surface the agent never saw, which is how
+        # the far-side horns came back named from a view they were not in.
+        hidden = [sl for sl in range(len(pieces)) if sl not in listed]
+        if hidden:
+            log("    %d piece(s) invisible in every view; not asked about"
+                % len(hidden))
         where = ("the whole piece" if current.parent is None
                  else "the part called '%s'" % current.path)
         prompt = ASK % {"intent": intent or "a 3D printed model",
-                        "where": where, "count": len(pieces)}
+                        "where": where, "views": views_used,
+                        "numbers": ", ".join(str(sl + 1)
+                                             for sl in sorted(listed))}
         answer = backend._run([path], prompt,
                               "walk-%s" % rig_module.digest(
                                   os.path.basename(path), prompt))
@@ -333,6 +460,8 @@ def walk(backend, mesh, tree, up, intent, out_dir, root=None, want=6,
                 continue
             if not (0 <= slot < len(pieces)) or not name:
                 continue
+            if slot not in listed:
+                continue
             if kind == "noise":
                 # Folded back into its parent rather than deleted: it is
                 # surface, and every face has to end up somewhere.
@@ -345,11 +474,83 @@ def walk(backend, mesh, tree, up, intent, out_dir, root=None, want=6,
         log("  %s -> %s" % (where, ", ".join(
             "%s[%s]" % (c.name, c.kind) for c in current.children) or "nothing"))
 
+    if plane is not None:
+        mirrored = complete_by_symmetry(mesh, tree, top, plane, log=log)
+        log("  symmetry completed %d part(s)" % mirrored)
+
     with open(os.path.join(out_dir, "hierarchy.json"), "w") as handle:
         json.dump(top.as_dict(), handle, indent=2)
     log("  walked %d node(s); %d parts named"
         % (looked, sum(1 for p in top.walk()) - 1))
     return top
+
+
+def complete_by_symmetry(mesh, tree, top, plane, coarser=3.0, log=print):
+    """Give every named part its mirror image, where the surface agrees.
+
+    This is what fixes a part that exists on both sides but was only ever
+    LOOKED at on one -- the second horn that stayed inside the skull piece
+    because no view showed it, and the far side that no camera reached. It
+    adds no vision calls: the mirror of a surface that was seen is not a
+    guess, it is the same geometry.
+
+    A mirror may take regions that are unclaimed, and regions held by a part
+    much COARSER than itself. That second case is the one that matters and it
+    was nearly got wrong. On the dragon's head the split offered one horn as
+    its own piece and left the other inside the 144-region skull, so the horn
+    was named and its twin was not; a rule that simply refused to overwrite
+    any existing claim would decline the mirror and preserve the exact defect
+    it exists to repair. A 14-region horn mirrored onto 8 regions sitting
+    inside a 144-region skull is not overwriting a peer -- it is refining a
+    container that was never split there.
+
+    Against a claimant of comparable size the mirror is declined, because then
+    the far side really is a different thing (a scar on one cheek), and an
+    inference must never overwrite an observation of equal standing.
+    """
+    named = [p for p in top.walk() if p.parent is not None]
+    claimed = {}
+    for part in named:
+        for region in rig_module.node_regions(tree, part.node):
+            claimed.setdefault(int(region), part)
+
+    added = 0
+    for part in list(named):
+        own = rig_module.node_regions(tree, part.node)
+        twin = mirror_regions(mesh, tree, own, plane)
+        if not len(twin):
+            continue
+        own_size = len(own)
+        free = []
+        for region in twin:
+            holder = claimed.get(int(region))
+            if holder is None:
+                free.append(int(region))
+            elif holder is not part and holder.kind != "whole":
+                continue
+            elif (holder is not part
+                  and len(rig_module.node_regions(tree, holder.node))
+                  >= coarser * own_size):
+                free.append(int(region))
+        if not free:
+            continue
+        part.mirrored = np.asarray(sorted(free), dtype=np.int64)
+        for region in free:
+            claimed[region] = part
+        added += 1
+        if log:
+            log("    %s: mirrored onto %d unclaimed region(s)"
+                % (part.name, len(free)))
+    return added
+
+
+def regions_of(tree, part):
+    """Everything a part covers: its own node, plus its mirror if it has one."""
+    own = np.asarray(rig_module.node_regions(tree, part.node), dtype=np.int64)
+    extra = getattr(part, "mirrored", None)
+    if extra is None or not len(extra):
+        return own
+    return np.unique(np.concatenate([own, extra]))
 
 
 def leaves(part):
@@ -368,8 +569,7 @@ def field(tree, parts, face_count):
     out = np.full(face_count, -1, dtype=np.int64)
     labels = []
     for part in sorted(parts, key=lambda p: p.depth):
-        mask = rig_module.face_mask(tree, rig_module.node_regions(tree,
-                                                                  part.node))
+        mask = rig_module.face_mask(tree, regions_of(tree, part))
         out[mask] = len(labels)
         labels.append(part.path)
     return out, labels
