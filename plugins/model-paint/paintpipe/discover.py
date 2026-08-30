@@ -138,8 +138,9 @@ def identify(backend, mesh, up, intent, out_dir, count=4, pixels=760,
                                        count=count, log=log)
     prompt = IDENTIFY % {"count": len(paths),
                          "intent": intent or "a 3D printed model"}
-    answer = backend._run([sheet], prompt,
-                          "identify-%s" % rig_module.digest(intent, len(paths)))
+    with open(sheet, "rb") as handle:
+        digest = rig_module.digest(handle.read(), intent)
+    answer = backend._run([sheet], prompt, "identify-%s" % digest)
     parts = []
     for entry in (answer or {}).get("parts", []) or []:
         name = str(entry.get("name", "")).strip()
@@ -173,9 +174,9 @@ def point_at(backend, poses, paths, part, intent, workers=3, log=None):
         index, path = job
         prompt = POINT % {"index": index, "intent": intent or "a 3D model",
                           "name": part["name"], "where": part["where"]}
-        answer = backend._run([path], prompt,
-                              "point-%s" % rig_module.digest(
-                                  os.path.basename(path), part["name"]))
+        with open(path, "rb") as handle:
+            digest = rig_module.digest(handle.read(), part["name"])
+        answer = backend._run([path], prompt, "point-%s" % digest)
         if answer is None:
             return index, None
         out = []

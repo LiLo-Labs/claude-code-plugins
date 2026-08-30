@@ -490,7 +490,15 @@ def confirm_ladder(backend, mesh, tree, poses, rungs, feature, hint, intent,
     prompt = LADDER_PROMPT % {"count": len(images),
                               "intent": intent or "a 3D printed model",
                               "feature": feature, "hint": hint or ""}
-    key = "ladder-%s" % rig_module.digest(os.path.basename(path), prompt)
+    # Keyed on the image CONTENT, never its name. The ladder sheet for a given
+    # part and region always lands on the same filename, so a filename key made
+    # a re-run with genuinely different rungs return the previous run's answer:
+    # the shell's ladder was widened from six rungs to the full chain and the
+    # cache confidently replayed "none of these covers the shell body", which
+    # had been true of the old rungs and was false of the new ones. A cache
+    # that can answer about a picture nobody looked at is worse than no cache.
+    with open(path, "rb") as handle:
+        key = "ladder-%s" % rig_module.digest(handle.read(), prompt)
     answer = backend._run([path], prompt, key) or {}
     try:
         pick = int(answer.get("pick", 0))
