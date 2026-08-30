@@ -68,8 +68,8 @@ def main(argv=None):
               % (int((evidence["seen"] > 0).sum()), len(evidence["seen"])))
     _atoms, tree = segment3d.atoms(mesh, log=print, evidence=evidence)
 
-    backend = vision.HeadlessClaude(os.path.join(args.out, "cache"),
-                                    model=args.model)
+    backend = vision.HeadlessBackend(os.path.join(args.out, "cache"),
+                                     model=args.model)
     field, labels = loop.paint(backend, mesh, tree, up, args.intent, args.out,
                                views=args.views, budget=args.budget,
                                max_parts=args.max_parts, log=print)
