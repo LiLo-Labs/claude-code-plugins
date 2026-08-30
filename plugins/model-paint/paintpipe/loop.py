@@ -169,10 +169,27 @@ def first_painting(mesh, tree, count=8):
     return field, ["colour %d" % (i + 1) for i in range(len(pieces))]
 
 
+# Twelve colours chosen to stay apart in hue AND in lightness. Generating them
+# as hue = 0.61 * i put colour 2 at 0.61 and colour 7 at 0.66 -- two blues five
+# hundredths apart, which made the shell body and the large barnacles the same
+# colour in the render. The agent is asked to judge one colour against another
+# in that picture, so two colours it cannot tell apart is not a cosmetic fault.
+DISTINCT = [(0.85, 0.33, 0.20), (0.20, 0.45, 0.80), (0.95, 0.76, 0.16),
+            (0.25, 0.62, 0.35), (0.62, 0.34, 0.68), (0.40, 0.78, 0.80),
+            (0.90, 0.55, 0.75), (0.45, 0.35, 0.22), (0.60, 0.80, 0.30),
+            (0.15, 0.28, 0.45), (0.98, 0.62, 0.35), (0.55, 0.58, 0.62)]
+
+
 def palette(count):
-    import colorsys
-    return np.array([colorsys.hsv_to_rgb((0.61 * i) % 1.0, 0.58, 0.95)
-                     for i in range(max(count, 1))])
+    out = []
+    for index in range(max(count, 1)):
+        base = np.asarray(DISTINCT[index % len(DISTINCT)])
+        # Past twelve, darken then lighten rather than repeat a colour exactly.
+        wrap = index // len(DISTINCT)
+        if wrap:
+            base = np.clip(base * (0.68 if wrap % 2 else 1.28), 0.05, 1.0)
+        out.append(base)
+    return np.asarray(out)
 
 
 def show(mesh, up, field, labels, out_dir, tag, views=3, pixels=520):
@@ -451,6 +468,7 @@ def add_part(backend, mesh, tree, up, field, labels, part, intent, out_dir,
             log("    %s: not pointed at in any view" % part["name"])
         labels.pop()
         return field, labels, 0
+    before = field.copy()
     field, labels, applied = apply_fixes(field, tree, poses, geometry, points,
                                          labels, growth=growth, log=None)
 
@@ -461,17 +479,30 @@ def add_part(backend, mesh, tree, up, field, labels, part, intent, out_dir,
     with open(path, "rb") as handle:
         key = "check-%s" % rig_module.digest(handle.read(), part["name"])
     answer = backend._run([path], prompt, key) or {}
-    fixes = []
+    adds, removes = [], []
     for fix in (answer.get("fixes") or [])[:budget]:
         kind = str(fix.get("kind", "add")).lower()
-        # "remove" hands the surface back to the base coat, which is colour 1
-        # by construction -- the part painted first, underneath everything.
         fix = dict(fix)
-        fix["colour"] = 1 if kind == "remove" else slot + 1
-        fixes.append(fix)
-    if fixes:
-        field, labels, _n = apply_fixes(field, tree, poses, geometry, fixes,
+        if kind == "remove":
+            removes.append(fix)
+        else:
+            fix["colour"] = slot + 1
+            adds.append(fix)
+    if adds:
+        field, labels, _n = apply_fixes(field, tree, poses, geometry, adds,
                                         labels, growth=growth, log=None)
+    # "remove" RESTORES WHAT WAS UNDERNEATH, which is not the same as painting
+    # the first colour. Sending it to colour 1 handed every over-painted patch
+    # to whichever part happened to be painted first -- on the shell that was
+    # the rock base, so telling the loop "this barnacle colour has spread onto
+    # the shell" turned that shell surface into rock. Undo has to be undo.
+    for fix in removes:
+        field, labels, _n = apply_fixes(field, tree, poses, geometry,
+                                        [dict(fix, colour=slot + 1)], labels,
+                                        growth=growth, log=None)
+        touched = field == slot
+        field[touched] = before[touched]
+    fixes = adds + removes
     if log:
         log("    %-32s %d point(s), %d fix(es)"
             % (part["name"], len(points), len(fixes)))
