@@ -195,6 +195,76 @@ properly; a fitted constant would have hidden it.
 for it on the (monotone) count. A region count is a quantity a person can
 reason about. `k` is not.
 
+## The base-region ceiling: measured, and lowered
+
+Every claim in this pipeline is a union of base regions. A boundary that runs
+through the MIDDLE of a region therefore cannot be expressed by any of them --
+not by the climb, not by the ladder, not by any amount of looking. This was
+the last structural limit, and it turned out to be measurable directly: a face
+pair the substrate calls one region while the camera sees an edge across it is
+exactly such a place, and both signals are already computed.
+
+**It was large.** Of the strong camera edges (top decile, and at least twice
+the typical pair -- a quantile alone flags everything on a surface with
+uniform evidence):
+
+    baby-dragon    14198 strong edges, 78.1% of them INSIDE a region
+                   838 of 1295 regions hid one; the worst hid 182
+    scallop-shell                      80.3% of them INSIDE a region
+
+Roughly four fifths of what could be plainly seen was unreachable by anything
+downstream.
+
+**The cut has to be agglomerative, not subtractive.** Deleting the strong
+edges and taking connected components is a recorded dead end in this file: a
+scattered subset of cut edges never closes a curve, so it cannot bound a
+region and growth simply routes around the gap. So the offending region is
+re-MERGED from its own faces at a finer threshold, with its hidden edges made
+the most expensive merges available, and felzenszwalb still decides whether to
+cut at all.
+
+Refinement is local and conditional -- a region nobody saw an edge inside is
+untouched -- and it converges on its own:
+
+    round 0:  1295 regions, ceiling 78.1%
+    round 1:  6617 regions, ceiling 54.3%   (578 regions split, 4s)
+    round 2:  8940 regions, ceiling 47.5%   (528 split, 2s)
+    round 3:  9254 regions, ceiling 46.9%   ( 85 split, 1s)
+    round 4:  9262 regions, ceiling 46.9%   (  2 split, 1s)
+
+78.1% -> 46.9% in eight seconds, stopping by itself. The shell goes 80.3% ->
+40.7% in one pass. The ladder bottoms out at `min_faces`, the printer's own
+floor, so what remains is two REAL limits rather than artefacts: edges nothing
+observed, and edges finer than the nozzle can lay down.
+
+## Buying more looks made recall WORSE, until nested groups were fused
+
+The coverage planner (`rig.plan_poses`) chose 12 poses over the old grid's 6
+and doubled the points -- 385 against 178. Recall went DOWN:
+
+    12-view grid            160 points ->  66 climbs -> 16 instances, 4.70% of surface
+    24-view coverage        312 points -> 110 climbs -> 12 instances, 3.05%
+    24-view coverage+fusion 312 points -> 110 climbs -> 13 instances, 5.61%
+
+The mechanism is worth keeping. Every extra look lands points on new regions
+of a spike the survey already had, and more points per view make the
+separation rule bite LOWER -- two points in one image stop a climb, and there
+are now more such pairs. So groups came out smaller, more numerous, and each
+too thinly supported to clear consensus. The confirmed median size collapsed
+from 118.0 mm2 to 19.7 mm2: the survey was confirming fragments of spikes.
+
+The fix is not a looser gate. Those groups were never different things: a node
+and its own ancestor are one feature described at two granularities, so
+`index3d.fuse_nested` merges them, keeping the outermost -- the rung the
+ladder judged a whole feature. Siblings are left alone, since two spikes side
+by side share no ancestor below the body.
+
+With fusion the coverage rig paints 84% more surface than it did without, and
+19% more than the six-pose grid, with each instance a whole spike rather than
+a fragment. Instance count is still lower than the grid's (13 against 16) and
+93 groups are still dropped for want of agreement, so this is a real but
+partial win -- recorded as one.
+
 ## What this plugin is for
 
 A 3D printing hobbyist runs one slash command on an STL or 3MF and gets back a

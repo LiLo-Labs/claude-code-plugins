@@ -234,3 +234,114 @@ class TestCalibrate(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestCeiling(unittest.TestCase):
+    """The base-region ceiling: a boundary inside a region cannot be expressed
+    by any union of regions, so the survey can never reach it however well it
+    looks. These pin the detection and the local re-cut that lowers it."""
+
+    def strip(self, faces=40):
+        """A line of faces, split into two regions, with a strong camera edge
+        hidden in the middle of the first one."""
+        pairs = np.stack([np.arange(faces - 1), np.arange(1, faces)], axis=1)
+        base = np.zeros(faces, dtype=np.int64)
+        base[faces // 2:] = 1
+        strength = np.full((3, faces - 1), 0.01)
+        seen = np.ones(faces - 1)
+        strength[:, faces // 4] = 10.0        # a bright edge inside region 0
+        return pairs, base, {"evidence": strength, "seen": seen}
+
+    def test_a_hidden_edge_is_found(self):
+        pairs, base, evidence = self.strip()
+        hidden, _cut = segment3d.hidden_edges(base, pairs, evidence)
+        self.assertTrue(hidden.any())
+        # It is inside region 0, not on the boundary between 0 and 1.
+        found = pairs[hidden]
+        self.assertTrue(np.all(base[found[:, 0]] == base[found[:, 1]]))
+
+    def test_an_edge_already_on_a_boundary_is_not_hidden(self):
+        pairs, base, evidence = self.strip()
+        # Move the bright edge onto the region boundary; nothing is hidden now.
+        evidence["evidence"][:] = 0.01
+        evidence["evidence"][:, len(base) // 2 - 1] = 10.0
+        hidden, _cut = segment3d.hidden_edges(base, pairs, evidence)
+        self.assertFalse(hidden.any())
+
+    def test_an_unseen_pair_cannot_hide_anything(self):
+        """No observation means no contradiction. A pair nothing looked at is
+        not evidence that the substrate is wrong."""
+        pairs, base, evidence = self.strip()
+        evidence["seen"][:] = 0.0
+        hidden, _cut = segment3d.hidden_edges(base, pairs, evidence)
+        self.assertFalse(hidden.any())
+
+    def test_splitting_lowers_the_ceiling(self):
+        pairs, base, evidence = self.strip(faces=60)
+        weights = np.full(len(pairs), 0.1)
+        weights[len(pairs) // 4] = 9.0
+        areas = np.ones(60)
+        refined, report = segment3d.split_hidden(
+            base, pairs, weights, areas, evidence, min_faces=2, base_k=15.0,
+            min_hidden=1)
+        self.assertGreater(int(refined.max()) + 1, int(base.max()) + 1)
+        before, _ = segment3d.hidden_edges(base, pairs, evidence)
+        after, _ = segment3d.hidden_edges(refined, pairs, evidence)
+        self.assertLess(int(after.sum()), int(before.sum()))
+
+    def test_a_region_with_no_hidden_edge_is_left_alone(self):
+        """Refinement is conditional. It may only add detail where something
+        observed a contradiction, never everywhere."""
+        pairs, base, evidence = self.strip()
+        evidence["evidence"][:] = 0.01          # nothing stands out
+        weights = np.full(len(pairs), 0.1)
+        refined, _report = segment3d.split_hidden(
+            base, pairs, weights, np.ones(len(base)), evidence, min_faces=2)
+        self.assertEqual(int(refined.max()) + 1, int(base.max()) + 1)
+
+    def test_refinement_stops_at_the_printer_floor(self):
+        """A region that cannot split into parts the printer could lay down as
+        separate colours is left whole: splitting it would manufacture a
+        boundary finer than anything printable."""
+        pairs, base, evidence = self.strip(faces=40)
+        weights = np.full(len(pairs), 0.1)
+        refined, _report = segment3d.split_hidden(
+            base, pairs, weights, np.ones(40), evidence, min_faces=1000,
+            min_hidden=1)
+        self.assertEqual(int(refined.max()) + 1, int(base.max()) + 1)
+
+
+class TestFuseNested(unittest.TestCase):
+    """Nested groups are one instance seen at two granularities. Without this,
+    buying more looks made recall worse on the dragon -- 24 views found FEWER
+    spikes than 12, because every extra look split the evidence for a spike it
+    already had across another node."""
+
+    def tree(self):
+        total = 2 * 4 - 1
+        children = np.full((total, 2), -1, dtype=np.int64)
+        children[4] = (0, 1)
+        children[5] = (2, 3)
+        children[6] = (4, 5)
+        return {"children": children,
+                "base": np.repeat(np.arange(4, dtype=np.int64), 3),
+                "regions": 4, "area": np.ones(total)}
+
+    def test_a_node_and_its_ancestor_become_one(self):
+        from paintpipe import index3d as i3
+        fused = i3.fuse_nested({4: {0, 1}, 0: {2}}, self.tree())
+        self.assertEqual(len(fused), 1)
+        self.assertEqual(fused[4], {0, 1, 2})
+
+    def test_siblings_are_left_apart(self):
+        """Two spikes side by side share no ancestor below the body. Fusing
+        them would be the over-merge the whole design exists to prevent."""
+        from paintpipe import index3d as i3
+        fused = i3.fuse_nested({4: {0}, 5: {1}}, self.tree())
+        self.assertEqual(len(fused), 2)
+
+    def test_a_chain_collapses_to_the_outermost(self):
+        from paintpipe import index3d as i3
+        fused = i3.fuse_nested({0: {0}, 4: {1}, 6: {2}}, self.tree())
+        self.assertEqual(len(fused), 1)
+        self.assertEqual(fused[6], {0, 1, 2})

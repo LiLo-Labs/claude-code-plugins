@@ -367,6 +367,42 @@ def climb(resolved, tree):
     return stopped, ladders, chains
 
 
+def fuse_nested(groups, tree):
+    """Groups whose nodes nest are one instance described at two granularities.
+
+    Two looks at one spike land on different base regions of it, and if their
+    climbs stop at different rungs the survey ends up holding the same spike
+    twice -- as a node and as something inside that node -- with the evidence
+    for it split between them. Neither half then clears consensus, and the
+    spike is lost for having been seen too WELL.
+
+    Fusing keeps the outermost node, because that is the rung the ladder
+    judged to be one whole feature; the inner ones are parts of it. Nodes that
+    do not nest are left alone: two spikes side by side share no ancestor
+    below the body, and nothing here merges them.
+    """
+    if not groups:
+        return dict(groups)
+    nodes = sorted(groups, key=lambda n: -len(rig_module.node_regions(tree, n)))
+    holder = {}
+    for node in nodes:
+        chain = set(rig_module.ancestors(tree, int(node)))
+        target = node
+        for other in nodes:
+            if other == node:
+                continue
+            # `other` is outside `node` when it sits on node's ancestor chain.
+            if int(other) in chain:
+                target = holder.get(other, other)
+                break
+        holder[node] = target
+
+    fused = defaultdict(set)
+    for node, members in groups.items():
+        fused[holder.get(node, node)].update(members)
+    return dict(fused)
+
+
 def nearest_by_area(rungs, areas, typical):
     """The rung whose area is closest to `typical`, compared as a RATIO.
 
@@ -654,6 +690,26 @@ def settle(backend, mesh, tree, views, poses, clicks, answered, feature, hint,
     for node, picked in settled.items():
         for index in grouped[node]:
             merged[picked].add(index)
+
+    # AND A NODE INSIDE ANOTHER NODE IS THE SAME INSTANCE, SEEN LESS WELL.
+    # Without this, buying more looks makes recall WORSE, which is the
+    # opposite of what more evidence should do. Measured on the dragon: 12
+    # looks gave 66 climbs and 16 spikes, and 24 looks gave 110 climbs and
+    # only 12, because every extra look adds points that land on new regions
+    # of a spike the survey already had. More points per view also make the
+    # separation rule bite lower -- two points in one image stop a climb, and
+    # there are more such pairs -- so groups come out smaller, more numerous,
+    # and individually too thinly supported to clear consensus.
+    #
+    # The fix is not a looser gate. It is that these groups were never
+    # different things: a node and its own ancestor are one feature described
+    # at two granularities, so they are fused, keeping the outermost, which is
+    # the one the ladder judged to be a whole feature.
+    fused = fuse_nested(merged, tree)
+    if log and len(fused) != len(merged):
+        log("  %d groups fused into %d: nested nodes are one instance seen "
+            "at two granularities" % (len(merged), len(fused)))
+    merged = fused
 
     shown = score(list(merged), poses, views, tree, base, answered=answered)
     instances = []

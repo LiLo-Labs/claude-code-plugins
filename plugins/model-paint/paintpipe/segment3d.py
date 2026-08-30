@@ -175,9 +175,185 @@ def solve_base_k(pairs, weights, count, min_faces, target_regions, sizes=None,
     return float(best_k), best_labels
 
 
+def hidden_edges(base, pairs, evidence, quantile=0.90, stand_out=2.0):
+    """Face pairs the substrate calls one region while the camera sees an edge.
+
+    THIS IS THE CEILING, MADE COUNTABLE. Every claim in this pipeline is a
+    union of base regions, so a boundary that runs through the middle of a
+    region cannot be expressed by any of them -- not by the climb, not by the
+    ladder, not by any amount of looking. The survey can only select among
+    nodes that exist.
+
+    A pair where the segmentation says "same region" and the camera says
+    "there is an edge here" is exactly such a place, and it is a disagreement
+    between two signals that are already computed. So the ceiling stops being
+    an abstract worry and becomes a number: how much of what can be seen is
+    unreachable by anything downstream.
+
+    Returns (mask over pairs, the strength cut used).
+    """
+    best = np.asarray(evidence["evidence"], dtype=float).max(axis=0)
+    observed = np.asarray(evidence["seen"], dtype=float) > 0
+    if not observed.any():
+        return np.zeros(len(pairs), dtype=bool), 0.0
+    # A quantile alone is not enough, and a test caught it: on a surface whose
+    # evidence is nearly uniform -- nothing distinctive seen anywhere -- the
+    # top decile is still a tenth of the pairs, so the rule would report the
+    # whole model as hiding edges and re-cut all of it on the strength of no
+    # observation at all. An edge has to STAND OUT to count, so it must clear
+    # the quantile AND be a real multiple of the typical pair. When the
+    # distribution is flat those two conditions cannot both hold, which is the
+    # correct answer: nothing was seen, so nothing is hidden.
+    cut = float(np.percentile(best[observed], 100.0 * quantile))
+    typical = float(np.median(best[observed]))
+    cut = max(cut, stand_out * typical)
+    strong = observed & (best >= cut) & (best > 0)
+    internal = base[pairs[:, 0]] == base[pairs[:, 1]]
+    return strong & internal, cut
+
+
+def refine_substrate(base, pairs, weights, areas, evidence, min_faces,
+                     base_k=15.0, rounds=3, log=None, **kwargs):
+    """Split, then look again, until nothing more can be split.
+
+    One pass cannot finish the job: splitting a region moves some of its hidden
+    edges onto the new boundaries, but a piece that is still too coarse still
+    hides its own. Each round is cheap (4s on a 475k-triangle model) and each
+    one is strictly local to what is still contradicted, so this converges
+    rather than running away -- it stops when no region hides enough to be
+    worth re-cutting, or when the pieces would fall below what the printer can
+    lay down.
+    """
+    report = {"rounds": [], "start_regions": int(base.max()) + 1}
+    for number in range(int(rounds)):
+        base, step = split_hidden(base, pairs, weights, areas, evidence,
+                                  min_faces, base_k=base_k, log=log, **kwargs)
+        report["rounds"].append(step)
+        if not step.get("split"):
+            break
+    report["end_regions"] = int(base.max()) + 1
+    return base, report
+
+
+def split_hidden(base, pairs, weights, areas, evidence, min_faces,
+                 base_k=15.0, quantile=0.90, min_hidden=3, ladder=(0.25, 0.06,
+                                                                   0.015),
+                 log=None):
+    """Re-cut only the regions that hide an edge, and only as far as they can go.
+
+    NOT by deleting the strong edges and taking components. That is a recorded
+    dead end in this project: a scattered subset of cut edges never closes a
+    curve, so it cannot bound a region, and growth simply routes around the
+    gap (the edge wall blocked 4.66% of contacts and changed nothing). The cut
+    has to be agglomerative, which is what felzenszwalb is -- so the offending
+    region is re-merged from its own faces at a finer threshold, and the
+    strong edges do their work by being expensive to merge across rather than
+    by being removed.
+
+    Refinement is LOCAL and CONDITIONAL, which is what keeps it honest and
+    cheap. A region nobody saw an edge inside is left exactly as it was, so
+    this can only add detail where something observed it.
+
+    The ladder stops at `min_faces` -- the printer's own floor. A region that
+    cannot split into parts the printer could lay down as separate colours is
+    left whole, because splitting it would manufacture a boundary finer than
+    anything that could ever be printed. The residual ceiling after this pass
+    is therefore two real limits and no artefacts: edges nothing can observe,
+    and edges finer than the nozzle.
+    """
+    import index_regions
+
+    hidden, cut = hidden_edges(base, pairs, evidence, quantile=quantile)
+    if not hidden.any():
+        if log:
+            log("  refine: no region hides a visible edge")
+        return base, {"suspect": 0, "split": 0, "added": 0, "cut": cut}
+
+    owner = base[pairs[hidden][:, 0]]
+    regions, counts = np.unique(owner, return_counts=True)
+    suspect = regions[counts >= int(min_hidden)]
+    if not len(suspect):
+        return base, {"suspect": 0, "split": 0, "added": 0, "cut": cut}
+
+    # Faces grouped by region once, rather than scanned per region.
+    order = np.argsort(base, kind="stable")
+    starts = np.searchsorted(base[order], np.arange(int(base.max()) + 2))
+    # Internal pairs grouped by region, likewise.
+    internal = base[pairs[:, 0]] == base[pairs[:, 1]]
+    inner_pairs = pairs[internal]
+    inner_weights = weights[internal]
+    inner_owner = base[inner_pairs[:, 0]]
+    pair_order = np.argsort(inner_owner, kind="stable")
+    pair_starts = np.searchsorted(inner_owner[pair_order],
+                                  np.arange(int(base.max()) + 2))
+
+    refined = base.copy()
+    next_label = int(base.max()) + 1
+    split_count = 0
+    for region in suspect:
+        faces = order[starts[region]:starts[region + 1]]
+        if len(faces) < 2 * min_faces:
+            continue
+        local_pairs = inner_pairs[pair_order[pair_starts[region]:
+                                             pair_starts[region + 1]]]
+        local_weights = inner_weights[pair_order[pair_starts[region]:
+                                                 pair_starts[region + 1]]]
+        if not len(local_pairs):
+            continue
+        lookup = np.full(int(base.shape[0]), -1, dtype=np.int64)
+        lookup[faces] = np.arange(len(faces))
+        mapped = lookup[local_pairs]
+        keep = (mapped >= 0).all(axis=1)
+        if not keep.any():
+            continue
+        mapped, local_weights = mapped[keep], local_weights[keep]
+
+        # Make the hidden edges the most expensive merges in this region, so
+        # the re-cut lands ON the thing that was seen. Without this the split
+        # goes wherever the weights happen to be highest, which is the same
+        # edge only because `edge_weights` folded the evidence in upstream --
+        # an implicit coupling a caller can break by passing geometry-only
+        # weights alongside camera evidence, and then the region splits
+        # confidently in the wrong place. This is a weighting, not a drawing:
+        # felzenszwalb still decides whether to cut at all.
+        local_hidden = hidden[internal][pair_order[pair_starts[region]:
+                                                   pair_starts[region + 1]]]
+        local_hidden = local_hidden[keep]
+        if local_hidden.any():
+            local_weights = local_weights.copy()
+            local_weights[local_hidden] = max(
+                float(local_weights.max()) * 1.5, 1e-6)
+
+        for step in ladder:
+            labels = index_regions.felzenszwalb(mapped, local_weights,
+                                                len(faces), base_k * step,
+                                                min_faces)
+            parts = int(labels.max()) + 1
+            if parts >= 2:
+                sizes = np.bincount(labels, minlength=parts)
+                if int(sizes.min()) >= min_faces:
+                    refined[faces] = next_label + labels
+                    next_label += parts
+                    split_count += 1
+                    break
+
+    added = next_label - (int(base.max()) + 1) - split_count
+    _unique, refined = np.unique(refined, return_inverse=True)
+    refined = refined.astype(np.int32)
+    report = {"suspect": int(len(suspect)), "split": int(split_count),
+              "added": int(added), "cut": round(float(cut), 5),
+              "hidden_pairs": int(hidden.sum())}
+    if log:
+        log("  refine: %d regions hid a visible edge, %d split into finer "
+            "regions (+%d); %d -> %d regions"
+            % (len(suspect), split_count, added, int(base.max()) + 1,
+               int(refined.max()) + 1))
+    return refined, report
+
+
 def atoms(mesh, cap=300, base_k=15.0, min_faces=None, scales=12, log=None,
           evidence=None, camera_weight=2.0, nozzle_mm=0.4,
-          target_regions=None):
+          target_regions=None, refine=True, refine_rounds=3):
     """Cached front door: the atoms of a mesh are a pure function of its
     geometry and these parameters, so they are computed once per mesh EVER,
     whatever output directory a run uses."""
@@ -188,8 +364,9 @@ def atoms(mesh, cap=300, base_k=15.0, min_faces=None, scales=12, log=None,
     # The evidence is part of what the atoms ARE, so it is part of their
     # identity. A cache key that ignored it would serve geometry-only atoms to
     # a caller that paid to render the model, silently and forever.
-    key.update(("%s|%s|%s|%s|%s|%s|%s|fastscale-v4"
+    key.update(("%s|%s|%s|%s|%s|%s|%s|%s|%s|fastscale-v5"
                 % (cap, base_k, min_faces, scales, nozzle_mm, target_regions,
+                   refine, refine_rounds,
                    camera_weight if evidence is not None else "geom")).encode())
     if evidence is not None:
         key.update(np.ascontiguousarray(
@@ -211,7 +388,9 @@ def atoms(mesh, cap=300, base_k=15.0, min_faces=None, scales=12, log=None,
                                       log=log, evidence=evidence,
                                       camera_weight=camera_weight,
                                       nozzle_mm=nozzle_mm,
-                                      target_regions=target_regions)
+                                      target_regions=target_regions,
+                                      refine=refine,
+                                      refine_rounds=refine_rounds)
     np.savez_compressed(cache, face_atom=face_atom,
                         children=tree["children"], base=tree["base"],
                         regions=np.int64(tree["regions"]),
@@ -223,7 +402,8 @@ def atoms(mesh, cap=300, base_k=15.0, min_faces=None, scales=12, log=None,
 
 def _atoms_uncached(mesh, cap=300, base_k=15.0, min_faces=None, scales=12,
                     log=None, evidence=None, camera_weight=2.0,
-                    nozzle_mm=0.4, target_regions=None):
+                    nozzle_mm=0.4, target_regions=None, refine=True,
+                    refine_rounds=3):
     """Feature-aligned atoms: a cut of the persistence merge tree, at most `cap` wide.
 
     Returns (face_atom, tree) where `tree` carries what a caller needs to descend into
@@ -271,6 +451,16 @@ def _atoms_uncached(mesh, cap=300, base_k=15.0, min_faces=None, scales=12,
     else:
         base = index_regions.felzenszwalb(pairs, weights, count, base_k,
                                           min_faces)
+
+    # BREAK THE CEILING. Every claim downstream is a union of base regions, so
+    # a boundary running through the middle of one cannot be expressed by any
+    # of them: the survey can only select among nodes that exist. Regions that
+    # hide an edge the camera can see are re-cut here, locally and only where
+    # something observed the contradiction, down to the printer's own floor.
+    if evidence is not None and refine:
+        base, _refine_report = refine_substrate(
+            base, pairs, weights, session["areas"], evidence, min_faces,
+            base_k=base_k, rounds=refine_rounds, log=log)
     regions = int(base.max()) + 1
     if log:
         log("  base regions: %d" % regions)
