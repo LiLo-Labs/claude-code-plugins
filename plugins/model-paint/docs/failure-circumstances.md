@@ -1,6 +1,6 @@
 # The circumstances under which this pipeline fails
 
-Every failure in the validation sweep reduced to one of eight structural
+Every failure in the validation sweep reduced to one of twelve structural
 circumstances. None of them is a model being bad at looking; each is a
 mismatch between where the evidence lives and where the decision is made.
 Each carries the invariant that now guards it, and the incident that paid
@@ -133,3 +133,96 @@ because the vocabulary had tagged barnacles "shell" material. A material
 tag is a prior written before anyone saw the finished piece; the critic's
 override is an observation of it. Observation outranks assertion (see 3),
 so critic-overridden parts are exempt from harmonization.
+
+## 9. A repair proposes what it can draw, not what is there
+
+Every recovery stage ends in a proposal: here is the region I think this part
+occupies. When those proposals are SYNTHESISED -- rings grown from a pixel
+stencil, discs of camera-facing surface, floods bounded by a crease angle --
+they cannot follow a sculpted margin, so the confirm gates refuse them and
+the feature stays unpainted forever. The judges were never the problem; the
+proposers were.
+
+*Incidents:* the dragon's eyes, refused as discs and bands and floods for a
+whole session while they existed all along as merge-tree nodes 53 and 54; the
+shell's barnacles and the reef's colonies, hunted with candidates sized from
+the fragments the family already held, so every sheet came back a sliver on a
+colony's edge and every reviewer correctly said no.
+*Invariant:* proposals come from the geometry's own structures first. The
+relocate ladder offers merge-tree nodes near the located anchor before any
+drawing, and the scattered-family sweep sizes its hunt by the characteristic
+radius the scale-space index measured for that family -- not by what the
+label currently holds. Synthetic drawings remain, but only as the fallback
+for a feature that exists in the design and not in the mesh.
+*Watch for:* a stage that refuses nearly everything it is offered. A gate at
+0/36 is evidence about the candidates, not about the model.
+
+## 10. A label field edited finer than its evidence
+
+Labels are decided per atom, per region, per confirmed instance -- but the
+field they live in is per face, and every stage was free to write single
+triangles into it. A boundary that is not a region edge is not a geometric
+edge at all, so those writes accumulated as ragged colour seams that no
+amount of downstream smoothing could make crisp.
+
+*Incident:* torn zigzag seams on every model -- stranded orange tongues at
+the fish's fin roots, speckled black on the cow's brow, colour crossing the
+dragon's spikes mid-shape.
+*Invariant:* labels live on the merge tree. After the recovery pass, and
+again after verification and the sweep, the whole field is projected back
+onto the base regions (area-majority per region), so every label edge the
+paint stages see is a real edge (`segment3d.snap_to_base`). The single
+exemption used to be a pattern painted onto smooth geometry, which has no
+region to snap to. **There is no exemption any more.** Once the synthetic
+proposers were deleted (see 9), nothing downstream produces a mask that is not
+already a union of base regions, so there is nothing left to protect from the
+projection: every label edge in the finished field is a region edge by
+construction rather than by a capped allowance. The cost is stated plainly --
+a marking on genuinely smooth geometry is now as coarse as the base regions
+there are -- and it is the right trade, because the capped exemption was the
+last place a ragged edge could still enter the field.
+
+## 11. A failed look counted as a look that saw nothing
+
+Consensus divides what was pointed at by what could have been seen. When a
+vision call FAILS -- a timeout, a transport error, a truncated answer -- the
+honest reading is that the view never testified. Reading its absence of
+points as "this view looked and found none" lets a transport failure vote
+against the feature: the view still sits in the denominator, so the share
+falls, and an instance that every look which actually ran agreed on is
+discarded for want of agreement it was never given the chance to show.
+
+This is the quietest failure in the taxonomy. Nothing errors, the counts
+look plausible, and the damage scales with how unreliable the network
+happened to be that day -- so the same model segments differently on Tuesday.
+
+*Incident:* on `samples/creature.stl`, whose ground truth is known (body, two
+horns, two eyes), six of sixteen calls failed at eight workers. The horns
+survived because every look that answered found them. One eye was dropped at
+share 0.33, having been correctly found by both looks that answered, because
+six silent failures sat in its denominator.
+*Invariant:* `index3d.ask_views` returns the set of views that ANSWERED, and
+`index3d.score` builds the denominator from that set alone. A failed call is
+retried, then excluded, then reported in the survey record. With the fix the
+fixture comes back exact: two horns at 48 faces each, two eyes at 320.
+*Watch for:* a run whose instance count moves between two runs of the same
+model. Look at the failed-look count before touching a threshold.
+
+## 12. A rig that returns a picture but carries no evidence
+
+An evidence channel is trusted because it is a different look, so a channel
+that is silently identical to another -- or that carries no signal at all --
+inflates agreement without adding anything to agree about. The renders still
+arrive, and they still look like renders.
+
+*Incident:* `render.RIGS["raking_b"]` keys its light off the object's front and
+then applies the grazing projection, which removes the component along the
+view axis. From any camera looking at the front, that removes the entire key:
+the rig returns flat ambient, measured at 0.28 across every visible pixel with
+no variation whatsoever. Every "raking_b" look ever fused was a constant.
+*Invariant:* the rig's lights are built in the CAMERA's screen basis
+(`rig.LIGHTINGS`), perpendicular to the view direction by construction, so no
+camera position can cancel one. Three raking directions are kept rather than
+one, because relief throws shadow ALONG the light and a ridge running parallel
+to the key casts nothing.
+*Watch for:* a lit buffer whose min and max are equal. That is not a look.

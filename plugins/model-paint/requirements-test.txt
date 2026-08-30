@@ -1,0 +1,18 @@
+# What the test suite needs. The pipeline itself needs these too, plus a
+# `claude` CLI on PATH for the vision agents (HeadlessBackend shells out to
+# `claude -p`, so no API key is involved).
+numpy
+scipy
+trimesh
+pillow
+rtree            # trimesh's ray engine needs a spatial index to build at all
+colour-science   # Lab <-> sRGB for the presentation renders
+networkx
+pytest
+
+# Strongly recommended, not required: embreex replaces trimesh's pure-python
+# ray engine and is worth installing before any real run. Measured on
+# samples/creature.stl in this repo: one 256px cast 2.6s -> 0.07s, a 37x
+# speedup, and the rig casts one pose per camera. Without it a 12-view rig on
+# a 475k-triangle model is minutes rather than seconds.
+embreex

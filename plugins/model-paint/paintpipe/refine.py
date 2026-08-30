@@ -77,22 +77,16 @@ def refine_subparts(mesh, face_part, labels, vocabulary, backend, intent,
         # host's own faces assumed the missing part's geometry currently carries the
         # host's label -- but the ogre's tusks were labelled skull dome, so a zoom onto
         # "lips and mouth" could not contain a single tusk face and returned nothing,
-        # honestly, forever. The region is now the host plus adjacency rings out to
-        # roughly 2.5x the host's area, so anatomy mislabelled to a NEIGHBOUR is inside
-        # the frame. Claims still move faces only INTO the missing children, and the
-        # visual confirm gate still stands between a claim and the model.
-        inside = np.zeros(len(mesh.faces), dtype=bool)
-        inside[host_faces] = True
+        # honestly, forever. The frame therefore has to reach past the host.
+        #
+        # It reaches by CLIMBING THE MERGE TREE, not by growing adjacency rings.
+        # A ring flood spreads the same distance in every direction regardless
+        # of what it crosses, so it walks off a limb onto the body as readily
+        # as it walks along the limb; the tree's parents are the neighbourhood
+        # the geometry itself groups this host with. Same intent, and the frame
+        # now stops where the surface stops rather than after twelve rings.
         host_area = float(mesh.area_faces[host_faces].sum())
-        for _ring in range(12):
-            if float(mesh.area_faces[inside].sum()) >= 2.5 * host_area:
-                break
-            touch = inside[adjacency[:, 0]] | inside[adjacency[:, 1]]
-            grow = np.unique(adjacency[touch].ravel())
-            before = int(inside.sum())
-            inside[grow] = True
-            if int(inside.sum()) == before:
-                break
+        inside = _tree_neighbourhood(mesh, tree, host_faces, host_area)
         parent_faces = np.flatnonzero(inside)
         sub = trimesh.Trimesh(vertices=mesh.vertices,
                               faces=mesh.faces[parent_faces], process=False)
@@ -1052,12 +1046,22 @@ def recover_located(mesh, face_part, labels, backend, intent, frame, located, no
     # feature that exists in the design and not in the mesh: lips on a smooth toy
     # fish, markings on a stylized cow. The spec calls for exactly this: a label-only
     # boundary drawn where it does not exist geometrically, without touching the mesh.
-    # A single drawing put to a yes/no gate stalemated exactly like the binary
-    # confirm did: the gate kept being RIGHT about a mediocre drawing and the
-    # feature stayed unpainted forever. So the reviewer now picks from several
-    # candidate drawings -- stencil solidified at different radii, discs of
-    # camera-facing surface at the located anchor -- or rejects them all.
-    # Selection beats judgement at the last gate too.
+    # A single candidate put to a yes/no gate stalemated exactly like the binary
+    # confirm did: the gate kept being RIGHT about a mediocre proposal and the
+    # feature stayed unpainted forever. So the reviewer picks from several
+    # candidates -- merge-tree nodes near the anchor, and twins of a confirmed
+    # sibling -- or rejects them all. Selection beats judgement at the last gate
+    # too.
+    #
+    # NOTHING IS EXEMPT FROM THE TREE ANY MORE. Every candidate offered here is
+    # now a union of base regions, so there is no drawing to protect from the
+    # projection and no silhouette left to trim: the pattern exemption existed
+    # only to stop `snap_to_base` from erasing a stencil, and there are no
+    # stencils. The cost is real and worth stating -- a marking painted onto
+    # genuinely smooth geometry now lands on whole base regions and is as
+    # coarse as the regions there are -- and the gain is circumstance 10 closed
+    # by construction rather than by a capped exemption: every label edge in
+    # the finished field is a region edge.
     for part, specs in located.items():
         if report.get(part, 0) > 0:
             continue
@@ -1069,49 +1073,16 @@ def recover_located(mesh, face_part, labels, backend, intent, frame, located, no
             faces, tag = _pick_design_cut(backend, mesh, frame, part, spec,
                                           intent, pixels, up=up, tree=tree)
             if faces is not None:
-                if tag != "tree-node":
-                    faces = _smooth_mask(mesh, np.asarray(faces))
                 for face in faces:
                     face_part[int(face)] = index[part]
                 drawn += int(len(faces))
                 report.setdefault("_drawn", []).append(
                     "%s#%d(%s)" % (part, slot, tag))
-                if tag != "tree-node" and len(faces) <= 0.02 * len(mesh.faces):
-                    # A painted-on feature has no region to snap to; these
-                    # faces are exempt from the base-region projection. The
-                    # exemption is for PATTERN-sized cuts only: a "design
-                    # cut" the size of a body part is a mislabel wearing a
-                    # costume, and it snaps like everything else.
-                    report.setdefault("_design_faces", []).extend(
-                        int(face) for face in faces)
         if drawn:
             report[part] = drawn
         else:
             report.setdefault("_drawn_rejected", []).append(part)
     return face_part, report
-
-
-def _smooth_mask(mesh, faces, rounds=3):
-    """Clean a face mask's silhouette the way a painter trims a stencil.
-
-    A design cut is a mask over smooth geometry -- there is no region edge
-    to snap to, so its edge quality must come from its own construction.
-    Majority smoothing over face adjacency drops protruding teeth and fills
-    notches without moving the mask's body.
-    """
-    adjacency = mesh.face_adjacency
-    mask = np.zeros(len(mesh.faces), dtype=bool)
-    mask[faces] = True
-    for _round in range(rounds):
-        votes = np.zeros(len(mask))
-        total = np.zeros(len(mask))
-        np.add.at(votes, adjacency[:, 0], mask[adjacency[:, 1]].astype(float))
-        np.add.at(votes, adjacency[:, 1], mask[adjacency[:, 0]].astype(float))
-        np.add.at(total, adjacency[:, 0], 1.0)
-        np.add.at(total, adjacency[:, 1], 1.0)
-        share = votes / np.maximum(total, 1.0)
-        mask = np.where(total > 0, share >= 0.5, mask)
-    return np.flatnonzero(mask)
 
 
 def _patch_tile(mesh, frame, patch, up, spin, extent, pixels=300):
@@ -1270,12 +1241,11 @@ def relocate_part(backend, mesh, frame, face_part, labels, part, note, intent,
         faces = faces[near]
         if len(faces) == 0:
             continue
-        # A tree node is already a geometric unit; anything synthetic is a
-        # painter's mask and gets a painter's edge.
-        if tag != "tree-node":
-            faces = _smooth_mask(mesh, faces)
-            if len(faces) == 0:
-                continue
+        # No silhouette trim any more. Every candidate is a geometric unit --
+        # a tree node, or a twin matched on the scale-space signature -- and
+        # the base-region projection in the pipeline gives all of them the
+        # same real edges afterwards. Majority-smoothing a mask that is about
+        # to be snapped only moved the ragged edge somewhere else first.
         # A relocation that would dwarf everything the label held before
         # the ladder started is a forced choice gone wrong, not a finding
         # (32k faces became "limpets" off one agreeable view). But the
@@ -1465,10 +1435,50 @@ def _node_candidates(mesh, spec, tree, exemplar_area=None):
     return [(nf, "tree-node") for _score, nf in picks[:3]]
 
 
-def _design_candidates(mesh, spec, features=None, exemplar=None, tree=None):
-    """Several plausible drawings of a located, geometry-less feature."""
-    adjacency = mesh.face_adjacency
-    stencil = np.asarray(spec["stencil_faces"], dtype=int)
+def _tree_neighbourhood(mesh, tree, host_faces, host_area, reach=2.5):
+    """The host plus the material the geometry groups it with, as a face mask.
+
+    Each base region the host occupies climbs to the first ancestor big enough
+    to carry `reach` times the host's area, and the union of those ancestors is
+    the frame. Falls back to the host alone when there is no tree -- never to a
+    flood, because a flood is what this replaced.
+    """
+    inside = np.zeros(len(mesh.faces), dtype=bool)
+    inside[host_faces] = True
+    if tree is None:
+        return inside
+    from . import rig as rig_module
+    base = np.asarray(tree["base"], dtype=np.int64)
+    areas = np.asarray(tree["area"], dtype=float)
+    target = reach * float(host_area)
+    chosen = set()
+    for region in np.unique(base[host_faces]):
+        for node in rig_module.ancestors(tree, int(region)):
+            chosen.add(int(node))
+            if float(areas[int(node)]) >= target:
+                break
+    for node in chosen:
+        inside[rig_module.face_mask(tree, rig_module.node_regions(tree, node))] = True
+    return inside
+
+
+def _geometry_candidates(mesh, spec, features=None, exemplar=None, tree=None):
+    """Candidate extents for a located feature -- every one of them the mesh's own.
+
+    The synthetic drawings that used to be offered here are gone: the stencil
+    solidified at one, three and five adjacency rings, and the discs of
+    camera-facing surface at the anchor. They are gone for the reason written
+    up as failure circumstance 9. A drawn region cannot follow a sculpted
+    margin, so the confirm gate refused it every time -- correctly -- and the
+    feature stayed unpainted forever. A gate refusing nearly everything it is
+    offered was evidence about the candidates, never about the model.
+
+    What is left proposes nodes of the persistence merge tree and twins of a
+    confirmed sibling, so every candidate arrives with a boundary the surface
+    itself drew. When neither can offer anything, this returns nothing, and
+    nothing is the honest answer: the part is reported unrecovered rather than
+    laundered through a drawing that the gate will refuse anyway.
+    """
     out = []
     if tree is not None:
         exemplar_area = (float(np.asarray(mesh.area_faces)[exemplar].sum())
@@ -1477,21 +1487,6 @@ def _design_candidates(mesh, spec, features=None, exemplar=None, tree=None):
                                     exemplar_area=exemplar_area))
     if features is not None and exemplar is not None and len(exemplar) >= 40:
         out.extend(_twin_candidates(mesh, spec, features, exemplar))
-    for rings, tag in ((1, "tight"), (3, "solid"), (5, "wide")):
-        chosen = np.zeros(len(mesh.faces), dtype=bool)
-        chosen[stencil] = True
-        for _ring in range(rings):
-            touch = chosen[adjacency[:, 0]] | chosen[adjacency[:, 1]]
-            chosen[np.unique(adjacency[touch].ravel())] = True
-        out.append((np.flatnonzero(chosen), tag))
-    centres = mesh.triangles.mean(axis=1)
-    direction = np.asarray(spec["direction"], dtype=float)
-    facing = (mesh.face_normals @ direction) < -0.1
-    for scale, tag in ((0.45, "disc-small"), (0.8, "disc-large")):
-        disc = (np.linalg.norm(centres - spec["anchor"], axis=1)
-                < spec["extent_mm"] * scale) & facing
-        if disc.sum() >= 10:
-            out.append((np.flatnonzero(disc), tag))
     # Drop near-duplicates: two candidates within 20% of the same size are one
     # choice, not two.
     kept = []
@@ -1510,7 +1505,7 @@ def _pick_design_cut(backend, mesh, frame, part, spec, intent, pixels,
     from . import entities as entities_module
     from . import render as render_module
 
-    candidates = _design_candidates(mesh, spec, features=features,
+    candidates = _geometry_candidates(mesh, spec, features=features,
                                     exemplar=exemplar, tree=tree)
     if not candidates:
         return None, ""
