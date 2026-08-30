@@ -225,3 +225,81 @@ def report(parts, claims, tree, path):
     with open(path, "w") as handle:
         json.dump({"parts": rows}, handle, indent=2)
     return rows
+
+
+def locate(backend, mesh, tree, poses, paths, part, intent, out_dir,
+           workers=3, confirm=True, log=print):
+    """Find one NAMED part on the surface. Points -> regions -> confirmed extent.
+
+    The sizing is the ladder from index3d: candidate extents around each point,
+    rendered framed on the candidate, and the agent picks the one that is that
+    whole part and nothing else. Nothing is voted on and nothing is gated -- a
+    point that was made is a point that counts, because the name came from
+    looking at the piece rather than from a guess about a feature.
+    """
+    from . import index3d
+
+    base = rig_module.region_of_face(tree)
+    hits = point_at(backend, poses, paths, part, intent, workers=workers,
+                    log=log)
+    if not hits:
+        return np.array([], dtype=np.int64), 0
+
+    seen, regions = set(), []
+    for index, x, y in hits:
+        region = rig_module.point_to_region(poses[index], base, x, y)
+        if region < 0 or region in seen:
+            continue
+        seen.add(region)
+        regions.append(region)
+    if not regions:
+        return np.array([], dtype=np.int64), 0
+
+    claimed = set()
+    for region in regions:
+        # THE WHOLE CHAIN, leaf to root. Truncating to the first six ancestors
+        # caps the largest extent the agent is allowed to choose, so a big part
+        # can never be picked: on the shell that gave "shell body" -- most of
+        # the model -- four regions out of 9626, because six rungs up from a
+        # 65-face leaf is still tiny. confirm_ladder spreads a long chain into
+        # a handful of well-separated rungs itself, so handing it everything
+        # costs nothing and lets one mechanism size a barnacle and a shell.
+        ladder = rig_module.ancestors(tree, int(region))
+        if len(ladder) <= 1 or not confirm:
+            claimed.update(int(r) for r in
+                           rig_module.node_regions(tree, ladder[0]))
+            continue
+        node, _why = index3d.confirm_ladder(
+            backend, mesh, tree, poses, ladder, part["name"],
+            part["where"], intent, out_dir,
+            tag="%s-%d" % (rig_module.digest(part["name"])[:6], region),
+            log=None)
+        chosen = node if node is not None else ladder[0]
+        claimed.update(int(r) for r in rig_module.node_regions(tree, chosen))
+    out = np.asarray(sorted(claimed), dtype=np.int64)
+    if log:
+        log("    %-32s %d point(s) -> %d region(s)"
+            % (part["name"], len(regions), len(out)))
+    return out, len(regions)
+
+
+def run(backend, mesh, tree, up, intent, out_dir, views=4, workers=3,
+        max_parts=8, log=print):
+    """identify -> locate every named part -> a label field. The whole method."""
+    os.makedirs(out_dir, exist_ok=True)
+    parts, paths, poses = identify(backend, mesh, up, intent, out_dir,
+                                   count=views, log=log)
+    claims = {}
+    for part in parts[:max_parts]:
+        regions, points = locate(backend, mesh, tree, poses, paths, part,
+                                 intent, out_dir, workers=workers, log=log)
+        if len(regions):
+            claims[part["name"]] = regions
+    field, labels = field_from(tree, claims, len(mesh.faces))
+    report(parts, claims, tree, os.path.join(out_dir, "found.json"))
+    if log:
+        painted = int((field >= 0).sum())
+        log("  %d/%d parts located; %d faces claimed (%.1f%% of surface)"
+            % (len(claims), len(parts), painted,
+               100.0 * painted / len(mesh.faces)))
+    return field, labels, parts, claims, poses, paths
