@@ -175,47 +175,66 @@ def forest_roots(tree):
     return sorted(roots, key=lambda n: -areas[n])
 
 
-def mirror_plane(mesh, samples=3000, accept=0.02, seed=3):
-    """The model's own plane of symmetry, or None if it has none.
+def mirror_plane(mesh, faces=None, samples=3000, accept=0.08, offsets=41,
+                 seed=3):
+    """The plane a part is symmetric about -- orientation AND position.
 
-    A person paints the far horn without walking round the model, because they
-    know it is the near horn mirrored. That is not a guess -- it is a fact
-    about the geometry, and it is cheap to establish: mirror a sample of the
-    surface through a candidate plane and measure how far the mirrored points
-    land from the real surface. On a symmetric figurine the answer is
-    essentially zero; on an asymmetric one it is not, and then this returns
-    None and nothing downstream assumes anything.
+    Two things about this were wrong when it was fitted globally with the
+    plane pinned to the mesh centroid, and the dragon exposed both.
 
-    Only planes through the centroid along the frame's own axes are tried.
-    The working mesh is already in its intrinsic frame, so a figurine's
-    sagittal plane is one of them, and searching arbitrary orientations would
-    cost far more for cases this pipeline does not have.
+    IT MUST BE FITTED PER PART, NOT PER MODEL. A posed figure has no good
+    global mirror plane: this dragon's tail curves and its limbs sit
+    differently, so the best whole-model plane scored the LENGTH axis, which
+    mirrors head onto tail and matches only because the body segments repeat.
+    Its head, being rigid, is properly symmetric. Fitting on the head alone
+    took a horn from 19% of its faces landing on real surface to 91%.
+
+    THE OFFSET MUST BE SEARCHED. Pinning the plane to the centroid is wrong
+    whenever the part is not centred in what it is attached to -- the head's
+    true plane sits 4.5mm off the model centroid, and at the centroid the
+    near horn mirrored into the jaw instead of onto its twin.
+
+    Points that barely move are excluded from the score. Without that, a thin
+    part is trivially "symmetric" about its own mid-thickness plane -- the
+    mirror hardly displaces anything, everything lands back on the surface,
+    and the winning plane is top-to-bottom rather than left-to-right.
     """
     from scipy.spatial import cKDTree
 
-    points = np.asarray(mesh.triangles, dtype=float).mean(axis=1)
+    centres = np.asarray(mesh.triangles, dtype=float).mean(axis=1)
+    local = centres if faces is None else centres[np.asarray(faces)]
+    if len(local) < 32:
+        return None
+    kd = cKDTree(local)
+    extent = float(np.ptp(local, axis=0).max()) or 1.0
+    points = local
     if len(points) > samples:
         rng = np.random.default_rng(seed)
         points = points[rng.choice(len(points), samples, replace=False)]
-    tree_kd = cKDTree(np.asarray(mesh.triangles, dtype=float).mean(axis=1))
-    centre = np.asarray(mesh.vertices, dtype=float).mean(axis=0)
-    extent = float(np.ptp(mesh.vertices, axis=0).max()) or 1.0
 
     best = None
     for axis in np.eye(3):
-        offset = points - centre
-        mirrored = centre + offset - 2.0 * np.outer(offset @ axis, axis)
-        distance, _index = tree_kd.query(mirrored)
-        score = float(np.mean(distance)) / extent
-        if best is None or score < best[0]:
-            best = (score, axis)
-    score, axis = best
-    if score > accept:
+        low, high = float((local @ axis).min()), float((local @ axis).max())
+        for offset in np.linspace(low, high, int(offsets)):
+            anchor = axis * offset
+            delta = points - anchor
+            along = delta @ axis
+            mirrored = anchor + delta - 2.0 * np.outer(along, axis)
+            moved = np.abs(2.0 * along) > 0.05 * extent
+            if int(moved.sum()) < 50:
+                continue
+            distance, _index = kd.query(mirrored[moved])
+            score = float(np.median(distance)) / extent
+            if best is None or score < best[0]:
+                best = (score, axis.copy(), offset)
+    if best is None or best[0] > accept:
         return None
-    return {"point": centre, "normal": axis, "score": round(score, 5)}
+    score, axis, offset = best
+    return {"point": axis * offset, "normal": axis, "score": round(score, 5)}
 
 
-def mirror_regions(mesh, tree, regions, plane, tolerance=0.015):
+def mirror_regions(mesh, tree, regions, plane, tolerance=0.015,
+                   coverage=0.25):
     """The base regions that are the mirror image of these, where they match.
 
     Every mirrored face has to LAND on real surface before its region is
@@ -239,8 +258,38 @@ def mirror_regions(mesh, tree, regions, plane, tolerance=0.015):
     good = distance <= tolerance * extent
     if not good.any():
         return np.array([], dtype=np.int64)
+
+    # A region is claimed only if the mirror actually COVERS it, not if it
+    # merely touches it. Claiming on a single hit is how a 2371-face horn
+    # mirrored onto 10925 faces -- 346% of itself -- because one stray face
+    # landing inside a large skull region dragged the whole region across.
+    #
+    # `coverage` is a real trade and the measurement behind it is worth
+    # keeping, because it exposes something the architecture has to fix
+    # properly. THE SUBSTRATE IS NOT SYMMETRIC: the dragon's near horn is 14
+    # regions averaging 169 faces, while the far side of the same symmetric
+    # head is cut into regions averaging 302. A symmetric claim therefore
+    # cannot be expressed exactly by either side's regions, and the threshold
+    # only chooses where to sit on that mismatch --
+    #
+    #     >= 0.20  recovers  94% of the horn's area
+    #     >= 0.35            77%
+    #     >= 0.50            54%
+    #     >= 0.70            37%
+    #
+    # 0.25 keeps most of the twin while still refusing a region the mirror
+    # barely reaches. The real fix is not a better number here: it is to feed
+    # symmetry into the substrate the way camera evidence already is, so a
+    # boundary the mirror implies becomes a region edge (segment3d.split_hidden
+    # does exactly this for edges the camera sees). Until then this is
+    # approximate and says so.
     base = rig_module.region_of_face(tree)
-    return np.unique(base[index[good]]).astype(np.int64)
+    regions_total = int(tree["regions"])
+    hit = np.bincount(base[index[good]], minlength=regions_total)
+    size = np.bincount(base, minlength=regions_total)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        share = np.where(size > 0, hit / np.maximum(size, 1), 0.0)
+    return np.flatnonzero(share >= coverage).astype(np.int64)
 
 
 def render_pieces(mesh, tree, node, pieces, up, out_dir, tag, pixels=470,
@@ -514,10 +563,45 @@ def complete_by_symmetry(mesh, tree, top, plane, coarser=3.0, log=print):
         for region in rig_module.node_regions(tree, part.node):
             claimed.setdefault(int(region), part)
 
+    # One plane per PARENT, fitted on the parent's own surface. The thing that
+    # contains both horns is the head, so the head is what the plane is fitted
+    # to; a plane fitted to the whole posed dragon mirrors head onto tail.
+    planes = {}
+
+    def plane_for(part):
+        # Keyed by the parent OBJECT, not its node id. Two different parts can
+        # carry the same node -- a walk's root and the single child it splits
+        # into -- and keying by node silently handed a child the plane fitted
+        # for the whole model, which is precisely the global fit this replaced.
+        parent = part.parent
+        key = id(parent) if parent is not None else None
+        if key not in planes:
+            scope = None
+            if parent is not None:
+                scope = np.flatnonzero(rig_module.face_mask(
+                    tree, rig_module.node_regions(tree, parent.node)))
+                if len(scope) >= len(mesh.faces):
+                    scope = None
+            planes[key] = mirror_plane(mesh, faces=scope)
+            if log and planes[key] is not None:
+                log("    plane for '%s': normal %s, residual %.4f"
+                    % (parent.name if parent is not None else "model",
+                       planes[key]["normal"].astype(int).tolist(),
+                       planes[key]["score"]))
+        return planes[key]
+
     added = 0
-    for part in list(named):
+    # Only NAMED THINGS are mirrored, never containers. A "group" is a bag
+    # waiting to be split, and mirroring it claims the whole far side under
+    # the bag's name -- on the dragon the head grabbed 38 regions that way and
+    # then blocked its own horn from reaching its twin. The mirror of a horn
+    # is a horn; the mirror of "a head" is not a finding.
+    for part in [p for p in named if p.kind == "whole"]:
+        here = plane_for(part) or plane
+        if here is None:
+            continue
         own = rig_module.node_regions(tree, part.node)
-        twin = mirror_regions(mesh, tree, own, plane)
+        twin = mirror_regions(mesh, tree, own, here)
         if not len(twin):
             continue
         own_size = len(own)
