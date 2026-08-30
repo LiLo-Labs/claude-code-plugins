@@ -102,6 +102,31 @@ class TestCoverage(unittest.TestCase):
         seen = {tuple(np.round(d, 9)) for d in directions}
         self.assertEqual(len(seen), len(directions))
 
+    def test_plan_and_audit_report_the_same_statistic(self):
+        """Found on the dragon: the plan said 92.3% covered and the audit said
+        65.3%, and neither was wrong -- one was area-weighted, the other
+        counted regions. Two numbers both called coverage that cannot be
+        compared hide whether the plan delivered what it promised."""
+        areas = np.array([100.0, 1.0, 1.0, 1.0])
+        counted = np.array([3, 0, 0, 0])
+        report = rig.coverage_report(counted, areas, target_views=3)
+        # Area-weighted and region-counted must both be reported, and they
+        # must be allowed to differ wildly without either being a lie.
+        self.assertAlmostEqual(report["area_share_met"], 100.0 / 103.0, 6)
+        self.assertAlmostEqual(report["region_share_met"], 0.25, 6)
+        self.assertEqual(report["unreachable_regions"], 3)
+
+    def test_unreachable_surface_is_reported_not_counted_as_shortfall(self):
+        """A print-in-place model has real interior faces between its joints.
+        Counting them against coverage makes every articulated model look
+        uncovered forever, however many views are bought."""
+        areas = np.array([10.0, 10.0, 5.0])
+        counted = np.array([4, 4, 0])
+        report = rig.coverage_report(counted, areas, target_views=3)
+        self.assertEqual(report["unreachable_regions"], 1)
+        self.assertAlmostEqual(report["unreachable_area_share"], 0.2, 6)
+        self.assertAlmostEqual(report["area_share_met"], 0.8, 6)
+
     def test_coverage_audit_agrees_with_the_plan(self):
         """plan_poses scouts at low resolution; coverage() measures the real
         poses. They must not disagree about whether the model was covered."""

@@ -123,6 +123,78 @@ that is simply not visible often enough. **The knob to turn first is
 `per_ring`, not the gate.** Every dropped instance is kept in the survey
 record with its votes and its share, so that decision is made against numbers.
 
+## Measured: camera evidence, and the parameter that would not derive
+
+### Camera evidence in the atom builder, on both model classes
+
+`segment3d` built its atoms from geometry alone -- `edge_weights(session,
+index, None, 0.0)` -- while `scripts/hierarchy_select.py:57` carries a comment
+saying that exact call was a bug it had already fixed. It now measures the
+model's edges first (`rig.edge_evidence`: intensity steps across adjacent face
+pairs, three blur scales, three lightings, no model calls).
+
+    model                     pairs with evidence   regions        largest region
+    baby-dragon (creased)     141977 / 712897  20%  1291 -> 1295   1.09% -> 1.42%
+    scallop-shell (relief)    463877 / 940149  49%  1469 -> 1579   5.96% -> 4.89%
+
+The result is modest and lands exactly where the model class predicts. On a
+crease-bounded model geometry already finds the boundaries and the camera adds
+nothing measurable -- which is the right outcome for a change that must not do
+harm where it is not needed. On the encrusted shell it splits the substrate
+further and, more usefully, **shrinks the largest single region by 18%**: a
+region that swallows six per cent of a surface is one the survey can never
+subdivide, because the climb can only choose among nodes that exist.
+
+**This is smaller than an earlier note in this file implied, and that note was
+wrong.** The claim that geometry-only weights were *fatal* on the shell came
+from the HANDOFF's own record of `hierarchy_select.build_tree`, where the
+figure "2 objects, one of them 82% of the surface" describes PERSISTENCE
+SELECTION over the merge tree, not the felzenszwalb base regions underneath
+it. The base regions were always adequate. Evidence improves them; it does not
+rescue them.
+
+Pair coverage is the lever if this is pushed further: only a fifth of the
+dragon's pairs are ever seen as adjacent pixels at 640px, because most of its
+faces are sub-pixel. The shell, whose faces are larger relative to the model,
+reaches half. Rendering the evidence pass finer would raise both.
+
+The pass costs 7s on the dragon and 13s on the shell, which is only true
+because the scatter-adds go through `np.bincount` rather than `np.add.at`;
+the unbuffered version turned this into minutes on every run.
+
+### base_k: the derivation was attempted, refuted, and is not shipped
+
+`base_k=15.0` and `min_faces=60` were hand-set, and this file named them as
+such. `min_faces` is now derived -- a region below the area the printer can
+lay down as its own colour is confetti by definition, so the floor is
+`pi * nozzle^2` converted to a face count, which means the same thing on every
+mesh.
+
+`base_k` resisted. The obvious rule is one region per disc of the model's own
+fine characteristic radius, and it does not hold:
+
+    model          area mm2   known-good regions   implied radius   p25 radius   ratio needed
+    baby-dragon      42873           1291              3.25 mm        7.14 mm       0.455
+    scallop-shell   128923           1469              5.29 mm        4.27 mm       1.238
+
+A factor of 2.7 apart, and worse at p5 and p10. The scale-space quantiles do
+not predict a good region count, and any single coefficient would have been
+fitted to whichever model was tried first. So no derived value ships, and
+`base_k` stays an explicit documented parameter.
+
+**What the same table shows is a real defect, and it is the more useful
+finding.** The shell's structure is genuinely five times finer than the
+dragon's -- p5 characteristic radius 0.96mm against 4.97mm, barnacles against
+spikes -- yet the two land within 14% of each other in region count while
+their triangle counts differ by 32%. The substrate is therefore tracking
+TESSELLATION DENSITY rather than the structure of the object, and an encrusted
+model is under-resolved relative to its own detail. That is worth fixing
+properly; a fitted constant would have hidden it.
+
+`--target-regions` is offered in the meantime, with `solve_base_k` bisecting
+for it on the (monotone) count. A region count is a quantity a person can
+reason about. `k` is not.
+
 ## What this plugin is for
 
 A 3D printing hobbyist runs one slash command on an STL or 3MF and gets back a

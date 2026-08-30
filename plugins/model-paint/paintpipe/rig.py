@@ -233,14 +233,16 @@ def plan_poses(mesh, tree, up, pixels=900, target_views=3, budget=12,
         covered[seen_sets[best]] += 1
         seen_sets[best] = np.array([], dtype=np.int64)   # never picked twice
 
-    total_area = float(areas.sum())
-    short = float((np.clip(target_views - covered, 0, None) * areas).sum())
+    report = coverage_report(covered, areas, target_views)
     if log:
         log("  coverage: %d poses chosen from %d scouted; %.1f%% of the "
-            "surface now seen from %d+ looks"
-            % (len(chosen), candidates,
-               100.0 * (1.0 - short / max(total_area * target_views, 1e-9)),
-               target_views))
+            "surface (%.1f%% of regions) reaches %d+ looks%s"
+            % (len(chosen), candidates, 100.0 * report["area_share_met"],
+               100.0 * report["region_share_met"], target_views,
+               ("; %d regions (%.1f%% of area) are unreachable from outside"
+                % (report["unreachable_regions"],
+                   100.0 * report["unreachable_area_share"]))
+               if report["unreachable_regions"] else ""))
     return [directions[i] for i in chosen], covered, areas
 
 
@@ -253,6 +255,41 @@ def coverage(poses, tree, base=None, min_pixels=4):
         regions, _counts = visible_regions(pose, base, min_pixels=min_pixels)
         counted[regions] += 1
     return counted
+
+
+def coverage_report(counted, areas, target_views):
+    """One statistic, computed the same way by the plan and by the audit.
+
+    The plan and the audit disagreed by 27 points on the dragon -- 92.3%
+    against 65.3% -- and neither number was wrong: one was area-weighted and
+    the other counted regions, so a model with many small regions and a few
+    large ones reads completely differently through the two. Two numbers that
+    are both called "coverage" and cannot be compared is worse than either
+    alone, because it hides whether the plan delivered what it promised.
+
+    Area-weighted is the honest default here: consensus is about whether a
+    FEATURE was seen enough times, and a feature's chance of being seen scales
+    with how much surface it presents, not with how many regions it was cut
+    into.
+    """
+    counted = np.asarray(counted)
+    areas = np.asarray(areas, dtype=float)
+    total = float(areas.sum())
+    met = counted >= target_views
+    unreachable = counted == 0
+    return {
+        "target_views": int(target_views),
+        "area_share_met": float(areas[met].sum() / max(total, 1e-9)),
+        "region_share_met": float(met.mean()),
+        "median_views": int(np.median(counted)),
+        "unreachable_regions": int(unreachable.sum()),
+        # Surface no camera outside the model can reach is a fact about the
+        # object, not a shortfall in the plan: a print-in-place model has real
+        # interior faces between its joints, and counting them against
+        # coverage makes every articulated model look uncovered forever.
+        "unreachable_area_share": float(areas[unreachable].sum()
+                                        / max(total, 1e-9)),
+    }
 
 
 def poses_from(mesh, directions, up, pixels=900, roll_cycle=(0.0, 22.0, -18.0),
