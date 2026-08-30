@@ -38,7 +38,8 @@ import numpy as np
 from . import rig as rig_module
 
 
-IDENTIFY = """These are %(count)d views of the same 3D model, plainly shaded.
+IDENTIFY = """This picture shows %(count)d views of the same 3D model, plainly shaded, laid
+out side by side and labelled "view 0", "view 1" and so on.
 
 The piece: %(intent)s
 
@@ -108,25 +109,36 @@ def survey_views(mesh, up, out_dir, pixels=760, count=4, log=None):
 
     directions = preview.orbit(count, 28.0, up=up)
     poses = rig_module.poses_from(mesh, directions, up, pixels=pixels)
-    paths = []
+    paths, images = [], []
     for index, pose in enumerate(poses):
         image = rig_module.light(pose, "studio")
         path = os.path.join(out_dir, "look-%d.png" % index)
         rig_module.write_png(image, pose.visible, path)
         paths.append(path)
+        canvas = np.full(image.shape, 0.97)
+        canvas[pose.visible] = image[pose.visible]
+        images.append(canvas)
+
+    # ONE file, not N. Handing the agent four separate paths makes it open four
+    # files, and measured here that turned a question answering in a couple of
+    # minutes into one that had not returned in fifteen. The views are the same
+    # views; they just arrive as a single picture.
+    sheet = os.path.join(out_dir, "views.png")
+    rig_module.sheet(images, ["view %d" % i for i in range(len(images))],
+                     sheet, columns=min(len(images), 4))
     if log:
-        log("  %d plain views for identification" % len(paths))
-    return paths, poses
+        log("  %d plain views for identification, as one sheet" % len(paths))
+    return sheet, paths, poses
 
 
 def identify(backend, mesh, up, intent, out_dir, count=4, pixels=760,
              log=print):
     """What parts does this piece have? One ask, on pictures of the thing itself."""
-    paths, poses = survey_views(mesh, up, out_dir, pixels=pixels, count=count,
-                                log=log)
+    sheet, paths, poses = survey_views(mesh, up, out_dir, pixels=pixels,
+                                       count=count, log=log)
     prompt = IDENTIFY % {"count": len(paths),
                          "intent": intent or "a 3D printed model"}
-    answer = backend._run(paths, prompt,
+    answer = backend._run([sheet], prompt,
                           "identify-%s" % rig_module.digest(intent, len(paths)))
     parts = []
     for entry in (answer or {}).get("parts", []) or []:
