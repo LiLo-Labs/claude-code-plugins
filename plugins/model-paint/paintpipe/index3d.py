@@ -452,18 +452,30 @@ def confirm_ladder(backend, mesh, tree, poses, rungs, feature, hint, intent,
     """
     if not rungs:
         return None, "no candidates"
-    # Spread the ladder when it is long: adjacent rungs of a deep chain differ
-    # by a sliver, and five near-identical pictures is not a choice.
+    # SPREAD BY AREA, NOT BY POSITION IN THE CHAIN. A binary merge tree absorbs
+    # one small region per merge, so area along an ancestor chain grows wildly
+    # non-linearly -- nearly all of it arrives in the last few merges. Sampling
+    # the chain by index therefore produced "a sliver, a sliver, a sliver, a
+    # sliver, and the entire model", and the agent said exactly that: candidate
+    # 1 showed no tint at all while candidates 2-5 already covered the rock
+    # base, the weed and the barnacles along with the shell. There was no rung
+    # in between to pick, so it correctly refused all five, three runs in a row.
+    #
+    # Geometric spacing in AREA gives a real size ladder -- sliver, small,
+    # medium, large, whole -- which is the choice the gate is supposed to be
+    # offered.
     chosen_rungs = list(rungs)
     if len(chosen_rungs) > max_rungs:
-        picks = np.linspace(0, len(chosen_rungs) - 1, max_rungs)
-        chosen_rungs = [chosen_rungs[int(round(p))] for p in picks]
+        areas = np.asarray(tree["area"], dtype=float)
+        span = np.array([max(float(areas[int(n)]), 1e-9) for n in chosen_rungs])
+        targets = np.geomspace(span.min(), span.max(), max_rungs)
         seen, unique = set(), []
-        for node in chosen_rungs:
+        for target in targets:
+            node = nearest_by_area(chosen_rungs, areas, target)
             if node not in seen:
                 seen.add(node)
                 unique.append(node)
-        chosen_rungs = unique
+        chosen_rungs = sorted(unique, key=lambda n: float(areas[int(n)]))
 
     region_sets = [rig_module.node_regions(tree, node) for node in chosen_rungs]
     wide, count = rig_module.best_pose(poses, tree, region_sets[-1])
