@@ -69,6 +69,24 @@ def main(argv=None):
     parser.add_argument("--model", default="claude-opus-5",
                         help="vision model for the naming, painter and critic "
                              "agents")
+    parser.add_argument("--no-camera-evidence", action="store_true",
+                        help="build atoms from geometry alone. Faster, and "
+                             "wrong on soft-relief models: geometry blurs "
+                             "across a boundary that is relief rather than a "
+                             "crease, and no later stage can recover an edge "
+                             "the substrate never drew")
+    parser.add_argument("--target-regions", type=int, default=None,
+                        help="how many base regions to cut the surface into; "
+                             "the merge threshold is solved for it. A region "
+                             "count is a quantity you can reason about, which "
+                             "is why this exists and --base-k does not")
+    parser.add_argument("--target-views", type=int, default=3,
+                        help="how many looks every part of the surface must "
+                             "get. Poses are chosen to cover the model rather "
+                             "than laid out on a grid, so a self-occluding "
+                             "model buys more views and a simple one fewer")
+    parser.add_argument("--view-budget", type=int, default=12,
+                        help="most poses the coverage plan may buy")
     parser.add_argument("--no-vision", action="store_true",
                         help="segment only and write the atom atlas; naming "
                              "is an act of looking, so no painting happens")
@@ -95,7 +113,10 @@ def main(argv=None):
         palette=parse_colors(args.colors), model=args.model,
         nozzle_mm=args.nozzle_mm, viewing_mm=args.viewing_mm,
         pixels=args.pixels, cap=args.cap, workers=args.workers,
-        no_vision=args.no_vision)
+        no_vision=args.no_vision,
+        camera_evidence=not args.no_camera_evidence,
+        target_regions=args.target_regions, target_views=args.target_views,
+        view_budget=args.view_budget)
     return 0 if manifest else 1
 
 

@@ -167,6 +167,124 @@ def poses(mesh, up, pixels=900, elevations=DEFAULT_ELEVATIONS, per_ring=4,
     return out
 
 
+def plan_poses(mesh, tree, up, pixels=900, target_views=3, budget=12,
+               candidates=48, scout_pixels=256, elevations=None, log=None):
+    """Choose WHERE to look so that everything is seen enough times.
+
+    Recall in the survey is bounded by how often a feature is visible, not by
+    the consensus gate: an instance seen from two poses can never clear a
+    two-vote threshold with any margin, and dropping it is the correct
+    response to thin evidence rather than a bug to be tuned away. Measured on
+    the dragon, a fixed ring grid left most dorsal spikes visible in two or
+    three of twelve looks, and 48 of 61 climbs were discarded for want of
+    agreement.
+
+    So stop guessing the number of views and cover the surface instead. Scout
+    cheaply from many directions, then greedily take the direction that most
+    reduces the REMAINING deficit -- area still short of `target_views` looks
+    -- until the deficit is gone or the budget is spent. Greedy set cover is
+    the right tool and gets within a known factor of optimal; more usefully,
+    it stops on its own when the model is covered, so an easy model buys fewer
+    views and a self-occluding one buys more.
+
+    Scouting is depth only, at low resolution, with no lighting and no model
+    calls, so a 48-direction scout costs a fraction of one full pose.
+    """
+    from . import render as render_module
+
+    base = region_of_face(tree)
+    areas = np.zeros(int(tree["regions"]), dtype=float)
+    face_area = np.asarray(mesh.area_faces, dtype=float)
+    np.add.at(areas, base, face_area)
+
+    axis = np.asarray(up, dtype=float)
+    axis = axis / max(np.linalg.norm(axis), 1e-12)
+    centre = mesh.vertices.mean(axis=0)
+    radius = float(np.ptp(mesh.vertices, axis=0).max()) / 2.0 * 1.06
+
+    directions = render_module.fibonacci_directions(int(candidates))
+    seen_sets = []
+    for direction in directions:
+        camera = render_module.Camera(direction, axis, centre, radius,
+                                      int(scout_pixels))
+        geometry = render_module.geometry_bundle(mesh, camera, cavity_taps=0)
+        hit = geometry["hit_id"]
+        found = hit[hit >= 0]
+        if not len(found):
+            seen_sets.append(np.array([], dtype=np.int64))
+            continue
+        regions, counts = np.unique(base[found], return_counts=True)
+        seen_sets.append(regions[counts >= 3].astype(np.int64))
+
+    covered = np.zeros(int(tree["regions"]), dtype=int)
+    chosen, deficits = [], []
+    for _pick in range(int(budget)):
+        deficit = np.clip(target_views - covered, 0, None) * areas
+        remaining = float(deficit.sum())
+        deficits.append(remaining)
+        if remaining <= 0:
+            break
+        gains = [float(deficit[regions].sum()) if len(regions) else 0.0
+                 for regions in seen_sets]
+        best = int(np.argmax(gains))
+        if gains[best] <= 0:
+            break
+        chosen.append(best)
+        covered[seen_sets[best]] += 1
+        seen_sets[best] = np.array([], dtype=np.int64)   # never picked twice
+
+    total_area = float(areas.sum())
+    short = float((np.clip(target_views - covered, 0, None) * areas).sum())
+    if log:
+        log("  coverage: %d poses chosen from %d scouted; %.1f%% of the "
+            "surface now seen from %d+ looks"
+            % (len(chosen), candidates,
+               100.0 * (1.0 - short / max(total_area * target_views, 1e-9)),
+               target_views))
+    return [directions[i] for i in chosen], covered, areas
+
+
+def coverage(poses, tree, base=None, min_pixels=4):
+    """How many poses actually see each base region. The audit for plan_poses."""
+    if base is None:
+        base = region_of_face(tree)
+    counted = np.zeros(int(tree["regions"]), dtype=int)
+    for pose in poses:
+        regions, _counts = visible_regions(pose, base, min_pixels=min_pixels)
+        counted[regions] += 1
+    return counted
+
+
+def poses_from(mesh, directions, up, pixels=900, roll_cycle=(0.0, 22.0, -18.0),
+               log=None):
+    """Cast the chosen directions. Roll still cycles, for the reason it always did:
+    two looks that differ only in azimuth see the same foreshortening, so rolling
+    makes the second an independent test of a shape rather than a repeat."""
+    from . import render as render_module
+
+    axis = np.asarray(up, dtype=float)
+    axis = axis / max(np.linalg.norm(axis), 1e-12)
+    centre = mesh.vertices.mean(axis=0)
+    radius = float(np.ptp(mesh.vertices, axis=0).max()) / 2.0 * 1.06
+    out = []
+    for index, direction in enumerate(directions):
+        roll = roll_cycle[index % len(roll_cycle)]
+        spun = axis
+        if abs(roll) > 1e-6:
+            side = np.cross(axis, np.asarray(direction, dtype=float))
+            norm = np.linalg.norm(side)
+            if norm > 1e-9:
+                angle = np.radians(roll)
+                spun = axis * np.cos(angle) + (side / norm) * np.sin(angle)
+        camera = render_module.Camera(direction, spun, centre, radius, pixels)
+        geometry = render_module.geometry_bundle(mesh, camera, cavity_taps=0)
+        out.append(Pose("c%02d" % index, camera, geometry))
+        if log:
+            log("    pose c%02d: %d visible px"
+                % (index, int(geometry["visible"].sum())))
+    return out
+
+
 def light(pose, lighting):
     """Apply one lighting to an already-cast pose. Never moves a silhouette."""
     spec = LIGHTINGS[lighting]
@@ -194,7 +312,7 @@ def light(pose, lighting):
 
 def observe(mesh, up, out_dir, pixels=900, elevations=DEFAULT_ELEVATIONS,
             per_ring=4, lightings=DEFAULT_LIGHTINGS, zoom=1.0, centre=None,
-            prefix="view", log=None):
+            prefix="view", tree=None, target_views=3, budget=12, log=None):
     """The rig: every pose under every lighting, written as PNGs.
 
     Returns (views, poses). Views are what an agent is shown; poses are what a
@@ -203,8 +321,18 @@ def observe(mesh, up, out_dir, pixels=900, elevations=DEFAULT_ELEVATIONS,
     the same place.
     """
     os.makedirs(out_dir, exist_ok=True)
-    made = poses(mesh, up, pixels=pixels, elevations=elevations,
-                 per_ring=per_ring, zoom=zoom, centre=centre, log=log)
+    if tree is not None and zoom == 1.0 and centre is None:
+        # Covered rather than gridded. Only for the whole-model rig: a zoomed
+        # or re-centred rig is framing a detail, where the question is not
+        # "has everything been seen" and coverage of the whole surface is the
+        # wrong objective.
+        directions, _covered, _areas = plan_poses(
+            mesh, tree, up, pixels=pixels, target_views=target_views,
+            budget=budget, log=log)
+        made = poses_from(mesh, directions, up, pixels=pixels, log=log)
+    else:
+        made = poses(mesh, up, pixels=pixels, elevations=elevations,
+                     per_ring=per_ring, zoom=zoom, centre=centre, log=log)
     views = []
     for pose in made:
         for lighting in lightings:
@@ -342,6 +470,105 @@ def node_regions(tree, node):
     out = np.asarray(sorted(set(int(v) for v in leaves)), dtype=np.int64)
     cache[key] = out
     return out
+
+
+EVIDENCE_BLURS = (0.0, 2.0, 5.0)
+
+
+def edge_evidence(mesh, directions=None, pixels=768, lightings=("raking_l",
+                                                                "raking_t",
+                                                                "studio"),
+                  up=(0.0, 0.0, 1.0), log=None):
+    """What the camera sees as an edge, per adjacent face pair. No model calls.
+
+    Geometry measures surfaces no camera can see; the camera notices edges a
+    person would while geometry blurs across them. They fail in different
+    places, which is the only good reason to combine two signals -- and on a
+    soft-relief model it is the difference between a barnacle field that is one
+    region and one that is hundreds.
+
+    Three blur scales are kept SEPARATE rather than summed, because a fine
+    crease between two cups and the broad edge where a ridge meets a panel are
+    different scales of evidence; `index_regions.edge_weights` takes the
+    maximum across them, which says "visible as an edge at SOME scale" instead
+    of "visible at the one I picked".
+
+    Several lightings for the same reason a raking light exists at all: relief
+    throws shadow ALONG the light, so an edge running parallel to the key casts
+    nothing and is invisible in that look however sharp it is.
+
+    A pair no direction could see contributes NOTHING rather than a zero.
+    Scoring an unseen pair as edge-free quietly merges every enclosed cavity
+    into whatever surrounds it, and about a fifth of a detailed model's pairs
+    are interior.
+    """
+    from scipy import ndimage
+    from . import render as render_module
+
+    pairs = np.asarray(mesh.face_adjacency, dtype=np.int64)
+    count = len(mesh.faces)
+    low = np.minimum(pairs[:, 0], pairs[:, 1]).astype(np.int64)
+    high = np.maximum(pairs[:, 0], pairs[:, 1]).astype(np.int64)
+    keys = low * np.int64(count) + high
+    order = np.argsort(keys, kind="stable")
+    sorted_keys = keys[order]
+
+    totals = np.zeros((len(EVIDENCE_BLURS), len(pairs)), dtype=np.float64)
+    seen = np.zeros(len(pairs), dtype=np.float64)
+
+    if directions is None:
+        directions = render_module.fibonacci_directions(14)
+    centre = mesh.vertices.mean(axis=0)
+    radius = float(np.ptp(mesh.vertices, axis=0).max()) / 2.0 * 1.06
+
+    for number, direction in enumerate(np.asarray(directions, dtype=float)):
+        camera = render_module.Camera(direction, up, centre, radius, pixels)
+        geometry = render_module.geometry_bundle(mesh, camera, cavity_taps=0)
+        picks = geometry["hit_id"]
+        if not (picks >= 0).any():
+            continue
+        pose = Pose("evidence-%02d" % number, camera, geometry)
+        for lighting in lightings:
+            grey = light(pose, lighting)
+            for slot, sigma in enumerate(EVIDENCE_BLURS):
+                field = grey if sigma <= 0 else ndimage.gaussian_filter(grey,
+                                                                        sigma)
+                for axis in (0, 1):
+                    if axis == 0:
+                        a, b = picks[:-1, :], picks[1:, :]
+                        fa_, fb_ = field[:-1, :], field[1:, :]
+                    else:
+                        a, b = picks[:, :-1], picks[:, 1:]
+                        fa_, fb_ = field[:, :-1], field[:, 1:]
+                    live = (a >= 0) & (b >= 0) & (a != b)
+                    if not live.any():
+                        continue
+                    fa = a[live].astype(np.int64)
+                    fb = b[live].astype(np.int64)
+                    key = (np.minimum(fa, fb) * np.int64(count)
+                           + np.maximum(fa, fb))
+                    slot_at = np.searchsorted(sorted_keys, key)
+                    slot_at = np.clip(slot_at, 0, len(sorted_keys) - 1)
+                    good = sorted_keys[slot_at] == key
+                    if not good.any():
+                        continue
+                    target = order[slot_at[good]]
+                    step = np.abs(fa_[live] - fb_[live])[good]
+                    # bincount, not np.add.at. This scatter-add runs once per
+                    # (view, lighting, blur, axis) over every visible pair
+                    # boundary -- on a 600k-triangle model that is hundreds of
+                    # calls over hundreds of thousands of indices, and add.at
+                    # is unbuffered and roughly an order of magnitude slower.
+                    # Same arithmetic; the difference is whether this pass
+                    # costs seconds or minutes on every single run.
+                    totals[slot] += np.bincount(target, weights=step,
+                                                minlength=len(pairs))
+                    if slot == 0 and lighting == lightings[0]:
+                        seen += np.bincount(target, minlength=len(pairs))
+        if log:
+            log("    evidence view %d/%d: %d pairs seen so far"
+                % (number + 1, len(directions), int((seen > 0).sum())))
+    return {"seen": seen, "evidence": totals}
 
 
 def face_mask(tree, regions):

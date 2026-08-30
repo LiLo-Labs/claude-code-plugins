@@ -57,7 +57,127 @@ def scale_index(mesh, scales=12, log=None):
     return fastscale.build(session, scales=scales, log=log), session
 
 
-def atoms(mesh, cap=300, base_k=15.0, min_faces=60, scales=12, log=None):
+def calibrate(mesh, index, nozzle_mm=0.4, log=None):
+    """Read `min_faces` and a target region count off the model and the printer.
+
+    Both were hand-set constants (`base_k=15.0`, `min_faces=60`), and the
+    HANDOFF names them as such. A face count is the wrong unit for either: 60
+    faces is a barnacle on one model and a speck on the next, so the same
+    number means different sizes on different meshes and nothing at all across
+    two models.
+
+    `min_faces` becomes a PHYSICAL floor. A region narrower than a couple of
+    extrusion widths cannot be laid down as its own colour, so a region below
+    that area is confetti by definition -- not because it is small in
+    triangles, but because the printer cannot express it.
+
+    `base_k` DOES NOT get the same treatment, and the reason is measured
+    rather than assumed. The obvious rule -- one region per disc of the
+    model's own fine characteristic radius -- was tried and refuted. To
+    reproduce the region counts that are known to work, the dragon needs a
+    ratio of 0.455 against its p25 radius and the shell needs 1.238: a factor
+    of 2.7 apart, and worse at other quantiles. So the scale-space quantiles do
+    not predict a good region count, and any single coefficient here would be
+    fitted to one model.
+
+    What the same measurement DOES show is worth recording, because it points
+    at a real defect rather than a missing constant. The shell's structure is
+    genuinely five times finer than the dragon's (p5 characteristic radius
+    0.96mm against 4.97mm -- barnacles against spikes), yet the two land within
+    14% of each other in region count, 1469 against 1291, while their triangle
+    counts differ by 32%. The current substrate therefore tracks TESSELLATION
+    DENSITY, not the structure of the object, and an encrusted model is
+    under-resolved relative to its own detail. `base_k` stays an explicit,
+    documented parameter until that is fixed properly; `target_regions` (see
+    `solve_base_k`) is offered as the better-shaped knob, because a region
+    count is a quantity somebody can reason about and `k` is not.
+
+    Returns (min_faces, scale_report).
+    """
+    areas = np.asarray(mesh.area_faces, dtype=float)
+    total = float(areas.sum())
+    mean_face = total / max(len(areas), 1)
+
+    # Two extrusion widths: one is a single bead, which no slicer will place
+    # as an isolated colour, so the smallest honest region is a pair.
+    floor_mm2 = float(np.pi * (nozzle_mm) ** 2)
+    min_faces = int(max(4, round(floor_mm2 / max(mean_face, 1e-12))))
+
+    radius = np.asarray(index["characteristic_mm"], dtype=float)
+    radius = radius[np.isfinite(radius)]
+    report = {"surface_mm2": round(total, 1),
+              "min_faces": min_faces,
+              "floor_mm2": round(floor_mm2, 4),
+              "fine_radius_mm": round(float(np.percentile(radius, 5)), 3),
+              "quartile_radius_mm": round(float(np.percentile(radius, 25)), 3)}
+    if log:
+        log("  calibrate: %.0f mm2 surface; structure radius p5 %.2f mm, "
+            "p25 %.2f mm; min_faces %d (%.3f mm2 floor at %.2f mm nozzle)"
+            % (total, report["fine_radius_mm"], report["quartile_radius_mm"],
+               min_faces, floor_mm2, nozzle_mm))
+    return min_faces, report
+
+
+def solve_base_k(pairs, weights, count, min_faces, target_regions, sizes=None,
+                 tolerance=0.12, rounds=12, log=None):
+    """Solve for the merge threshold instead of choosing it.
+
+    `k` gates every merge against `internal + k / size`, so region count falls
+    monotonically as k rises -- which makes it a bisection rather than a
+    search. The bracket is widened first (a fixed one silently pins k to an
+    endpoint on a model whose weights are scaled differently), then halved
+    until the region count is within `tolerance` of the target.
+
+    Monotonicity is what makes this safe: there is exactly one k per count, so
+    the answer does not depend on where the bisection started.
+    """
+    import index_regions
+
+    def regions_at(k):
+        labels = index_regions.felzenszwalb(pairs, weights, count, float(k),
+                                            min_faces, sizes=sizes)
+        return int(labels.max()) + 1, labels
+
+    low, high = 0.05, 5.0
+    low_n, _ = regions_at(low)
+    high_n, high_labels = regions_at(high)
+    for _widen in range(8):
+        if high_n <= target_regions:
+            break
+        low, low_n = high, high_n
+        high *= 4.0
+        high_n, high_labels = regions_at(high)
+    if low_n < target_regions:
+        # Even the finest bracket is coarser than asked for: the mesh cannot
+        # express the target, and saying so beats returning an endpoint as
+        # though it were a solution.
+        if log:
+            log("  base_k: mesh bottoms out at %d regions, target was %d"
+                % (low_n, target_regions))
+        return float(low), regions_at(low)[1]
+
+    best_k, best_labels, best_n = high, high_labels, high_n
+    for _round in range(rounds):
+        middle = 0.5 * (low + high)
+        count_here, labels = regions_at(middle)
+        if abs(count_here - target_regions) < abs(best_n - target_regions):
+            best_k, best_labels, best_n = middle, labels, count_here
+        if abs(count_here - target_regions) <= tolerance * target_regions:
+            best_k, best_labels, best_n = middle, labels, count_here
+            break
+        if count_here > target_regions:
+            low = middle
+        else:
+            high = middle
+    if log:
+        log("  base_k solved: %.3f -> %d regions (target %d)"
+            % (best_k, best_n, target_regions))
+    return float(best_k), best_labels
+
+
+def atoms(mesh, cap=300, base_k=15.0, min_faces=None, scales=12, log=None,
+          evidence=None, camera_weight=2.0, nozzle_mm=0.4,
+          target_regions=None):
     """Cached front door: the atoms of a mesh are a pure function of its
     geometry and these parameters, so they are computed once per mesh EVER,
     whatever output directory a run uses."""
@@ -65,8 +185,15 @@ def atoms(mesh, cap=300, base_k=15.0, min_faces=60, scales=12, log=None):
     key = hashlib.sha256()
     key.update(np.ascontiguousarray(mesh.vertices).tobytes())
     key.update(np.ascontiguousarray(mesh.faces).tobytes())
-    key.update(("%s|%s|%s|%s|fastscale-v3" % (cap, base_k, min_faces,
-                                               scales)).encode())
+    # The evidence is part of what the atoms ARE, so it is part of their
+    # identity. A cache key that ignored it would serve geometry-only atoms to
+    # a caller that paid to render the model, silently and forever.
+    key.update(("%s|%s|%s|%s|%s|%s|%s|fastscale-v4"
+                % (cap, base_k, min_faces, scales, nozzle_mm, target_regions,
+                   camera_weight if evidence is not None else "geom")).encode())
+    if evidence is not None:
+        key.update(np.ascontiguousarray(
+            np.asarray(evidence["evidence"], dtype=np.float32)).tobytes())
     cache_dir = os.path.join(os.path.expanduser("~"), ".cache", "model-paint")
     os.makedirs(cache_dir, exist_ok=True)
     cache = os.path.join(cache_dir, "atoms-%s.npz" % key.hexdigest()[:20])
@@ -81,7 +208,10 @@ def atoms(mesh, cap=300, base_k=15.0, min_faces=60, scales=12, log=None):
         return saved["face_atom"], tree
     face_atom, tree = _atoms_uncached(mesh, cap=cap, base_k=base_k,
                                       min_faces=min_faces, scales=scales,
-                                      log=log)
+                                      log=log, evidence=evidence,
+                                      camera_weight=camera_weight,
+                                      nozzle_mm=nozzle_mm,
+                                      target_regions=target_regions)
     np.savez_compressed(cache, face_atom=face_atom,
                         children=tree["children"], base=tree["base"],
                         regions=np.int64(tree["regions"]),
@@ -91,8 +221,9 @@ def atoms(mesh, cap=300, base_k=15.0, min_faces=60, scales=12, log=None):
     return face_atom, tree
 
 
-def _atoms_uncached(mesh, cap=300, base_k=15.0, min_faces=60, scales=12,
-                    log=None):
+def _atoms_uncached(mesh, cap=300, base_k=15.0, min_faces=None, scales=12,
+                    log=None, evidence=None, camera_weight=2.0,
+                    nozzle_mm=0.4, target_regions=None):
     """Feature-aligned atoms: a cut of the persistence merge tree, at most `cap` wide.
 
     Returns (face_atom, tree) where `tree` carries what a caller needs to descend into
@@ -111,10 +242,35 @@ def _atoms_uncached(mesh, cap=300, base_k=15.0, min_faces=60, scales=12,
     import index_persist
 
     index, session = scale_index(mesh, scales=scales, log=log)
-    weights = index_regions.edge_weights(session, index, None, 0.0)
+
+    # CAMERA EVIDENCE, WHEN THE CALLER PAID FOR IT. This call used to hardcode
+    # (None, 0.0) -- geometry only -- and its sibling in scripts/hierarchy_select.py
+    # carries a comment saying that exact call was a bug it already fixed.
+    # Geometry alone does not see a boundary that is soft relief rather than a
+    # crease, so on an encrusted surface it blurs straight across the edges
+    # that matter most, and no later stage can recover a boundary the substrate
+    # never drew.
+    weights = index_regions.edge_weights(
+        session, index, evidence,
+        camera_weight if evidence is not None else 0.0)
     pairs = session["pairs"]
     count = len(session["faces"])
-    base = index_regions.felzenszwalb(pairs, weights, count, base_k, min_faces)
+
+    # The speck floor is no longer a face count somebody picked: it is the
+    # smallest area this printer can lay down as its own colour. `base_k` stays
+    # explicit -- see calibrate() for the measurement that refused to justify a
+    # derived value -- but a caller who knows what granularity they want can
+    # ask for a region COUNT and have k solved for it, which is a quantity a
+    # person can reason about in a way that k is not.
+    solved_min, _report = calibrate(mesh, index, nozzle_mm=nozzle_mm, log=log)
+    if min_faces is None:
+        min_faces = solved_min
+    if target_regions:
+        base_k, base = solve_base_k(pairs, weights, count, min_faces,
+                                    int(target_regions), log=log)
+    else:
+        base = index_regions.felzenszwalb(pairs, weights, count, base_k,
+                                          min_faces)
     regions = int(base.max()) + 1
     if log:
         log("  base regions: %d" % regions)

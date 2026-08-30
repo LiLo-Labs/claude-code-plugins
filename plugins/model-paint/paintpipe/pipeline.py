@@ -44,7 +44,9 @@ def default_log(message):
 
 def paint(input_path, out_dir, intent="", size_mm=None, palette=(),
           model="claude-opus-5", nozzle_mm=0.4, viewing_mm=500.0, pixels=900,
-          cap=250, workers=3, no_vision=False, log=default_log):
+          cap=250, workers=3, no_vision=False, camera_evidence=True,
+          target_regions=None, target_views=3, view_budget=12,
+          log=default_log):
     """One mesh and a brief in; a painted, geometry-identical 3MF out.
 
     Returns a manifest dict (also written to out_dir/scheme.json). With
@@ -79,7 +81,23 @@ def paint(input_path, out_dir, intent="", size_mm=None, palette=(),
     mesh = field.substrate
 
     # -- segment in 3D --------------------------------------------------------
-    face_atom, tree = segment3d.atoms(mesh, cap=cap, log=log)
+    # CAMERA EVIDENCE FIRST. Geometry alone does not see a boundary that is
+    # soft relief rather than a crease, and no later stage can recover an edge
+    # the substrate never drew -- the survey can only choose among nodes that
+    # exist. This pass is renders only: no model calls, no cost but time.
+    from . import rig as rig_module
+    evidence = None
+    if camera_evidence:
+        started_evidence = time.time()
+        evidence = rig_module.edge_evidence(mesh, pixels=min(pixels, 768),
+                                            log=None)
+        log("  edge evidence from %d looks in %.0fs (%d of %d face pairs seen)"
+            % (14, time.time() - started_evidence,
+               int((evidence["seen"] > 0).sum()), len(evidence["seen"])))
+    face_atom, tree = segment3d.atoms(mesh, cap=cap, log=log,
+                                      evidence=evidence,
+                                      nozzle_mm=nozzle_mm,
+                                      target_regions=target_regions)
     atom_count = len(tree["node_of_atom"])
 
     if no_vision:
@@ -109,9 +127,10 @@ def paint(input_path, out_dir, intent="", size_mm=None, palette=(),
     # cameras express their claims in two different places and can never
     # contradict each other; on one rig, "the agent pointed here" means the
     # same thing to the survey, the recovery ladder and the colour critic.
-    from . import rig as rig_module
     views, rig_poses = rig_module.observe(mesh, up, os.path.join(out_dir, "rig"),
-                                          pixels=pixels, log=log)
+                                          pixels=pixels, tree=tree,
+                                          target_views=target_views,
+                                          budget=view_budget, log=log)
 
     # -- survey: parts the vocabulary promised that no atom carries ----------
     # Before the ladder, not after, because of circumstance 9's invariant:
