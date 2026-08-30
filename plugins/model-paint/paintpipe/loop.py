@@ -236,7 +236,7 @@ def apply_fixes(field, tree, poses, geometry, fixes, labels, growth=8.0,
     """
     from . import index3d
 
-    pixels, _gap = geometry
+    pixels, gap = geometry
     base = rig_module.region_of_face(tree)
     areas = np.asarray(tree["area"], dtype=float)
     applied = 0
@@ -250,11 +250,21 @@ def apply_fixes(field, tree, poses, geometry, fixes, labels, growth=8.0,
             continue
         if not (0 <= view < len(poses)):
             continue
-        # The coordinate is given in the RIGHT-hand (painted) panel, which sits
-        # one panel width along; both panels are the same camera, so removing
-        # the offset lands it on the same surface.
-        local_x = x - pixels if x >= pixels else x
-        region = rig_module.point_to_region(poses[view], base, local_x, y)
+        # Map a coordinate on the SHEET back to the panel it belongs to. The
+        # right-hand panel of view v starts at gap + v*(2*pixels+gap) + pixels,
+        # and subtracting only one panel width -- which is what this did -- is
+        # right for view 0 and wildly wrong for every view after it. Four of
+        # eight corrections were dropped on the floor because of it.
+        stride = 2 * pixels + gap
+        origin = gap + view * stride + pixels
+        local_x, local_y = x - origin, y - gap
+        if not (0 <= local_x < pixels):
+            plain = gap + view * stride
+            local_x = x - plain if 0 <= x - plain < pixels else x % pixels
+        if not (0 <= local_y < pixels):
+            local_y = y % pixels
+        region = rig_module.point_to_region(poses[view], base, local_x,
+                                            local_y)
         if region < 0:
             continue
 
@@ -324,3 +334,172 @@ def run(backend, mesh, tree, up, intent, out_dir, rounds=4, start=8, views=3,
     with open(os.path.join(out_dir, "loop.json"), "w") as handle:
         json.dump({"colours": final}, handle, indent=2)
     return field, final
+
+
+SEE = """This picture shows %(count)d views of the same 3D model, plainly shaded.
+
+The piece: %(intent)s
+
+Answer as a painter about to paint it:
+
+1. WHAT PARTS do you see? Name the things you would give their own colour.
+
+2. HOW MUCH DETAIL does each part have? Say "flat" if the whole part takes one
+   colour, or "detailed" if it is really many separate things of the same kind
+   (a field of barnacles, a row of spikes) that might want picking out.
+
+3. IN WHAT ORDER would you paint them? Background and large areas first,
+   details and small things last, because later coats go ON TOP of earlier
+   ones. Number them from 1.
+
+Overlap is expected and is handled by that order, so do not worry about parts
+touching or sitting on each other -- just say which goes on first.
+
+Reply with ONLY a JSON object, no prose:
+{"parts": [{"name": "<short name>", "detail": "flat|detailed",
+            "order": <int>, "where": "<where it sits>"}, ...]}"""
+
+
+WHERE = """The LEFT image is a 3D model plainly shaded, %(count)d views. The RIGHT
+image of each pair is the painting so far.
+
+The piece: %(intent)s
+
+I am about to paint: %(name)s -- %(where)s
+
+Point at it. Give a pixel coordinate IN THE RIGHT-HAND image of each view where
+this part is, one point per separate piece of it you can see. If the part is a
+field of many small things, point at several of them across the model.
+
+If a view does not show it, give nothing for that view.
+
+Reply with ONLY a JSON object, no prose:
+{"points": [{"view": <int>, "x": <int>, "y": <int>}, ...]}"""
+
+
+CHECK = """The LEFT image of each pair is the model plainly shaded. The RIGHT is the
+painting so far. I have just painted %(name)s in the colour shown as %(swatch)s.
+
+The piece: %(intent)s
+
+Look only at that colour. Is it on the right surface?
+
+Give corrections as places, at most %(budget)d, most important first:
+  - "add"    the part is there but unpainted -- point at it
+  - "remove" the colour has spread somewhere it should not be -- point at it
+
+Reply with ONLY a JSON object, no prose:
+{"fixes": [{"kind": "add|remove", "view": <int>, "x": <int>, "y": <int>,
+            "why": "<short>"}, ...]}
+An empty list means that colour is right."""
+
+
+def see(backend, mesh, up, intent, out_dir, views=4, pixels=700, log=print):
+    """What parts, how much detail each, and in what order to paint them."""
+    from . import discover
+    sheet, paths, poses = discover.survey_views(mesh, up, out_dir,
+                                                pixels=pixels, count=views,
+                                                log=None)
+    prompt = SEE % {"count": len(paths), "intent": intent or "a 3D model"}
+    with open(sheet, "rb") as handle:
+        key = "see-%s" % rig_module.digest(handle.read(), prompt)
+    answer = backend._run([sheet], prompt, key)
+    parts = []
+    for entry in (answer or {}).get("parts", []) or []:
+        name = str(entry.get("name", "")).strip()
+        if not name:
+            continue
+        try:
+            order = int(entry.get("order", 99))
+        except (TypeError, ValueError):
+            order = 99
+        parts.append({"name": name, "where": str(entry.get("where", "")),
+                      "detail": str(entry.get("detail", "flat")).lower(),
+                      "order": order})
+    parts.sort(key=lambda p: p["order"])
+    if log:
+        for part in parts:
+            log("    %2d. %-32s [%s] %s" % (part["order"], part["name"],
+                                            part["detail"],
+                                            part["where"][:44]))
+    return parts
+
+
+def add_part(backend, mesh, tree, up, field, labels, part, intent, out_dir,
+             tag, growth=8.0, budget=6, log=print):
+    """Paint ONE part, look at it, fix it. The additive step.
+
+    A person does not paint everything and then audit everything; they lay one
+    colour, check that colour, fix it, and move on. Checking one colour against
+    a picture is a far easier question than checking eight, and the answer is
+    correspondingly better.
+    """
+    slot = len(labels)
+    labels.append(part["name"])
+
+    path, poses, geometry = show(mesh, up, field, labels, out_dir,
+                                 "%s-before" % tag)
+    prompt = WHERE % {"count": len(poses), "intent": intent or "a 3D model",
+                      "name": part["name"], "where": part["where"]}
+    with open(path, "rb") as handle:
+        key = "where-%s" % rig_module.digest(handle.read(), part["name"])
+    answer = backend._run([path], prompt, key) or {}
+    points = [{"view": p.get("view"), "x": p.get("x"), "y": p.get("y"),
+               "colour": slot + 1} for p in (answer.get("points") or [])]
+    if not points:
+        if log:
+            log("    %s: not pointed at in any view" % part["name"])
+        labels.pop()
+        return field, labels, 0
+    field, labels, applied = apply_fixes(field, tree, poses, geometry, points,
+                                         labels, growth=growth, log=None)
+
+    path, poses, geometry = show(mesh, up, field, labels, out_dir,
+                                 "%s-after" % tag)
+    prompt = CHECK % {"name": part["name"], "swatch": "colour %d" % (slot + 1),
+                      "intent": intent or "a 3D model", "budget": budget}
+    with open(path, "rb") as handle:
+        key = "check-%s" % rig_module.digest(handle.read(), part["name"])
+    answer = backend._run([path], prompt, key) or {}
+    fixes = []
+    for fix in (answer.get("fixes") or [])[:budget]:
+        kind = str(fix.get("kind", "add")).lower()
+        # "remove" hands the surface back to the base coat, which is colour 1
+        # by construction -- the part painted first, underneath everything.
+        fix = dict(fix)
+        fix["colour"] = 1 if kind == "remove" else slot + 1
+        fixes.append(fix)
+    if fixes:
+        field, labels, _n = apply_fixes(field, tree, poses, geometry, fixes,
+                                        labels, growth=growth, log=None)
+    if log:
+        log("    %-32s %d point(s), %d fix(es)"
+            % (part["name"], len(points), len(fixes)))
+    return field, labels, applied
+
+
+def paint(backend, mesh, tree, up, intent, out_dir, views=3, budget=6,
+          max_parts=8, log=print):
+    """The whole method, in the order a person works.
+
+    See what parts there are and how much detail each has; paint them in the
+    order given, background first so later coats land on top; and after each
+    colour, look at that colour and fix it before starting the next.
+    """
+    os.makedirs(out_dir, exist_ok=True)
+    parts = see(backend, mesh, up, intent, out_dir, views=views, log=log)
+    if not parts:
+        return None, []
+
+    # The base coat: everything starts as the first part, so nothing is ever
+    # unclaimed and "remove" always has somewhere to put a face back.
+    field = np.zeros(len(mesh.faces), dtype=np.int64)
+    labels = [parts[0]["name"]]
+    for index, part in enumerate(parts[1:max_parts], start=1):
+        field, labels, _n = add_part(backend, mesh, tree, up, field, labels,
+                                     part, intent, out_dir, str(index),
+                                     budget=budget, log=log)
+    show(mesh, up, field, labels, out_dir, "final", views=views)
+    with open(os.path.join(out_dir, "painted.json"), "w") as handle:
+        json.dump({"parts": parts, "colours": labels}, handle, indent=2)
+    return field, labels
