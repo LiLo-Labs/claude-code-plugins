@@ -781,8 +781,10 @@ Look at the right-hand images and answer for that colour only:
 
    %(how)s
 
-2. WHAT SHOULD NOT BE THIS COLOUR. Point at any spot that has the colour and
-   is not this part. It goes back to whatever it was before.
+2. WHAT SHOULD NOT BE THIS COLOUR. Give the colour back wherever it has gone
+   somewhere it should not be. A single spot can be a point; a whole area that
+   was taken wrongly should be drawn round, the same way you drew it on. It
+   all goes back to whatever it was before.
 
 You will see the result and be asked again, many times, so take a little and
 take it accurately. Doing a few pieces properly from every side beats doing
@@ -791,7 +793,8 @@ reply with both lists empty. That is how this finishes.
 
 Reply with ONLY a JSON object, no prose:
 {"add": [{"view": <int>, "points": [{"x": <int>, "y": <int>}, ...]}, ...],
- "remove": [{"view": <int>, "x": <int>, "y": <int>}, ...]}"""
+ "remove": [{"view": <int>, "x": <int>, "y": <int>}, ...
+            or {"view": <int>, "points": [{"x": <int>, "y": <int>}, ...]}]}"""
 
 
 # A broad brush fills an area; a fine one lines in a detail. Which instrument
@@ -938,7 +941,22 @@ def add_part(backend, mesh, tree, up, seeds, labels, part, intent, out_dir,
                             stroke_regions(tree, poses, geometry, add))
         if drawn:
             seeds[slot] = sorted(set(seeds[slot]) | drawn)
-        for region in seed_regions(tree, poses, geometry, remove):
+        # UNDO HAS TO BE AS STRONG AS THE STROKE. One outline can take
+        # thousands of regions in a gesture, and a removal used to be a single
+        # point: on the shell the agent saw its spiral-eye colour cover the
+        # whole coil, asked for seventeen removals, and took back six regions
+        # of three thousand. Seeing the mistake is worthless if the correction
+        # cannot reach it, so a removal may be drawn round exactly as the
+        # paint was.
+        taken = set(seed_regions(tree, poses, geometry,
+                                 [f for f in remove if "x" in f]))
+        areas = [f for f in remove if f.get("points")]
+        if areas:
+            taken |= set(int(r) for r in
+                         outline_regions(tree, poses, geometry, areas))
+            taken |= set(int(r) for r in
+                         stroke_regions(tree, poses, geometry, areas))
+        for region in taken:
             # RETRACT FIRST. Re-asserting the displaced claim while this
             # part's own mark is still there is not undo: both hold the
             # region and the later one wins, so nothing changes.

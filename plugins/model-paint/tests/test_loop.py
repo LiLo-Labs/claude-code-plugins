@@ -386,6 +386,23 @@ class TestAddPartRuns(unittest.TestCase):
         self.assertEqual(sorted(seeds[0]), [0],
                          "an outline over region 0 alone claims region 0 alone")
 
+    def test_a_removal_can_be_drawn_round_not_only_pointed_at(self):
+        """One outline takes thousands of regions in a gesture; a removal used
+        to be a single point. On the shell the agent saw its colour covering
+        the whole coil, asked for seventeen removals, and took back six
+        regions out of three thousand. Seeing a mistake is worthless if the
+        correction cannot reach it."""
+        wide = self._box(0, 0, 39)
+        backend = self._backend([{"add": [wide]},
+                                 {"remove": [dict(wide)]}])
+        seeds, _labels, _field, _used = loop.add_part(
+            backend, self.mesh, self.tree, (0, 0, 1), {0: [0], 1: [4]},
+            ["rock", "shell"], self._part("detail"), "test", "/tmp/unused",
+            "4", rounds=3, log=None)
+        self.assertNotIn(2, seeds,
+                         "an area painted wrongly must be recoverable in one "
+                         "gesture, as it was laid")
+
     def test_a_part_nobody_finds_takes_no_colour(self):
         backend = self._backend([{"add": [], "remove": []}])
         seeds, labels, _field, _used = loop.add_part(
