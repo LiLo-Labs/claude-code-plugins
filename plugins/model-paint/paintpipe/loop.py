@@ -503,7 +503,7 @@ def stroke_regions(tree, poses, geometry, shapes, width=1, agree=False):
     return np.asarray(sorted(out), dtype=np.int64)
 
 
-def outline_regions(tree, poses, geometry, shapes, share=0.5):
+def outline_regions(tree, poses, geometry, shapes, share=0.5, min_pixels=12):
     """An outline drawn round a part in the picture -> the base regions it means.
 
     This is the one source of the part's extent that nothing has used. The
@@ -573,7 +573,17 @@ def outline_regions(tree, poses, geometry, shapes, share=0.5):
     # A region only clipped by the edge of an outline is not in the part. The
     # share is a majority of what the cameras can see of it, which is a
     # statement about the drawing rather than a size or a scale.
-    keep = (seen > 0) & (inside >= share * seen)
+    #
+    # But a majority of THREE PIXELS is not evidence. A region turned almost
+    # edge-on, or tucked behind something, shows a handful of pixels in the
+    # drawn views, and if the outline happens to cover them it is claimed on
+    # nothing at all -- measured, the shell's spiral eye went from 742 regions
+    # to 3555 in one round while barely changing on screen, because the extra
+    # three thousand were surfaces the drawing could hardly see. A region has
+    # to be properly visible somewhere before a drawing gets to decide it;
+    # `min_pixels` is a fact about the render, like the brush width, and the
+    # loop paints such surfaces from a view that does see them.
+    keep = (seen >= int(min_pixels)) & (inside >= share * seen)
     return np.flatnonzero(keep).astype(np.int64)
 
 

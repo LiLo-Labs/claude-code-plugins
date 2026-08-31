@@ -512,6 +512,19 @@ class TestOutlineRegions(unittest.TestCase):
                                    self._shape(0, 39))
         self.assertEqual(got.tolist(), [0, 1])
 
+    def test_a_barely_visible_region_is_not_decided_by_a_drawing(self):
+        """A majority of three pixels is not evidence. The shell's spiral eye
+        went 742 -> 3555 regions in one round while barely changing on screen:
+        the extra three thousand were surfaces the drawing could hardly see."""
+        pose = _BoxPose()
+        pose.hit_id[:] = -1
+        pose.hit_id[0, 0:3] = 0          # region 0 shows three pixels
+        pose.hit_id[10:40, 20:40] = 4    # region 1 shows plenty
+        got = loop.outline_regions(self.tree, [pose], self.geometry,
+                                   self._shape(0, 39))
+        self.assertEqual(got.tolist(), [1],
+                         "three pixels is not enough to claim a surface")
+
     def test_no_shapes_claims_nothing(self):
         self.assertEqual(loop.outline_regions(self.tree, self.poses,
                                               self.geometry, []).tolist(), [])
