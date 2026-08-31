@@ -358,6 +358,9 @@ class TestOutlineRegions(unittest.TestCase):
         pose.hit_id[:] = -1
         pose.hit_id[0, 0:3] = 0          # region 0 shows three pixels
         pose.hit_id[10:40, 20:40] = 4    # region 1 shows plenty
+        # Four pixels, the same number rig.coverage uses to decide whether a
+        # pose sees a region at all. Measured on the shell: across six views
+        # the median region gets 42 pixels and four rejects 3.5% of them.
         got = loop.outline_regions(self.tree, [pose], self.geometry,
                                    self._shape(0, 39))
         self.assertEqual(got.tolist(), [1],

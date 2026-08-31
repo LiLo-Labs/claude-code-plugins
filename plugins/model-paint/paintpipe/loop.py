@@ -316,7 +316,7 @@ def stroke_regions(tree, poses, geometry, shapes, width=1, agree=False):
     return np.asarray(sorted(out), dtype=np.int64)
 
 
-def outline_regions(tree, poses, geometry, shapes, share=0.5, min_pixels=12):
+def outline_regions(tree, poses, geometry, shapes, share=0.5, min_pixels=4):
     """An outline drawn round a part in the picture -> the base regions it means.
 
     This is the one source of the part's extent that nothing has used. The
@@ -393,9 +393,15 @@ def outline_regions(tree, poses, geometry, shapes, share=0.5, min_pixels=12):
     # nothing at all -- measured, the shell's spiral eye went from 742 regions
     # to 3555 in one round while barely changing on screen, because the extra
     # three thousand were surfaces the drawing could hardly see. A region has
-    # to be properly visible somewhere before a drawing gets to decide it;
-    # `min_pixels` is a fact about the render, like the brush width, and the
-    # loop paints such surfaces from a view that does see them.
+    # to be properly visible somewhere before a drawing gets to decide it.
+    #
+    # FOUR PIXELS, which is the number rig.coverage already uses to decide
+    # whether a pose sees a region at all -- one calibrated constant for that
+    # judgement rather than two. Measured on the shell across six views: the
+    # median region gets 42 pixels and a floor of four rejects 3.5% of them.
+    # The count here is only over the views DRAWN ON, though, so with two
+    # views drawn the same median is nearer fourteen and a floor of twelve
+    # threw away about half of what the agent could plainly see.
     keep = (seen >= int(min_pixels)) & (inside >= share * seen)
     return np.flatnonzero(keep).astype(np.int64)
 
