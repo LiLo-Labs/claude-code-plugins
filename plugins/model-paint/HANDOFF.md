@@ -32,11 +32,23 @@ recessed lines; slate acts as the shadow"; ribs -> bone, same as the body,
 "the deep ribbing already reads". That is a painter using four colours, and no
 Lab-distance solver produces it.
 
-## What is still wrong
+## Judge the FILAMENT render, not the part render
 
-The upper coil is patchy in the views that see it obliquely (2 and 5 of six).
-Ribs and body are the same material and the boundary between them is a
-judgement, so they trade surface across rounds. Views 0, 3 and 4 are clean.
+The part render shows ten colours and its upper coil looks patchy, because
+ribs and shell body are the same material and their boundary is a judgement --
+they trade surface between rounds. That flaw does not reach the print. Asked
+which filament each part wants, the agent puts ribs and body BOTH in bone, so
+the boundary it was arguing about vanishes. As laid down:
+
+    slate 57.1% (the rock)   bone 31.3% (the shell)
+    rust   8.9% (spiral eye and breaks)   moss 2.8% (weed)
+
+and the rock/shell split is clean in every view. Some rust speckles the coil
+in views 2 and 5, where the cracks took shell surface; that is the real
+remaining defect and it is much smaller than the part render suggests.
+
+Render `field.npy` mapped through `filaments.json` before concluding anything
+is wrong with a run.
 
 ## Do not rebuild these
 
