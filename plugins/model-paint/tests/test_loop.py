@@ -599,3 +599,52 @@ class TestOutlineAcrossViews(unittest.TestCase):
                                    [self._shape(0, 0, 19),
                                     self._shape(4, 20, 39)])
         self.assertEqual(got.tolist(), [0, 1])
+
+
+class TestStrokeRegions(unittest.TestCase):
+    """The fine brush: only what the line runs over."""
+
+    def setUp(self):
+        self.tree = two_lobe_tree(per_region=4)
+        self.poses = [_BoxPose()]
+        self.geometry = (40, 8, 1)
+
+    def _line(self, points):
+        origin = 8 + 40
+        return [{"view": 0, "points": [{"x": origin + x, "y": 8 + y}
+                                       for x, y in points]}]
+
+    def test_a_line_paints_what_it_runs_over(self):
+        got = loop.stroke_regions(self.tree, self.poses, self.geometry,
+                                  self._line([(2, 2), (2, 30)]))
+        self.assertEqual(got.tolist(), [0])
+
+    def test_a_line_does_not_close_back_to_its_start(self):
+        """A stroke that ends far from where it began used to get a closing
+        segment running straight back, painting a chord across everything
+        between -- which is how a brush drawn along a crack streaked over the
+        middle of the shell. The stroke here stays in region 1; only the
+        return leg would cross into region 0."""
+        got = loop.stroke_regions(self.tree, self.poses, self.geometry,
+                                  self._line([(38, 2), (22, 2), (22, 35),
+                                              (38, 35)]))
+        self.assertEqual(got.tolist(), [1],
+                         "the return leg must not be drawn")
+
+    def test_a_line_crossing_a_border_takes_both_sides(self):
+        got = loop.stroke_regions(self.tree, self.poses, self.geometry,
+                                  self._line([(2, 20), (38, 20)]))
+        self.assertEqual(got.tolist(), [0, 1])
+
+    def test_the_brush_does_not_reach_past_the_line(self):
+        """One pixel, not three. A crack region is narrow and its neighbour is
+        one big smooth region, so reaching a pixel past the line hands over
+        that whole neighbour."""
+        got = loop.stroke_regions(self.tree, self.poses, self.geometry,
+                                  self._line([(19, 2), (19, 30)]))
+        self.assertEqual(got.tolist(), [0], "x=19 is region 0; x=20 is not")
+
+    def test_a_single_point_still_marks_its_region(self):
+        got = loop.stroke_regions(self.tree, self.poses, self.geometry,
+                                  self._line([(30, 30)]))
+        self.assertEqual(got.tolist(), [1])

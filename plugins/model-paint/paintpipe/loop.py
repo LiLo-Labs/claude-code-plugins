@@ -391,7 +391,7 @@ def seed_regions(tree, poses, geometry, points):
     return out
 
 
-def stroke_regions(tree, poses, geometry, shapes, width=3):
+def stroke_regions(tree, poses, geometry, shapes, width=1):
     """A line drawn ALONG a part -> the base regions it actually runs over.
 
     For a crack, a rib cord, a weed strand or a scattered crust, an outline is
@@ -406,6 +406,11 @@ def stroke_regions(tree, poses, geometry, shapes, width=3):
     regions and stops; the width is in PIXELS of the render, a brush thickness
     rather than a fact about the model, and the region boundaries decide the
     actual edge as always.
+
+    One pixel wide, not three. A crack region is narrow and the smooth shell
+    either side of it is one big region, so a brush reaching a pixel past the
+    line takes that whole neighbour -- a fine instrument has to actually be
+    fine, or it is the outline again with extra steps.
     """
     base = rig_module.region_of_face(tree)
     reach = max(0, int(width) // 2)
@@ -426,12 +431,16 @@ def stroke_regions(tree, poses, geometry, shapes, width=3):
                 continue
             if local is not None:
                 corners.append(local)
-        for index in range(len(corners)):
+        # A LINE IS NOT A LOOP. Wrapping the last corner back to the first
+        # adds a closing segment running from the end of the stroke straight
+        # back to its start, painting a chord across everything between --
+        # which is how a brush drawn along a crack streaked over the middle of
+        # the shell. An open stroke stops where it stops. The segments between
+        # the given corners are still walked, because a stroke is a line and
+        # not a row of dots.
+        for index in range(max(1, len(corners) - 1)):
             x0, y0 = corners[index]
-            # Walk the segment to the next corner, so the regions BETWEEN two
-            # given points are painted too -- a stroke is a line, not a row of
-            # dots, and a person drawing one does not mean only its ends.
-            x1, y1 = corners[(index + 1) % len(corners)] if len(corners) > 1 \
+            x1, y1 = corners[index + 1] if index + 1 < len(corners) \
                 else (x0, y0)
             steps = max(abs(x1 - x0), abs(y1 - y0), 1)
             for tick in range(steps + 1):
