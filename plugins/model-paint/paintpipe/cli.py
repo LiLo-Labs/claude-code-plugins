@@ -25,6 +25,7 @@ decision about which of them matter.
 """
 
 import argparse
+import json
 import os
 import time
 
@@ -120,6 +121,9 @@ def main(argv=None):
             backend, mesh, up, field, labels, [p.name for p in filaments],
             args.intent, args.out, directions, views=len(directions),
             log=print)
+        with open(os.path.join(args.out, "filaments.json"), "w") as handle:
+            json.dump({"chosen": chosen,
+                       "loaded": [p.name for p in filaments]}, handle, indent=2)
         from . import export
         result = export.write_3mf(args.input, args.out, field, labels, chosen,
                                   filaments, log=print)

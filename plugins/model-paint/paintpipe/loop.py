@@ -937,6 +937,12 @@ def paint(backend, mesh, tree, up, intent, out_dir, views=3, rounds=6,
         left = 100.0 * float(areas[field < 0].sum()) / total
         if left > 0.05:
             log("  %-32s %5.1f%%" % ("(unclaimed)", left))
+    # THE RECORD OF THE RUN. Without the field on disk the only artefact is
+    # the 3MF, so re-exporting against different filaments -- or looking at
+    # what was actually painted -- means paying for the whole thing again.
+    np.save(os.path.join(out_dir, "field.npy"), field)
     with open(os.path.join(out_dir, "painted.json"), "w") as handle:
-        json.dump({"parts": parts, "colours": labels}, handle, indent=2)
+        json.dump({"parts": parts, "colours": labels,
+                   "seeds": {str(k): [int(r) for r in v]
+                             for k, v in seeds.items()}}, handle, indent=2)
     return field, labels
