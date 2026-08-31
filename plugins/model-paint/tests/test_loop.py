@@ -745,3 +745,78 @@ class TestStrokeRegions(unittest.TestCase):
         got = loop.stroke_regions(self.tree, poses, geometry, shapes,
                                   agree=True)
         self.assertEqual(got.tolist(), [0])
+
+
+class TestReview(unittest.TestCase):
+    """The question nobody in the loop was ever asked.
+
+    Each part is painted alone, and each of those calls can be right about its
+    own colour while the picture falls apart -- it is asked "what is missing
+    from THIS colour", never "is this any good". And a part's turn ends and
+    never returns, so when a later coat eats an earlier one there is nobody
+    left who is allowed to say so.
+    """
+
+    def setUp(self):
+        self.tree = two_lobe_tree(per_region=4)
+        self.mesh = _Mesh(len(self.tree["base"]))
+        self.poses = [_BoxPose()]
+        self.geometry = (40, 8, 1)
+        self._show = loop.show
+
+        def fake_show(mesh, up, field, labels, out_dir, tag, views=3,
+                      pixels=520, directions=None):
+            return (os.path.join(HERE, "..", "README.md"), self.poses,
+                    self.geometry)
+        loop.show = fake_show
+
+    def tearDown(self):
+        loop.show = self._show
+
+    def _backend(self, script):
+        state = {"n": 0}
+
+        class Fake(object):
+            def _run(inner, paths, prompt, key):
+                index = state["n"]
+                state["n"] += 1
+                return script[index] if index < len(script) else {"fixes": []}
+        return Fake()
+
+    def _box(self, x0, x1):
+        origin = 8 + 40
+        return [{"x": origin + x0, "y": 8}, {"x": origin + x1, "y": 8},
+                {"x": origin + x1, "y": 8 + 39}, {"x": origin + x0, "y": 8 + 39}]
+
+    def test_it_takes_surface_back_off_a_colour_that_took_it(self):
+        """The earlier colour's turn is over and it cannot defend itself. This
+        pass stands in for it."""
+        seeds = {0: [0, 1], 1: []}
+        backend = self._backend([{"fixes": [{"colour": 2, "view": 0,
+                                             "points": self._box(0, 19)}]}])
+        seeds, field = loop.review(backend, self.mesh, self.tree, (0, 0, 1),
+                                   seeds, ["rock", "shell"], "test",
+                                   "/tmp/unused", None, rounds=2, log=None)
+        self.assertIn(0, seeds[1], "the surface must move to the named colour")
+        self.assertNotIn(0, seeds[0], "and off the one that was holding it")
+        self.assertEqual(int(field[0]), 1)
+
+    def test_an_empty_answer_ends_the_review(self):
+        calls = []
+
+        class Counting(object):
+            def _run(inner, paths, prompt, key):
+                calls.append(key)
+                return {"fixes": []}
+        loop.review(Counting(), self.mesh, self.tree, (0, 0, 1), {0: [0]},
+                    ["rock"], "test", "/tmp/unused", None, rounds=5, log=None)
+        self.assertEqual(len(calls), 1, "a painting called right is finished")
+
+    def test_a_colour_that_does_not_exist_is_refused(self):
+        seeds = {0: [0, 1]}
+        backend = self._backend([{"fixes": [{"colour": 9, "view": 0,
+                                             "points": self._box(0, 19)}]}])
+        seeds, _field = loop.review(backend, self.mesh, self.tree, (0, 0, 1),
+                                    seeds, ["rock"], "test", "/tmp/unused",
+                                    None, rounds=1, log=None)
+        self.assertEqual(sorted(seeds[0]), [0, 1])

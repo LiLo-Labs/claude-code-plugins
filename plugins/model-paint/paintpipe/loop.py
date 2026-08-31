@@ -981,6 +981,100 @@ def add_part(backend, mesh, tree, up, seeds, labels, part, intent, out_dir,
     return seeds, labels, field_of(tree, owner, len(mesh.faces)), used
 
 
+
+REVIEW = """The LEFT image of each pair is a 3D model plainly shaded, %(count)d views.
+The RIGHT image of each pair is the finished painting.
+
+The piece: %(intent)s
+
+The colours are:
+%(legend)s
+
+Every colour was painted on its own, one at a time, and nobody has yet looked
+at the whole thing. Do that now. Stand back and say what is WRONG with the
+painting as a painting -- a colour that has spread across something it should
+not, two things that ought to be different colours and are not, an area that
+belongs to a part but ended up another colour because a later coat took it.
+
+Give the fixes as places, and say which colour each place SHOULD be. Draw
+round an area the same way it was painted: a closed outline for a patch, a
+line along a thin thing, or a single point for a spot.
+
+Take the worst few. You will be asked again after these are applied.
+
+Reply with ONLY a JSON object, no prose:
+{"fixes": [{"colour": <the colour number it should be>,
+            "view": <int>,
+            "points": [{"x": <int>, "y": <int>}, ...] or "x"/"y" for a point,
+            "why": "<short>"}, ...]}
+An empty list means the painting is right."""
+
+
+def review(backend, mesh, tree, up, seeds, labels, intent, out_dir,
+           directions, rounds=3, views=3, log=print):
+    """Look at the WHOLE painting and fix it. The question nobody was asked.
+
+    Every part is painted on its own, and each of those calls can be perfectly
+    right about its own colour while the picture goes to pieces -- because it
+    is asked "what is missing from THIS colour", never "is this any good".
+    Worse, a part's turn ends and never comes back, so when a later coat eats
+    into an earlier one there is no one left who is allowed to say so: by the
+    time the ribs are being painted, the body's turn is three parts gone.
+
+    This is that missing pass. It sees the finished thing, it may move any
+    surface to any colour, and it runs until it says the painting is right.
+    """
+    for step in range(max(1, int(rounds))):
+        owner = settle(tree, seeds, len(labels), fallback=0)
+        field = field_of(tree, owner, len(mesh.faces))
+        path, poses, geometry = show(mesh, up, field, labels, out_dir,
+                                     "review-%d" % step, views=views,
+                                     directions=directions)
+        legend = "\n".join("  %d: %s" % (i + 1, name)
+                            for i, name in enumerate(labels))
+        prompt = REVIEW % {"count": len(poses), "legend": legend,
+                           "intent": intent or "a 3D model"}
+        with open(path, "rb") as handle:
+            key = "review-%s" % rig_module.digest(handle.read(), str(step))
+        answer = backend._run([path], prompt, key)
+        if answer is None:
+            break
+        fixes = answer.get("fixes") or []
+        moved = 0
+        for fix in fixes:
+            try:
+                slot = int(fix["colour"]) - 1
+            except (KeyError, TypeError, ValueError):
+                continue
+            if not (0 <= slot < len(labels)):
+                continue
+            if fix.get("points"):
+                want = set(int(r) for r in
+                           outline_regions(tree, poses, geometry, [fix]))
+                want |= set(int(r) for r in
+                            stroke_regions(tree, poses, geometry, [fix]))
+            else:
+                want = set(seed_regions(tree, poses, geometry, [fix]))
+            if not want:
+                continue
+            # A surface can only belong to one part, so giving it to this
+            # colour means taking it off whoever holds it. That is the whole
+            # point: the earlier colour's turn is over and cannot defend
+            # itself, and this pass is what stands in for it.
+            for other in list(seeds):
+                if other != slot and seeds[other]:
+                    seeds[other] = [r for r in seeds[other] if r not in want]
+            seeds[slot] = sorted(set(seeds.get(slot, [])) | want)
+            moved += len(want)
+        if log:
+            log("    review %d: %d fix(es), %d region(s) moved"
+                % (step, len(fixes), moved))
+        if not fixes:
+            break
+    owner = settle(tree, seeds, len(labels), fallback=0)
+    return seeds, field_of(tree, owner, len(mesh.faces))
+
+
 def paint(backend, mesh, tree, up, intent, out_dir, views=3, rounds=6,
           max_parts=8, log=print):
     """The whole method, in the order a person works.
@@ -1019,6 +1113,14 @@ def paint(backend, mesh, tree, up, intent, out_dir, views=3, rounds=6,
             backend, mesh, tree, up, seeds, labels, part, intent, out_dir,
             str(index), rounds=rounds, views=len(directions),
             directions=directions, log=log)
+    # NOW LOOK AT THE WHOLE THING. Until this pass nobody has: every call was
+    # about one colour, asked before the later colours existed, and allowed to
+    # change only that colour. A part whose turn has passed cannot complain
+    # that a later coat took its surface, so this is where that gets said.
+    if labels:
+        seeds, field = review(backend, mesh, tree, up, seeds, labels, intent,
+                              out_dir, directions, rounds=max(2, rounds // 2),
+                              views=len(directions), log=log)
     # THE BASE COAT LAST. Anything nobody drew round is the first part -- a
     # printer cannot lay "no colour" -- but that is a decision about the
     # finished piece, not something to show while there is still painting to
