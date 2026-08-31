@@ -306,158 +306,33 @@ def paint_units(tree):
 
 
 
-def claim(tree, seeds, count=None, fallback=None):
-    """Give EVERY base region to the part it is most continuous with. No unit size.
+def panel_point(geometry, views, view, x, y):
+    """A coordinate given on the sheet -> the pixel inside that view's panel.
 
-    This replaces the idea that a click paints a fixed-size chunk. There is no
-    size that works: an ancestor at 8x the clicked area put 82% of the shell in
-    one colour, and a persistence object -- median 0.0005% of the surface --
-    left every part under-filled while the base coat kept 83.7%. Both are the
-    same mistake, which is choosing an extent in the abstract rather than from
-    the model.
-
-    So a click stops being a patch and becomes a CLAIM, and every region is
-    handed to the claim it is most continuous with. Continuity is measured on
-    the model's own borders: the cost of reaching a region from a seed is the
-    total border strength that has to be crossed to get there, so a claim
-    spreads freely across a smooth surface and stops where a real edge stands
-    -- unless nothing else claims the far side, in which case it keeps going,
-    which is right too.
-
-    NOT the merge tree, which is built from these same borders and then throws
-    almost all of them away. Two regions in a tree are only ever as far apart
-    as the single strongest border between them, and at the top of an
-    agglomerative tree that is one long chain, so the cost collapses: measured
-    on the shell, 58.5% of the surface tied for the minimum and 35.9% of it in
-    a five-way tie, which left whatever broke the tie choosing the colour.
-    It did: one part took 62.2% of the model. The borders themselves do not
-    collapse, so the claim is settled on them.
-
-    Three things fall out, none of them tuned:
-
-        Nothing is left over. Every region is reachable from some seed, so the
-        base coat stops absorbing whatever the clicks failed to reach.
-
-        Nothing runs away. A claim can only take surface that is cheaper to
-        reach from it than from any other part's seeds, so a barnacle seed
-        cannot cross onto the shell while a shell seed sits there -- the
-        strong border between them is exactly what stops it.
-
-        One click is enough for a big flat part, and many clicks still help a
-        scattered one, without either being asked how big it is. The extent
-        comes from where the OTHER parts were pointed at, which is how a person
-        decides where the shell stops and the barnacles start.
-
-    `seeds` maps label index -> base regions. Ties go to the higher label,
-    because parts are painted background-first and later coats go on top.
-    Returns an owner array over base regions; `fallback` is what to give a
-    region no claim can reach at all, and -1 (nothing) if not given.
+    The sheet lays out `views` pairs side by side, so the right-hand panel of
+    view v starts at gap + v*(2*pixels+gap) + pixels. Subtracting one panel
+    width is right for view 0 and wrong for every view after it, which once
+    threw away half of every round's corrections in silence; a coordinate
+    given in the plain panel, or already panel-local, is recovered instead of
+    being lost.
     """
-    regions = int(tree["regions"])
-    if count is None:
-        count = (max(seeds) + 1) if seeds else 0
-    live = {int(label): np.asarray(want, dtype=np.int64).ravel()
-            for label, want in seeds.items()
-            if len(np.asarray(want, dtype=np.int64).ravel())}
-    if not count or not live:
-        return np.full(regions, -1 if fallback is None else int(fallback),
-                       dtype=np.int64)
-
-    pairs = tree.get("region_pairs")
-    weights = tree.get("region_weights")
-    if pairs is None or weights is None:
-        return _claim_on_tree(tree, live, count, fallback)
-
-    from scipy.sparse import coo_matrix
-    from scipy.sparse.csgraph import dijkstra
-
-    pairs = np.asarray(pairs, dtype=np.int64)
-    weights = np.asarray(weights, dtype=float)
-    # A zero-weight border is free to cross, and a chain of them would let one
-    # claim travel the model for nothing. The smallest border this model
-    # actually has is the natural price of a step -- read off the model, not
-    # picked -- so crossing is never free and distance still counts.
-    step = float(weights[weights > 0].min()) if (weights > 0).any() else 1.0
-    graph = coo_matrix((weights + step, (pairs[:, 0], pairs[:, 1])),
-                       shape=(regions, regions)).tocsr()
-
-    # Sources in label order, so a region tying between two claims is resolved
-    # by which source scipy reports -- pinned below rather than left to chance.
-    sources, owner_of = [], []
-    for label in sorted(live):
-        for region in live[label]:
-            if 0 <= int(region) < regions:
-                sources.append(int(region))
-                owner_of.append(int(label))
-    if not sources:
-        return np.full(regions, -1 if fallback is None else int(fallback),
-                       dtype=np.int64)
-    owner_of = np.asarray(owner_of, dtype=np.int64)
-    sources = np.asarray(sources, dtype=np.int64)
-
-    distance = np.full((len(live), regions), np.inf)
-    order = sorted(live)
-    for slot, label in enumerate(order):
-        mine = sources[owner_of == label]
-        distance[slot] = dijkstra(graph, directed=False, indices=mine,
-                                  min_only=True)
-    reached = np.isfinite(distance).any(axis=0)
-    # Ties to the LATER part: paint order is overlap precedence, so a detail
-    # equally continuous with the surface it sits on wins the surface. Here
-    # that decides a sliver rather than a third of the model.
-    pick = (len(order) - 1) - np.argmin(distance[::-1], axis=0)
-    owner = np.asarray(order, dtype=np.int64)[pick]
-    # A merge FOREST, not a tree: a detached island is reachable from no seed
-    # at all. Left at -1 it renders unpainted and prints unpainted, so the
-    # caller hands it to the base coat -- "everything starts as the first
-    # part" -- rather than to whichever part is nearest in space, a guess.
-    owner[~reached] = -1 if fallback is None else int(fallback)
-    return owner.astype(np.int64)
-
-
-def _claim_on_tree(tree, live, count, fallback):
-    """The same competition on the merge tree, for a tree with no border graph.
-
-    Only reached by a cache written before the graph was kept. It is the
-    metric that collapses into ties, so it is a fallback and not a choice.
-    """
-    regions = int(tree["regions"])
-    children = np.asarray(tree["children"], dtype=np.int64)
-    used = int(tree.get("used", len(children)))
-    birth = np.asarray(tree.get("birth", np.zeros(len(children))), dtype=float)
-
-    has = np.zeros((used, count), dtype=bool)
-    for label, want in live.items():
-        for region in want:
-            if 0 <= int(region) < regions:
-                has[int(region), int(label)] = True
-    for node in range(regions, used):
-        left, right = children[node]
-        if left >= 0 and right >= 0:
-            has[node] = has[left] | has[right]
-
-    cost = np.where(has, birth[:used, None], np.inf)
-    for node in range(used - 1, regions - 1, -1):
-        left, right = children[node]
-        if left < 0 or right < 0:
-            continue
-        here = cost[node]
-        for child in (int(left), int(right)):
-            missing = ~has[child]
-            cost[child] = np.where(missing, np.minimum(cost[child], here),
-                                   cost[child])
-    leaves = cost[:regions]
-    unreachable = ~np.isfinite(leaves).any(axis=1)
-    owner = (count - 1) - np.argmin(leaves[:, ::-1], axis=1)
-    owner[unreachable] = -1 if fallback is None else int(fallback)
-    return owner.astype(np.int64)
+    pixels, gap = geometry
+    if not (0 <= view < views):
+        return None
+    stride = 2 * pixels + gap
+    origin = gap + view * stride + pixels
+    local_x, local_y = x - origin, y - gap
+    if not (0 <= local_x < pixels):
+        plain = gap + view * stride
+        local_x = x - plain if 0 <= x - plain < pixels else x % pixels
+    if not (0 <= local_y < pixels):
+        local_y = y % pixels
+    return int(local_x), int(local_y)
 
 
 def seed_regions(tree, poses, geometry, points):
     """Pointed-at places -> base regions. One click is one region, nothing grown."""
     base = rig_module.region_of_face(tree)
-    pixels, gap = geometry
-    stride = 2 * pixels + gap
     out = []
     for point in points:
         try:
@@ -465,19 +340,109 @@ def seed_regions(tree, poses, geometry, points):
             x, y = int(point["x"]), int(point["y"])
         except (KeyError, TypeError, ValueError):
             continue
-        if not (0 <= view < len(poses)):
+        local = panel_point(geometry, len(poses), view, x, y)
+        if local is None:
             continue
-        origin = gap + view * stride + pixels
-        local_x, local_y = x - origin, y - gap
-        if not (0 <= local_x < pixels):
-            plain = gap + view * stride
-            local_x = x - plain if 0 <= x - plain < pixels else x % pixels
-        if not (0 <= local_y < pixels):
-            local_y = y % pixels
-        region = rig_module.point_to_region(poses[view], base, local_x, local_y)
+        region = rig_module.point_to_region(poses[view], base, local[0],
+                                            local[1])
         if region >= 0:
             out.append(int(region))
     return out
+
+
+def outline_regions(tree, poses, geometry, shapes, share=0.5):
+    """An outline drawn round a part in the picture -> the base regions it means.
+
+    This is the one source of the part's extent that nothing has used. The
+    merge tree does not contain the part -- measured on the shell, the chain
+    above a rib seed goes 0.132% to 33.989% of the surface with nothing in
+    between, so the ribs are not a node and no way of choosing among nodes can
+    produce them. Nor does any rule for filling between scribble marks: every
+    one tried drew bands or confetti, because between the marks it is guessing.
+
+    The render is not guessing. A rib is a continuous shape in the picture,
+    and the depth buffer already says which face each pixel belongs to. So the
+    agent draws round the part, and a base region joins it when most of the
+    region's visible pixels -- counted across every view that can see it, not
+    just the one drawn on -- fall inside. Vision decides WHICH surface;
+    the region boundaries decide where the edge actually falls, so the result
+    can only ever have edges the geometry itself drew.
+    """
+    from PIL import Image, ImageDraw
+
+    base = rig_module.region_of_face(tree)
+    regions = int(tree["regions"])
+    pixels, _gap = geometry
+    inside = np.zeros(regions, dtype=np.int64)
+    seen = np.zeros(regions, dtype=np.int64)
+
+    by_view = {}
+    for shape in shapes or []:
+        try:
+            view = int(shape["view"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        corners = []
+        for point in shape.get("points") or []:
+            try:
+                local = panel_point(geometry, len(poses), view,
+                                    int(point["x"]), int(point["y"]))
+            except (KeyError, TypeError, ValueError):
+                continue
+            if local is not None:
+                corners.append(local)
+        if len(corners) >= 3:
+            by_view.setdefault(view, []).append(corners)
+
+    for view, pose in enumerate(poses):
+        visible = pose.visible
+        if not visible.any():
+            continue
+        here = base[pose.hit_id[visible]]
+        seen += np.bincount(here, minlength=regions)
+        if view not in by_view:
+            continue
+        canvas = Image.new("L", (pixels, pixels), 0)
+        draw = ImageDraw.Draw(canvas)
+        for corners in by_view[view]:
+            draw.polygon(corners, fill=1)
+        drawn = np.asarray(canvas, dtype=bool) & visible
+        if not drawn.any():
+            continue
+        inside += np.bincount(base[pose.hit_id[drawn]], minlength=regions)
+
+    # A region only clipped by the edge of an outline is not in the part. The
+    # share is a majority of what the cameras can see of it, which is a
+    # statement about the drawing rather than a size or a scale.
+    keep = (seen > 0) & (inside >= share * seen)
+    return np.flatnonzero(keep).astype(np.int64)
+
+
+def settle(tree, seeds, count, fallback=0):
+    """What each part was given, laid down in paint order. No guessing.
+
+    Every earlier version of this filled the gaps between what the agent
+    marked -- by climbing the tree, by shortest path over the borders, by
+    matching the surface signature, by letting each part reach as far as its
+    own marks are apart. All four drew bands or confetti, for one reason: in
+    the gap they were guessing, and the guess had to come from somewhere the
+    part's identity does not live. So nothing fills gaps any more. A part gets
+    the surface it was drawn round, later parts land on top of earlier ones
+    because that is what paint order means, and whatever nobody claimed stays
+    the base coat, where it is visible in the render and can be drawn round
+    next round.
+    """
+    regions = int(tree["regions"])
+    owner = np.full(regions, -1, dtype=np.int64)
+    for label in sorted(seeds):
+        if not (0 <= int(label) < count):
+            continue
+        want = np.asarray(seeds[label], dtype=np.int64).ravel()
+        want = want[(want >= 0) & (want < regions)]
+        owner[want] = int(label)
+    if fallback is not None:
+        owner[owner < 0] = int(fallback)
+    return owner
 
 
 def field_of(tree, owner, face_count):
@@ -642,20 +607,27 @@ The piece: %(intent)s
 
 I am about to paint: %(name)s -- %(where)s
 
-SCRIBBLE OVER IT, the way you would with a brush. Give pixel coordinates IN THE
-RIGHT-HAND image of each view that land ON this part -- not one or two, but
-enough to cover it: %(want)d or more per view if it is large or spread out,
-tracing along it and across it. On a field of many small things (a row of
-spikes, a patch of barnacles), put points on many of them, all over the model.
+DRAW ROUND IT, in the RIGHT-HAND image of each view that shows it.
 
-Every point must be ON the part. A point that strays onto its neighbour paints
-the neighbour, so stay inside; leave gaps rather than risk the edge, because
-the gaps get filled in from the points either side.
+Give one closed outline per separate piece of it -- a list of pixel corners
+that goes round the piece and back to the start. Follow the shape: a long
+piece wants corners along both of its sides, not a box round it. On a field of
+many small things (a row of spikes, a patch of barnacles), draw round each
+patch, or round each thing if they are far apart -- as many outlines as it
+takes.
+
+Trace just INSIDE the edge rather than just outside. A surface is only taken
+when most of it falls within an outline, so cutting a little short costs
+nothing while spilling over paints the neighbour.
+
+Also drop %(want)d or more points ON the part per view, as a check on the
+outlines: on the same pieces, spread over them.
 
 If a view does not show it, give nothing for that view.
 
 Reply with ONLY a JSON object, no prose:
-{"points": [{"view": <int>, "x": <int>, "y": <int>}, ...]}"""
+{"shapes": [{"view": <int>, "points": [{"x": <int>, "y": <int>}, ...]}, ...],
+ "points": [{"view": <int>, "x": <int>, "y": <int>}, ...]}"""
 
 
 CHECK = """The LEFT image of each pair is the model plainly shaded. The RIGHT is the
@@ -729,8 +701,7 @@ def add_part(backend, mesh, tree, up, seeds, labels, part, intent, out_dir,
     labels.append(part["name"])
     count = len(labels)
 
-    before = (claim(tree, seeds, count=count, fallback=0)
-              if seeds else None)
+    before = settle(tree, seeds, count) if seeds else None
     field = (field_of(tree, before, len(mesh.faces)) if before is not None
              else np.full(len(mesh.faces), -1, dtype=np.int64))
     path, poses, geometry = show(mesh, up, field, labels, out_dir,
@@ -747,15 +718,22 @@ def add_part(backend, mesh, tree, up, seeds, labels, part, intent, out_dir,
     with open(path, "rb") as handle:
         key = "where-%s" % rig_module.digest(handle.read(), part["name"])
     answer = backend._run([path], prompt, key) or {}
+    # THE OUTLINE IS THE EXTENT; the points only confirm it. Neither the tree
+    # nor any rule for filling between marks can say how far a part goes --
+    # measured, the chain above a rib seed jumps 0.132% to 33.989% of the
+    # surface, and every fill rule tried drew bands or confetti. The picture
+    # says, so the picture is asked.
+    drawn = outline_regions(tree, poses, geometry, answer.get("shapes") or [])
     points = seed_regions(tree, poses, geometry, answer.get("points") or [])
-    if not points:
+    claimed = sorted(set(int(r) for r in drawn) | set(points))
+    if not claimed:
         if log:
-            log("    %s: not pointed at in any view" % part["name"])
+            log("    %s: not found in any view" % part["name"])
         labels.pop()
         return seeds, labels, field, 0
-    seeds[slot] = sorted(set(points))
+    seeds[slot] = claimed
 
-    owner = claim(tree, seeds, count=count, fallback=0)
+    owner = settle(tree, seeds, count)
     field = field_of(tree, owner, len(mesh.faces))
     path, poses, geometry = show(mesh, up, field, labels, out_dir,
                                  "%s-after" % tag, views=views)
@@ -771,9 +749,12 @@ def add_part(backend, mesh, tree, up, seeds, labels, part, intent, out_dir,
         else:
             adds.append(fix)
 
-    grown = seed_regions(tree, poses, geometry, adds)
+    grown = set(seed_regions(tree, poses, geometry, adds))
+    grown |= set(int(r) for r in
+                 outline_regions(tree, poses, geometry,
+                                 [f for f in adds if f.get("points")]))
     if grown:
-        seeds[slot] = sorted(set(seeds[slot]) | set(grown))
+        seeds[slot] = sorted(set(seeds[slot]) | grown)
     # "remove" RESTORES WHAT WAS UNDERNEATH. Sending it to colour 1 handed
     # every over-painted patch to whichever part was painted first -- on the
     # shell the rock base -- so "this barnacle colour has spread onto the
@@ -789,7 +770,7 @@ def add_part(backend, mesh, tree, up, seeds, labels, part, intent, out_dir,
             continue
         seeds[prior] = sorted(set(seeds.get(prior, [])) | {region})
 
-    owner = claim(tree, seeds, count=count, fallback=0)
+    owner = settle(tree, seeds, count)
     field = field_of(tree, owner, len(mesh.faces))
     if log:
         log("    %-32s %d point(s), %d add, %d remove"

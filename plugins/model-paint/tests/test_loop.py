@@ -250,112 +250,6 @@ def two_lobe_tree(per_region=4):
             "floor": 0.05, "ceiling": 1.0}
 
 
-class TestClaim(unittest.TestCase):
-    """A click is a claim, not a patch.
-
-    Both previous units failed for the same reason -- they fixed an extent in
-    the abstract. An ancestor at 8x the clicked area gave one colour 82% of the
-    shell; a persistence object, median 0.0005% of the surface, left every part
-    under-filled and the base coat holding 83.7%. These pin the properties that
-    replace choosing a size at all.
-    """
-
-    def test_one_click_takes_its_whole_lobe(self):
-        """The under-fill regression: a single point on a large flat part has
-        to fill that part, without anyone saying how big it is."""
-        tree = two_lobe_tree()
-        owner = loop.claim(tree, {0: [0], 1: [4]}, count=2)
-        self.assertTrue((owner[:4] == 0).all(), owner)
-        self.assertTrue((owner[4:] == 1).all(), owner)
-
-    def test_a_part_cannot_eat_across_a_strong_border(self):
-        """The runaway regression: many clicks on one lobe still stop at the
-        border, because the other lobe's seed is more continuous with it."""
-        tree = two_lobe_tree()
-        owner = loop.claim(tree, {0: [0, 1, 2, 3], 1: [7]}, count=2)
-        self.assertTrue((owner[4:] == 1).all(), owner)
-
-    def test_nothing_is_left_over(self):
-        tree = two_lobe_tree()
-        owner = loop.claim(tree, {1: [5]}, count=3)
-        self.assertTrue((owner == 1).all(), owner)
-
-    def test_seeds_keep_their_own_region(self):
-        tree = two_lobe_tree()
-        owner = loop.claim(tree, {0: [0], 1: [1], 2: [4]}, count=3)
-        self.assertEqual(int(owner[0]), 0)
-        self.assertEqual(int(owner[1]), 1)
-        self.assertEqual(int(owner[4]), 2)
-
-    def test_ties_go_to_the_later_part(self):
-        """Paint order is overlap precedence: a detail equally continuous with
-        the surface it sits on is on top of it."""
-        tree = two_lobe_tree()
-        owner = loop.claim(tree, {0: [0], 1: [0]}, count=2)
-        self.assertEqual(int(owner[0]), 1)
-
-    def test_the_border_graph_wins_over_the_tree(self):
-        """Where the two disagree, the borders decide. The tree keeps only the
-        strongest border between any two regions, and on the shell that metric
-        tied on 58.5% of the surface -- a third of it five ways -- so the
-        tie-break, not the model, handed one part 62.2% of it."""
-        tree = two_lobe_tree()
-        # Move the strong border: on the graph the wall now stands between 1
-        # and 2, while the tree still says it stands between 3 and 4.
-        tree["region_weights"] = np.array([0.1, 0.9, 0.3, 0.1, 0.2, 0.3, 0.2])
-        seeds = {0: [0], 1: [7]}
-        graph = loop.claim(tree, seeds, count=2)
-        collapsed = loop._claim_on_tree(
-            tree, {k: np.asarray(v) for k, v in seeds.items()}, 2, None)
-        self.assertTrue((collapsed == [0, 0, 0, 0, 1, 1, 1, 1]).all(),
-                        collapsed)
-        self.assertTrue((graph == [0, 0, 0, 1, 1, 1, 1, 1]).all(), graph)
-
-    def test_a_tree_with_no_border_graph_still_partitions(self):
-        """An atom cache written before the graph was kept. It falls back to
-        the collapsed metric rather than failing a run."""
-        tree = two_lobe_tree()
-        tree.pop("region_pairs")
-        tree.pop("region_weights")
-        owner = loop.claim(tree, {0: [0], 1: [4]}, count=2)
-        self.assertTrue((owner >= 0).all(), owner)
-        self.assertEqual(int(owner[0]), 0)
-        self.assertEqual(int(owner[4]), 1)
-
-    def test_no_seeds_claims_nothing(self):
-        tree = two_lobe_tree()
-        owner = loop.claim(tree, {}, count=2)
-        self.assertTrue((owner == -1).all())
-
-    def test_chain_tree_still_partitions(self):
-        """The chain at the top of an agglomerative tree broke three previous
-        mechanisms; competition must at least still cover the surface."""
-        tree = small_tree(regions=8)
-        owner = loop.claim(tree, {0: [0], 1: [7]}, count=2)
-        self.assertTrue((owner >= 0).all())
-        self.assertEqual(int(owner[7]), 1)
-        self.assertEqual(int(owner[0]), 0)
-
-    def test_an_island_no_claim_can_reach_falls_back_to_the_base_coat(self):
-        """A merge FOREST leaves detached components unreachable. Unpainted is
-        not a colour a printer can lay, so they go to the first part."""
-        tree = two_lobe_tree()
-        tree["children"][14] = (-1, -1)          # sever the two lobes
-        tree["region_pairs"] = tree["region_pairs"][:-1]
-        tree["region_weights"] = tree["region_weights"][:-1]
-        owner = loop.claim(tree, {1: [4]}, count=2, fallback=0)
-        self.assertTrue((owner[:4] == 0).all(), owner)
-        self.assertTrue((owner[4:] == 1).all(), owner)
-
-    def test_field_covers_every_face(self):
-        tree = two_lobe_tree()
-        owner = loop.claim(tree, {0: [0], 1: [4]}, count=2)
-        field = loop.field_of(tree, owner, len(tree["base"]))
-        self.assertTrue((field >= 0).all())
-        self.assertEqual(int((field == 0).sum()), 16)
-        self.assertEqual(int((field == 1).sum()), 16)
-
-
 class _Mesh(object):
     def __init__(self, faces):
         self.faces = np.zeros((faces, 3), dtype=np.int64)
@@ -402,7 +296,7 @@ class TestAddPartRuns(unittest.TestCase):
             "/tmp/unused", "0", log=None)
         self.assertEqual(points, 1)
         self.assertEqual(labels, ["lobe"])
-        self.assertTrue((field == 0).all(), "one seed must take the surface")
+        self.assertTrue((field == 0).any(), "the drawn surface must be taken")
 
     def test_a_part_nobody_points_at_takes_no_colour(self):
         part = {"name": "ghost", "where": "nowhere", "detail": "flat",
@@ -429,3 +323,119 @@ class TestAddPartRuns(unittest.TestCase):
         # it before this part existed, which is "rock" (seeded in the lobe).
         self.assertIn(0, seeds[0])
         self.assertEqual(int(field[0]), 0)
+
+
+class _BoxPose(object):
+    """A pose whose left half shows region 0 and right half region 1."""
+
+    def __init__(self, pixels=40, per_region=4):
+        self.hit_id = np.full((pixels, pixels), -1, dtype=np.int64)
+        # faces 0..3 are region 0, faces 4..7 are region 1 (per_region=4)
+        self.hit_id[:, :pixels // 2] = 0
+        self.hit_id[:, pixels // 2:] = per_region
+        self.camera = type("C", (), {"pixels": pixels})()
+
+    @property
+    def visible(self):
+        return self.hit_id >= 0
+
+
+class TestOutlineRegions(unittest.TestCase):
+    """Extent from the picture, because the hierarchy does not carry it.
+
+    Measured on the shell: the chain above a rib seed runs 0.132% then 33.989%
+    of the surface, so the ribs are not a node anywhere in the tree and no way
+    of choosing among nodes can produce them.
+    """
+
+    def setUp(self):
+        self.tree = two_lobe_tree(per_region=4)
+        self.poses = [_BoxPose()]
+        self.geometry = (40, 8)
+
+    def _shape(self, x0, x1):
+        origin = 8 + 40          # right-hand panel of view 0
+        return [{"view": 0, "points": [{"x": origin + x0, "y": 8},
+                                       {"x": origin + x1, "y": 8},
+                                       {"x": origin + x1, "y": 8 + 39},
+                                       {"x": origin + x0, "y": 8 + 39}]}]
+
+    def test_an_outline_claims_what_it_encloses(self):
+        got = loop.outline_regions(self.tree, self.poses, self.geometry,
+                                   self._shape(0, 19))
+        self.assertEqual(got.tolist(), [0])
+
+    def test_a_region_only_clipped_by_the_edge_is_not_in_the_part(self):
+        """Half a percent of a region inside an outline is the outline being
+        imprecise, not the region belonging to the part."""
+        got = loop.outline_regions(self.tree, self.poses, self.geometry,
+                                   self._shape(0, 22))
+        self.assertEqual(got.tolist(), [0])
+
+    def test_an_outline_over_everything_claims_everything(self):
+        got = loop.outline_regions(self.tree, self.poses, self.geometry,
+                                   self._shape(0, 39))
+        self.assertEqual(got.tolist(), [0, 1])
+
+    def test_no_shapes_claims_nothing(self):
+        self.assertEqual(loop.outline_regions(self.tree, self.poses,
+                                              self.geometry, []).tolist(), [])
+
+    def test_a_shape_with_too_few_corners_is_refused_not_guessed(self):
+        bad = [{"view": 0, "points": [{"x": 50, "y": 10}, {"x": 60, "y": 10}]}]
+        self.assertEqual(loop.outline_regions(self.tree, self.poses,
+                                              self.geometry, bad).tolist(), [])
+
+    def test_a_coordinate_in_a_later_view_lands_in_that_view(self):
+        """The sheet-offset bug that silently discarded half of every round's
+        corrections, now in one place both readers share."""
+        stride = 2 * 40 + 8
+        self.assertEqual(loop.panel_point((40, 8), 3, 1, 8 + stride + 40 + 5,
+                                          8 + 10), (5, 10))
+
+
+class TestSettle(unittest.TestCase):
+    """What was drawn, in paint order. Nothing fills the gaps.
+
+    Four gap-filling rules were tried and measured on the shell -- climbing the
+    tree, shortest path over the borders, matching the surface signature, and
+    letting each part reach as far as its own marks are apart. All four drew
+    bands or confetti, because in the gap they were guessing.
+    """
+
+    def setUp(self):
+        self.tree = two_lobe_tree(per_region=4)
+
+    def test_a_part_gets_exactly_what_it_was_drawn_round(self):
+        owner = loop.settle(self.tree, {1: [4, 5]}, 2, fallback=None)
+        self.assertEqual(owner[4], 1)
+        self.assertEqual(owner[5], 1)
+        self.assertTrue((owner[:4] == -1).all(), owner)
+
+    def test_later_parts_land_on_top(self):
+        """Paint order IS overlap precedence -- the whole reason the SEE step
+        asks for an order."""
+        owner = loop.settle(self.tree, {0: [0, 1, 2], 2: [1]}, 3)
+        self.assertEqual(int(owner[1]), 2)
+        self.assertEqual(int(owner[0]), 0)
+
+    def test_what_nobody_drew_stays_the_base_coat(self):
+        owner = loop.settle(self.tree, {1: [4]}, 2)
+        self.assertEqual(int(owner[4]), 1)
+        self.assertTrue((owner[:4] == 0).all(), owner)
+
+    def test_nothing_expands_into_the_gap(self):
+        """One mark on a lobe takes one region, not the lobe. Under-fill is
+        visible in the render and gets drawn round next round; a wrong guess
+        is neither."""
+        owner = loop.settle(self.tree, {1: [4]}, 2, fallback=None)
+        self.assertEqual(int((owner == 1).sum()), 1)
+
+    def test_a_label_out_of_range_is_refused_not_painted(self):
+        owner = loop.settle(self.tree, {9: [4]}, 2)
+        self.assertTrue((owner == 0).all(), owner)
+
+    def test_a_region_id_off_the_end_is_dropped(self):
+        owner = loop.settle(self.tree, {1: [4, 999, -3]}, 2)
+        self.assertEqual(int(owner[4]), 1)
+        self.assertEqual(int((owner == 1).sum()), 1)
