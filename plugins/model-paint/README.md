@@ -6,12 +6,20 @@
 > this has to run as, and the failure that paid for each rule.
 
 
-Paints an STL or 3MF for multi-filament printing from one command. Segments the
-mesh into real features **in 3D**, has vision agents name them (eyes, horns,
-spikes, claws, belly plates — or panels, trim, and text on a non-creature),
-designs an unconstrained color scheme first, limits it to the filaments you
-actually have loaded, has a critic review the finished renders, and writes an
-OrcaSlicer-ready 3MF whose geometry is provably identical to what went in.
+Paints an STL or 3MF for multi-filament printing from one command, by looking
+at it. The model is segmented in 3D into regions whose edges are real -- creases,
+relief, and boundaries the camera can see that the geometry alone cannot -- and
+then an agent works on renders of the thing: it says what parts the piece has,
+paints them one colour at a time while looking after every stroke, reviews the
+finished painting as a whole, and says which of your loaded filaments each part
+should print in. The output is an OrcaSlicer-ready 3MF whose geometry is
+provably identical to what went in.
+
+Nothing in it solves for a boundary or fills a gap between marks. Four rules
+that did were built and measured, and all four guessed; see
+[paintpipe/README.md](paintpipe/README.md) for the measurement that retired
+them. The geometry supplies edges worth snapping to, and every decision about
+which of them matter is the agent's.
 
 ## What it does
 

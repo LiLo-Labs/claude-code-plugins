@@ -309,39 +309,3 @@ class TestCeiling(unittest.TestCase):
             base, pairs, weights, np.ones(40), evidence, min_faces=1000,
             min_hidden=1)
         self.assertEqual(int(refined.max()) + 1, int(base.max()) + 1)
-
-
-class TestFuseNested(unittest.TestCase):
-    """Nested groups are one instance seen at two granularities. Without this,
-    buying more looks made recall worse on the dragon -- 24 views found FEWER
-    spikes than 12, because every extra look split the evidence for a spike it
-    already had across another node."""
-
-    def tree(self):
-        total = 2 * 4 - 1
-        children = np.full((total, 2), -1, dtype=np.int64)
-        children[4] = (0, 1)
-        children[5] = (2, 3)
-        children[6] = (4, 5)
-        return {"children": children,
-                "base": np.repeat(np.arange(4, dtype=np.int64), 3),
-                "regions": 4, "area": np.ones(total)}
-
-    def test_a_node_and_its_ancestor_become_one(self):
-        from paintpipe import index3d as i3
-        fused = i3.fuse_nested({4: {0, 1}, 0: {2}}, self.tree())
-        self.assertEqual(len(fused), 1)
-        self.assertEqual(fused[4], {0, 1, 2})
-
-    def test_siblings_are_left_apart(self):
-        """Two spikes side by side share no ancestor below the body. Fusing
-        them would be the over-merge the whole design exists to prevent."""
-        from paintpipe import index3d as i3
-        fused = i3.fuse_nested({4: {0}, 5: {1}}, self.tree())
-        self.assertEqual(len(fused), 2)
-
-    def test_a_chain_collapses_to_the_outermost(self):
-        from paintpipe import index3d as i3
-        fused = i3.fuse_nested({0: {0}, 4: {1}, 6: {2}}, self.tree())
-        self.assertEqual(len(fused), 1)
-        self.assertEqual(fused[6], {0, 1, 2})

@@ -58,138 +58,6 @@ import numpy as np
 from . import rig as rig_module
 
 
-ASK = """The LEFT image is a 3D model plainly shaded. The RIGHT image is the SAME
-views with the current colouring painted on. Colours are listed below.
-
-The piece: %(intent)s
-
-Current colours:
-%(legend)s
-
-Two things:
-
-1. NAME each colour -- what part of the model is it actually covering? If a
-   colour covers several unrelated things, say so and name the biggest.
-
-2. List what is WRONG, as places. For each, give the view number and a pixel
-   coordinate IN THE RIGHT-HAND image of that view, and which colour that
-   spot should be:
-     - a place painted the wrong colour
-     - a place that should be its own part (say "new" as the colour)
-
-Give at most %(budget)d corrections, the most important first. Corrections
-should be places you can point at, not descriptions.
-
-Reply with ONLY a JSON object, no prose:
-{"names": {"<colour number>": "<what it is>"},
- "fixes": [{"view": <int>, "x": <int>, "y": <int>, "colour": <int or "new">,
-            "why": "<short>"}, ...]}
-An empty "fixes" list means the colouring matches what you see."""
-
-
-def bifurcate(tree, node, min_share=0.18, budget=4000):
-    """The most balanced real split available inside a node.
-
-    This is the operation that breaks a chain, and without it nothing here
-    works. The top of an agglomerative merge tree is not a balanced tree: the
-    last merges absorb one small region at a time, so splitting the biggest
-    piece into its two children peels a speck and leaves the giant. Seven
-    splits of the shell's root gave 100.0000% + 0.0000%, seven times over --
-    and the SHIPPED atom cut has the same shape, returning 250 atoms of which
-    one holds 82.1% of the surface and 248 hold under 0.1% each. On the dragon
-    the same code gives a largest atom of 3.3%, which is why it went unnoticed.
-
-    SEARCHING BEATS WALKING, and the difference is the whole fix. Following the
-    big side down the chain misses balanced splits that sit on a branch it
-    never enters: the shell has nine of them among nodes over 5% of the model,
-    and a walk found none. So look over the node's substantial descendants and
-    take the split whose smaller half is largest.
-
-    Everything shed on the way to that split is returned too, because it is
-    real surface and a partition that drops it is not a partition.
-    """
-    children = tree["children"]
-    areas = np.asarray(tree["area"], dtype=float)
-    root_area = float(areas[int(node)])
-    if children[int(node)][0] < 0:
-        return [int(node)], []
-
-    best, frontier, seen = None, [int(node)], 0
-    while frontier and seen < budget:
-        current = frontier.pop(0)
-        seen += 1
-        left, right = (int(v) for v in children[current])
-        if left < 0:
-            continue
-        smaller = min(float(areas[left]), float(areas[right]))
-        if best is None or smaller > best[0]:
-            best = (smaller, current, left, right)
-        for side in (left, right):
-            if children[side][0] >= 0 and areas[side] >= min_share * root_area:
-                frontier.append(side)
-
-    if best is None:
-        return [int(node)], []
-    _smaller, where, left, right = best
-
-    # Everything under `node` that is not under `where` is shed: it is the
-    # material peeled off on the way down, and it still has to go somewhere.
-    inside = set(int(r) for r in rig_module.node_regions(tree, where))
-    shed_regions = [int(r) for r in rig_module.node_regions(tree, int(node))
-                    if r not in inside]
-    return [left, right], shed_regions
-
-
-def first_painting(mesh, tree, count=8):
-    """A partition of the WHOLE surface, from geometry alone. No vision.
-
-    Split the biggest piece -- through `bifurcate`, so a split is a real
-    division rather than a peel -- until there are `count` of them. It will be
-    a poor division; the point is that it is a COMPLETE one, so the first
-    render shows something to correct instead of a mostly grey model with a
-    question attached.
-    """
-    areas = np.asarray(tree["area"], dtype=float)
-    children = tree["children"]
-    regions = int(tree["regions"])
-
-    claimed = set()
-    for node in range(len(children)):
-        for side in children[node]:
-            if side >= 0:
-                claimed.add(int(side))
-    pieces = [n for n in range(len(children))
-              if n not in claimed and (n < regions or children[n][0] >= 0)]
-    crumbs = []
-
-    while len(pieces) < count:
-        splittable = [p for p in pieces if children[p][0] >= 0]
-        if not splittable:
-            break
-        biggest = max(splittable, key=lambda p: areas[p])
-        parts, shed = bifurcate(tree, biggest)
-        if len(parts) < 2:
-            break
-        pieces.remove(biggest)
-        pieces.extend(parts)
-        crumbs.extend(shed)
-
-    pieces = sorted(pieces, key=lambda p: -areas[p])
-    field = np.full(len(mesh.faces), 0, dtype=np.int64)
-    # Crumbs first, so a real piece always wins the faces it shares with one.
-    if crumbs:
-        field[rig_module.face_mask(tree, crumbs)] = 0
-    for slot, piece in enumerate(pieces):
-        field[rig_module.face_mask(
-            tree, rig_module.node_regions(tree, piece))] = slot
-    return field, ["colour %d" % (i + 1) for i in range(len(pieces))]
-
-
-# Twelve colours chosen to stay apart in hue AND in lightness. Generating them
-# as hue = 0.61 * i put colour 2 at 0.61 and colour 7 at 0.66 -- two blues five
-# hundredths apart, which made the shell body and the large barnacles the same
-# colour in the render. The agent is asked to judge one colour against another
-# in that picture, so two colours it cannot tell apart is not a cosmetic fault.
 DISTINCT = [(0.85, 0.33, 0.20), (0.20, 0.45, 0.80), (0.95, 0.76, 0.16),
             (0.25, 0.62, 0.35), (0.62, 0.34, 0.68), (0.40, 0.78, 0.80),
             (0.90, 0.55, 0.75), (0.45, 0.35, 0.22), (0.60, 0.80, 0.30),
@@ -289,61 +157,6 @@ def show(mesh, up, field, labels, out_dir, tag, views=3, pixels=520,
     path = os.path.join(out_dir, "state-%s.png" % tag)
     sheet.save(path)
     return path, poses, (pixels, gap, columns)
-
-
-def paint_units(tree):
-    """The unit a single click paints: a persistence object, cached on the tree.
-
-    NOT an ancestor at some multiple of the clicked region's area. That
-    assumed the ancestor chain contains a node of roughly the size wanted, and
-    in an agglomerative tree it does not: a region's parent is already the
-    accumulated giant, so every click resolved to either one tiny region or a
-    huge blob with nothing in between. It is the same chain pathology that
-    broke the sizing ladder and the first painting, showing up a third time --
-    "barnacle clusters" took 28.2% of the shell and overwrote the shell body
-    to 0.0%.
-
-    Persistence objects are the unit this repo already validated: nodes that
-    survive a long way up the tree before being absorbed, so each is a thing
-    rather than an arbitrary cut. On the shell the largest is 5.1% of the
-    surface against the 82.1% of the area-based cut, which is the difference
-    between a click that paints a barnacle and a click that paints the model.
-    """
-    cached = tree.get("_units")
-    if cached is not None:
-        return cached
-    regions_total = int(tree["regions"])
-    if "birth" not in tree or "used" not in tree:
-        # A tree built before persistence was kept, or a synthetic one. Fall
-        # back to the base region itself: finer than ideal, but a click still
-        # lands somewhere real and the loop can still add to it. Crashing
-        # because an old cache lacks a field is not an option a run can take.
-        owner = np.arange(regions_total, dtype=np.int64)
-        tree["_units"] = owner
-        return owner
-    from . import segment3d  # noqa: F401  (puts scripts/ on sys.path)
-    import index_persist
-
-    # Persistence is measured as a log ratio against `floor`, so a floor of
-    # zero divides by zero. Real weights are positive, but a mesh with one
-    # zero-weight border would take the whole run down for it, so the floor is
-    # nudged off zero here rather than left to chance.
-    floor = float(tree.get("floor", 0.0))
-    ceiling = float(tree.get("ceiling", 1.0))
-    if not np.isfinite(floor) or floor <= 0:
-        floor = 1e-9
-    if not np.isfinite(ceiling) or ceiling <= floor:
-        ceiling = floor * 1e6
-    chosen = index_persist.select(tree["children"], tree["birth"],
-                                  tree["death"], tree["area"],
-                                  int(tree["used"]), floor, ceiling)
-    owner = np.arange(regions_total, dtype=np.int64)
-    for node in chosen:
-        for leaf in rig_module.node_regions(tree, int(node)):
-            owner[int(leaf)] = int(node)
-    tree["_units"] = owner
-    return owner
-
 
 
 def panel_point(geometry, views, view, x, y):
@@ -622,118 +435,31 @@ def field_of(tree, owner, face_count):
     field[inside] = owner[base[inside]]
     return field
 
-def resolve_point(tree, poses, geometry, view, x, y, growth=8.0):
-    """A pointed-at place -> the faces it means. Shared by adding and removing.
+def survey_views(mesh, up, out_dir, directions, pixels=760, log=None):
+    """Plain shaded views of the whole piece, as ONE sheet.
 
-    Both operations have to agree about what a point covers. When they did not
-    -- add painted a node, remove restored every face of the whole part -- a
-    single "this has spread too far" wiped the entire colour, and four of the
-    shell's parts came back at 0.0% having been painted correctly first.
-
-    The coordinate arrives in SHEET space, whose right-hand panel for view v
-    starts at gap + v*(2*pixels+gap) + pixels. Subtracting one panel width is
-    right for view 0 and wrong for every view after it, which silently threw
-    away half of every round's corrections; a point given in the plain panel or
-    already panel-local is recovered rather than lost.
+    Handing the agent N separate files makes it open N files, and measured
+    here that turned a question answering in a couple of minutes into one that
+    had not returned in fifteen. The views are the same views; they just
+    arrive as a single picture.
     """
-    local = panel_point(geometry, len(poses), view, x, y)
-    if local is None:
-        return None
-    base = rig_module.region_of_face(tree)
-    region = rig_module.point_to_region(poses[view], base, local[0], local[1])
-    if region < 0:
-        return None
-    node = int(paint_units(tree)[int(region)])
-    return rig_module.face_mask(tree, rig_module.node_regions(tree, node))
-
-
-def apply_fixes(field, tree, poses, geometry, fixes, labels, growth=8.0,
-                log=None):
-    """Turn pointed-at places into edits of the field.
-
-    A correction lands on one base region, and one region is far too small to
-    be a useful edit, so it takes the ancestor a fixed FACTOR larger in area.
-    The factor is scale-free -- eight times whatever was clicked -- so the same
-    number moves a barnacle-sized chunk when a barnacle was clicked and a
-    dome-sized chunk when the dome was clicked, which is what lets it work on
-    any model at any size.
-
-    It does not have to be right. That is the point of the loop: a part still
-    short next round gets pointed at somewhere else and the chunks union, which
-    is how a person fills a large area too.
-    """
-    applied = 0
-    for fix in fixes:
-        try:
-            view = int(fix["view"])
-            x, y = int(fix["x"]), int(fix["y"])
-            wanted = fix.get("colour")
-        except (KeyError, TypeError, ValueError):
-            continue
-        if wanted == "new" or wanted is None:
-            slot = len(labels)
-            labels.append("colour %d" % (slot + 1))
-        else:
-            try:
-                slot = int(wanted) - 1
-            except (TypeError, ValueError):
-                continue
-            if not (0 <= slot < len(labels)):
-                continue
-        mask = resolve_point(tree, poses, geometry, view, x, y, growth=growth)
-        if mask is None:
-            continue
-        field[mask] = slot
-        applied += 1
-    if log:
-        log("    applied %d/%d correction(s)" % (applied, len(fixes)))
-    return field, labels, applied
-
-
-def run(backend, mesh, tree, up, intent, out_dir, rounds=4, start=8, views=3,
-        budget=8, log=print):
-    """paint -> look -> fix -> repeat. Returns the field and what each colour is."""
     os.makedirs(out_dir, exist_ok=True)
-    field, labels = first_painting(mesh, tree, count=start)
-    names = {}
-
-    for step in range(rounds):
-        path, poses, geometry = show(mesh, up, field, labels, out_dir,
-                                     str(step), views=views)
-        legend = "\n".join("  %d: %s" % (i + 1, names.get(i, "unnamed"))
-                           for i in range(len(labels)))
-        prompt = ASK % {"intent": intent or "a 3D printed model",
-                        "legend": legend, "budget": budget}
-        with open(path, "rb") as handle:
-            key = "loop-%s" % rig_module.digest(handle.read(), prompt)
-        answer = backend._run([path], prompt, key)
-        if not answer:
-            log("  round %d: no answer" % step)
-            break
-        for slot, name in (answer.get("names") or {}).items():
-            try:
-                names[int(slot) - 1] = str(name)[:60]
-            except (TypeError, ValueError):
-                continue
-        fixes = answer.get("fixes") or []
-        log("  round %d: %d colour(s) named, %d correction(s)"
-            % (step, len(names), len(fixes)))
-        for fix in fixes[:budget]:
-            log("      %s -> colour %s (%s)"
-                % (str(fix.get("why", ""))[:44], fix.get("colour"),
-                   "view %s" % fix.get("view")))
-        if not fixes:
-            log("  round %d: nothing wrong; stopping" % step)
-            break
-        field, labels, applied = apply_fixes(field, tree, poses, geometry,
-                                             fixes[:budget], labels, log=log)
-        if not applied:
-            break
-
-    final = [names.get(i, labels[i]) for i in range(len(labels))]
-    with open(os.path.join(out_dir, "loop.json"), "w") as handle:
-        json.dump({"colours": final}, handle, indent=2)
-    return field, final
+    poses = rig_module.poses_from(mesh, directions, up, pixels=pixels)
+    paths, images = [], []
+    for index, pose in enumerate(poses):
+        image = rig_module.light(pose, "studio")
+        path = os.path.join(out_dir, "look-%d.png" % index)
+        rig_module.write_png(image, pose.visible, path)
+        paths.append(path)
+        canvas = np.full(image.shape, 0.97)
+        canvas[pose.visible] = image[pose.visible]
+        images.append(canvas)
+    sheet = os.path.join(out_dir, "views.png")
+    rig_module.sheet(images, ["view %d" % i for i in range(len(images))],
+                     sheet, columns=min(len(images), 3))
+    if log:
+        log("  %d plain views for identification, as one sheet" % len(paths))
+    return sheet, paths, poses
 
 
 SEE = """This picture shows %(count)d views of the same 3D model, plainly shaded.
@@ -826,11 +552,11 @@ LINE = """Draw a LINE ALONG each piece of this part that has not got the
 def see(backend, mesh, up, intent, out_dir, views=4, pixels=700,
         directions=None, log=print):
     """What parts, how much detail each, and in what order to paint them."""
-    from . import discover
-    sheet, paths, poses = discover.survey_views(mesh, up, out_dir,
-                                                pixels=pixels, count=views,
-                                                directions=directions,
-                                                log=None)
+    from . import preview
+    if directions is None:
+        directions = preview.orbit(views, 28.0, up=up)
+    sheet, paths, poses = survey_views(mesh, up, out_dir, directions,
+                                       pixels=pixels, log=None)
     prompt = SEE % {"count": len(paths), "intent": intent or "a 3D model"}
     with open(sheet, "rb") as handle:
         key = "see-%s" % rig_module.digest(handle.read(), prompt)
@@ -1073,6 +799,73 @@ def review(backend, mesh, tree, up, seeds, labels, intent, out_dir,
             break
     owner = settle(tree, seeds, len(labels), fallback=0)
     return seeds, field_of(tree, owner, len(mesh.faces))
+
+
+
+CHOOSE = """The LEFT image of each pair is a 3D model plainly shaded, %(count)d views.
+The RIGHT image of each pair is it painted, one colour per part.
+
+The piece: %(intent)s
+
+The parts, by the colour they are painted in that picture:
+%(legend)s
+
+The printer has these filaments loaded, and no others:
+%(filaments)s
+
+Say which filament each part should be printed in. Several parts may share a
+filament -- that is normal and often right, and a part whose real colour you
+have not got is better in the nearest sensible one than in a wrong one.
+
+Judge it as the finished object: what the thing IS, what would read well at
+arm's length, and what a painter would do with this many colours. Say briefly
+why for each.
+
+Reply with ONLY a JSON object, no prose:
+{"choices": [{"part": "<part name, exactly as listed>",
+              "filament": "<filament name, exactly as listed>",
+              "why": "<short>"}, ...]}"""
+
+
+def choose_filaments(backend, mesh, up, field, labels, filaments, intent,
+                     out_dir, directions, views=3, log=print):
+    """Which filament each part is printed in. Asked, not optimised.
+
+    This was a solver that minimised colour distance in Lab against the loaded
+    palette. That is the wrong shape of question: which filament a barnacle
+    should be is a judgement about the object -- what it is, what reads at
+    arm's length, what a painter would do with four colours -- and the nearest
+    Lab match to a grey render carries none of it. The agent has just spent
+    the whole run looking at this model; it is the thing that knows.
+
+    Returns {part name: filament name}, and falls back to the last filament
+    for any part the answer did not cover, because a printer needs an answer
+    for every part.
+    """
+    path, poses, _geometry = show(mesh, up, field, labels, out_dir, "choose",
+                                  views=views, directions=directions)
+    legend = "\n".join("  colour %d: %s" % (i + 1, name)
+                        for i, name in enumerate(labels))
+    listing = "\n".join("  %s" % name for name in filaments)
+    prompt = CHOOSE % {"count": len(poses), "legend": legend,
+                       "filaments": listing, "intent": intent or "a 3D model"}
+    with open(path, "rb") as handle:
+        key = "choose-%s" % rig_module.digest(handle.read(), listing)
+    answer = backend._run([path], prompt, key) or {}
+
+    known = {name.lower(): name for name in filaments}
+    chosen = {}
+    for entry in answer.get("choices") or []:
+        part = str(entry.get("part", "")).strip()
+        want = known.get(str(entry.get("filament", "")).strip().lower())
+        if part in labels and want:
+            chosen[part] = want
+            if log:
+                log("    %-32s -> %-16s %s"
+                    % (part, want, str(entry.get("why", ""))[:40]))
+    for name in labels:
+        chosen.setdefault(name, filaments[-1])
+    return chosen
 
 
 def paint(backend, mesh, tree, up, intent, out_dir, views=3, rounds=6,
