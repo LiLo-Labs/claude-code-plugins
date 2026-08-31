@@ -649,6 +649,23 @@ class TestStrokeRegions(unittest.TestCase):
                                   self._line([(30, 30)]))
         self.assertEqual(got.tolist(), [1])
 
+    def test_corroboration_is_off_by_default(self):
+        """Demanding a second view mark the SAME base region tests whether two
+        lines land on the same few pixels, not whether they are right: on the
+        shell it left 28 strokes along the ribs holding 43 regions."""
+        poses = [_BoxPose() for _ in range(2)]
+        geometry = (40, 8, 2)
+        cell = 2 * 40 + 8
+        shapes = [{"view": 0,
+                   "points": [{"x": 8 + 40 + 2, "y": 8 + 2},
+                              {"x": 8 + 40 + 2, "y": 8 + 30}]},
+                  {"view": 1,
+                   "points": [{"x": 8 + cell + 40 + 30, "y": 8 + 2},
+                              {"x": 8 + cell + 40 + 30, "y": 8 + 30}]}]
+        self.assertEqual(
+            loop.stroke_regions(self.tree, poses, geometry, shapes).tolist(),
+            [0, 1], "both marks stand when nothing is vetoing them")
+
     def test_a_mark_made_from_two_sides_is_kept(self):
         """Six views of one object: where two of them agree, that is a
         statement about the object rather than about one picture."""
@@ -659,7 +676,8 @@ class TestStrokeRegions(unittest.TestCase):
                    "points": [{"x": 8 + v * cell + 40 + 2, "y": 8 + 2},
                               {"x": 8 + v * cell + 40 + 2, "y": 8 + 30}]}
                   for v in (0, 1)]
-        got = loop.stroke_regions(self.tree, poses, geometry, shapes)
+        got = loop.stroke_regions(self.tree, poses, geometry, shapes,
+                                  agree=True)
         self.assertEqual(got.tolist(), [0])
 
     def test_a_mark_the_other_drawn_views_could_see_and_did_not_make_is_dropped(self):
@@ -674,7 +692,8 @@ class TestStrokeRegions(unittest.TestCase):
                   {"view": 1,
                    "points": [{"x": 8 + cell + 40 + 30, "y": 8 + 2},
                               {"x": 8 + cell + 40 + 30, "y": 8 + 30}]}]
-        got = loop.stroke_regions(self.tree, poses, geometry, shapes)
+        got = loop.stroke_regions(self.tree, poses, geometry, shapes,
+                                  agree=True)
         self.assertEqual(got.tolist(), [],
                          "neither mark has a second opinion, and both could "
                          "have had one")
@@ -693,5 +712,6 @@ class TestStrokeRegions(unittest.TestCase):
                   {"view": 1,
                    "points": [{"x": 8 + cell + 40 + 2, "y": 8 + 2},
                               {"x": 8 + cell + 40 + 3, "y": 8 + 30}]}]
-        got = loop.stroke_regions(self.tree, poses, geometry, shapes)
+        got = loop.stroke_regions(self.tree, poses, geometry, shapes,
+                                  agree=True)
         self.assertEqual(got.tolist(), [0])

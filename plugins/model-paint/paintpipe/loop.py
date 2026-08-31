@@ -391,7 +391,7 @@ def seed_regions(tree, poses, geometry, points):
     return out
 
 
-def stroke_regions(tree, poses, geometry, shapes, width=1):
+def stroke_regions(tree, poses, geometry, shapes, width=1, agree=False):
     """A line drawn ALONG a part -> the base regions it actually runs over.
 
     For a crack, a rib cord, a weed strand or a scattered crust, an outline is
@@ -475,12 +475,22 @@ def stroke_regions(tree, poses, geometry, shapes, width=1):
         for region in here:
             marked.setdefault(region, set()).add(view)
 
-    # WHERE THE VIEWS AGREE. A stroke marked from two sides is a statement
-    # about the object; a stroke marked from one side, on surface the other
-    # drawn views can also see and did not mark, is a slip of the hand. So a
-    # region needs a second opinion wherever a second opinion exists -- and is
-    # taken on one where none does, because a surface only one drawn view can
-    # see has nothing to corroborate it.
+    # CORROBORATION IS OFF BY DEFAULT HERE, and that is a measurement rather
+    # than a preference. Demanding that a second view mark the SAME base
+    # region tests whether two lines drawn from different angles land on the
+    # same few pixels of surface, which is a far harder thing than being
+    # right: on the shell it left 28 strokes along the ribs holding 43
+    # regions, and the fine brush stopped painting anything.
+    #
+    # The check belongs where a mistake is large and corroboration is cheap,
+    # which is an outline -- it claims an area, so a second view has plenty of
+    # surface to agree about. A stroke is one pixel wide and stops at the
+    # region boundaries it crosses, so it is self-limiting; its real failure
+    # was the closing segment that ran back across the model, and that is
+    # fixed. What multiple views buy a stroke is COVERAGE of the part from
+    # every side, not a veto.
+    if not agree:
+        return np.asarray(sorted(marked), dtype=np.int64)
     out = []
     for region, views_hit in marked.items():
         if len(views_hit) >= 2:
