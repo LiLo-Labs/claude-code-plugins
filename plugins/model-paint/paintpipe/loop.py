@@ -208,13 +208,43 @@ def palette(count):
     return np.asarray(out)
 
 
-def show(mesh, up, field, labels, out_dir, tag, views=3, pixels=520):
-    """Plain beside painted, same views, numbered. The only picture ever asked about."""
+def look_from(mesh, tree, up, views=3, pixels=520, log=None):
+    """The directions to work from: chosen by what they see, not by an orbit.
+
+    An orbit at a fixed elevation looks wherever the model happens to be
+    pointing. On the shell that spent an entire view of three on the flat open
+    top -- a face with nothing on it -- and never once showed the back, so a
+    third of every picture was blank and a third of the model was painted
+    without ever being seen. No amount of looking harder at the right-hand
+    image recovers a surface no camera was aimed at.
+
+    plan_poses scouts cheaply from many directions and greedily takes the one
+    that most reduces the surface still short of looks. It stops when the
+    model is covered, so a plain model buys few views and a self-occluding one
+    buys more -- which is what a person does when they turn a thing over.
+    """
+    directions, _covered, _areas = rig_module.plan_poses(
+        mesh, tree, up, pixels=pixels, target_views=2,
+        budget=max(2, int(views)), log=log)
+    if not directions:                      # a scout that saw nothing at all
+        from . import preview
+        directions = preview.orbit(max(2, int(views)), 26.0, up=up)
+    return list(directions)
+
+
+def show(mesh, up, field, labels, out_dir, tag, views=3, pixels=520,
+         directions=None):
+    """Plain beside painted, same views, numbered. The only picture ever asked about.
+
+    `directions` must be the SAME on every call of a run: the agent points at
+    pixels, and a pixel only means a place while the camera stays put.
+    """
     from PIL import Image, ImageDraw
     from . import preview
 
     os.makedirs(out_dir, exist_ok=True)
-    directions = preview.orbit(views, 26.0, up=up)
+    if directions is None:
+        directions = preview.orbit(views, 26.0, up=up)
     poses = rig_module.poses_from(mesh, directions, up, pixels=pixels)
     colours = palette(len(labels))
 
@@ -235,20 +265,30 @@ def show(mesh, up, field, labels, out_dir, tag, views=3, pixels=520):
             painted[mask] = np.clip(colours[slot] * (0.42 + 0.72 * shade), 0, 1)
         panels.append((plain, painted))
 
-    gap = 8
-    sheet = Image.new("RGB", (len(panels) * (2 * pixels + gap) + gap,
-                              pixels + 2 * gap + 18), (247, 246, 244))
+    # WRAP INTO ROWS. Six views in a line is a 6296 x 554 strip, and a picture
+    # with an aspect ratio of eleven to one is not a picture anyone can read --
+    # every panel arrives a few dozen pixels tall once it is fitted to a page.
+    # Covering the model properly needs six looks, so the sheet has to be a
+    # sheet.
+    gap, caption = 8, 18
+    columns = max(1, min(len(panels), 3))
+    rows = (len(panels) + columns - 1) // columns
+    cell = 2 * pixels + gap
+    sheet = Image.new("RGB", (columns * cell + gap,
+                              rows * (pixels + caption + gap) + gap),
+                      (247, 246, 244))
     draw = ImageDraw.Draw(sheet)
     for index, (plain, painted) in enumerate(panels):
-        x0 = gap + index * (2 * pixels + gap)
-        sheet.paste(Image.fromarray((plain * 255).astype(np.uint8)), (x0, gap))
+        x0 = gap + (index % columns) * cell
+        y0 = gap + (index // columns) * (pixels + caption + gap)
+        sheet.paste(Image.fromarray((plain * 255).astype(np.uint8)), (x0, y0))
         sheet.paste(Image.fromarray((painted * 255).astype(np.uint8)),
-                    (x0 + pixels, gap))
-        draw.text((x0 + 4, pixels + gap + 3), "view %d" % index,
+                    (x0 + pixels, y0))
+        draw.text((x0 + 4, y0 + pixels + 3), "view %d" % index,
                   fill=(20, 20, 20))
     path = os.path.join(out_dir, "state-%s.png" % tag)
     sheet.save(path)
-    return path, poses, (pixels, gap)
+    return path, poses, (pixels, gap, columns)
 
 
 def paint_units(tree):
@@ -309,22 +349,23 @@ def paint_units(tree):
 def panel_point(geometry, views, view, x, y):
     """A coordinate given on the sheet -> the pixel inside that view's panel.
 
-    The sheet lays out `views` pairs side by side, so the right-hand panel of
-    view v starts at gap + v*(2*pixels+gap) + pixels. Subtracting one panel
-    width is right for view 0 and wrong for every view after it, which once
-    threw away half of every round's corrections in silence; a coordinate
-    given in the plain panel, or already panel-local, is recovered instead of
-    being lost.
+    The sheet lays pairs out in a grid, so view v sits at column v%columns and
+    row v//columns, and its painted panel starts one panel width into the
+    cell. Subtracting one panel width and nothing else is right for view 0 and
+    wrong for every view after it, which once threw away half of every round's
+    corrections in silence; a coordinate given in the plain panel, or already
+    panel-local, is recovered here instead of being lost.
     """
-    pixels, gap = geometry
+    pixels, gap = geometry[0], geometry[1]
+    columns = geometry[2] if len(geometry) > 2 else max(1, views)
     if not (0 <= view < views):
         return None
-    stride = 2 * pixels + gap
-    origin = gap + view * stride + pixels
-    local_x, local_y = x - origin, y - gap
+    cell = 2 * pixels + gap
+    left = gap + (view % max(1, columns)) * cell
+    top = gap + (view // max(1, columns)) * (pixels + 18 + gap)
+    local_x, local_y = x - (left + pixels), y - top
     if not (0 <= local_x < pixels):
-        plain = gap + view * stride
-        local_x = x - plain if 0 <= x - plain < pixels else x % pixels
+        local_x = x - left if 0 <= x - left < pixels else x % pixels
     if not (0 <= local_y < pixels):
         local_y = y % pixels
     return int(local_x), int(local_y)
@@ -372,7 +413,7 @@ def outline_regions(tree, poses, geometry, shapes, share=0.5):
 
     base = rig_module.region_of_face(tree)
     regions = int(tree["regions"])
-    pixels, _gap = geometry
+    pixels = geometry[0]
     inside = np.zeros(regions, dtype=np.int64)
     seen = np.zeros(regions, dtype=np.int64)
 
@@ -467,20 +508,11 @@ def resolve_point(tree, poses, geometry, view, x, y, growth=8.0):
     away half of every round's corrections; a point given in the plain panel or
     already panel-local is recovered rather than lost.
     """
-    pixels, gap = geometry
-    if not (0 <= view < len(poses)):
+    local = panel_point(geometry, len(poses), view, x, y)
+    if local is None:
         return None
-    stride = 2 * pixels + gap
-    origin = gap + view * stride + pixels
-    local_x, local_y = x - origin, y - gap
-    if not (0 <= local_x < pixels):
-        plain = gap + view * stride
-        local_x = x - plain if 0 <= x - plain < pixels else x % pixels
-    if not (0 <= local_y < pixels):
-        local_y = y % pixels
-
     base = rig_module.region_of_face(tree)
-    region = rig_module.point_to_region(poses[view], base, local_x, local_y)
+    region = rig_module.point_to_region(poses[view], base, local[0], local[1])
     if region < 0:
         return None
     node = int(paint_units(tree)[int(region)])
@@ -633,11 +665,13 @@ Reply with ONLY a JSON object, no prose:
  "remove": [{"view": <int>, "x": <int>, "y": <int>}, ...]}"""
 
 
-def see(backend, mesh, up, intent, out_dir, views=4, pixels=700, log=print):
+def see(backend, mesh, up, intent, out_dir, views=4, pixels=700,
+        directions=None, log=print):
     """What parts, how much detail each, and in what order to paint them."""
     from . import discover
     sheet, paths, poses = discover.survey_views(mesh, up, out_dir,
                                                 pixels=pixels, count=views,
+                                                directions=directions,
                                                 log=None)
     prompt = SEE % {"count": len(paths), "intent": intent or "a 3D model"}
     with open(sheet, "rb") as handle:
@@ -665,7 +699,7 @@ def see(backend, mesh, up, intent, out_dir, views=4, pixels=700, log=print):
 
 
 def add_part(backend, mesh, tree, up, seeds, labels, part, intent, out_dir,
-             tag, rounds=3, views=3, log=print):
+             tag, rounds=3, views=3, directions=None, log=print):
     """Paint ONE colour, looking after every stroke, until that colour is right.
 
     The looking is not an audit at the end. It happens after each application,
@@ -703,7 +737,8 @@ def add_part(backend, mesh, tree, up, seeds, labels, part, intent, out_dir,
         owner = settle(tree, seeds, count)
         field = field_of(tree, owner, len(mesh.faces))
         path, poses, geometry = show(mesh, up, field, labels, out_dir,
-                                     "%s-%d" % (tag, step), views=views)
+                                     "%s-%d" % (tag, step), views=views,
+                                     directions=directions)
         state = ("Nothing has that colour yet." if not seeds[slot] else
                  "What has it so far is shown in that colour.")
         prompt = BRUSH % {"count": len(poses), "name": part["name"],
@@ -779,7 +814,12 @@ def paint(backend, mesh, tree, up, intent, out_dir, views=3, rounds=3,
     on a model nobody has seen.
     """
     os.makedirs(out_dir, exist_ok=True)
-    parts = see(backend, mesh, up, intent, out_dir, views=views, log=log)
+    # WHERE TO STAND, before anything else. Every later question is asked of
+    # these pictures and answered in their pixels, so they are chosen once,
+    # by what they can see, and never change for the rest of the run.
+    directions = look_from(mesh, tree, up, views=views, log=log)
+    parts = see(backend, mesh, up, intent, out_dir, views=len(directions),
+                directions=directions, log=log)
     if not parts:
         return None, []
 
@@ -788,8 +828,10 @@ def paint(backend, mesh, tree, up, intent, out_dir, views=3, rounds=3,
     for index, part in enumerate(parts[:max_parts]):
         seeds, labels, field, _n = add_part(
             backend, mesh, tree, up, seeds, labels, part, intent, out_dir,
-            str(index), rounds=rounds, views=views, log=log)
-    show(mesh, up, field, labels, out_dir, "final", views=views)
+            str(index), rounds=rounds, views=len(directions),
+            directions=directions, log=log)
+    show(mesh, up, field, labels, out_dir, "final",
+         views=len(directions), directions=directions)
     if log:
         areas = mesh.area_faces
         total = float(areas.sum()) or 1.0

@@ -13,6 +13,8 @@ import os
 import sys
 import time
 
+import numpy as np
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
 sys.path.insert(0, HERE)
@@ -28,7 +30,8 @@ def main(argv=None):
                         help="looks per colour before moving on")
     parser.add_argument("--max-parts", type=int, default=8)
     parser.add_argument("--model", default="claude-opus-5")
-    parser.add_argument("--up", default="0,0,1")
+    parser.add_argument("--up", default="",
+                        help="override the up axis; default is the model's own")
     parser.add_argument("--size-mm", type=float, default=None,
                         help="longest dimension in mm, if the file has no units")
     parser.add_argument("--no-camera-evidence", action="store_true",
@@ -50,7 +53,16 @@ def main(argv=None):
     working = frame.working_mesh(source)
     mesh = field_module.LabelField(working, frame,
                                    policy_module.DEFAULT).substrate
-    up = tuple(float(v) for v in args.up.split(","))
+    # THE MODEL'S OWN UP, not an assumption. A print-ready mesh stands the way
+    # it will be printed, and the working mesh lives in a rotated frame, so
+    # the file's +Z has to be carried into that frame rather than guessed at
+    # as (0,0,1) -- which is what put the shell's flat open top in the middle
+    # of every picture.
+    from paintpipe import preview
+    up = tuple(float(v) for v in args.up.split(",")) if args.up else None
+    if up is None:
+        up = tuple(float(v) for v in preview.up_axis(frame))
+    print("  up axis %s" % (np.round(up, 3).tolist(),))
     os.makedirs(args.out, exist_ok=True)
 
     started = time.time()

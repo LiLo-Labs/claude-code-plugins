@@ -97,7 +97,8 @@ Reply with ONLY a JSON object, no prose:
 An empty list means the colouring matches what you can see."""
 
 
-def survey_views(mesh, up, out_dir, pixels=760, count=4, log=None):
+def survey_views(mesh, up, out_dir, pixels=760, count=4, directions=None,
+                 log=None):
     """Plain shaded views of the whole piece. No colour, no numbers, no division.
 
     This is the picture a person is actually looking at when they say "it has
@@ -107,7 +108,12 @@ def survey_views(mesh, up, out_dir, pixels=760, count=4, log=None):
     os.makedirs(out_dir, exist_ok=True)
     from . import preview
 
-    directions = preview.orbit(count, 28.0, up=up)
+    # The SAME directions the painting will use, when the caller has planned
+    # them. Naming the parts from one set of views and then painting from
+    # another means being asked to paint something no camera in the working
+    # set ever showed.
+    if directions is None:
+        directions = preview.orbit(count, 28.0, up=up)
     poses = rig_module.poses_from(mesh, directions, up, pixels=pixels)
     paths, images = [], []
     for index, pose in enumerate(poses):

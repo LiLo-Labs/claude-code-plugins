@@ -282,7 +282,7 @@ class TestAddPartRuns(unittest.TestCase):
         self.poses = [_BoxPose(), _BoxPose(), _BoxPose()]
 
         def fake_show(mesh, up, field, labels, out_dir, tag, views=3,
-                      pixels=520):
+                      pixels=520, directions=None):
             return (os.path.join(HERE, "..", "README.md"), self.poses,
                     self.geometry)
 
@@ -496,6 +496,25 @@ class TestOutlineRegions(unittest.TestCase):
     def test_a_coordinate_in_a_later_view_lands_in_that_view(self):
         """The sheet-offset bug that silently discarded half of every round's
         corrections, now in one place both readers share."""
+        stride = 2 * 40 + 8
+        self.assertEqual(loop.panel_point((40, 8), 3, 1, 8 + stride + 40 + 5,
+                                          8 + 10), (5, 10))
+
+    def test_a_view_on_the_second_row_lands_in_that_view(self):
+        """Six views is what covering a model actually takes, and six pairs in
+        a line is an eleven-to-one strip nobody can read. Once the sheet wraps,
+        a coordinate carries a row as well as a column."""
+        pixels, gap, columns = 40, 8, 3
+        cell = 2 * pixels + gap
+        # view 4 -> column 1, row 1
+        x = gap + 1 * cell + pixels + 5
+        y = gap + 1 * (pixels + 18 + gap) + 10
+        self.assertEqual(loop.panel_point((pixels, gap, columns), 6, 4, x, y),
+                         (5, 10))
+
+    def test_a_sheet_that_never_wrapped_still_reads(self):
+        """A two-tuple geometry is the old single-row sheet; it must keep
+        working rather than silently mapping every point into row zero."""
         stride = 2 * 40 + 8
         self.assertEqual(loop.panel_point((40, 8), 3, 1, 8 + stride + 40 + 5,
                                           8 + 10), (5, 10))
