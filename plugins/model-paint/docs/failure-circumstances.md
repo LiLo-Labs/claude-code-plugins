@@ -226,3 +226,38 @@ camera position can cancel one. Three raking directions are kept rather than
 one, because relief throws shadow ALONG the light and a ridge running parallel
 to the key casts nothing.
 *Watch for:* a lit buffer whose min and max are equal. That is not a look.
+
+## 13. A hierarchy with no rung at the size of the thing
+
+A merge tree is offered to the agent as a menu of extents: point at a place,
+climb, and take the node that is the part. That only works if a node the size
+of the part exists. In an agglomerative tree it often does not, and the
+absence is invisible from anywhere except a direct measurement, because every
+rung IS a real node with a real boundary -- just never the boundary wanted.
+
+*Incident:* on `scallop-shell-barricade.stl`, refined to 11876 base regions
+with camera evidence, the ancestor chain above a seed on the ribs reads
+0.001%, 0.106%, 0.116%, 0.125%, 0.129%, 0.130%, 0.132%, then **33.989%** of
+the surface. Above a seed on the limpets: 0.005%, 0.019%, 0.028%, then
+**27.492%**. A speck, a fraction of a percent, then a third of the model. The
+ribs are a large, obvious, nameable feature and there is no node that is them.
+Above the jump the chain then creeps by about 0.01% per rung for two thousand
+rungs, absorbing one region at a time: that is the chain at the top of a
+single-linkage agglomeration, and it is why splitting the biggest node peels
+one speck and why the tree's own distance ties. Measured on the same model,
+the minimax cost the tree induces tied for the minimum on 58.5% of the
+surface, 35.9% of it five ways, so the tie-break rather than the model chose
+the colour -- and it gave one part 62.2%.
+
+*Invariant:* a part is ASSEMBLED from base regions, never selected as a node.
+Nothing downstream may assume the tree contains a node of any particular size,
+and any mechanism that asks "which ancestor is this part" is wrong however the
+ancestor is chosen. The tree is still the right thing for what it is -- a
+nesting of real boundaries -- and the border graph it was built from is kept
+alongside it (`tree["region_pairs"]`, `tree["region_weights"]`) because the
+tree discards every border except the strongest between any two regions.
+
+*Watch for:* an ancestor chain whose successive areas jump by more than about
+an order of magnitude. Print the chain before trusting any rung of it. A
+menu can be well-formed, correctly rendered, correctly chosen from, and still
+not contain the answer.
