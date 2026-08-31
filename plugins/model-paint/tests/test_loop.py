@@ -373,6 +373,19 @@ class TestAddPartRuns(unittest.TestCase):
                         "what was not drawn round must stay unpainted")
         self.assertTrue((field == 0).any(), "and what was drawn must be painted")
 
+    def test_a_broad_stroke_does_not_also_get_the_fine_brush(self):
+        """`not drawn` on a numpy array raises for more than one element and,
+        for exactly one, asks whether that element is zero -- so a flat part
+        whose only claim was region 0 silently got the fine brush too, and
+        picked up its neighbour off the outline's own perimeter."""
+        backend = self._backend([{"add": [self._box(0, 0, 19)]},
+                                 {"add": [], "remove": []}])
+        seeds, _labels, _field, _used = loop.add_part(
+            backend, self.mesh, self.tree, (0, 0, 1), {}, [], self._part(),
+            "test", "/tmp/unused", "0", rounds=2, log=None)
+        self.assertEqual(sorted(seeds[0]), [0],
+                         "an outline over region 0 alone claims region 0 alone")
+
     def test_a_part_nobody_finds_takes_no_colour(self):
         backend = self._backend([{"add": [], "remove": []}])
         seeds, labels, _field, _used = loop.add_part(
@@ -533,3 +546,56 @@ class TestOutlineRegions(unittest.TestCase):
         stride = 2 * 40 + 8
         self.assertEqual(loop.panel_point((40, 8), 3, 1, 8 + stride + 40 + 5,
                                           8 + 10), (5, 10))
+
+
+class TestOutlineAcrossViews(unittest.TestCase):
+    """A drawing is judged against the views it was drawn on, and no others."""
+
+    def setUp(self):
+        self.tree = two_lobe_tree(per_region=4)
+        self.geometry = (40, 8, 3)
+
+    def _shape(self, view, x0, x1):
+        origin = 8 + (view % 3) * (2 * 40 + 8) + 40
+        top = 8 + (view // 3) * (40 + 18 + 8)
+        return {"view": view,
+                "points": [{"x": origin + x0, "y": top},
+                           {"x": origin + x1, "y": top},
+                           {"x": origin + x1, "y": top + 39},
+                           {"x": origin + x0, "y": top + 39}]}
+
+    def test_views_never_drawn_on_do_not_veto_the_ones_that_were(self):
+        """Six views and one outline used to claim nothing at all: the region
+        reached a sixth of its visible pixels and lost the majority to five
+        views the agent had not been asked about."""
+        poses = [_BoxPose() for _ in range(6)]
+        got = loop.outline_regions(self.tree, poses, self.geometry,
+                                   [self._shape(0, 0, 19)])
+        self.assertEqual(got.tolist(), [0])
+
+    def test_drawing_the_same_part_in_two_views_agrees_with_itself(self):
+        poses = [_BoxPose() for _ in range(6)]
+        got = loop.outline_regions(self.tree, poses, self.geometry,
+                                   [self._shape(0, 0, 19),
+                                    self._shape(4, 0, 19)])
+        self.assertEqual(got.tolist(), [0])
+
+    def test_a_region_avoided_in_most_drawn_views_is_refused(self):
+        """Disagreement between drawings is the whole point of counting across
+        views rather than trusting one. Inside in one of three drawn views is
+        not a majority, so it does not join the part."""
+        poses = [_BoxPose() for _ in range(6)]
+        got = loop.outline_regions(self.tree, poses, self.geometry,
+                                   [self._shape(0, 0, 19),
+                                    self._shape(4, 20, 39),
+                                    self._shape(5, 20, 39)])
+        self.assertEqual(got.tolist(), [1])
+
+    def test_an_even_split_counts_as_inside(self):
+        """Deliberate: the prompt tells the agent that cutting a little short
+        costs nothing, so a tie has to fall its way or the advice is a trap."""
+        poses = [_BoxPose() for _ in range(6)]
+        got = loop.outline_regions(self.tree, poses, self.geometry,
+                                   [self._shape(0, 0, 19),
+                                    self._shape(4, 20, 39)])
+        self.assertEqual(got.tolist(), [0, 1])

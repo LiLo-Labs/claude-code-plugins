@@ -391,6 +391,61 @@ def seed_regions(tree, poses, geometry, points):
     return out
 
 
+def stroke_regions(tree, poses, geometry, shapes, width=3):
+    """A line drawn ALONG a part -> the base regions it actually runs over.
+
+    For a crack, a rib cord, a weed strand or a scattered crust, an outline is
+    the wrong instrument. A crack is a few pixels wide, so any loop that can be
+    drawn around a set of fracture lines is mostly the smooth shell between
+    them -- and a majority rule then takes all of it. Measured on the shell,
+    "cracks and chips" and "broken shell edges" drawn as outlines took large
+    blotches out of the middle of the shell body.
+
+    A stroke takes only what it runs over. The substrate was refined until a
+    crack has base regions of its own, so a line down the crack picks up those
+    regions and stops; the width is in PIXELS of the render, a brush thickness
+    rather than a fact about the model, and the region boundaries decide the
+    actual edge as always.
+    """
+    base = rig_module.region_of_face(tree)
+    reach = max(0, int(width) // 2)
+    out = set()
+    for shape in shapes or []:
+        try:
+            view = int(shape["view"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if not (0 <= view < len(poses)):
+            continue
+        corners = []
+        for point in shape.get("points") or []:
+            try:
+                local = panel_point(geometry, len(poses), view,
+                                    int(point["x"]), int(point["y"]))
+            except (KeyError, TypeError, ValueError):
+                continue
+            if local is not None:
+                corners.append(local)
+        for index in range(len(corners)):
+            x0, y0 = corners[index]
+            # Walk the segment to the next corner, so the regions BETWEEN two
+            # given points are painted too -- a stroke is a line, not a row of
+            # dots, and a person drawing one does not mean only its ends.
+            x1, y1 = corners[(index + 1) % len(corners)] if len(corners) > 1 \
+                else (x0, y0)
+            steps = max(abs(x1 - x0), abs(y1 - y0), 1)
+            for tick in range(steps + 1):
+                x = int(round(x0 + (x1 - x0) * tick / steps))
+                y = int(round(y0 + (y1 - y0) * tick / steps))
+                for dy in range(-reach, reach + 1):
+                    for dx in range(-reach, reach + 1):
+                        region = rig_module.point_to_region(poses[view], base,
+                                                            x + dx, y + dy)
+                        if region >= 0:
+                            out.add(int(region))
+    return np.asarray(sorted(out), dtype=np.int64)
+
+
 def outline_regions(tree, poses, geometry, shapes, share=0.5):
     """An outline drawn round a part in the picture -> the base regions it means.
 
@@ -436,13 +491,19 @@ def outline_regions(tree, poses, geometry, shapes, share=0.5):
             by_view.setdefault(view, []).append(corners)
 
     for view, pose in enumerate(poses):
+        # ONLY THE VIEWS DRAWN ON. Counting a region's visible pixels across
+        # every view, while counting "inside" only where an outline exists,
+        # judges the drawing against views the agent never drew on: with six
+        # views a region outlined in one reaches a sixth and can never make a
+        # majority. The question is whether most of what was VISIBLE TO THE
+        # DRAWING fell inside it.
+        if view not in by_view:
+            continue
         visible = pose.visible
         if not visible.any():
             continue
         here = base[pose.hit_id[visible]]
         seen += np.bincount(here, minlength=regions)
-        if view not in by_view:
-            continue
         canvas = Image.new("L", (pixels, pixels), 0)
         draw = ImageDraw.Draw(canvas)
         for corners in by_view[view]:
@@ -642,16 +703,7 @@ It is %(swatch)s. %(state)s
 
 Look at the right-hand images and answer for that colour only:
 
-1. WHAT IS STILL MISSING. Draw round each piece of this part that has not got
-   the colour yet -- a closed outline, a list of pixel corners going round the
-   piece and back to the start, in the RIGHT-HAND image of a view that shows
-   it. Follow the shape: a long piece wants corners down both its sides, not a
-   box round it. A field of many small things wants an outline round each
-   patch, or round each thing where they are far apart.
-
-   Trace just INSIDE the edge. A surface is taken only when most of it falls
-   within an outline, so cutting a little short costs nothing, while spilling
-   over paints the neighbour.
+1. WHAT IS STILL MISSING. %(how)s
 
 2. WHAT SHOULD NOT BE THIS COLOUR. Point at any spot that has the colour and
    is not this part. It goes back to whatever it was before.
@@ -663,6 +715,31 @@ and nothing else, reply with both lists empty. That is how this finishes.
 Reply with ONLY a JSON object, no prose:
 {"add": [{"view": <int>, "points": [{"x": <int>, "y": <int>}, ...]}, ...],
  "remove": [{"view": <int>, "x": <int>, "y": <int>}, ...]}"""
+
+
+# A broad brush fills an area; a fine one lines in a detail. Which instrument
+# the agent is handed is the one thing the SEE step's "flat or detailed"
+# answer decides, and it is the difference between a crack being a crack and a
+# crack taking the shell it runs across.
+FILL = """Draw round each piece of this part that has not got the colour
+   yet -- a closed outline, a list of pixel corners going round the piece and
+   back to the start, in the RIGHT-HAND image of a view that shows it. Follow
+   the shape: a long piece wants corners down both its sides, not a box round
+   it.
+
+   Trace just INSIDE the edge. A surface is taken only when most of it falls
+   within an outline, so cutting a little short costs nothing, while spilling
+   over paints the neighbour."""
+
+LINE = """Draw a LINE ALONG each piece of this part that has not got the
+   colour yet -- a run of pixel corners following it from one end to the
+   other, in the RIGHT-HAND image of a view that shows it. This is a fine
+   brush: only what the line runs over is painted, so stay on the thing
+   itself. For a field of many small things, one short line on each of them.
+
+   Do NOT draw a loop enclosing several of them. A crack is a few pixels wide,
+   so anything drawn around a set of cracks is mostly the surface between
+   them, and that surface would be painted too."""
 
 
 def see(backend, mesh, up, intent, out_dir, views=4, pixels=700,
@@ -748,8 +825,10 @@ def add_part(backend, mesh, tree, up, seeds, labels, part, intent, out_dir,
                                      directions=directions)
         state = ("Nothing has that colour yet." if not seeds[slot] else
                  "What has it so far is shown in that colour.")
+        fine = str(part.get("detail", "flat")).lower() == "detailed"
         prompt = BRUSH % {"count": len(poses), "name": part["name"],
                           "where": part["where"], "state": state,
+                          "how": LINE if fine else FILL,
                           "swatch": "colour %d" % (slot + 1),
                           "intent": intent or "a 3D model"}
         with open(path, "rb") as handle:
@@ -762,16 +841,21 @@ def add_part(backend, mesh, tree, up, seeds, labels, part, intent, out_dir,
 
         add = answer.get("add") or []
         remove = answer.get("remove") or []
-        drawn = set(int(r) for r in
-                    outline_regions(tree, poses, geometry, add))
-        # An outline the agent drew as a stroke rather than a loop still says
-        # where the part is, so its corners count as marks even when the shape
-        # was too thin to enclose a majority of anything.
-        for shape in add:
-            drawn |= set(seed_regions(
-                tree, poses, geometry,
-                [dict(p, view=shape.get("view")) for p in
-                 (shape.get("points") or [])]))
+        if fine:
+            drawn = set(int(r) for r in
+                        stroke_regions(tree, poses, geometry, add))
+        else:
+            drawn = set(int(r) for r in
+                        outline_regions(tree, poses, geometry, add))
+            # A loop drawn so thin it encloses a majority of nothing still
+            # says where the part is, so its own corners count as marks.
+            # `len(...) == 0`, never `not drawn`: on a numpy array that raises
+            # for more than one element, and for exactly one it tests whether
+            # that element is ZERO -- so a part whose only claim was region 0
+            # would quietly get the fine brush run over it as well.
+            if add and len(drawn) == 0:
+                drawn = set(int(r) for r in
+                            stroke_regions(tree, poses, geometry, add))
         if drawn:
             seeds[slot] = sorted(set(seeds[slot]) | drawn)
         for region in seed_regions(tree, poses, geometry, remove):
