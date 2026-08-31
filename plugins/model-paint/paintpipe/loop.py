@@ -734,7 +734,14 @@ def add_part(backend, mesh, tree, up, seeds, labels, part, intent, out_dir,
 
     used = 0
     for step in range(max(1, int(rounds))):
-        owner = settle(tree, seeds, count)
+        # NO BASE COAT WHILE WORKING. Filling the unclaimed surface with the
+        # first colour makes that colour cover the whole model from the very
+        # first look, so the agent cannot tell what it has actually painted
+        # from what merely defaulted -- and its corrections then point at
+        # surface no stroke ever claimed, which retraction cannot touch.
+        # Measured: 25 removals on the rocky base changed nothing at all.
+        # Unclaimed has to LOOK unclaimed, or the feedback is not feedback.
+        owner = settle(tree, seeds, count, fallback=None)
         field = field_of(tree, owner, len(mesh.faces))
         path, poses, geometry = show(mesh, up, field, labels, out_dir,
                                      "%s-%d" % (tag, step), views=views,
@@ -788,7 +795,7 @@ def add_part(backend, mesh, tree, up, seeds, labels, part, intent, out_dir,
         seeds.pop(slot, None)
         labels.pop()
         count = len(labels)
-    owner = settle(tree, seeds, count)
+    owner = settle(tree, seeds, count, fallback=None)
     return seeds, labels, field_of(tree, owner, len(mesh.faces)), used
 
 
@@ -830,6 +837,12 @@ def paint(backend, mesh, tree, up, intent, out_dir, views=3, rounds=3,
             backend, mesh, tree, up, seeds, labels, part, intent, out_dir,
             str(index), rounds=rounds, views=len(directions),
             directions=directions, log=log)
+    # THE BASE COAT LAST. Anything nobody drew round is the first part -- a
+    # printer cannot lay "no colour" -- but that is a decision about the
+    # finished piece, not something to show while there is still painting to
+    # do and looking to be done.
+    field = field_of(tree, settle(tree, seeds, len(labels), fallback=0),
+                     len(mesh.faces))
     show(mesh, up, field, labels, out_dir, "final",
          views=len(directions), directions=directions)
     if log:

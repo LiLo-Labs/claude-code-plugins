@@ -358,6 +358,21 @@ class TestAddPartRuns(unittest.TestCase):
             "test", "/tmp/unused", "0", rounds=2, log=None)
         self.assertEqual(used, 2)
 
+    def test_unclaimed_surface_looks_unclaimed_while_working(self):
+        """The base coat must not be laid during the loop. Filling the gaps
+        with colour 1 makes colour 1 cover the whole model from the first
+        look, so its own check has nothing to check -- measured, 25 removals
+        on the rocky base changed nothing, because every one of them pointed
+        at surface that had defaulted rather than been painted."""
+        backend = self._backend([{"add": [self._box(0, 0, 19)]},
+                                 {"add": [], "remove": []}])
+        _s, _l, field, _used = loop.add_part(
+            backend, self.mesh, self.tree, (0, 0, 1), {}, [], self._part(),
+            "test", "/tmp/unused", "0", rounds=2, log=None)
+        self.assertTrue((field < 0).any(),
+                        "what was not drawn round must stay unpainted")
+        self.assertTrue((field == 0).any(), "and what was drawn must be painted")
+
     def test_a_part_nobody_finds_takes_no_colour(self):
         backend = self._backend([{"add": [], "remove": []}])
         seeds, labels, _field, _used = loop.add_part(
