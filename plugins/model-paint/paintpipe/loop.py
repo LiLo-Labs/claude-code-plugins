@@ -600,51 +600,37 @@ Reply with ONLY a JSON object, no prose:
             "order": <int>, "where": "<where it sits>"}, ...]}"""
 
 
-WHERE = """The LEFT image is a 3D model plainly shaded, %(count)d views. The RIGHT
-image of each pair is the painting so far.
+BRUSH = """The LEFT image of each pair is a 3D model plainly shaded, %(count)d views.
+The RIGHT image of each pair is the painting as it stands right now.
 
 The piece: %(intent)s
 
-I am about to paint: %(name)s -- %(where)s
+You are painting ONE thing: %(name)s -- %(where)s
+It is %(swatch)s. %(state)s
 
-DRAW ROUND IT, in the RIGHT-HAND image of each view that shows it.
+Look at the right-hand images and answer for that colour only:
 
-Give one closed outline per separate piece of it -- a list of pixel corners
-that goes round the piece and back to the start. Follow the shape: a long
-piece wants corners along both of its sides, not a box round it. On a field of
-many small things (a row of spikes, a patch of barnacles), draw round each
-patch, or round each thing if they are far apart -- as many outlines as it
-takes.
+1. WHAT IS STILL MISSING. Draw round each piece of this part that has not got
+   the colour yet -- a closed outline, a list of pixel corners going round the
+   piece and back to the start, in the RIGHT-HAND image of a view that shows
+   it. Follow the shape: a long piece wants corners down both its sides, not a
+   box round it. A field of many small things wants an outline round each
+   patch, or round each thing where they are far apart.
 
-Trace just INSIDE the edge rather than just outside. A surface is only taken
-when most of it falls within an outline, so cutting a little short costs
-nothing while spilling over paints the neighbour.
+   Trace just INSIDE the edge. A surface is taken only when most of it falls
+   within an outline, so cutting a little short costs nothing, while spilling
+   over paints the neighbour.
 
-Also drop %(want)d or more points ON the part per view, as a check on the
-outlines: on the same pieces, spread over them.
+2. WHAT SHOULD NOT BE THIS COLOUR. Point at any spot that has the colour and
+   is not this part. It goes back to whatever it was before.
 
-If a view does not show it, give nothing for that view.
-
-Reply with ONLY a JSON object, no prose:
-{"shapes": [{"view": <int>, "points": [{"x": <int>, "y": <int>}, ...]}, ...],
- "points": [{"view": <int>, "x": <int>, "y": <int>}, ...]}"""
-
-
-CHECK = """The LEFT image of each pair is the model plainly shaded. The RIGHT is the
-painting so far. I have just painted %(name)s in the colour shown as %(swatch)s.
-
-The piece: %(intent)s
-
-Look only at that colour. Is it on the right surface?
-
-Give corrections as places, at most %(budget)d, most important first:
-  - "add"    the part is there but unpainted -- point at it
-  - "remove" the colour has spread somewhere it should not be -- point at it
+You will see the result and be asked again, so do not try to get it all at
+once -- draw round what you are sure of. If the colour now covers this part
+and nothing else, reply with both lists empty. That is how this finishes.
 
 Reply with ONLY a JSON object, no prose:
-{"fixes": [{"kind": "add|remove", "view": <int>, "x": <int>, "y": <int>,
-            "why": "<short>"}, ...]}
-An empty list means that colour is right."""
+{"add": [{"view": <int>, "points": [{"x": <int>, "y": <int>}, ...]}, ...],
+ "remove": [{"view": <int>, "x": <int>, "y": <int>}, ...]}"""
 
 
 def see(backend, mesh, up, intent, out_dir, views=4, pixels=700, log=print):
@@ -679,117 +665,118 @@ def see(backend, mesh, up, intent, out_dir, views=4, pixels=700, log=print):
 
 
 def add_part(backend, mesh, tree, up, seeds, labels, part, intent, out_dir,
-             tag, budget=6, views=3, log=print):
-    """Paint ONE part, look at it, fix it, and re-settle the whole surface.
+             tag, rounds=3, views=3, log=print):
+    """Paint ONE colour, looking after every stroke, until that colour is right.
 
-    A person does not paint everything and then audit everything; they lay one
-    colour, check that colour, fix it, and move on. Checking one colour against
-    a picture is a far easier question than checking eight.
+    The looking is not an audit at the end. It happens after each application,
+    on the one colour being laid, and that is what makes the application itself
+    unimportant: a stroke that covered half the part is seen to have covered
+    half the part, and the next one covers the rest. Nothing has to land
+    correctly the first time.
 
-    What changed is what "lay a colour" means. It used to stamp a fixed-size
-    chunk at each point, which is why the same loop first ran away (28% of the
-    shell called barnacles) and then under-filled (every part a few percent,
-    the base coat 83.7%). Now a point is a claim, every region on the model is
-    re-awarded to its most continuous claim, and the extent of this part comes
-    from where the OTHER parts were pointed at. So the picture changes globally
-    after every correction, which is the point: a fix to the shell moves the
-    barnacle border too, exactly as it does on a real model.
+    Which is why there is no longer any machinery trying to make it land
+    correctly. Four rules for deciding how far one mark should spread were
+    built and measured -- climbing the merge tree, shortest path over the
+    border graph, matching the surface signature, and letting a part reach as
+    far as its own marks are apart -- and all four drew bands or confetti,
+    because each was guessing in the gap between marks. The gap does not need
+    guessing at. It needs another look.
 
-    Returns (seeds, labels, field, points_made).
+    So one question is asked over and over of one colour: what has it not
+    covered yet, and what is it covering that it should not? An empty answer
+    to both is the finish.
+
+    Returns (seeds, labels, field, rounds_used).
     """
     slot = len(labels)
     labels.append(part["name"])
     count = len(labels)
-
+    # What the surface was before this colour existed, so "remove" can put a
+    # patch back where it came from rather than handing it to colour 1 -- on
+    # the shell that was the rock base, so "this has spread onto the shell"
+    # turned shell into rock.
     before = settle(tree, seeds, count) if seeds else None
-    field = (field_of(tree, before, len(mesh.faces)) if before is not None
-             else np.full(len(mesh.faces), -1, dtype=np.int64))
-    path, poses, geometry = show(mesh, up, field, labels, out_dir,
-                                 "%s-before" % tag, views=views)
-    # A large flat part wants covering; a scattered detail wants examples on
-    # many of its members. Both are "more points than a click", which is the
-    # measured lesson: from 5-11 seeds on 11876 regions, every way of spreading
-    # a claim -- the merge tree, shortest path over the borders, and matching
-    # the surface signature -- drew distance bands instead of parts, because
-    # sparse seeds make any of them a Voronoi diagram.
-    prompt = WHERE % {"count": len(poses), "intent": intent or "a 3D model",
-                      "name": part["name"], "where": part["where"],
-                      "want": 30 if part.get("detail") == "detailed" else 20}
-    with open(path, "rb") as handle:
-        key = "where-%s" % rig_module.digest(handle.read(), part["name"])
-    answer = backend._run([path], prompt, key) or {}
-    # THE OUTLINE IS THE EXTENT; the points only confirm it. Neither the tree
-    # nor any rule for filling between marks can say how far a part goes --
-    # measured, the chain above a rib seed jumps 0.132% to 33.989% of the
-    # surface, and every fill rule tried drew bands or confetti. The picture
-    # says, so the picture is asked.
-    drawn = outline_regions(tree, poses, geometry, answer.get("shapes") or [])
-    points = seed_regions(tree, poses, geometry, answer.get("points") or [])
-    claimed = sorted(set(int(r) for r in drawn) | set(points))
-    if not claimed:
+    seeds.setdefault(slot, [])
+
+    used = 0
+    for step in range(max(1, int(rounds))):
+        owner = settle(tree, seeds, count)
+        field = field_of(tree, owner, len(mesh.faces))
+        path, poses, geometry = show(mesh, up, field, labels, out_dir,
+                                     "%s-%d" % (tag, step), views=views)
+        state = ("Nothing has that colour yet." if not seeds[slot] else
+                 "What has it so far is shown in that colour.")
+        prompt = BRUSH % {"count": len(poses), "name": part["name"],
+                          "where": part["where"], "state": state,
+                          "swatch": "colour %d" % (slot + 1),
+                          "intent": intent or "a 3D model"}
+        with open(path, "rb") as handle:
+            key = "brush-%s" % rig_module.digest(handle.read(),
+                                                 "%s|%d" % (part["name"], step))
+        answer = backend._run([path], prompt, key)
+        if answer is None:
+            break
+        used += 1
+
+        add = answer.get("add") or []
+        remove = answer.get("remove") or []
+        drawn = set(int(r) for r in
+                    outline_regions(tree, poses, geometry, add))
+        # An outline the agent drew as a stroke rather than a loop still says
+        # where the part is, so its corners count as marks even when the shape
+        # was too thin to enclose a majority of anything.
+        for shape in add:
+            drawn |= set(seed_regions(
+                tree, poses, geometry,
+                [dict(p, view=shape.get("view")) for p in
+                 (shape.get("points") or [])]))
+        if drawn:
+            seeds[slot] = sorted(set(seeds[slot]) | drawn)
+        for region in seed_regions(tree, poses, geometry, remove):
+            # RETRACT FIRST. Re-asserting the displaced claim while this
+            # part's own mark is still there is not undo: both hold the
+            # region and the later one wins, so nothing changes.
+            seeds[slot] = [r for r in seeds[slot] if r != region]
+            prior = int(before[region]) if before is not None else -1
+            if prior >= 0 and prior != slot:
+                seeds[prior] = sorted(set(seeds.get(prior, [])) | {region})
         if log:
-            log("    %s: not found in any view" % part["name"])
+            log("    %-30s round %d: %d outline(s), %d removal(s) -> %d region(s)"
+                % (part["name"], step, len(add), len(remove),
+                   len(seeds[slot])))
+        if not add and not remove:
+            break
+
+    if not seeds[slot]:
+        if log:
+            log("    %s: never found; no colour spent on it" % part["name"])
+        seeds.pop(slot, None)
         labels.pop()
-        return seeds, labels, field, 0
-    seeds[slot] = claimed
-
+        count = len(labels)
     owner = settle(tree, seeds, count)
-    field = field_of(tree, owner, len(mesh.faces))
-    path, poses, geometry = show(mesh, up, field, labels, out_dir,
-                                 "%s-after" % tag, views=views)
-    prompt = CHECK % {"name": part["name"], "swatch": "colour %d" % (slot + 1),
-                      "intent": intent or "a 3D model", "budget": budget}
-    with open(path, "rb") as handle:
-        key = "check-%s" % rig_module.digest(handle.read(), part["name"])
-    answer = backend._run([path], prompt, key) or {}
-    adds, removes = [], []
-    for fix in (answer.get("fixes") or [])[:budget]:
-        if str(fix.get("kind", "add")).lower() == "remove":
-            removes.append(fix)
-        else:
-            adds.append(fix)
-
-    grown = set(seed_regions(tree, poses, geometry, adds))
-    grown |= set(int(r) for r in
-                 outline_regions(tree, poses, geometry,
-                                 [f for f in adds if f.get("points")]))
-    if grown:
-        seeds[slot] = sorted(set(seeds[slot]) | grown)
-    # "remove" RESTORES WHAT WAS UNDERNEATH. Sending it to colour 1 handed
-    # every over-painted patch to whichever part was painted first -- on the
-    # shell the rock base -- so "this barnacle colour has spread onto the
-    # shell" turned that shell surface into rock. Undo has to be undo, and
-    # here undo is re-asserting the claim this part took the ground from.
-    for region in seed_regions(tree, poses, geometry, removes):
-        # RETRACT FIRST. Re-asserting the old claim while leaving this part's
-        # own click in place is not undo: both parts then hold the region, and
-        # ties go to the later one, so the correction changed nothing at all.
-        seeds[slot] = [r for r in seeds.get(slot, []) if r != region]
-        prior = int(before[region]) if before is not None else -1
-        if prior < 0 or prior == slot:
-            continue
-        seeds[prior] = sorted(set(seeds.get(prior, [])) | {region})
-
-    owner = settle(tree, seeds, count)
-    field = field_of(tree, owner, len(mesh.faces))
-    if log:
-        log("    %-32s %d point(s), %d add, %d remove"
-            % (part["name"], len(points), len(adds), len(removes)))
-    return seeds, labels, field, len(points)
+    return seeds, labels, field_of(tree, owner, len(mesh.faces)), used
 
 
-def paint(backend, mesh, tree, up, intent, out_dir, views=3, budget=6,
+def paint(backend, mesh, tree, up, intent, out_dir, views=3, rounds=3,
           max_parts=8, log=print):
     """The whole method, in the order a person works.
 
     See what parts there are and how much detail each has; paint them in the
-    order given, background first so later coats land on top; and after each
-    colour, look at that colour and fix it before starting the next.
+    order given, background first so later coats land on top; and stay on each
+    colour, looking after every stroke, until that colour is right.
 
-    Nothing anywhere sets a size. Every part's extent is settled by the
-    competition between the places the parts were pointed at, so the same
-    procedure sizes a 4mm barnacle and a 190mm shell without being told which
-    is which -- which is the only way it can work on a model nobody has seen.
+    The looking is what makes this work, and it is why there is no cleverness
+    anywhere about how far a stroke should spread. A person laying one colour
+    sees immediately whether they have covered the thing, and covers the rest
+    if they have not. Four different rules for spreading a mark were built and
+    measured before that was taken seriously; all four guessed, and all four
+    drew bands or confetti. Nothing guesses now. The gap between two strokes
+    is not filled in, it is looked at.
+
+    Nothing anywhere sets a size either. A part is whatever surface was drawn
+    round in the picture, so the same procedure paints a 4mm barnacle and a
+    190mm shell without being told which is which -- the only way it can work
+    on a model nobody has seen.
     """
     os.makedirs(out_dir, exist_ok=True)
     parts = see(backend, mesh, up, intent, out_dir, views=views, log=log)
@@ -801,7 +788,7 @@ def paint(backend, mesh, tree, up, intent, out_dir, views=3, budget=6,
     for index, part in enumerate(parts[:max_parts]):
         seeds, labels, field, _n = add_part(
             backend, mesh, tree, up, seeds, labels, part, intent, out_dir,
-            str(index), budget=budget, views=views, log=log)
+            str(index), rounds=rounds, views=views, log=log)
     show(mesh, up, field, labels, out_dir, "final", views=views)
     if log:
         areas = mesh.area_faces

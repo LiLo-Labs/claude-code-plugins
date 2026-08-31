@@ -256,6 +256,20 @@ class _Mesh(object):
         self.area_faces = np.ones(faces)
 
 
+class _BoxPose(object):
+    """A pose whose left half shows region 0 and right half region 1."""
+
+    def __init__(self, pixels=40, per_region=4):
+        self.hit_id = np.full((pixels, pixels), -1, dtype=np.int64)
+        self.hit_id[:, :pixels // 2] = 0
+        self.hit_id[:, pixels // 2:] = per_region
+        self.camera = type("C", (), {"pixels": pixels})()
+
+    @property
+    def visible(self):
+        return self.hit_id >= 0
+
+
 class TestAddPartRuns(unittest.TestCase):
     """The entry point, not just its helpers. apply_fixes once vanished from
     this module and every test still passed, because nothing called the thing
@@ -265,13 +279,12 @@ class TestAddPartRuns(unittest.TestCase):
         self.tree = two_lobe_tree(per_region=4)
         self.mesh = _Mesh(len(self.tree["base"]))
         self.geometry = (40, 8)
-        self.poses = [_Pose(), _Pose(), _Pose()]
-        # Every pixel of the fake pose hits face 0, whose base region is 0.
-        self.answers = {}
+        self.poses = [_BoxPose(), _BoxPose(), _BoxPose()]
 
         def fake_show(mesh, up, field, labels, out_dir, tag, views=3,
                       pixels=520):
-            return os.path.join(HERE, "..", "README.md"), self.poses, self.geometry
+            return (os.path.join(HERE, "..", "README.md"), self.poses,
+                    self.geometry)
 
         self._show = loop.show
         loop.show = fake_show
@@ -279,65 +292,159 @@ class TestAddPartRuns(unittest.TestCase):
     def tearDown(self):
         loop.show = self._show
 
-    def _backend(self, where_points, fixes=()):
-        answers = {"where": {"points": list(where_points)},
-                   "check": {"fixes": list(fixes)}}
+    def _backend(self, script):
+        """A backend that answers a different thing on each successive look."""
+        state = {"n": 0}
 
         class Fake(object):
-            def _run(self, paths, prompt, key):
-                return answers[key.split("-")[0]]
+            calls = []
+
+            def _run(inner, paths, prompt, key):
+                index = state["n"]
+                state["n"] += 1
+                inner.calls.append(key)
+                if index < len(script):
+                    return script[index]
+                return {"add": [], "remove": []}
         return Fake()
 
-    def test_a_pointed_at_part_claims_surface(self):
-        part = {"name": "lobe", "where": "left", "detail": "flat", "order": 1}
-        seeds, labels, field, points = loop.add_part(
-            self._backend([{"view": 0, "x": 8 + 40 + 10, "y": 8 + 10}]),
-            self.mesh, self.tree, (0, 0, 1), {}, [], part, "test",
-            "/tmp/unused", "0", log=None)
-        self.assertEqual(points, 1)
-        self.assertEqual(labels, ["lobe"])
-        self.assertTrue((field == 0).any(), "the drawn surface must be taken")
+    def _box(self, view, x0, x1):
+        origin = 8 + view * (2 * 40 + 8) + 40
+        return {"view": view,
+                "points": [{"x": origin + x0, "y": 8},
+                           {"x": origin + x1, "y": 8},
+                           {"x": origin + x1, "y": 8 + 39},
+                           {"x": origin + x0, "y": 8 + 39}]}
 
-    def test_a_part_nobody_points_at_takes_no_colour(self):
-        part = {"name": "ghost", "where": "nowhere", "detail": "flat",
-                "order": 2}
-        seeds, labels, _field, points = loop.add_part(
-            self._backend([]), self.mesh, self.tree, (0, 0, 1),
-            {0: [4]}, ["base"], part, "test", "/tmp/unused", "1", log=None)
-        self.assertEqual(points, 0)
+    def _part(self, name="lobe"):
+        return {"name": name, "where": "left", "detail": "flat", "order": 1}
+
+    def test_an_outline_gives_the_part_its_surface(self):
+        backend = self._backend([{"add": [self._box(0, 0, 19)]}])
+        seeds, labels, field, used = loop.add_part(
+            backend, self.mesh, self.tree, (0, 0, 1), {}, [], self._part(),
+            "test", "/tmp/unused", "0", log=None)
+        self.assertEqual(labels, ["lobe"])
+        self.assertIn(0, seeds[0])
+        self.assertTrue((field == 0).any())
+        self.assertGreaterEqual(used, 1)
+
+    def test_it_looks_again_after_each_stroke(self):
+        """The correction that matters: painting one colour is itself a loop.
+        A stroke that covered half the part is SEEN to have covered half, and
+        the next one covers the rest -- so no single stroke has to be right."""
+        backend = self._backend([{"add": [self._box(0, 0, 19)]},
+                                 {"add": [self._box(0, 20, 39)]}])
+        seeds, _labels, _field, used = loop.add_part(
+            backend, self.mesh, self.tree, (0, 0, 1), {}, [], self._part(),
+            "test", "/tmp/unused", "0", rounds=4, log=None)
+        self.assertEqual(used, 3, "two strokes, then the empty answer")
+        self.assertEqual(sorted(seeds[0]), [0, 1],
+                         "the second stroke added what the first missed")
+
+    def test_an_empty_answer_is_the_finish(self):
+        backend = self._backend([{"add": [self._box(0, 0, 39)]},
+                                 {"add": [], "remove": []},
+                                 {"add": [self._box(0, 0, 19)]}])
+        _s, _l, _f, used = loop.add_part(
+            backend, self.mesh, self.tree, (0, 0, 1), {}, [], self._part(),
+            "test", "/tmp/unused", "0", rounds=8, log=None)
+        self.assertEqual(used, 2, "it must stop being asked once it is right")
+
+    def test_it_never_looks_more_than_its_rounds(self):
+        backend = self._backend([{"add": [self._box(0, 0, 19)]}] * 20)
+        _s, _l, _f, used = loop.add_part(
+            backend, self.mesh, self.tree, (0, 0, 1), {}, [], self._part(),
+            "test", "/tmp/unused", "0", rounds=2, log=None)
+        self.assertEqual(used, 2)
+
+    def test_a_part_nobody_finds_takes_no_colour(self):
+        backend = self._backend([{"add": [], "remove": []}])
+        seeds, labels, _field, _used = loop.add_part(
+            backend, self.mesh, self.tree, (0, 0, 1), {0: [4]}, ["base"],
+            self._part("ghost"), "test", "/tmp/unused", "1", log=None)
         self.assertEqual(labels, ["base"])
         self.assertNotIn(1, seeds)
 
     def test_remove_hands_the_ground_back_to_who_had_it(self):
         """Not to colour 1. Sending undo to the first colour turned shell into
         rock every time a detail was said to have spread."""
-        part = {"name": "detail", "where": "on the lobe", "detail": "detailed",
-                "order": 2}
-        point = {"view": 0, "x": 8 + 40 + 10, "y": 8 + 10}
-        seeds, labels, field, _points = loop.add_part(
-            self._backend([point], [dict(point, kind="remove")]),
-            self.mesh, self.tree, (0, 0, 1), {0: [3], 1: [4]},
-            ["rock", "shell"], part, "test", "/tmp/unused", "2", log=None)
+        origin = 8 + 40
+        backend = self._backend([
+            {"add": [self._box(0, 0, 39)]},
+            {"remove": [{"view": 0, "x": origin + 5, "y": 8 + 5}]},
+        ])
+        seeds, labels, field, _used = loop.add_part(
+            backend, self.mesh, self.tree, (0, 0, 1), {0: [0], 1: [4]},
+            ["rock", "shell"], self._part("detail"), "test", "/tmp/unused",
+            "2", rounds=3, log=None)
         self.assertEqual(len(labels), 3)
-        # Region 0 was pointed at, then removed; it goes back to whoever held
-        # it before this part existed, which is "rock" (seeded in the lobe).
-        self.assertIn(0, seeds[0])
+        self.assertNotIn(0, seeds[2], "the mark that was wrong must be dropped")
+        self.assertIn(1, seeds[2], "the rest of the part must survive the undo")
+        self.assertIn(0, seeds[0], "and the ground goes back to who had it")
         self.assertEqual(int(field[0]), 0)
 
+    def test_a_part_undone_back_to_nothing_gives_its_colour_up(self):
+        """A colour covering no surface is not a colour. It must not sit in
+        the palette taking a filament slot."""
+        origin = 8 + 40
+        backend = self._backend([
+            {"add": [self._box(0, 0, 19)]},
+            {"remove": [{"view": 0, "x": origin + 5, "y": 8 + 5}]},
+        ])
+        seeds, labels, _field, _used = loop.add_part(
+            backend, self.mesh, self.tree, (0, 0, 1), {0: [0], 1: [4]},
+            ["rock", "shell"], self._part("detail"), "test", "/tmp/unused",
+            "3", rounds=3, log=None)
+        self.assertEqual(labels, ["rock", "shell"])
+        self.assertNotIn(2, seeds)
 
-class _BoxPose(object):
-    """A pose whose left half shows region 0 and right half region 1."""
 
-    def __init__(self, pixels=40, per_region=4):
-        self.hit_id = np.full((pixels, pixels), -1, dtype=np.int64)
-        # faces 0..3 are region 0, faces 4..7 are region 1 (per_region=4)
-        self.hit_id[:, :pixels // 2] = 0
-        self.hit_id[:, pixels // 2:] = per_region
-        self.camera = type("C", (), {"pixels": pixels})()
+class TestSettle(unittest.TestCase):
+    """What was drawn, in paint order. Nothing fills the gaps.
 
-    @property
-    def visible(self):
-        return self.hit_id >= 0
+    Four gap-filling rules were tried and measured on the shell -- climbing the
+    tree, shortest path over the borders, matching the surface signature, and
+    letting each part reach as far as its own marks are apart. All four drew
+    bands or confetti, because in the gap they were guessing.
+    """
+
+    def setUp(self):
+        self.tree = two_lobe_tree(per_region=4)
+
+    def test_a_part_gets_exactly_what_it_was_drawn_round(self):
+        owner = loop.settle(self.tree, {1: [4, 5]}, 2, fallback=None)
+        self.assertEqual(owner[4], 1)
+        self.assertEqual(owner[5], 1)
+        self.assertTrue((owner[:4] == -1).all(), owner)
+
+    def test_later_parts_land_on_top(self):
+        """Paint order IS overlap precedence -- the whole reason the SEE step
+        asks for an order."""
+        owner = loop.settle(self.tree, {0: [0, 1, 2], 2: [1]}, 3)
+        self.assertEqual(int(owner[1]), 2)
+        self.assertEqual(int(owner[0]), 0)
+
+    def test_what_nobody_drew_stays_the_base_coat(self):
+        owner = loop.settle(self.tree, {1: [4]}, 2)
+        self.assertEqual(int(owner[4]), 1)
+        self.assertTrue((owner[:4] == 0).all(), owner)
+
+    def test_nothing_expands_into_the_gap(self):
+        """One mark on a lobe takes one region, not the lobe. Under-fill is
+        visible in the render and gets drawn round next round; a wrong guess
+        is neither."""
+        owner = loop.settle(self.tree, {1: [4]}, 2, fallback=None)
+        self.assertEqual(int((owner == 1).sum()), 1)
+
+    def test_a_label_out_of_range_is_refused_not_painted(self):
+        owner = loop.settle(self.tree, {9: [4]}, 2)
+        self.assertTrue((owner == 0).all(), owner)
+
+    def test_a_region_id_off_the_end_is_dropped(self):
+        owner = loop.settle(self.tree, {1: [4, 999, -3]}, 2)
+        self.assertEqual(int(owner[4]), 1)
+        self.assertEqual(int((owner == 1).sum()), 1)
 
 
 class TestOutlineRegions(unittest.TestCase):
@@ -392,50 +499,3 @@ class TestOutlineRegions(unittest.TestCase):
         stride = 2 * 40 + 8
         self.assertEqual(loop.panel_point((40, 8), 3, 1, 8 + stride + 40 + 5,
                                           8 + 10), (5, 10))
-
-
-class TestSettle(unittest.TestCase):
-    """What was drawn, in paint order. Nothing fills the gaps.
-
-    Four gap-filling rules were tried and measured on the shell -- climbing the
-    tree, shortest path over the borders, matching the surface signature, and
-    letting each part reach as far as its own marks are apart. All four drew
-    bands or confetti, because in the gap they were guessing.
-    """
-
-    def setUp(self):
-        self.tree = two_lobe_tree(per_region=4)
-
-    def test_a_part_gets_exactly_what_it_was_drawn_round(self):
-        owner = loop.settle(self.tree, {1: [4, 5]}, 2, fallback=None)
-        self.assertEqual(owner[4], 1)
-        self.assertEqual(owner[5], 1)
-        self.assertTrue((owner[:4] == -1).all(), owner)
-
-    def test_later_parts_land_on_top(self):
-        """Paint order IS overlap precedence -- the whole reason the SEE step
-        asks for an order."""
-        owner = loop.settle(self.tree, {0: [0, 1, 2], 2: [1]}, 3)
-        self.assertEqual(int(owner[1]), 2)
-        self.assertEqual(int(owner[0]), 0)
-
-    def test_what_nobody_drew_stays_the_base_coat(self):
-        owner = loop.settle(self.tree, {1: [4]}, 2)
-        self.assertEqual(int(owner[4]), 1)
-        self.assertTrue((owner[:4] == 0).all(), owner)
-
-    def test_nothing_expands_into_the_gap(self):
-        """One mark on a lobe takes one region, not the lobe. Under-fill is
-        visible in the render and gets drawn round next round; a wrong guess
-        is neither."""
-        owner = loop.settle(self.tree, {1: [4]}, 2, fallback=None)
-        self.assertEqual(int((owner == 1).sum()), 1)
-
-    def test_a_label_out_of_range_is_refused_not_painted(self):
-        owner = loop.settle(self.tree, {9: [4]}, 2)
-        self.assertTrue((owner == 0).all(), owner)
-
-    def test_a_region_id_off_the_end_is_dropped(self):
-        owner = loop.settle(self.tree, {1: [4, 999, -3]}, 2)
-        self.assertEqual(int(owner[4]), 1)
-        self.assertEqual(int((owner == 1).sum()), 1)

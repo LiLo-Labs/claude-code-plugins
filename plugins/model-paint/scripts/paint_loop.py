@@ -24,7 +24,8 @@ def main(argv=None):
     parser.add_argument("--out", required=True)
     parser.add_argument("--intent", default="")
     parser.add_argument("--views", type=int, default=3)
-    parser.add_argument("--budget", type=int, default=6)
+    parser.add_argument("--rounds", type=int, default=3,
+                        help="looks per colour before moving on")
     parser.add_argument("--max-parts", type=int, default=8)
     parser.add_argument("--model", default="claude-opus-5")
     parser.add_argument("--up", default="0,0,1")
@@ -71,7 +72,7 @@ def main(argv=None):
     backend = vision.HeadlessBackend(os.path.join(args.out, "cache"),
                                      model=args.model)
     field, labels = loop.paint(backend, mesh, tree, up, args.intent, args.out,
-                               views=args.views, budget=args.budget,
+                               views=args.views, rounds=args.rounds,
                                max_parts=args.max_parts, log=print)
     print("calls %d  failures %d  $%.2f  %ds"
           % (backend.calls, backend.failures, backend.cost_usd,
