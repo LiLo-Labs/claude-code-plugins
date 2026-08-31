@@ -26,7 +26,7 @@ def main(argv=None):
     parser.add_argument("--out", required=True)
     parser.add_argument("--intent", default="")
     parser.add_argument("--views", type=int, default=3)
-    parser.add_argument("--rounds", type=int, default=3,
+    parser.add_argument("--rounds", type=int, default=6,
                         help="looks per colour before moving on")
     parser.add_argument("--max-parts", type=int, default=8)
     parser.add_argument("--model", default="claude-opus-5")

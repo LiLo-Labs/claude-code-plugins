@@ -648,3 +648,50 @@ class TestStrokeRegions(unittest.TestCase):
         got = loop.stroke_regions(self.tree, self.poses, self.geometry,
                                   self._line([(30, 30)]))
         self.assertEqual(got.tolist(), [1])
+
+    def test_a_mark_made_from_two_sides_is_kept(self):
+        """Six views of one object: where two of them agree, that is a
+        statement about the object rather than about one picture."""
+        poses = [_BoxPose() for _ in range(2)]
+        geometry = (40, 8, 2)
+        cell = 2 * 40 + 8
+        shapes = [{"view": v,
+                   "points": [{"x": 8 + v * cell + 40 + 2, "y": 8 + 2},
+                              {"x": 8 + v * cell + 40 + 2, "y": 8 + 30}]}
+                  for v in (0, 1)]
+        got = loop.stroke_regions(self.tree, poses, geometry, shapes)
+        self.assertEqual(got.tolist(), [0])
+
+    def test_a_mark_the_other_drawn_views_could_see_and_did_not_make_is_dropped(self):
+        """A slip of the hand: one view marks surface that the other drawn
+        view can see perfectly well and did not mark."""
+        poses = [_BoxPose() for _ in range(2)]
+        geometry = (40, 8, 2)
+        cell = 2 * 40 + 8
+        shapes = [{"view": 0,
+                   "points": [{"x": 8 + 40 + 2, "y": 8 + 2},
+                              {"x": 8 + 40 + 2, "y": 8 + 30}]},
+                  {"view": 1,
+                   "points": [{"x": 8 + cell + 40 + 30, "y": 8 + 2},
+                              {"x": 8 + cell + 40 + 30, "y": 8 + 30}]}]
+        got = loop.stroke_regions(self.tree, poses, geometry, shapes)
+        self.assertEqual(got.tolist(), [],
+                         "neither mark has a second opinion, and both could "
+                         "have had one")
+
+    def test_a_surface_only_one_drawn_view_can_see_needs_no_second_opinion(self):
+        """Corroboration is required where it is possible, not where it is
+        not -- otherwise nothing on a self-occluded face could ever be
+        painted."""
+        poses = [_BoxPose(), _BoxPose()]
+        poses[1].hit_id[:] = -1              # this view sees nothing at all
+        geometry = (40, 8, 2)
+        cell = 2 * 40 + 8
+        shapes = [{"view": 0,
+                   "points": [{"x": 8 + 40 + 2, "y": 8 + 2},
+                              {"x": 8 + 40 + 2, "y": 8 + 30}]},
+                  {"view": 1,
+                   "points": [{"x": 8 + cell + 40 + 2, "y": 8 + 2},
+                              {"x": 8 + cell + 40 + 3, "y": 8 + 30}]}]
+        got = loop.stroke_regions(self.tree, poses, geometry, shapes)
+        self.assertEqual(got.tolist(), [0])

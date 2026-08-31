@@ -413,8 +413,26 @@ def stroke_regions(tree, poses, geometry, shapes, width=1):
     fine, or it is the outline again with extra steps.
     """
     base = rig_module.region_of_face(tree)
+    regions = int(tree["regions"])
     reach = max(0, int(width) // 2)
-    out = set()
+    marked = {}                        # region -> the views that marked it
+    drawn_views = set()
+    visible_cache = {}
+
+    def seen_in(view, region):
+        """Can this view see this region at all? Cached; only drawn views are
+        ever asked, so the cost is one pass per view the agent drew on."""
+        table = visible_cache.get(view)
+        if table is None:
+            pose = poses[view]
+            table = np.zeros(regions, dtype=bool)
+            if pose.visible.any():
+                found, counts = np.unique(base[pose.hit_id[pose.visible]],
+                                          return_counts=True)
+                table[found[counts >= 4]] = True
+            visible_cache[view] = table
+        return bool(table[region])
+
     for shape in shapes or []:
         try:
             view = int(shape["view"])
@@ -438,6 +456,7 @@ def stroke_regions(tree, poses, geometry, shapes, width=1):
         # the shell. An open stroke stops where it stops. The segments between
         # the given corners are still walked, because a stroke is a line and
         # not a row of dots.
+        here = set()
         for index in range(max(1, len(corners) - 1)):
             x0, y0 = corners[index]
             x1, y1 = corners[index + 1] if index + 1 < len(corners) \
@@ -451,7 +470,26 @@ def stroke_regions(tree, poses, geometry, shapes, width=1):
                         region = rig_module.point_to_region(poses[view], base,
                                                             x + dx, y + dy)
                         if region >= 0:
-                            out.add(int(region))
+                            here.add(int(region))
+        drawn_views.add(view)
+        for region in here:
+            marked.setdefault(region, set()).add(view)
+
+    # WHERE THE VIEWS AGREE. A stroke marked from two sides is a statement
+    # about the object; a stroke marked from one side, on surface the other
+    # drawn views can also see and did not mark, is a slip of the hand. So a
+    # region needs a second opinion wherever a second opinion exists -- and is
+    # taken on one where none does, because a surface only one drawn view can
+    # see has nothing to corroborate it.
+    out = []
+    for region, views_hit in marked.items():
+        if len(views_hit) >= 2:
+            out.append(region)
+            continue
+        elsewhere = sum(1 for view in drawn_views
+                        if view not in views_hit and seen_in(view, region))
+        if elsewhere == 0:
+            out.append(region)
     return np.asarray(sorted(out), dtype=np.int64)
 
 
@@ -710,16 +748,26 @@ The piece: %(intent)s
 You are painting ONE thing: %(name)s -- %(where)s
 It is %(swatch)s. %(state)s
 
+The views are six looks at the SAME object from different sides, so a piece of
+it usually appears in several of them. Where those views agree is where the
+part really is on the object; a mark made in only one view is a guess about
+everything the other views can see.
+
 Look at the right-hand images and answer for that colour only:
 
-1. WHAT IS STILL MISSING. %(how)s
+1. WHAT IS STILL MISSING. Take %(bite)s -- not every piece at once -- and for
+   each one you take, MARK IT IN EVERY VIEW THAT SHOWS IT, before moving on.
+   The same piece of the object, marked from each side that can see it.
+
+   %(how)s
 
 2. WHAT SHOULD NOT BE THIS COLOUR. Point at any spot that has the colour and
    is not this part. It goes back to whatever it was before.
 
-You will see the result and be asked again, so do not try to get it all at
-once -- draw round what you are sure of. If the colour now covers this part
-and nothing else, reply with both lists empty. That is how this finishes.
+You will see the result and be asked again, many times, so take a little and
+take it accurately. Doing a few pieces properly from every side beats doing
+all of them from one. If the colour now covers this part and nothing else,
+reply with both lists empty. That is how this finishes.
 
 Reply with ONLY a JSON object, no prose:
 {"add": [{"view": <int>, "points": [{"x": <int>, "y": <int>}, ...]}, ...],
@@ -736,9 +784,10 @@ FILL = """Draw round each piece of this part that has not got the colour
    the shape: a long piece wants corners down both its sides, not a box round
    it.
 
-   Trace just INSIDE the edge. A surface is taken only when most of it falls
-   within an outline, so cutting a little short costs nothing, while spilling
-   over paints the neighbour."""
+   Trace just INSIDE the edge. A surface is taken only when most of the views
+   you drew on agree it is inside, so cutting a little short costs nothing,
+   while spilling over paints the neighbour -- and a piece drawn in three
+   views is held to what those three agree on."""
 
 LINE = """Draw a LINE ALONG each piece of this part that has not got the
    colour yet -- a run of pixel corners following it from one end to the
@@ -785,7 +834,7 @@ def see(backend, mesh, up, intent, out_dir, views=4, pixels=700,
 
 
 def add_part(backend, mesh, tree, up, seeds, labels, part, intent, out_dir,
-             tag, rounds=3, views=3, directions=None, log=print):
+             tag, rounds=6, views=3, directions=None, log=print):
     """Paint ONE colour, looking after every stroke, until that colour is right.
 
     The looking is not an audit at the end. It happens after each application,
@@ -838,6 +887,8 @@ def add_part(backend, mesh, tree, up, seeds, labels, part, intent, out_dir,
         prompt = BRUSH % {"count": len(poses), "name": part["name"],
                           "where": part["where"], "state": state,
                           "how": LINE if fine else FILL,
+                          "bite": ("three or four of them" if fine
+                                   else "one or two pieces"),
                           "swatch": "colour %d" % (slot + 1),
                           "intent": intent or "a 3D model"}
         with open(path, "rb") as handle:
@@ -892,7 +943,7 @@ def add_part(backend, mesh, tree, up, seeds, labels, part, intent, out_dir,
     return seeds, labels, field_of(tree, owner, len(mesh.faces)), used
 
 
-def paint(backend, mesh, tree, up, intent, out_dir, views=3, rounds=3,
+def paint(backend, mesh, tree, up, intent, out_dir, views=3, rounds=6,
           max_parts=8, log=print):
     """The whole method, in the order a person works.
 
