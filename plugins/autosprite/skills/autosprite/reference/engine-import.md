@@ -1,6 +1,6 @@
 # What gets written, and how each engine reads it
 
-Every build writes the sheet, the native atlas, a rig, a frames ZIP, GIF
+Every build writes the sheet, the native atlas, a rig, two ZIPs, GIF
 previews and one file per requested engine. `--engines` takes a comma list,
 `all`, or `web`.
 
@@ -10,6 +10,7 @@ previews and one file per requested engine. `--engines` takes a comma list,
 | `<name>.autosprite.json` | this pipeline. Complete: clips, fps, loop, per-frame rects, anchors, direction fidelity, the source's own report |
 | `<name>.rig.json` | `animate.py` and `rig.py`, for iterating |
 | `<name>-frames.zip` | one PNG per frame, cut back out of the finished sheet |
+| `<name>-animations.zip` | one folder per animation: `<anim>/spritesheet.png`, `<anim>/atlas.json`, `<anim>/frames/01.png…` |
 | `preview/*.gif`, `preview/contact-sheet.png` | you and the user |
 
 ## Phaser 3 / PixiJS
@@ -79,6 +80,11 @@ sprite-atlas importer, and a JSON claiming to be one would import as nothing.
 - **Grid layout**: use *Import Strip* with the `strip` block's `cellWidth`,
   `cellHeight`, `offsetX`, `offsetY`, `columns` and `rows`. One row per clip.
 - **Packed layout**: import `<name>-frames.zip` as loose frames.
+- **One animation at a time**: use `<name>-animations.zip`. Each folder is
+  self-contained -- a horizontal strip, its own atlas with that clip's fps and
+  loop flag, and the individual frames numbered from 01. Every frame in it is
+  byte-identical to the master sheet's own crop, and the ANIMZIP check proves
+  that on every build.
 
 Set each sprite's playback speed from the clip's `fps` and its origin from the
 clip's `origin`.
