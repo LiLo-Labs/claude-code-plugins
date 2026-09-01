@@ -223,3 +223,27 @@ def test_a_baked_shadow_keeps_the_ground_line_still(tmp_path):
         floors.add(int(rows.max()))
     assert len(floors) == 1, "the ground line moved: %s" % sorted(floors)
     assert result.verification.ok, result.verification.report()
+
+
+def test_a_fixed_frame_size_gives_every_clip_the_same_cell(hero_path, tmp_path):
+    result = build(hero_path, tmp_path / "out", animations=["walk", "jump"],
+                   frames=12, frame_size=64)
+    assert result.sheet.cell == (64, 64)
+    anchors = set()
+    for clip in result.clips:
+        assert len(clip.frames) == 12
+        assert all(frame.shape[:2] == (64, 64) for frame in clip.frames)
+        anchors.add(tuple(clip.anchor))
+    assert len(anchors) == 1, "the character must stand in the same place in every clip"
+    assert result.verification.ok, result.verification.report()
+
+
+def test_a_cell_too_small_for_the_character_is_refused(hero_path, tmp_path):
+    with pytest.raises(ValueError) as caught:
+        build(hero_path, tmp_path / "out", animations=["walk"], frame_size=8)
+    assert "--frame-size" in str(caught.value)
+
+
+def test_the_frame_count_is_bounded(hero_path, tmp_path):
+    with pytest.raises(ValueError):
+        build(hero_path, tmp_path / "out", animations=["walk"], frames=200)

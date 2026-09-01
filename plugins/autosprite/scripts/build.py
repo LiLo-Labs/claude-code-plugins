@@ -57,6 +57,16 @@ def main():
                              "By default a clip measured to be coming apart has "
                              "the responsible swing reduced until it holds "
                              "together, and the build says so")
+    parser.add_argument("--frames", type=int, default=None,
+                        help="redraw every animation at this many frames, 2-64. "
+                             "The motion is a continuous curve, so this samples "
+                             "it more finely rather than interpolating pictures; "
+                             "fps moves with it so the timing is unchanged")
+    parser.add_argument("--frame-size", type=int, default=None,
+                        help="put every frame in a square cell of this many "
+                             "pixels, 8-512, with the character standing at the "
+                             "bottom centre. Refuses rather than crops if the "
+                             "art does not fit")
     parser.add_argument("--padding", type=int, default=1)
     parser.add_argument("--extrude", type=int, default=1)
     parser.add_argument("--scale", type=int, default=1,
@@ -85,7 +95,8 @@ def main():
             engines=[e.strip() for e in args.engines.split(",") if e.strip()],
             front=args.front, back=args.back, tolerance=args.tolerance,
             native=not args.no_native, custom_animations=custom, kind=args.kind,
-            compress=args.compress, repair=not args.no_repair)
+            compress=args.compress, repair=not args.no_repair,
+            frames=args.frames, frame_size=args.frame_size)
     except (ValueError, RuntimeError) as error:
         print("build failed: %s" % error, file=sys.stderr)
         return 2

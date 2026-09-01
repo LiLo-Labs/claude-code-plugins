@@ -177,7 +177,8 @@ def build_sheet(reference_path, outdir, animations=("full",), direction_set="1",
                 extrude=1, scale=1, power_of_two=False, engines=("all",),
                 front=None, back=None, tolerance=12, native=True,
                 custom_animations=None, preview_scale=None, kind="character",
-                compress=False, repair=True):
+                compress=False, repair=True, frames=None,
+                frame_size=None):
     """The whole pipeline. Returns a Build."""
     build = Build()
     os.makedirs(outdir, exist_ok=True)
@@ -208,6 +209,10 @@ def build_sheet(reference_path, outdir, animations=("full",), direction_set="1",
         chosen = list(chosen) + list(custom_animations)
     if not chosen:
         raise ValueError("no animations selected")
+    if frames:
+        if not 2 <= int(frames) <= 64:
+            raise ValueError("--frames must be between 2 and 64, not %r" % frames)
+        chosen = [animation.resampled(frames) for animation in chosen]
 
     plans = directions_module.plan(direction_set, build.references)
     build.report["directions"] = [plan.to_dict() for plan in plans]
@@ -222,6 +227,15 @@ def build_sheet(reference_path, outdir, animations=("full",), direction_set="1",
     build.report["repairs"] = repairs
     build.report["margin"] = margin
     build.report["stabilise"] = stabilise_clips(build.clips)
+    from . import stabilize as stabilize_module
+    if frame_size:
+        if not 8 <= int(frame_size) <= 512:
+            raise ValueError("--frame-size must be between 8 and 512, not %r"
+                             % frame_size)
+        for clip in build.clips:
+            clip.frames, clip.anchor = stabilize_module.fit_to_cell(
+                clip.frames, clip.anchor, frame_size)
+        build.report["frame_size"] = int(frame_size)
     for key, runs in build.report["stabilise"].get("holds", {}).items():
         longest = max(count for _, count in runs)
         if longest >= 3:

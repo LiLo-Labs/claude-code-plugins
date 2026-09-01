@@ -124,6 +124,18 @@ Frame counts and rates are already tuned per animation and are visible in the
 build output. Change them only when the user asks or when the build warns that
 frames repeat -- which means the motion is too small for a character that size.
 
+When the user does ask, two flags cover it:
+
+- **`--frames N`** (2-64) redraws every clip at N frames. The motion is a
+  continuous curve, so this samples it more finely rather than interpolating
+  finished pictures, and fps moves with the count so the timing is unchanged.
+  Useful when an engine or a jam wants a fixed frame count.
+- **`--frame-size N`** (8-512) puts every frame in a square N-pixel cell with
+  the character standing at the bottom centre, so every clip of every character
+  shares one floor and one origin. This is what a tile-based importer and a
+  fixed collision box want. It refuses rather than crops if the art does not
+  fit, and the error says the size that would.
+
 ## Directions, and what not to claim
 
 A profile drawing does not contain the back of the head. The build labels every

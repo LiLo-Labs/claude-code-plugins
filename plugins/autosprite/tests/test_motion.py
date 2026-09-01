@@ -247,3 +247,39 @@ def test_a_channel_that_was_never_authored_is_not_invented():
 def test_scale_motion_floors_the_travel_for_a_small_character():
     scaled = motion.scale_motion([motion.get("walk")], 16)[0]
     assert _peak(scaled.root, "dy") >= 1.0
+
+
+# -- a different number of frames -----------------------------------------
+
+def test_resampling_keeps_the_duration_and_changes_the_smoothness():
+    walk = motion.get("walk")
+    denser = walk.resampled(16)
+    assert denser.frames == 16
+    assert denser.fps == pytest.approx(walk.fps * 2)
+    assert denser.frames / denser.fps == pytest.approx(walk.frames / walk.fps)
+
+
+def test_resampling_samples_the_same_curve():
+    """Not an interpolation of finished pictures: every track is a continuous
+    curve, so more frames is a finer sampling of the identical movement."""
+    walk = motion.get("walk")
+    denser = walk.resampled(16)
+    for t in (0.0, 0.125, 0.375, 0.5, 0.875):
+        before = walk.tracks["leg_near"].sample(t, True)
+        after = denser.tracks["leg_near"].sample(t, True)
+        assert after.angle == pytest.approx(before.angle)
+
+
+def test_resampling_to_the_same_count_is_free():
+    walk = motion.get("walk")
+    assert walk.resampled(walk.frames) is walk
+
+
+def test_a_clip_cannot_be_resampled_below_two_frames():
+    assert motion.get("walk").resampled(1).frames == 2
+
+
+def test_resampling_does_not_mutate_the_library():
+    before = motion.get("walk").frames
+    motion.get("walk").resampled(30)
+    assert motion.get("walk").frames == before

@@ -152,6 +152,23 @@ class Animation:
     def poses(self, rig):
         return [self.pose_at(rig, t) for t in self.times()]
 
+    def resampled(self, frames):
+        """The same motion, drawn at a different number of frames.
+
+        Every track here is a continuous curve sampled at `times()`, so this is
+        just a different set of samples of the same movement -- not a redraw and
+        not an interpolation of finished frames. The duration is held constant
+        by moving fps with the frame count: asking for more frames means a
+        smoother cycle, not a slower one.
+        """
+        frames = max(2, int(frames))
+        if frames == self.frames:
+            return self
+        clone = copy.deepcopy(self)
+        clone.fps = self.fps * (float(frames) / float(self.frames))
+        clone.frames = frames
+        return clone
+
     def scaled(self, factor):
         """Scale every translation for a character of a different size.
 

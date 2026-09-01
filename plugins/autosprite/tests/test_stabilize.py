@@ -1,5 +1,6 @@
 """One box per clip, and an anchor that does not wander."""
 
+import pytest
 
 from spritepipe import image, stabilize
 
@@ -64,3 +65,39 @@ def test_anchor_drift_is_measured_not_corrected():
     drift = stabilize.anchor_drift(moving(), (10, 12))
     assert len(drift) == 4
     assert drift[0] != drift[-1]
+
+
+# -- a fixed frame size ---------------------------------------------------
+
+def test_every_frame_lands_in_the_cell_with_the_anchor_in_one_place():
+    frames = [image.blank(6, 4), image.blank(5, 7)]
+    frames[0][:, :] = (10, 20, 30, 255)
+    frames[1][:, :] = (40, 50, 60, 255)
+    out, anchor = stabilize.fit_to_cell(frames, (2, 6), 16)
+    assert anchor == (8, 16)
+    assert all(frame.shape[:2] == (16, 16) for frame in out)
+    # the first frame's bottom-left corner sits where the anchor put it
+    assert tuple(out[0][15, 6][:3]) == (10, 20, 30)
+
+
+def test_the_character_still_stands_on_the_cell_floor():
+    frame = image.blank(4, 4)
+    frame[:, :] = (200, 100, 50, 255)
+    out, _ = stabilize.fit_to_cell([frame], (2, 4), 12)
+    rows = image.alpha_mask(out[0]).nonzero()[0]
+    assert int(rows.max()) == 11
+
+
+def test_art_too_big_for_the_cell_is_refused_not_cropped():
+    frame = image.blank(20, 20)
+    frame[:, :] = (1, 2, 3, 255)
+    with pytest.raises(ValueError) as caught:
+        stabilize.fit_to_cell([frame], (10, 20), 16)
+    assert "--frame-size" in str(caught.value)
+
+
+def test_nothing_is_lost_when_it_does_fit():
+    frame = image.blank(5, 5)
+    frame[2, 2] = (9, 9, 9, 255)
+    out, _ = stabilize.fit_to_cell([frame], (2, 5), 20)
+    assert int(image.alpha_mask(out[0]).sum()) == 1
