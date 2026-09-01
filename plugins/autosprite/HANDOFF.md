@@ -508,9 +508,9 @@ nearest-neighbour path, same palette guarantee, no new render code. It shares
 shed 0.22% -> 0.03%, and closest to the artist in how much of the picture it
 disturbs.
 
-**The dead end.** The obvious next step is to cut a continuous surface into
-vertical strips and use `spread` to travel a wave across them. It tears, and not
-marginally:
+**The dead end that came first.** The obvious step is to cut a continuous
+surface into vertical strips and use `spread` to travel a wave across them. It
+tears, and not marginally:
 
 | rig | worst-frame shed |
 |---|---|
@@ -523,13 +523,35 @@ Rigid strips at different phases separate from each other, and `render._reconnec
 cannot help because it repairs a layer that came apart *internally*, not a gap
 *between* layers. Tested at three strip counts, so it is not a tuning problem.
 
-**What that leaves named.** Against the artist's frames, every variant sits at
-70-79% footprint error, and shear amplitude does not move it: the artist warps
-the cloth's INTERIOR and we lean it rigidly. Cloth needs a continuous per-column
-offset inside one part -- a warp, which is still a permutation of whole pixels
-and therefore still palette-safe, but needs a render path the affine matrix
-cannot provide. That is the next real capability, and the flag is in the corpus
-with its sixteen frames so it can be measured rather than argued about.
+**And the capability it named, now built.** `wave` and `wave_phase`: each
+column of a part slides vertically by a whole number of pixels, sinusoidally in
+its own position, and advancing the phase makes the crest travel. It is a
+PERMUTATION of the part's pixels -- nothing sampled, averaged or invented --
+which is the strongest palette claim in the vocabulary.
+
+| driving a flag's cloth | worst-frame shed | of what we disturb, the artist never touches |
+|---|---|---|
+| `shear`, leaning it rigidly | 0.10% | 36% |
+| **`wave`, amplitude 4** | **0.00%** | **16%** |
+| `wave` + a lean on top | 0.00% | 26-38% |
+
+So cloth is not a thing that leans: adding a shear to the wave makes it worse at
+every amplitude tried. `ripple` and `sway`'s surface half now drive `wave`.
+
+### A measurement error worth more than the measurement
+
+Every flag number above was first reported at **70-79%**, in a commit message
+and in this file, and all of them were wrong. `render_pose` draws into a canvas
+with a MARGIN and the art it is judged against is trimmed flush, so
+`quality.footprint` was comparing a picture with a *shifted copy* of another
+one. It turned a real 15% into 68%, and nothing about 68% looked wrong -- it
+agreed with the story I already believed, which is why it survived.
+
+`footprint` now takes the margin as a parameter rather than trying to infer it,
+because a frame's own content box moves with the animation and there is nothing
+honest to infer it from. A test asserts that the untold case gives a different
+answer from the told one. The strip numbers above are unaffected: `shed` is
+measured within a frame and does not care where the frame sits.
 
 ## Dead ends — measured, not guessed
 

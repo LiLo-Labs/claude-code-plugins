@@ -170,3 +170,23 @@ def test_the_two_footprints_are_aligned_at_the_top_left():
     theirs[5, 5] = [200, 30, 30, 255]      # somewhere we do not touch
     share, wrong, total = quality.footprint([ours], rest, [bigger, theirs])
     assert (wrong, total) == (1, 1) and share == 1.0
+
+
+def test_a_render_margin_must_be_declared_or_the_answer_is_nonsense():
+    """The failure this parameter exists for. Rendered frames sit `margin`
+    pixels in from the corner and the art they are judged against is trimmed
+    flush, so measuring them as given compares a picture with a shifted copy of
+    another one -- and reports a plausible-looking number for it."""
+    rest = _plain((80, 80, 90), size=8)
+    ours = rest.copy()
+    ours[2, 2] = [200, 30, 30, 255]
+    theirs = rest.copy()
+    theirs[2, 2] = [200, 30, 30, 255]
+
+    padded = image.blank(12, 12)
+    padded[2:10, 2:10] = ours
+
+    told = quality.footprint([padded], rest, [rest, theirs], offset=(2, 2))
+    assert told == (0.0, 0, 1)                    # exactly right
+    untold = quality.footprint([padded], rest, [rest, theirs])
+    assert untold[0] > 0.0                        # ... and wrong when not told

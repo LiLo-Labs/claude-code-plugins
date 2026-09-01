@@ -31,10 +31,11 @@ class PartPose:
     everything a subject does that is not a movement.
     """
 
-    __slots__ = ("angle", "dx", "dy", "sx", "sy", "cycle", "shear")
+    __slots__ = ("angle", "dx", "dy", "sx", "sy", "cycle", "shear",
+                 "wave", "wave_phase")
 
     def __init__(self, angle=0.0, dx=0.0, dy=0.0, sx=1.0, sy=1.0, cycle=0.0,
-                 shear=0.0):
+                 shear=0.0, wave=0.0, wave_phase=0.0):
         self.angle = float(angle)
         self.dx = float(dx)
         self.dy = float(dy)
@@ -42,6 +43,8 @@ class PartPose:
         self.sy = float(sy)
         self.cycle = float(cycle)
         self.shear = float(shear)
+        self.wave = float(wave)
+        self.wave_phase = float(wave_phase)
 
     def blend(self, other, amount):
         """Linear blend towards `other`. Used to ease between keyframes."""
@@ -52,7 +55,9 @@ class PartPose:
                         self.sx * keep + other.sx * amount,
                         self.sy * keep + other.sy * amount,
                         self.cycle * keep + other.cycle * amount,
-                        self.shear * keep + other.shear * amount)
+                        self.shear * keep + other.shear * amount,
+                        self.wave * keep + other.wave * amount,
+                        self.wave_phase * keep + other.wave_phase * amount)
 
     def compose(self, other):
         """This pose with `other`'s DEPARTURE FROM REST applied on top.
@@ -67,13 +72,15 @@ class PartPose:
         return PartPose(self.angle + other.angle,
                         self.dx + other.dx, self.dy + other.dy,
                         self.sx * other.sx, self.sy * other.sy,
-                        self.cycle + other.cycle, self.shear + other.shear)
+                        self.cycle + other.cycle, self.shear + other.shear,
+                        self.wave + other.wave,
+                        self.wave_phase + other.wave_phase)
 
     def __repr__(self):
         return ("PartPose(angle=%.1f, d=(%.1f, %.1f), s=(%.2f, %.2f), "
-                "cycle=%+.1f, shear=%.1f)"
+                "cycle=%+.1f, shear=%.1f, wave=%.1f@%.2f)"
                 % (self.angle, self.dx, self.dy, self.sx, self.sy, self.cycle,
-                   self.shear))
+                   self.shear, self.wave, self.wave_phase))
 
 
 class Pose:

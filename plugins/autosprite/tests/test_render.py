@@ -320,3 +320,31 @@ def test_reconnect_leaves_a_whole_frame_alone():
     art = _flask()
     frame = _squashed(art, 1.0)
     assert image.equal(render._reconnect(frame, np.zeros_like(frame)), frame)
+
+
+def test_a_wave_reaches_the_render_and_keeps_the_palette(hero_cutout):
+    """The channel is applied to a part's own pixels before its transform, so
+    the guarantee has to survive that path too."""
+    from spritepipe import palette
+
+    cut = hero_cutout
+    name = cut.sprites[0].name
+    rest = render.render_pose(cut, skeleton.Pose(), margin=4)
+    waved = render.render_pose(
+        cut, skeleton.Pose({name: skeleton.PartPose(wave=3.0, wave_phase=0.2)}),
+        margin=4)
+    assert not image.equal(rest, waved)
+    locked = image.unique_colors(cut.reference)
+    assert len(palette.escapes(waved, locked)) == 0
+
+
+def test_a_wave_is_applied_in_the_part_s_own_space(hero_cutout):
+    """Before the transform, so a part the rig has turned on its side waves
+    along its own length rather than along the screen's."""
+    cut = hero_cutout
+    name = cut.sprites[0].name
+    upright = render.render_pose(
+        cut, skeleton.Pose({name: skeleton.PartPose(wave=3.0)}), margin=8)
+    turned = render.render_pose(
+        cut, skeleton.Pose({name: skeleton.PartPose(wave=3.0, angle=90.0)}), margin=8)
+    assert not image.equal(upright, turned)

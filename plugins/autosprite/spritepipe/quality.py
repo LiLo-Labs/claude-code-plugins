@@ -98,9 +98,9 @@ def disturbed(frames, rest, shape=None):
     all, whether it moved something there or vacated it.
 
     `shape` puts the answer in a canvas of a given size, which is how two
-    footprints measured from differently-trimmed art get compared. Frames are
-    aligned at the TOP-LEFT, which is right because everything here is cropped
-    to its own content box, and is the caller's job to have arranged.
+    footprints measured from differently-sized art get compared. Frames are
+    aligned at the top-left; `footprint` below is what arranges for that to be
+    meaningful.
     """
     import numpy as _np
 
@@ -118,7 +118,27 @@ def disturbed(frames, rest, shape=None):
     return out
 
 
-def footprint(frames, rest, reference_frames):
+def _aligned(frames, offset):
+    """Frames with a render margin cropped off, so they sit where `rest` does.
+
+    `render_pose` draws into a canvas with a MARGIN -- room for a limb swung to
+    horizontal -- so the character sits `margin` pixels in from the corner,
+    while the art it is judged against is trimmed flush. Comparing them as given
+    measures one picture against a SHIFTED COPY of another and reports nonsense
+    with total confidence: on a flag it turned a real 15% into 68%, and nothing
+    about that number looked wrong.
+
+    The offset is not inferable -- a frame's own content box moves with the
+    animation -- so the caller passes it, and it is exactly the `margin` they
+    rendered with.
+    """
+    x, y = offset
+    if not x and not y:
+        return frames
+    return [frame[y:, x:] for frame in frames]
+
+
+def footprint(frames, rest, reference_frames, offset=(0, 0)):
     """(share, wrong, total): how much of what we move, the artist never moves.
 
     Every other measurement in this plugin asks whether a frame is INTACT.
@@ -137,17 +157,21 @@ def footprint(frames, rest, reference_frames):
     deliberately one-sided: under-moving is a quieter failure than moving the
     wrong thing, and is measured by comparing the totals, which are returned.
 
-    The two sets of art are routinely trimmed to slightly different sizes -- our
-    rest pose goes through `ingest`, the artist's frames usually do not -- so
-    both footprints are measured into one canvas big enough for either, aligned
-    at the top-left. Comparing them at their own sizes is a shape error waiting
-    to happen, and worse, an off-by-two misalignment when it does not raise.
+    Pass `offset` -- the margin `frames` were rendered with -- or the comparison
+    is silently meaningless. Rendered frames carry a margin and the art they are
+    judged against does not, so measuring them as given compares a picture with
+    a SHIFTED COPY of another one; on a flag that reported 68% where the truth
+    was 15%, and the number looked entirely plausible. It is a parameter rather
+    than something inferred because a frame's own content box moves with the
+    animation, so there is nothing honest to infer it from.
     """
     if not frames or len(reference_frames) < 2:
         return 0.0, 0, 0
-    shape = (max(rest.shape[0], reference_frames[0].shape[0]),
-             max(rest.shape[1], reference_frames[0].shape[1]))
-    truth = disturbed(reference_frames[1:], reference_frames[0], shape)
+    frames = _aligned(frames, offset)
+    reference_rest = reference_frames[0]
+    shape = (max(rest.shape[0], reference_rest.shape[0]),
+             max(rest.shape[1], reference_rest.shape[1]))
+    truth = disturbed(reference_frames[1:], reference_rest, shape)
     ours = disturbed(frames, rest, shape)
     total = int(ours.sum())
     if not total:

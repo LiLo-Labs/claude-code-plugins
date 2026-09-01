@@ -243,7 +243,13 @@ def render_pose(cutout, pose, margin=0):
     frame = img.blank(height, width)
     for sprite in cutout.sprites:
         pixels = sprite.pixels
-        step = int(round(pose.get(sprite.name).cycle))
+        part_pose = pose.get(sprite.name)
+        if abs(part_pose.wave) >= 0.5:
+            # In the part's own space, before its transform, so a part the rig
+            # has turned on its side waves along its own length rather than
+            # along the screen's.
+            pixels = img.wave_columns(pixels, part_pose.wave, part_pose.wave_phase)
+        step = int(round(part_pose.cycle))
         if step:
             # Before the transform, not after: the supersampled reduction votes
             # on whatever colours the block holds, and it should be voting on

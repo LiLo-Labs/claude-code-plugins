@@ -24,19 +24,33 @@ hero.png                                       hero-sprites/
 
 The input file is never written to.
 
-## Two operations that are not a rotation
+## Three operations that are not a rotation
 
-Six of the seven animation channels are an affine transform — `angle`, `dx`,
-`dy`, `sx`, `sy` and `shear`.
+Six of the nine animation channels are an affine transform — `angle`, `dx`,
+`dy`, `sx`, `sy` and `shear`. The other three are not, and each is what some
+subject with no limbs actually does.
 
 **`shear`** leans a part's top away from its base, in degrees, without turning
-it. A rotation moves a limb; a shear deforms a *surface*, which is what cloth,
-water and smoke do and what a hinge cannot: the base stays where the artist drew
-it and everything above slides in proportion to how far above it is. It costs
-nothing — one more term in a matrix that was being built anyway.
+it: the base stays where the artist drew it and everything above slides in
+proportion to how far above it is. It costs nothing — one more term in a matrix
+that was being built anyway.
 
-The seventh, **`cycle`**, is a whole-numbered step along a part's own shading
-**ramp**. Nothing moves: every pixel stays exactly where the artist
+**`wave`** and **`wave_phase`** slide each *column* of a part vertically by a
+whole number of pixels, sinusoidally in its own position; advancing the phase
+makes the crest travel. It is the only deformation here that is not a rigid
+transform of the whole part, and it is what cloth and water actually do — their
+*interior* moves. It is also the strongest palette claim in the plugin, because
+it is a **permutation**: every output pixel is an input pixel moved by a whole
+number of rows, so there is nothing to sample, average or invent.
+
+> Measured on a CC0 flag against the artist's own sixteen frames of the same
+> wave: of the pixels `wave` disturbs, the artist never touches **16%**. Leaning
+> the same cloth rigidly with `shear` gets 36%, and adding a lean on top of the
+> wave makes it worse again — so cloth is not a thing that leans. Cutting the
+> cloth into strips and travelling a wave across them with `spread` *tears*, at
+> 31–61% shed, however many strips.
+
+**`cycle`** is a whole-numbered step along a part's own shading **ramp**. Nothing moves: every pixel stays exactly where the artist
 put it and changes shade instead, so the light changes and the silhouette does
 not.
 
@@ -420,7 +434,7 @@ pip install -r requirements-test.txt
 python3 -m pytest tests -q
 ```
 
-603 tests, no network, no model, well under a minute. Fixtures are generated rather
+613 tests, no network, no model, well under a minute. Fixtures are generated rather
 than checked in — `tests/make_fixture.py` builds parametric sprites so a test can
 have the exact property it is about (arms clear of the body or touching, legs
 parted or robed) instead of one PNG having to serve every case.

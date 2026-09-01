@@ -61,6 +61,10 @@ CHANNEL_LIMITS = {
     # Degrees of lean. Past about 40 a surface is not leaning, it is folding
     # over itself, and nearest-neighbour sampling turns that into a smear.
     "shear": 40.0,
+    # Pixels of vertical slide. Past a fifth of a part's height a wave is not a
+    # wave, it is the part being torn into columns.
+    "wave": 12.0,
+    "wave_phase": 2.0,
 }
 MIN_SCALE = 0.2
 
