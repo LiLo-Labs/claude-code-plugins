@@ -76,8 +76,8 @@ runs against the template backend, so CI needs no model and no network.
 
 ## What it makes
 
-**Fifteen character animations** — idle, walk, run, dash, climb, crouch, jump,
-land, attack, block, cast, throw, hurt, die, sleep. Frame counts, rates and loop
+**Sixteen character animations** — idle, walk, run, dash, climb, fly, crouch,
+jump, land, attack, block, cast, throw, hurt, die, sleep. Frame counts, rates and loop
 points are tuned per animation and all three are overridable (`--frames`,
 `--fps`, `--loop-start`/`--loop-end`). Presets: `basic`, `platformer`,
 `topdown`, `action`, `full`, `everything`.

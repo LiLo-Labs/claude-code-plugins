@@ -121,9 +121,12 @@ Ask for the game, not for a list of animations. The answer picks the set:
 | Nothing in particular | `--animations full` and let them cut it down |
 | "Everything you have" | `--animations everything` -- all fifteen |
 | A coin, a potion, a chest, a pickup | `--kind prop --animations pickup` |
+| A bird, a dragon, anything with wings | `--animations winged` (idle, fly, walk, attack, hurt, die) |
 
-The character library is idle, walk, run, dash, climb, crouch, jump, land,
-attack, block, cast, throw, hurt, die, sleep. Two of them come with a caveat to
+The character library is idle, walk, run, dash, climb, fly, crouch, jump, land,
+attack, block, cast, throw, hurt, die, sleep. **Wings beat in phase**, unlike
+every other pair: a body has to stay under itself so legs and arms alternate,
+but wings beat together because that is what makes lift. Two of them come with a caveat to
 pass on: **climb** reads as reaching rather than gripping, because a profile
 drawing has no front view to turn towards a wall; **sleep** lays the character
 over with a root rotation, the same trick `die` uses, because a standing
