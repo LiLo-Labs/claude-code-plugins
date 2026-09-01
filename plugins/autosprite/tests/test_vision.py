@@ -379,3 +379,79 @@ def test_the_slack_does_not_reach_arbitrarily_far_up():
     for row in range(art.shape[0], art.shape[0] + 8):
         padded[row, box[0]:box[2]] = [60, 60, 90, 255]
     assert vision.find_split(image.alpha_mask(padded)) is None
+
+
+# -- a quadruped's legs are columns, not rows -----------------------------
+
+def test_leg_columns_finds_one_run_per_leg_pair():
+    mask = image.alpha_mask(make_fixture.creature())
+    belly = vision.find_split(mask, floor=0.45)
+    assert vision.leg_columns(mask, belly, mask.shape[0]) == [(7, 10), (17, 20)]
+
+
+def test_a_shallow_belly_fringe_does_not_widen_a_leg():
+    """The horse's underside hangs a pixel or two below the belly line the
+    whole length of the animal. Reading legs by presence makes that fringe part
+    of a leg and the leg twenty pixels wide; reading them by reach does not."""
+    mask = np.zeros((10, 20), dtype=bool)
+    mask[:5, :] = True                 # body
+    mask[5:6, 2:18] = True             # a one-pixel fringe under all of it
+    mask[5:10, 3:6] = True             # hind leg
+    mask[5:10, 14:17] = True           # fore leg
+    assert vision.leg_columns(mask, 5, 10) == [(3, 6), (14, 17)]
+
+
+def test_a_notch_inside_one_hoof_does_not_split_it():
+    mask = np.zeros((10, 20), dtype=bool)
+    mask[:5, :] = True
+    mask[5:10, 3:6] = True
+    mask[5:10, 7:9] = True             # same leg, one empty column between
+    mask[5:10, 15:18] = True
+    assert vision.leg_columns(mask, 5, 10) == [(3, 9), (15, 18)]
+
+
+def test_the_leg_groups_split_at_the_animal_s_length():
+    """Three runs: one hind leg, and two forelegs close together."""
+    assert vision.split_leg_groups([(3, 6), (20, 23), (24, 27)]) \
+        == ([(3, 6)], [(20, 23), (24, 27)])
+
+
+def test_one_cluster_of_legs_is_not_a_quadruped():
+    assert vision.split_leg_groups([(3, 6)]) is None
+    assert vision.split_leg_groups([]) is None
+
+
+def test_a_quadruped_rigs_with_four_legs_and_the_forelegs_lead():
+    built = rig_of(make_fixture.creature())
+    assert built.character_class == "creature"
+    roles = {part.name: part.role for part in built.parts}
+    assert roles["foreleg_near"] == "arm_near" and roles["foreleg_far"] == "arm_far"
+    assert roles["hindleg_near"] == "leg_near" and roles["hindleg_far"] == "leg_far"
+    # Facing right, the forelegs are the cluster nearer the head.
+    assert built.by_name("foreleg_near").box[0] > built.by_name("hindleg_near").box[0]
+
+
+def test_a_leg_box_holds_one_leg_not_the_whole_underside():
+    """The bug this replaced: the pegasus's last row is a single merged span,
+    `pair_boxes` halved it, and the far leg's box grew from 5 pixels wide to 15
+    -- a slab holding both leg pairs, which sheared a tenth of the animal off
+    when it swung."""
+    mask = np.zeros((26, 27), dtype=bool)
+    mask[:18, :] = True
+    mask[18:24, 5:10] = True           # hind legs
+    mask[18:25, 17:22] = True          # fore legs
+    mask[24:25, 19:22] = True          # ... ending in one merged hoof row
+    parts = vision.TemplateBackend()._creature(mask, 27, 26, "right")[0]
+    for part in parts:
+        if part.role.endswith("_near") or part.role.endswith("_far"):
+            assert part.box[2] - part.box[0] <= 6, part
+
+
+def test_a_creature_whose_legs_never_part_falls_back_to_halving():
+    mask = np.zeros((14, 16), dtype=bool)
+    mask[:8, :] = True
+    mask[8:14, 5:11] = True            # one block of legs, never parted
+    parts, notes = vision.TemplateBackend()._creature(mask, 16, 14, "right")
+    names = {part.name for part in parts}
+    assert "leg_near" in names and "leg_far" in names
+    assert any("never separate" in note for note in notes)

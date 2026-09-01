@@ -288,6 +288,67 @@ def _complete_pair(left, right, reference_box, width=None):
     return partner, right, True
 
 
+def leg_columns(mask, belly, height, floor_share=0.6, gap=1):
+    """Where a side-on animal's legs are, read as COLUMNS rather than rows.
+
+    `pair_boxes` reads a band row by row and halves any row that has not parted
+    yet. That is right under a biped's hips, where an unparted row really is two
+    legs touching. It is wrong under a quadruped, where the unparted row is the
+    last row of a single hoof: on the pegasus, one such row at the very bottom
+    stretched the far leg's box from 5 pixels wide to 15, so a box holding BOTH
+    leg pairs rotated about its middle and sheared a tenth of the animal off.
+
+    A leg, seen side-on, is a run of columns that reaches down towards the
+    floor. Everything shallower is belly fringe, a contact shadow or the tip of
+    a dragging tail, and must not widen a leg's box. So measure each column's
+    reach below the belly line, keep the columns that reach at least
+    `floor_share` of the deepest, and return their runs, bridging gaps of up to
+    `gap` columns so a two-pixel notch inside one hoof does not split it.
+    """
+    height = int(height)
+    belly = int(belly)
+    if belly >= height:
+        return []
+    below = mask[belly:height]
+    width = mask.shape[1]
+    reach = [0] * width
+    for x in range(width):
+        column = np.nonzero(below[:, x])[0]
+        reach[x] = int(column[-1]) + 1 if len(column) else 0
+    deepest = max(reach) if reach else 0
+    if deepest <= 0:
+        return []
+    floor = max(2, int(deepest * float(floor_share)))
+    found, start, missing = [], None, 0
+    for x in range(width + 1):
+        deep = x < width and reach[x] >= floor
+        if deep:
+            if start is None:
+                start = x
+            missing = 0
+        elif start is not None:
+            missing += 1
+            if missing > gap or x >= width:
+                found.append((start, x - missing + 1))
+                start, missing = None, 0
+    return found
+
+
+def split_leg_groups(columns):
+    """Split leg column runs into the trailing group and the leading group.
+
+    A quadruped's four legs read as two clusters far apart with, at most, a
+    small gap inside each cluster where one leg of a pair shows past the other.
+    The largest gap between runs is therefore the animal's own length, and it is
+    the only place the split can honestly go.
+    """
+    if len(columns) < 2:
+        return None
+    gaps = [(columns[i + 1][0] - columns[i][1], i) for i in range(len(columns) - 1)]
+    _, at = max(gaps)
+    return columns[:at + 1], columns[at + 1:]
+
+
 def pair_boxes(mask, y0, y1):
     """Split a band into a left box and a right box, one limb each.
 
@@ -483,8 +544,6 @@ class TemplateBackend(Backend):
             tail_box = (width - tail_span, int(height * 0.10),
                         width, max(int(height * 0.10) + 1, int(belly * 0.8)))
 
-        left_leg, right_leg = pair_boxes(mask, belly, height)
-        fore, hind = (right_leg, left_leg) if facing == "right" else (left_leg, right_leg)
 
         parts = [rig_module.Part("body", "body", (0, 0, width, belly), None,
                                  (width // 2, belly)),
@@ -493,13 +552,58 @@ class TemplateBackend(Backend):
                  rig_module.Part("tail", "tail", tail_box, "body",
                                  (tail_box[2] if facing == "right" else tail_box[0],
                                   (tail_box[1] + tail_box[3]) // 2))]
-        for name, role, box in (("leg_near", "leg_near", fore),
-                                ("leg_far", "leg_far", hind)):
+        groups = split_leg_groups(leg_columns(mask, belly, height))
+        if groups is None:
+            # Only one cluster of legs reaches the floor: this reads as a biped
+            # or a creature standing square, so fall back to the row-wise split.
+            left_leg, right_leg = pair_boxes(mask, belly, height)
+            lead, trail = ((right_leg, left_leg) if facing == "right"
+                           else (left_leg, right_leg))
+            legs = [("leg_near", "leg_near", lead), ("leg_far", "leg_far", trail)]
+            notes.append("the legs never separate into fore and hind, so they "
+                         "are split down the middle as a biped's are")
+        else:
+            trailing, leading = groups
+            fore_columns, hind_columns = ((leading, trailing) if facing == "right"
+                                          else (trailing, leading))
+            legs = (self._leg_pair(mask, fore_columns, belly, height, "foreleg", "arm")
+                    + self._leg_pair(mask, hind_columns, belly, height, "hindleg", "leg"))
+            notes.append("four legs: the columns reaching the floor form two "
+                         "clusters, forelegs at x%s and hindlegs at x%s"
+                         % (fore_columns[0][0], hind_columns[0][0]))
+        for name, role, box in legs:
             if box is None or box[2] <= box[0] or box[3] <= box[1]:
                 continue
             parts.append(rig_module.Part(name, role, box, "body",
                                          ((box[0] + box[2]) // 2, belly)))
         return [p for p in parts if p.width > 0 and p.height > 0], notes
+
+    @staticmethod
+    def _leg_pair(mask, columns, belly, height, name, role_stem):
+        """One end of a quadruped: a near leg, and its partner behind it.
+
+        Where the cluster resolves into two column runs, both legs are drawn and
+        each gets its own; where it resolves into one, the near leg hides the far
+        one, and the far part is emitted over the same box. `cutout` gives every
+        shared pixel to the near partner, so the far leg is then empty -- which
+        is what a profile view actually shows, and keeps the pair complete for
+        the animations that swing them in counter-phase.
+        """
+        def box_of(x0, x1):
+            band = mask[belly:height, x0:x1]
+            rows = np.nonzero(band.any(axis=1))[0]
+            if not len(rows):
+                return None
+            return (x0, belly, x1, belly + int(rows[-1]) + 1)
+
+        if len(columns) >= 2:
+            near = box_of(columns[-1][0], columns[-1][1])
+            far = box_of(columns[0][0], columns[0][1])
+        else:
+            near = box_of(columns[0][0], columns[0][1])
+            far = near
+        return [("%s_near" % name, "%s_near" % role_stem, near),
+                ("%s_far" % name, "%s_far" % role_stem, far)]
 
     def _prop(self, mask, width, height, facing):
         return ([rig_module.Part("body", "body", (0, 0, width, height), None,

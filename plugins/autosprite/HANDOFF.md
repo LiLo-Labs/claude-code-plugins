@@ -9,7 +9,7 @@ again.
 The pipeline is sound and proven on real art. **20 CC0 sprites** (16×16 to
 76×81; humanoids, creatures, props, and four cases chosen to break a silhouette
 rigger) all build, with all seven verification checks passing on both backends.
-350 tests, no network or model in any of them.
+358 tests, no network or model in any of them.
 
 Quality, measured as **debris** — the share of a frame's pixels not connected to
 its main blob, against the source's own figure:
@@ -99,31 +99,47 @@ That gap is what backlog item 1 exists to close.
    - **It always reaches for the same four roles** (both arms, both legs), and
      touched `torso` in four and `root` in two. It has not once proposed a
      change to `head`, `tail` or a scale channel.
-2. **Bring `_creature` up to `_humanoid`.** Half done.
+2. ~~**Bring `_creature` up to `_humanoid`.**~~ **Done for the legs.**
 
-   The classification half is fixed: `find_split` now looks past up to two
-   merged rows at the floor, because hooves, boots on a ground line and baked
-   contact shadows all merge the last row back into one span. A winged pony with
-   six clearly parted rows of legs was being demoted to a one-piece prop by its
-   hooves meeting on the final row. Pegasus and dragon now rig as creatures.
+   The classification half was fixed first: `find_split` now looks past up to
+   two merged rows at the floor, because hooves, boots on a ground line and
+   baked contact shadows all merge the last row back into one span. A winged
+   pony with six clearly parted rows of legs was being demoted to a one-piece
+   prop by its hooves meeting on the final row.
 
-   **The builder half is not**, and the numbers say so plainly. `_creature`
-   still places the head, tail and belly by proportion rather than measurement,
-   and the result is that a correctly-classified pegasus animates WORSE than the
-   static prop it used to be:
+   The builder half is now fixed too, and by measurement rather than by taste.
+   A leave-one-out ablation — re-render the clip with one part frozen at rest
+   and see how much shed goes away — put **all 9.8% of the pegasus's shed on a
+   single part, `leg_far`**, and the cause was visible the moment you looked at
+   it: `pair_boxes` reads a band row by row and halves any row that has not
+   parted yet, which is right under a biped's hips and wrong under a horse. The
+   pegasus's bottom row is one merged hoof, so the halving stretched `leg_far`
+   from 5 pixels wide to 15 — a slab holding BOTH leg pairs, rotating about its
+   middle.
 
-   | | as a prop (before) | as a creature (now) |
+   A side-on animal's legs are **columns**, so `leg_columns` measures each
+   column's reach below the belly line, keeps the ones reaching 60% of the
+   deepest, and returns their runs (bridging one-column notches). Shallow
+   columns — belly fringe, contact shadow, a dragging tail tip — no longer
+   widen a leg. `split_leg_groups` then splits those runs at the largest gap,
+   which is the animal's own length, and `_leg_pair` builds four legs:
+   **forelegs take the arm roles** and hindlegs the leg roles, matching what
+   the vision backend independently chose, so the walk swings them in
+   counter-phase for free.
+
+   | | before | after |
    |---|---|---|
-   | dragon walk | 0.0% (static) | **0.0%**, and it moves |
-   | pegasus walk | 0.0% (static) | **9.8%** |
+   | pegasus, all 7 clips | 9.7% | **0.0%** |
+   | horse, all 7 clips | 9.2% | **0.0%** |
+   | dragon, all 7 clips | 1.9% | **0.0%** |
+   | whole corpus, template backend | 89.4% | **68.6%** |
 
-   The dragon is a clear win. The pegasus trades "static but clean" for
-   "animated but shedding a tenth of itself", which is not obviously better. The
-   classification is still right — a pegasus is a creature — so the fix belongs
-   in `_creature`: find the spine, the head end and the leg pairs from the
-   silhouette the way `_humanoid` now finds the neck and the hips. Start by
-   finding which part of the pegasus rig sheds; the wings are the obvious
-   suspect, since they are currently swallowed into `body`.
+   Every creature in the corpus now sheds nothing on any animation, with no
+   other asset changed. What is NOT done: the pegasus's **wings** are still
+   swallowed into `body`, because a silhouette cannot tell a wing from a
+   shoulder. The vision backend finds them. That may simply be the honest
+   division of labour between the two backends.
+
 3. **Per-animation exports.** One PNG + atlas per animation, and the
    folder-per-animation ZIP (`<anim>/spritesheet.png`, `atlas.json`,
    `frames/01.png…`). Concrete parity, entirely deterministic.
