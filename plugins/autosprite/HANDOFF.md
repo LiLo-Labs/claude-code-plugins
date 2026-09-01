@@ -250,6 +250,82 @@ comes next:
 That is the whole problem stated in one subject: **the geometry works, the
 vocabulary does not.**
 
+## What was built for the new direction, and what it cost
+
+Four stages have landed, each measured on real CC0 art rather than on fixtures.
+
+**1. A channel may have its own timeline (`Lane`).** A keyframe carried a whole
+pose, so every channel of a part shared one set of instants -- and a key that
+omitted a channel was ASSERTING that channel was at rest, not that it did not
+care. Overlapping action and follow-through are exactly what that forbids:
+adding a late squash key to a swing drags the swing back to zero with it. A
+track may now carry lanes, which override the channels they name and leave the
+rest of the pose alone, so the sixteen built-in clips -- none of which uses one
+-- sample exactly as before. A test pins the three numbers from `cast`'s leg
+squash, and a second checks no clip has quietly grown a lane.
+
+Every mutator now goes through a small channel API on `Track` (`has`, `values`,
+`adjust`, `foreshorten`) rather than reaching into key dicts, so scaling,
+the squash and travel floors, the critic's edits and repair's damping all reach
+into a lane without knowing it is one.
+
+**2. Parts are addressed by what they ARE (traits and selectors).** A part's
+traits come from its role (every `accessory` is a `stalk`, every leg is a
+`support`) plus whatever the rig tags it with. A track may be addressed at
+`trait:stalk` or `name:sails` as well as at a role. When several tracks match one
+part the most specific is the base pose and the rest COMPOSE onto it, so "every
+stalk lags by a frame" adds a lag without replacing anything's authored swing.
+A track may carry a `spread`, so each matched part in turn plays the curve a
+little later -- one field, and it is a wave travelling across a wheat field, a
+chain following the link before it, and a canopy lagging its trunk.
+
+Seven subject clips use it: `turn`, `sway`, `gust`, `ripple`, `creak`,
+`flicker`, `shimmer`. A clip that ends up driving nothing is dropped with the
+missing trait named. **Measured:** `gust` and `sway`, written for trees and
+flags, drive a hero's cape with 0.00% shed and every frame distinct, because the
+vision rig called the cape an `accessory` and an accessory is a stalk.
+
+**3. Outfitting.** An item is composited into the character's art at rest and
+the composed image becomes the source. Doing it BEFORE anything else runs is
+what makes it cost nothing: the item is a rig part parented to the arm, so
+forward kinematics carries it, and every check still means what it meant --
+REST holds because the composed art IS the source, and PALETTE holds because the
+input now contains the sword's colours. Sockets are DERIVED from the rig (a hand
+is the free end of the near arm, measured rather than assumed), which is what
+makes "works with every character" true. **Measured:** a CC0 hero and a CC0
+sword by two different artists, 27 colours in and 27 out, all eight checks green.
+
+The limitation is real and stated: an item goes IN FRONT of what it hangs on,
+because compositing at rest cannot record pixels hidden at rest.
+
+**4. A channel that is not a movement (`cycle`).** A whole-numbered step along a
+part's own shading ramp. Nothing moves; the light changes and the silhouette
+does not. It is the strongest form of the palette guarantee here rather than a
+weakening of it -- a step lands on another shade of the same ramp, and every
+ramp comes from the locked source palette, so nothing can escape.
+
+**5. `--rig`, which the README had been promising.** A corrected rig could be
+previewed one clip at a time and there was no way to BUILD with it except
+re-running the rigger and hoping. That is also the path a tag travels.
+
+### Three findings from this work that are worth more than the code
+
+- **A symmetric curve wastes half its frames.** `sway` swung evenly out and
+  back; on the first caped hero it drew five different pictures out of eight,
+  and raising the amplitude changed *nothing at all*, because the amplitude was
+  never the problem -- a pendulum passes through the same angles going out and
+  coming back. `sway`, `ripple` and `bob` are now asymmetric, and a test asserts
+  it for every trait clip.
+- **An outline lives in the ramp of whatever it outlines.** Ramps are found by
+  hue and adjacency and an outline touches everything, so a brightening ramp
+  step lifts the outline with the fill and the sprite goes soft at the edges.
+  The rule is the art's darkest colour never moves and nothing steps down onto
+  it -- the darkest of the WHOLE art, not of each ramp, because a material's own
+  deepest shadow is a shade like any other.
+- **A short clip has nowhere to hide.** `bob`'s keys sat between its four frame
+  times, so the renderer sampled heights nobody chose and rounded two of them
+  together. Keys on the frame times, at whole pixels, fixed it.
+
 ## Backlog, in value order
 
 Honest and short. The easy things are gone.
