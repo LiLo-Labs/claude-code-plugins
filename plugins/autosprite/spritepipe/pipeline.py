@@ -24,6 +24,7 @@ from . import motion as motion_module
 from . import pack as pack_module
 from . import palette as palette_module
 from . import preview as preview_module
+from . import quality as quality_module
 from . import render as render_module
 from . import rig as rig_module
 from . import verify as verify_module
@@ -111,6 +112,7 @@ def make_clips(references, rigs, cutouts, animations, direction_plans, locked,
                                  % (plan.name, plan.source))
         rig = rigs[view]
         cut = cutouts[view]
+        reference = references[view] if view in references else references["side"]
         height = rig.size[1]
 
         for animation in motion_module.scale_motion(animations, height):
@@ -212,6 +214,17 @@ def build_sheet(reference_path, outdir, animations=("full",), direction_set="1",
         if longest >= 3:
             build.warn("%s holds the same frame for %d frames running; the motion "
                        "may be too small for a character this size" % (key, longest))
+
+    reference_pixels = build.references["side"].pixels
+    build.report["shed"] = {}
+    for clip in build.clips:
+        worst, index = quality_module.shed(clip.frames, reference_pixels)
+        build.report["shed"][clip.key] = {"worst": round(worst, 4), "frame": index}
+        if worst >= 0.05:
+            build.warn("%s frame %d sheds %.0f%% of the character into pixels "
+                       "detached from its body; the motion is more than this "
+                       "drawing can take at its size"
+                       % (clip.key, index, worst * 100))
 
     build.sheet = pack_module.pack(build.clips, layout=layout, padding=padding,
                                    extrude=extrude, power_of_two=power_of_two,

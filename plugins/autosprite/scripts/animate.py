@@ -16,8 +16,8 @@ import os
 import sys
 
 import _bootstrap  # noqa: F401
-from spritepipe import (cutout, ingest, motion, pack, palette, preview, props,
-                        render, rig as rig_module, stabilize)
+from spritepipe import (cutout, image, ingest, motion, pack, palette, preview,
+                        props, render, rig as rig_module, stabilize)
 
 
 def main():

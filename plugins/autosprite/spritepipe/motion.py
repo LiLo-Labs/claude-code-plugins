@@ -169,6 +169,31 @@ class Animation:
                         key[channel] = float(key[channel]) * factor
         return clone
 
+    def floored(self, min_sx=0.0, min_sy=0.0):
+        """Stop a squash from thinning the sprite below one drawable pixel.
+
+        A coin's spin squashes to a sliver at the quarter points, and a sliver
+        is the whole trick. But the sliver has to be at least a couple of pixels
+        wide: below that, nearest-neighbour sampling keeps some columns and
+        drops others, and a 16px potion does not become a thin potion, it
+        becomes a scatter of loose pixels.
+
+        Expressed as a floor on the SCALE rather than a redesign of the
+        animation, so the keyframes stay readable and a big sprite still gets
+        the full squash it was authored with.
+        """
+        if min_sx <= 0.0 and min_sy <= 0.0:
+            return self
+        clone = copy.deepcopy(self)
+        tracks = list(clone.tracks.values()) + ([clone.root] if clone.root else [])
+        for track in tracks:
+            for key in track.keys:
+                if "sx" in key:
+                    key["sx"] = max(float(key["sx"]), min_sx) if key["sx"] >= 0 else key["sx"]
+                if "sy" in key:
+                    key["sy"] = max(float(key["sy"]), min_sy) if key["sy"] >= 0 else key["sy"]
+        return clone
+
     def to_dict(self):
         return {"name": self.name, "frames": self.frames, "fps": self.fps,
                 "loop": self.loop, "easing": self.easing, "note": self.note,
@@ -451,7 +476,18 @@ def load_custom(path):
     return animations
 
 
-def scale_motion(animations, reference_height, authored_height=32.0):
-    """Rescale every animation's pixel offsets for this character's size."""
+def scale_motion(animations, reference_height, squash_floor=0.0,
+                 authored_height=32.0):
+    """Rescale every animation for this character's size.
+
+    Pixel offsets scale with the character. Squashes do not -- a squash is a
+    ratio, already size-independent -- but they take a FLOOR, because the same
+    ratio that leaves a 64px coin a nine-pixel sliver leaves a 16px potion a
+    scatter of loose pixels. `quality.deepest_squash` measures that floor on the
+    actual drawing; pass 0 to skip it.
+    """
     factor = max(0.25, float(reference_height) / float(authored_height))
-    return [animation.scaled(factor) for animation in animations]
+    scaled = [animation.scaled(factor) for animation in animations]
+    if squash_floor <= 0:
+        return scaled
+    return [animation.floored(squash_floor, squash_floor) for animation in scaled]
