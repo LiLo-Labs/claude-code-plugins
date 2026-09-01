@@ -31,6 +31,7 @@ ROLES = (
     "tail",        # trails the body with a lag
     "wing_near",
     "wing_far",
+    "shadow",      # a baked ground shadow; stays on the floor, never moves
     "prop",        # a held item; rides the near arm if one exists
     "accessory",   # hats, capes, scarves; ride the parent with a small lag
 )

@@ -622,3 +622,41 @@ def test_a_few_rows_of_leg_on_a_tiny_character_are_still_legs():
 def test_a_few_rows_of_leg_on_a_large_character_are_boots():
     built = rig_of(_humanoid_with_leg_band(48, 20, 3))
     assert any("boots" in note for note in built.notes)
+
+
+# -- a baked contact shadow is the floor, not the character ---------------
+
+def _with_shadow(gap=1):
+    art = np.zeros((20, 14, 4), dtype=np.uint8)
+    art[0:6, 4:10] = (220, 190, 160, 255)      # head
+    art[6:14, 3:11] = (60, 120, 200, 255)      # body
+    art[14:17 - gap, 4:6] = (40, 40, 60, 255)  # legs
+    art[14:17 - gap, 8:10] = (40, 40, 60, 255)
+    art[18:19, 3:11] = (25, 14, 14, 255)       # the shadow, a row below the feet
+    return art
+
+
+def test_a_strip_below_the_feet_is_a_shadow():
+    mask = image.alpha_mask(_with_shadow())
+    assert vision.find_shadow(mask) == (3, 18, 11, 19)
+
+
+def test_a_detached_piece_beside_the_character_is_not_a_shadow():
+    """A floating orb, a held-out lantern, a cape blowing clear: all separate
+    components, all part of the character, all of which must move with it."""
+    art = _with_shadow()
+    art[18:19, 3:11] = 0
+    art[2:5, 11:14] = (255, 220, 80, 255)      # an orb beside the head
+    assert vision.find_shadow(image.alpha_mask(art)) is None
+
+
+def test_a_character_in_one_piece_has_no_shadow():
+    assert vision.find_shadow(image.alpha_mask(make_fixture.prop())) is None
+
+
+def test_the_shadow_is_rigged_behind_everything_and_says_so():
+    built = rig_of(_with_shadow())
+    shadow = built.first_role("shadow")
+    assert shadow is not None
+    assert built.draw_order()[0] is shadow
+    assert any("contact shadow" in note for note in built.notes)

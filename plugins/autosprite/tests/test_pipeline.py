@@ -199,3 +199,27 @@ def test_a_face_on_walk_alternates_the_feet_and_a_profile_one_does_not(hero_path
 def test_a_face_on_build_names_the_limbs_left_and_right(hero_path, tmp_path):
     result = build(hero_path, tmp_path / "out", animations=["walk"], facing="front")
     assert result.rigs["side"].by_name("arm_left") is not None
+
+
+def test_a_baked_shadow_keeps_the_ground_line_still(tmp_path):
+    """The corpus's 16px hero stands on a five-pixel contact shadow. Rigged as
+    part of him it rides the root: five rows off the ground at the apex of a
+    jump, two per walk step, so the ground pumps along with the animation."""
+    art = image.blank(20, 14)
+    art[0:6, 4:10] = (220, 190, 160, 255)
+    art[6:14, 3:11] = (60, 120, 200, 255)
+    art[14:16, 4:6] = (40, 40, 60, 255)
+    art[14:16, 8:10] = (40, 40, 60, 255)
+    art[18:19, 3:11] = (25, 14, 14, 255)
+    path = tmp_path / "hero.png"
+    image.save(art, str(path))
+
+    result = build(str(path), tmp_path / "out", animations=["jump"])
+    assert result.rigs["side"].first_role("shadow") is not None
+    clip = next(clip for clip in result.clips if clip.name == "jump")
+    floors = set()
+    for frame in clip.frames:
+        rows = image.alpha_mask(frame).nonzero()[0]
+        floors.add(int(rows.max()))
+    assert len(floors) == 1, "the ground line moved: %s" % sorted(floors)
+    assert result.verification.ok, result.verification.report()

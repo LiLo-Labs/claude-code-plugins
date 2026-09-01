@@ -93,6 +93,10 @@ def local(part_pose, pivot):
             @ translate(-px, -py))
 
 
+# Roles that do not follow the character at all.
+GROUNDED = ("shadow",)
+
+
 def world_transforms(rig, pose):
     """{part name: 3x3 matrix} in reference-image coordinates.
 
@@ -103,6 +107,15 @@ def world_transforms(rig, pose):
     root_shift = translate(pose.dx, pose.dy)
     transforms = {}
     for part in rig.descend():
+        if part.role in GROUNDED:
+            # A baked ground shadow is not part of the character; it is the
+            # floor the character stands on, drawn into the same sprite. Riding
+            # the root would lift it fifteen rows at the apex of a jump and bob
+            # it two pixels per walk step -- the ground line pumping with the
+            # animation. It gets the identity, and stays exactly where the
+            # artist drew it.
+            transforms[part.name] = np.eye(3)
+            continue
         parent = transforms.get(part.parent, root_shift)
         transforms[part.name] = parent @ local(pose.get(part.name), part.pivot)
     return transforms

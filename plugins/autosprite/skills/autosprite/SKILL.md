@@ -158,15 +158,19 @@ What to look for, in order:
    frame, and by how much. When it says damping did NOT put the character back
    together, believe it: that is a rig problem, and re-rigging is the fix.
    `--no-repair` turns it off.
-2. **Do the feet slide?** The walk's contact frames should have a foot planted.
+2. **Does the ground line stay put?** A sprite with a baked contact shadow gets
+   a `shadow` part that never moves, so the floor stays where the artist drew
+   it while the character jumps off it. If a sprite's shadow still rides the
+   character, the rigger did not recognise it -- check the rig notes.
+3. **Do the feet slide?** The walk's contact frames should have a foot planted.
    If both feet move every frame the leg amplitudes are too large for the stride.
-3. **Does anything freeze?** The build warns when frames repeat. Vertical
+4. **Does anything freeze?** The build warns when frames repeat. Vertical
    travel is floored at one pixel so a small character's bob cannot round away,
    but the limb amplitudes still can; scale the motion up with a custom
    animation rather than upscaling the art.
-4. **Does the near limb read as in front?** If the far arm is drawn over the
+5. **Does the near limb read as in front?** If the far arm is drawn over the
    torso, near and far are swapped -- pass the other `--facing`.
-5. **Is the character looking at you?** If it is drawn face-on, `--facing front`
+6. **Is the character looking at you?** If it is drawn face-on, `--facing front`
    (or `back`) is not cosmetic. It draws both limbs of each pair in front of the
    torso, names them left and right instead of near and far, and trades every
    clip's sideways limb swing for a lift, because a leg walking towards the

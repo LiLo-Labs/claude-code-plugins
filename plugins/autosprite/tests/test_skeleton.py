@@ -72,3 +72,17 @@ def test_scale_is_applied_about_the_pivot_too():
 
 def test_an_unposed_part_reports_rest():
     assert skeleton.Pose().get("anything").angle == 0.0
+
+
+def test_a_shadow_never_moves_however_far_the_character_does():
+    """A baked ground shadow is the floor drawn into the sprite. Riding the root
+    lifts it off the ground at the apex of a jump and bobs it with every step,
+    so the ground line pumps along with the animation."""
+    parts = [R.Part("torso", "torso", (0, 0, 10, 14), None, (5, 14)),
+             R.Part("shadow", "shadow", (2, 15, 8, 16), "torso", (5, 16))]
+    rig = R.Rig((10, 16), parts, "humanoid", "right", anchor=(5, 16))
+    pose = skeleton.Pose(dx=3.0, dy=-9.0)
+    pose.set("torso", skeleton.PartPose(angle=20.0))
+    transforms = skeleton.world_transforms(rig, pose)
+    assert np.allclose(transforms["shadow"], np.eye(3))
+    assert not np.allclose(transforms["torso"], np.eye(3))

@@ -30,7 +30,7 @@ from . import rig as rig_module
 
 # Draw order by role. Far limbs behind the body, near limbs in front of it.
 Z_BY_ROLE = {
-    "wing_far": -2, "arm_far": -1, "leg_far": 0, "body": 1, "torso": 1,
+    "shadow": -3, "wing_far": -2, "arm_far": -1, "leg_far": 0, "body": 1, "torso": 1,
     "leg_near": 2, "tail": 2, "head": 3, "accessory": 4, "arm_near": 5,
     "prop": 6, "wing_near": 6,
 }
@@ -134,6 +134,31 @@ def _bbox(spans):
     ys = [span[0] for span in spans]
     return (min(span[1] for span in spans), min(ys),
             max(span[2] for span in spans), max(ys) + 1)
+
+
+def find_shadow(mask, keep=0.15):
+    """A piece of art lying below the character's feet is the floor, not them.
+
+    Sprite packs bake contact shadows in constantly, and a shadow rigged as part
+    of the character is worse than one rigged as nothing: it rides the root, so
+    it lifts off the ground at the apex of a jump and bobs with every walk step,
+    and the ground line pumps along with the animation. Given its own part it
+    simply stays where it was drawn.
+
+    Only what is BELOW the body counts. A detached cape, a floating orb, a
+    held-out lantern are all separate components too, and all of them belong to
+    the character and should move with it.
+    """
+    body = body_mask(mask, keep)
+    loose = mask & ~body
+    if not loose.any():
+        return None
+    rows, columns = np.nonzero(loose)
+    body_rows = np.nonzero(body.any(axis=1))[0]
+    if not body_rows.size or int(rows.min()) < int(body_rows.max()):
+        return None
+    return (int(columns.min()), int(rows.min()),
+            int(columns.max()) + 1, int(rows.max()) + 1)
 
 
 def find_crown(mask, share=0.35):
@@ -526,6 +551,16 @@ class TemplateBackend(Backend):
         parts, notes = builder(mask, width, height, facing)
         if notes_from_class:
             notes.insert(0, notes_from_class)
+
+        shadow = find_shadow(mask)
+        if shadow is not None and parts:
+            root = next((p for p in parts if p.parent is None), parts[0])
+            parts.append(rig_module.Part(
+                "shadow", "shadow", shadow, root.name,
+                ((shadow[0] + shadow[2]) // 2, shadow[3])))
+            notes.append("there is a contact shadow drawn below the feet; it is "
+                         "rigged as ground and stays put, rather than riding the "
+                         "character up into the air")
 
         for part in parts:
             part.z = Z_BY_ROLE.get(part.role, 1)

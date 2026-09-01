@@ -9,7 +9,7 @@ again.
 The pipeline is sound and proven on real art. **20 CC0 sprites** (16×16 to
 76×81; humanoids, creatures, props, and four cases chosen to break a silhouette
 rigger) all build, with all seven verification checks passing on both backends.
-396 tests, no network or model in any of them.
+402 tests, no network or model in any of them.
 
 Quality, measured as **debris** — the share of a frame's pixels not connected to
 its main blob, against the source's own figure:
@@ -20,13 +20,18 @@ its main blob, against the source's own figure:
 | after quadrupeds read their legs as columns | 68.6% |
 | after the automatic repair | **44.3%** |
 
-Fifteen of the twenty sprites now shed nothing on any animation. What is left
-is three characters and one prop: `grafxkid-oldhero` (1.3% on jump),
-`platformer-grass-prowne` (15.4% on jump, an 8-pixel-wide character whose limbs
-are 2 pixels across), and `props-potion-funnydude` (15.8% on spin, the cork
-coming off as the neck vanishes mid-squash). All three are reported by name,
-frame and part in the build's `repairs`, and all three are rig problems rather
-than motion problems -- the repair says so itself.
+**Eighteen of the twenty sprites now shed nothing on any animation.** What is
+left is one character and one prop: `platformer-grass-prowne` (15.4% on jump,
+an 8-pixel-wide character whose limbs are 2 pixels across) and
+`props-potion-funnydude` (23.8% on spin, the cork coming off as the 2px neck
+vanishes mid-squash). Both are reported by name, frame and part in the build's
+`repairs`, and the repair says of both that damping cannot fix them.
+
+Note that the corpus comparison harness had a bug worth remembering: it took
+the debris baseline from the RAW png, background and all, so a sprite drawn in
+two pieces was scored against a baseline of zero. Any figure measured before
+that was fixed is inflated for `grafxkid-oldhero`, the only corpus sprite the
+bug touched.
 
 `scripts/build.py` warns per clip which frame sheds most, so a regression
 announces itself.
@@ -105,7 +110,29 @@ worth fixing:
    Still open in this theme: the head box that reaches the image edge because a
    raised weapon is inside it. The weapon wants its own `prop` part parented to
    an arm, which the silhouette cannot find and the vision backend can.
-4. **Props rigged as bodies.** The sword's `hilt` is tagged `body` while
+4. ~~**A baked contact shadow rides the character.**~~ **Done.** Not from the
+   audit but from a parallel investigation, and the same shape of bug: the 16px
+   hero stands on a five-pixel shadow a row below his boots, and rigged as part
+   of him it rode the root -- five rows off the ground at the apex of a jump,
+   two per walk step, with the ground line pumping along with the animation.
+   Worse, both leg boxes reached the bottom of the image, so the shadow was
+   split between two counter-rotating legs and torn in half.
+
+   `find_shadow` now recognises a component lying below the character's feet
+   (and only below: a floating orb or a held-out lantern is a separate
+   component too, and belongs to the character), and gives it a `shadow` part
+   that `world_transforms` hands the identity. It stays exactly where the
+   artist drew it. Measured: the character's lowest row is now the same in
+   every frame of every clip, where it moved five rows across a jump before,
+   and his worst clip went 1.3% -> 0.2%.
+
+   The first attempt is worth not repeating: giving the split piece wholly to
+   the two legs' nearest common ancestor, the torso, does keep it in one piece
+   -- and then it rides the torso instead, which measured WORSE on three of his
+   five clips (-0.1% -> 3.3%, -0.3% -> 2.8%, -0.6% -> 3.7%). A shadow does not
+   want a better owner, it wants not to move.
+
+5. **Props rigged as bodies.** The sword's `hilt` is tagged `body` while
    `blade`, the bulk of the sprite, is tagged `prop` -- the split is inverted.
    The potion's `flask` box fully contains `bowl` and `neck`. These come from
    the VISION backend, not the template one.
