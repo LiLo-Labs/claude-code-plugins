@@ -106,6 +106,15 @@ def build_rigs(references, backend, character_class="auto", facing="right",
     return rigs, cutouts
 
 
+def _plain(selector):
+    """A selector as something to say out loud in a build report."""
+    if selector.startswith("trait:"):
+        return "anything that is a %s" % selector[len("trait:"):]
+    if selector.startswith("name:"):
+        return "the part called %r" % selector[len("name:"):]
+    return "the %s" % selector
+
+
 def union_palette(references):
     """One palette across every view, so all directions share the guarantee."""
     import numpy as np
@@ -256,6 +265,22 @@ def build_sheet(reference_path, outdir, animations=("full",), direction_set="1",
                 raise ValueError("%s: %s" % (clone.name, "; ".join(problems)))
             retimed.append(clone)
         chosen = retimed
+
+    side_rig = build.rigs["side"]
+    drivable = [animation for animation in chosen if animation.drives(side_rig)]
+    for animation in chosen:
+        if animation not in drivable:
+            build.warn("%s was not written: it moves %s, and this subject has "
+                       "no such part. Tag one in the rig file, or pick a "
+                       "different animation"
+                       % (animation.name,
+                          " or ".join(_plain(selector)
+                                      for selector in animation.missing(side_rig))))
+    if not drivable:
+        raise ValueError(
+            "none of the chosen animations moves anything on this rig: %s"
+            % ", ".join(animation.name for animation in chosen))
+    chosen = drivable
 
     plans = directions_module.plan(direction_set, build.references)
     build.report["directions"] = [plan.to_dict() for plan in plans]

@@ -1062,9 +1062,47 @@ def _denormalise_point(point, width, height):
     return (int(max(0, min(round(x), width))), int(max(0, min(round(y), height))))
 
 
+class FileBackend(Backend):
+    """A rig read from a JSON file, so a CORRECTED rig can be built with.
+
+    The rig is the one artefact in the pipeline a model has an opinion about,
+    and the README's whole claim about it is that a human can fix it in ten
+    seconds by editing one line of JSON. That claim was not true end to end:
+    a rig could be edited and previewed one clip at a time, and the only way to
+    build a sheet was to re-run the rigger and hope it landed on the same
+    answer. It is the path a tag has to travel too -- tagging a windmill's
+    sails `spinner` is exactly the one-line edit that turns a house that bobs
+    into a windmill that turns.
+
+    It refuses a rig for a different picture rather than building a wrong
+    sheet: a rig is a set of boxes in one image's coordinates and means nothing
+    against another.
+    """
+
+    def __init__(self, path):
+        self.path = str(path)
+        self.actor = "file:%s" % os.path.basename(self.path)
+
+    def rig(self, reference, character_class="auto", facing="right", intent=""):
+        built = rig_module.Rig.load(self.path)
+        height, width = reference.pixels.shape[:2]
+        if tuple(built.size) != (width, height):
+            raise ValueError(
+                "%s is a rig for a %dx%d image, but this one works out at %dx%d "
+                "-- a rig's boxes are coordinates in one picture and mean "
+                "nothing in another"
+                % (self.path, built.size[0], built.size[1], width, height))
+        built.notes = list(built.notes) + ["rig read from %s, not inferred"
+                                           % self.path]
+        return built
+
+
 def make_backend(name, workdir, model="claude-opus-5"):
     if name in ("template", "none", "deterministic"):
         return TemplateBackend()
     if name in ("claude", "headless", "vision"):
         return HeadlessBackend(workdir, model=model)
-    raise ValueError("unknown rig backend %r (template | claude)" % name)
+    if os.path.exists(name):
+        return FileBackend(name)
+    raise ValueError("unknown rig backend %r (template | claude | a path to a "
+                     "rig.json)" % name)

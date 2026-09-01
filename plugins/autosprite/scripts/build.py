@@ -35,8 +35,14 @@ def main():
     parser.add_argument("--kind", default="character", choices=("character", "prop"),
                         help="props rig as one piece and use the prop animations")
 
-    parser.add_argument("--backend", default="template", choices=("template", "claude"),
-                        help="template rigs from the silhouette; claude looks at the art")
+    parser.add_argument("--backend", default="template",
+                        help="template rigs from the silhouette; claude looks "
+                             "at the art; a path to a rig.json builds with that "
+                             "rig exactly as written")
+    parser.add_argument("--rig", help="build with this rig file instead of "
+                                      "inferring one. The same as passing it to "
+                                      "--backend, and the way to use a rig you "
+                                      "have corrected or tagged by hand")
     parser.add_argument("--model", default="claude-opus-5")
     parser.add_argument("--class", dest="character_class", default="auto",
                         choices=("auto", "humanoid", "creature", "prop"))
@@ -99,7 +105,8 @@ def main():
         build = pipeline.build_sheet(
             args.input, args.out,
             animations=[a.strip() for a in args.animations.split(",") if a.strip()],
-            direction_set=args.directions, backend=args.backend, model=args.model,
+            direction_set=args.directions, backend=args.rig or args.backend,
+            model=args.model,
             character_class=args.character_class, facing=args.facing,
             intent=args.intent, name=args.name, layout=args.layout,
             padding=args.padding, extrude=args.extrude, scale=args.scale,

@@ -39,6 +39,20 @@ class PartPose:
                         self.sx * keep + other.sx * amount,
                         self.sy * keep + other.sy * amount)
 
+    def compose(self, other):
+        """This pose with `other`'s DEPARTURE FROM REST applied on top.
+
+        Rest is angle 0, no translation, scale 1, so composing is adding the
+        rotations and translations and multiplying the squashes. That is
+        already how a root track folds into the root part; it is now also how a
+        trait-addressed layer folds into a role-addressed base, which is what
+        lets "every stalk trails by a frame" be one line that leaves each
+        part's own swing alone.
+        """
+        return PartPose(self.angle + other.angle,
+                        self.dx + other.dx, self.dy + other.dy,
+                        self.sx * other.sx, self.sy * other.sy)
+
     def __repr__(self):
         return "PartPose(angle=%.1f, d=(%.1f, %.1f), s=(%.2f, %.2f))" % (
             self.angle, self.dx, self.dy, self.sx, self.sy)

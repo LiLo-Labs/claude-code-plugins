@@ -668,3 +668,136 @@ def test_a_broken_root_track_is_reported_rather_than_ignored():
     """The root track was validated by nothing at all until lanes arrived."""
     bad = {"name": "x", "frames": 4, "root": [{"dy": -2.0}]}
     assert any("no t" in problem for problem in motion.validate_animation(bad))
+
+
+# ---------------------------------------------------------------------------
+# Selectors: addressing parts by what they ARE, not by a humanoid role name.
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def windmill_rig():
+    """A subject with no humanoid part in it at all.
+
+    Four sails on a hub, listed clockwise, tagged `spinner` -- a trait no role
+    in the thirteen-name enum carries, which is exactly why the enum could not
+    animate this building except by bobbing the whole house.
+    """
+    return R.Rig((16, 16), [
+        R.Part("tower", "body", (4, 4, 12, 16), None, (8, 15), 0),
+        R.Part("sail_n", "accessory", (7, 1, 9, 6), "tower", (8, 6), 1, tags=("spinner",)),
+        R.Part("sail_e", "accessory", (9, 5, 14, 7), "tower", (8, 6), 1, tags=("spinner",)),
+        R.Part("sail_s", "accessory", (7, 6, 9, 11), "tower", (8, 6), 1, tags=("spinner",)),
+        R.Part("sail_w", "accessory", (2, 5, 7, 7), "tower", (8, 6), 1, tags=("spinner",)),
+    ])
+
+
+def test_a_trait_track_drives_every_part_that_has_the_trait(windmill_rig):
+    turn = motion.Animation("turn", 4, tracks={
+        "trait:spinner": [{"t": 0.0, "angle": 0.0}, {"t": 0.5, "angle": 180.0}]})
+    pose = turn.pose_at(windmill_rig, 0.5)
+    assert [round(pose.get(name).angle) for name in
+            ("sail_n", "sail_e", "sail_s", "sail_w")] == [180, 180, 180, 180]
+    assert pose.get("tower").angle == 0.0      # the tower is not a spinner
+
+
+def test_a_name_selector_drives_exactly_one_part(windmill_rig):
+    animation = motion.Animation("one", 4, tracks={
+        "name:sail_e": [{"t": 0.0, "angle": 40.0}]})
+    pose = animation.pose_at(windmill_rig, 0.0)
+    assert pose.get("sail_e").angle == 40.0
+    assert pose.get("sail_n").angle == 0.0
+
+
+def test_a_spread_makes_one_track_a_travelling_wave(windmill_rig):
+    """The mechanism behind wheat bending in sequence and a chain following
+    the link before it: each matched part plays the same curve a bit later."""
+    wave = motion.Animation("wave", 4, tracks={
+        "trait:spinner": {"keys": [{"t": 0.0, "angle": 0.0},
+                                   {"t": 0.5, "angle": 20.0}],
+                          "spread": 0.25}})
+    pose = wave.pose_at(windmill_rig, 0.5)
+    angles = [pose.get(name).angle for name in
+              ("sail_n", "sail_e", "sail_s", "sail_w")]
+    assert angles[0] == pytest.approx(20.0)           # at its peak
+    assert angles[2] == pytest.approx(0.0)            # half a cycle behind
+    assert len(set(round(a, 3) for a in angles)) > 1  # not lockstep
+
+
+def test_a_role_track_is_the_base_and_a_trait_track_composes_onto_it(humanoid_rig):
+    """The ordering that makes a broad statement safe to write. A lag applied
+    to every limb must leave each limb's own authored swing alone."""
+    animation = motion.Animation("both", 4, tracks={
+        "arm_near": [{"t": 0.0, "angle": 30.0}],
+        "trait:limb": [{"t": 0.0, "angle": 5.0}]})
+    pose = animation.pose_at(humanoid_rig, 0.0)
+    assert pose.get("arm_near").angle == pytest.approx(35.0)
+    assert pose.get("leg_near").angle == pytest.approx(5.0)
+
+
+def test_a_name_selector_outranks_a_role_track(windmill_rig):
+    animation = motion.Animation("both", 4, tracks={
+        "name:sail_n": [{"t": 0.0, "angle": 90.0, "sx": 2.0}],
+        "accessory": [{"t": 0.0, "angle": 10.0, "sx": 3.0}]})
+    pose = animation.pose_at(windmill_rig, 0.0)
+    # Rotations add and squashes multiply whichever way round they compose, so
+    # what specificity decides is only which one is the base -- and the answer
+    # has to be the same every run, whatever order the dict happens to iterate.
+    assert pose.get("sail_n").angle == pytest.approx(100.0)
+    assert pose.get("sail_n").sx == pytest.approx(6.0)
+
+
+def test_composing_layers_does_not_depend_on_dictionary_order(windmill_rig):
+    """Two trait tracks match the same part; the result must be stable."""
+    first = motion.Animation("a", 4, tracks={
+        "trait:spinner": [{"t": 0.0, "angle": 7.0}],
+        "trait:socket": [{"t": 0.0, "angle": 3.0}]})
+    second = motion.Animation("a", 4, tracks={
+        "trait:socket": [{"t": 0.0, "angle": 3.0}],
+        "trait:spinner": [{"t": 0.0, "angle": 7.0}]})
+    assert first.pose_at(windmill_rig, 0.0).get("sail_n").angle == \
+        second.pose_at(windmill_rig, 0.0).get("sail_n").angle
+
+
+def test_a_trait_is_a_property_of_the_role_and_of_the_tags():
+    part = R.Part("cape", "accessory", (0, 0, 4, 8), tags=("cloth",))
+    assert part.has_trait("stalk")     # every accessory rides with a lag
+    assert part.has_trait("socket")
+    assert part.has_trait("cloth")     # ... and this rig said so explicitly
+    assert not part.has_trait("limb")
+
+
+def test_tags_survive_a_rig_being_written_out_and_read_back():
+    part = R.Part("sails", "accessory", (0, 0, 8, 8), tags=("spinner",))
+    assert R.Part.from_dict(json.loads(json.dumps(part.to_dict()))).tags == ("spinner",)
+
+
+def test_a_rig_without_tags_does_not_grow_a_tags_field():
+    """A rig file that gained an empty key on every part would be a diff on
+    every rig anyone has already saved."""
+    assert "tags" not in R.Part("head", "head", (0, 0, 4, 4)).to_dict()
+
+
+def test_a_trait_that_is_not_a_trait_is_reported():
+    bad = {"name": "x", "frames": 4,
+           "tracks": {"trait:wobbly": [{"t": 0.0, "angle": 1.0}]}}
+    assert any("is not a trait" in problem
+               for problem in motion.validate_animation(bad))
+
+
+def test_a_selector_track_validates_and_round_trips():
+    document = {"name": "turn", "frames": 8, "tracks": {
+        "trait:spinner": {"keys": [{"t": 0.0, "angle": 0.0},
+                                   {"t": 0.5, "angle": 180.0}], "spread": 0.1}}}
+    assert motion.validate_animation(document) == []
+    restored = motion.Animation.from_dict(document)
+    assert restored.tracks["trait:spinner"].spread == pytest.approx(0.1)
+    assert restored.to_dict()["tracks"]["trait:spinner"]["spread"] == pytest.approx(0.1)
+
+
+def test_a_spread_of_a_whole_cycle_is_refused():
+    """A spread of 1 is a spread of 0 with extra steps, and a spread above it
+    reads as frames rather than as a fraction -- the mistake worth catching."""
+    bad = {"name": "x", "frames": 4, "tracks": {
+        "trait:limb": {"keys": [{"t": 0.0, "angle": 1.0}], "spread": 2}}}
+    assert any("fraction of the cycle" in problem
+               for problem in motion.validate_animation(bad))

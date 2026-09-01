@@ -122,7 +122,7 @@ class Lane:
 class Track:
     """Keyframes for one role, as a list of {"t": float, <channel>: value}."""
 
-    def __init__(self, keys=None, easing="smooth", lanes=None):
+    def __init__(self, keys=None, easing="smooth", lanes=None, spread=0.0):
         self.keys = sorted((dict(key) for key in keys or ()),
                            key=lambda key: float(key["t"]))
         self.easing = easing
@@ -143,6 +143,12 @@ class Track:
         if not self.keys:
             # Lane-only: every channel a lane does not name holds at rest.
             self.keys = [{"t": 0.0}]
+        # When this track addresses several parts at once, how much later each
+        # one in turn plays it, in normalised time. Zero is lockstep. A nonzero
+        # spread is the whole mechanism behind a travelling wave: the wheat at
+        # the far side of the field bends after the wheat at the near side, and
+        # a chain of segments follows the one before it.
+        self.spread = float(spread)
 
     def has(self, channel):
         """Whether this track says anything at all about one channel."""
@@ -260,13 +266,18 @@ class Track:
         return [dict(key) for key in self.keys]
 
     def to_dict(self):
-        """The serialisable form. A plain list when there are no lanes, so
-        every animation written before lanes existed round-trips unchanged."""
-        if not self.lanes:
+        """The serialisable form. A plain list when there is nothing but pose
+        keys, so every animation written before lanes existed round-trips
+        unchanged."""
+        if not self.lanes and not self.spread:
             return self.to_list()
-        return {"keys": self.to_list(),
-                "lanes": {channel: lane.to_list()
-                          for channel, lane in self.lanes.items()}}
+        document = {"keys": self.to_list()}
+        if self.lanes:
+            document["lanes"] = {channel: lane.to_list()
+                                 for channel, lane in self.lanes.items()}
+        if self.spread:
+            document["spread"] = self.spread
+        return document
 
     @classmethod
     def of(cls, data, easing="smooth"):
@@ -275,8 +286,32 @@ class Track:
             return data
         if isinstance(data, dict):
             return cls(data.get("keys"), data.get("easing", easing),
-                       data.get("lanes"))
+                       data.get("lanes"), data.get("spread", 0.0))
         return cls(data, easing)
+
+
+def select(rig, selector):
+    """The parts a track selector addresses, in the rig's own declaration order.
+
+    Order matters: it is the order a `spread` plays them in, so a rigger who
+    lists a windmill's four sails clockwise gets a wave that travels clockwise.
+    """
+    if selector.startswith("name:"):
+        wanted = selector[len("name:"):]
+        return [part for part in rig.parts if part.name == wanted]
+    if selector.startswith("trait:"):
+        wanted = selector[len("trait:"):]
+        return [part for part in rig.parts if part.has_trait(wanted)]
+    return [part for part in rig.parts if part.role == selector]
+
+
+def specificity(selector):
+    """Lower is more specific. One part beats one role beats a whole trait."""
+    if selector.startswith("name:"):
+        return 0
+    if selector.startswith("trait:"):
+        return 2
+    return 1
 
 
 def _key_pose(key):
@@ -320,14 +355,49 @@ class Animation:
         return [index / divisor for index in range(self.frames)]
 
     def pose_at(self, rig, t):
-        """Resolve every role track onto the rig's actual parts."""
+        """Resolve every track onto the rig's actual parts.
+
+        A track is addressed by a SELECTOR, of which a bare role name is the
+        commonest and the only one the built-in library uses:
+
+            "leg_near"        the parts with that role
+            "name:sails"      one part, by name
+            "trait:stalk"     every part that trails from a fixed base
+
+        When more than one track matches a part, the most specific one is the
+        base pose and the rest COMPOSE onto it -- their rotations add, their
+        squashes multiply. That ordering is what makes a broad statement safe
+        to write: "every stalk lags by a frame" leaves each part's own authored
+        swing intact and adds the lag, rather than replacing the swing with it.
+        Specificity is name, then role, then trait, and ties break on the
+        selector text so the result never depends on dictionary order.
+        """
         pose = Pose()
         if self.flip_from is not None:
             pose.flip = t >= float(self.flip_from)
+
+        # Resolve each selector once, not once per part.
+        matched = {selector: {part.name: index for index, part
+                              in enumerate(select(rig, selector))}
+                   for selector in self.tracks}
         for part in rig.parts:
-            track = self.tracks.get(part.role)
-            if track is not None:
-                pose.set(part.name, track.sample(t, self.loop))
+            layers = []
+            for selector in sorted(self.tracks):
+                index = matched[selector].get(part.name)
+                if index is None:
+                    continue
+                track = self.tracks[selector]
+                layers.append((specificity(selector), selector,
+                               track.sample(self._shifted(t, index, track.spread),
+                                            self.loop)))
+            if not layers:
+                continue
+            layers.sort(key=lambda layer: layer[:2])
+            result = layers[0][2]
+            for _, _, extra in layers[1:]:
+                result = result.compose(extra)
+            pose.set(part.name, result)
+
         if self.root is not None:
             whole = self.root.sample(t, self.loop)
             pose.dx, pose.dy = whole.dx, whole.dy
@@ -336,15 +406,47 @@ class Animation:
             # `die` a single line of keyframes instead of one per limb.
             root_part = rig.root
             if root_part is not None and (whole.angle or whole.sx != 1.0 or whole.sy != 1.0):
+                # The root's own translation is the WHOLE character's and has
+                # already been taken above, so only the rotation and squash
+                # compose onto the root part.
                 existing = pose.get(root_part.name)
-                pose.set(root_part.name,
-                         PartPose(existing.angle + whole.angle,
-                                  existing.dx, existing.dy,
-                                  existing.sx * whole.sx, existing.sy * whole.sy))
+                pose.set(root_part.name, existing.compose(
+                    PartPose(whole.angle, 0.0, 0.0, whole.sx, whole.sy)))
         return pose
+
+    def _shifted(self, t, index, spread):
+        """When part `index` of a matched set plays a track that spreads.
+
+        Each part in turn plays the same curve a little later, which is a
+        travelling wave when the parts are laid out in a line and
+        follow-through when they are a chain.
+        """
+        if not spread or not index:
+            return t
+        moment = t - index * spread
+        return moment % 1.0 if self.loop else max(0.0, min(1.0, moment))
 
     def poses(self, rig):
         return [self.pose_at(rig, t) for t in self.times()]
+
+    def drives(self, rig):
+        """Whether this clip moves anything at all on this rig.
+
+        A clip addressed at a trait the subject does not have moves nothing, and
+        a clip that moves nothing renders as N copies of the rest pose. That is
+        not an error -- `sway` on a coin is a reasonable thing to ask for and a
+        reasonable thing to be told no about -- but shipping it as a row of
+        identical frames would be a silent lie, so the build drops it and says
+        which trait was missing.
+        """
+        if self.root is not None:
+            return True
+        return any(select(rig, selector) for selector in self.tracks)
+
+    def missing(self, rig):
+        """The selectors this clip addresses that this rig has nothing for."""
+        return sorted(selector for selector in self.tracks
+                      if not select(rig, selector))
 
     def resampled(self, frames):
         """The same motion, drawn at a different number of frames.
@@ -530,11 +632,21 @@ def validate_animation(data):
     if not tracks and not data.get("root"):
         problems.append("no tracks and no root track: every frame would be identical")
 
-    from .rig import ROLES
-    for role, track in tracks.items():
-        if role not in ROLES:
-            problems.append("track %r is not a rig role (%s)" % (role, ", ".join(ROLES)))
-        problems.extend(_track_problems("track %r" % role, track))
+    from .rig import ROLES, TRAITS
+    for selector, track in tracks.items():
+        if selector.startswith("name:"):
+            if not selector[len("name:"):]:
+                problems.append("track 'name:' names no part")
+        elif selector.startswith("trait:"):
+            trait = selector[len("trait:"):]
+            if trait not in TRAITS:
+                problems.append("track %r is not a trait (%s)"
+                                % (selector, ", ".join(TRAITS)))
+        elif selector not in ROLES:
+            problems.append("track %r is not a rig role (%s) and is not a "
+                            "'name:' or 'trait:' selector"
+                            % (selector, ", ".join(ROLES)))
+        problems.extend(_track_problems("track %r" % selector, track))
     if data.get("root") is not None:
         problems.extend(_track_problems("the root track", data["root"]))
     return problems
@@ -543,9 +655,10 @@ def validate_animation(data):
 def _track_problems(label, track):
     """Both serialised forms of a track: a bare key list, or keys plus lanes."""
     problems = []
-    lanes = {}
+    lanes, spread = {}, 0.0
     if isinstance(track, dict):
         lanes = track.get("lanes") or {}
+        spread = track.get("spread", 0.0)
         if not isinstance(lanes, dict):
             return ["%s has lanes that are not an object" % label]
         track = track.get("keys") or []
@@ -553,6 +666,12 @@ def _track_problems(label, track):
             return ["%s has no keyframes" % label]
     elif not isinstance(track, list) or not track:
         return ["%s has no keyframes" % label]
+
+    if isinstance(spread, (int, float)) and not 0.0 <= float(spread) < 1.0:
+        problems.append("%s has spread=%r; it is a fraction of the cycle, so it "
+                        "must be at least 0 and less than 1" % (label, spread))
+    elif not isinstance(spread, (int, float)):
+        problems.append("%s has spread=%r, which is not a number" % (label, spread))
 
     for key in track:
         if not isinstance(key, dict) or "t" not in key:
@@ -1071,18 +1190,41 @@ def get(name):
 
 
 def resolve(names):
-    """Expand preset-set names and animation names into a list of Animations."""
+    """Expand preset-set names and animation names into a list of Animations.
+
+    Falls through to the subject library in `props` for anything this one does
+    not have, because the two are not really separate catalogues any more. A
+    `gust` is written against the `stalk` trait, and a hero's cape is a stalk;
+    refusing to run it on a character because it was filed under props would be
+    an accident of where the table lives. A clip that ends up driving nothing
+    is dropped by the build with a reason, so the fallthrough cannot quietly
+    ship a row of identical frames.
+    """
+    from . import props as props_module
+    return _resolve(names, PRESET_SETS, LIBRARY, props_module)
+
+
+def _resolve(names, presets, library, other):
     wanted = []
     for name in names:
-        if name in PRESET_SETS:
-            wanted.extend(PRESET_SETS[name])
+        if name in presets:
+            wanted.extend(presets[name])
+        elif name in other.PRESET_SETS and name not in library:
+            wanted.extend(other.PRESET_SETS[name])
         else:
             wanted.append(name)
     seen, out = set(), []
     for name in wanted:
-        if name not in seen:
-            seen.add(name)
-            out.append(get(name))
+        if name in seen:
+            continue
+        seen.add(name)
+        if name in library:
+            out.append(library[name])
+        elif name in other.LIBRARY:
+            out.append(other.LIBRARY[name])
+        else:
+            raise KeyError("no animation %r; have %s"
+                           % (name, ", ".join(sorted(set(library) | set(other.LIBRARY)))))
     return out
 
 
