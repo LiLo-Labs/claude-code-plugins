@@ -827,6 +827,16 @@ Rules that decide whether this rig works or produces a broken character:
   correctly. Use "body" for anything that should simply ride its parent.
 - **Exactly one part has "parent": null.** That is the root -- torso for a
   humanoid, body for anything else. Every other part names its parent.
+- **On an inanimate object the root is its main mass**, with role "body". A
+  sword's root is its blade, not its grip; a flask's is the bowl, not the cork.
+  Getting this inverted makes the object's bulk swing as an accessory of a fake
+  body, which is exactly what it looks like. "prop" is for something a
+  CHARACTER holds, not for the parts of an object that is itself the subject.
+- **An object that does not bend gets one part.** A glass flask's neck is not a
+  joint and its rim is not an accessory: splitting a rigid thing into pieces
+  only gives them a chance to come apart. Emit the extra parts only where the
+  drawing shows something that could actually move separately -- a chest's lid,
+  a lantern's swinging handle.
 - **pivot is the joint: the point that stays still when the part rotates.**
   A shoulder, not the middle of the arm. A neck, not the middle of the head.
   It usually sits just inside the PARENT, on the edge they share.

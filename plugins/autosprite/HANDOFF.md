@@ -118,6 +118,17 @@ worth fixing:
    Still open in this theme: the head box that reaches the image edge because a
    raised weapon is inside it. The weapon wants its own `prop` part parented to
    an arm, which the silhouette cannot find and the vision backend can.
+3b. ~~**Props rigged as bodies.**~~ **Done, in the prompt.** The sword's `hilt`
+   was tagged `body` while `blade`, the bulk of the sprite, was tagged `prop` --
+   the object's main mass swinging as an accessory of a fake body. The prompt
+   now says that on an inanimate object the root is its main mass, that `prop`
+   is for something a CHARACTER holds, and that a rigid object gets one part
+   because splitting it only gives the pieces a chance to come apart. Re-rigged:
+   the sword and the flask each became a single `body` part, and the chest kept
+   exactly the one joint it has -- a hinged lid, with the lock plate as an
+   accessory. Debris unchanged, because those rigs were not what was breaking;
+   the rigs are simply now true.
+
 4. ~~**A baked contact shadow rides the character.**~~ **Done.** Not from the
    audit but from a parallel investigation, and the same shape of bug: the 16px
    hero stands on a five-pixel shadow a row below his boots, and rigged as part
@@ -153,6 +164,22 @@ twice" is **wrong about the mechanism**: `cutout` gives every pixel to exactly
 one part. It is often right about the effect and wrong about the cause, which
 is the normal failure mode of a critic that can see the picture but not the
 code.
+
+## A second rig audit, after all of the above
+
+Re-running the critic over all twenty **silhouette** rigs (the first audit was
+of the vision rigs, so the two are not comparable and no claim of improvement
+should be made from the pair) leaves one theme, said five different ways:
+
+> The rigger splits a single mass and calls the halves a pair -- a floor-length
+> robe hem, a slime, a squat 16px blob, a tunic, a cape.
+
+Three more complaints are the harness's fault rather than the rigger's: the
+chest, gem and sword were all shown a `walk`, and "a walk cycle does not apply
+to a treasure chest" is true and not a bug. One is a genuine miss the silhouette
+cannot fix: `topdown-dcss` is a cloaked humanoid whose outline is a smooth bell
+with no parting and no neck, so it rigs as a prop. The critic can see a head and
+two arms because it can see COLOUR. That is the vision backend's job.
 
 ## Backlog, in value order
 
@@ -370,6 +397,21 @@ reverted.
   torso. The critic is right that a two-row pauldron is not an arm; it is still
   a better thing to swing than an invented one, because it barely moves. Only
   the LEG half of this idea pays.
+
+- **Testing whether two paired limbs are "a matched pair".** The critic's own
+  suggestion, and it fails in an instructive direction. On five corpus
+  characters it says the same thing five ways -- a robe hem, a slime, a squat
+  blob, a tunic, a cape -- the rigger has cut ONE mass in half and called the
+  halves a pair. So compare them: area ratio, and how much palette they share.
+  Measured, the two ranges lie exactly on top of each other (area: bad
+  0.72-1.00, good 0.65-1.00; palette: bad 0.54-1.00, good 0.33-1.00), and the
+  bad cases score HIGHER on similarity, because two halves of one uniform mass
+  are the most similar pair it is possible to cut. Similarity is not just a weak
+  signal here, it points the wrong way.
+
+  This is the silhouette backend's real ceiling, and it is where the vision
+  backend earns its place: a model can see that a robe hem is a robe hem. The
+  docs already say so.
 
 - **Telling front-facing from side-facing by symmetry.** A front-on character
   is bilaterally symmetric and a profile is not, so this looks like a free
