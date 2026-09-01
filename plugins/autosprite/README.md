@@ -142,9 +142,37 @@ every clip trading its sideways swing for a lift. A leg walking towards the
 camera foreshortens; it does not sweep across the picture. `--facing front` does
 the same for a single sprite drawn that way.
 
-**Props** — bob, spin, tumble, pulse, swing. A prop rigs as one piece, which is
-never wrong, only plain — and the vision prompt now says so, because it had been
-splitting a glass flask into bowl, neck and cork, none of which is a joint.
+**Anything that is not a character** — two kinds of clip, and they are not the
+same kind of thing. `bob`, `spin`, `tumble`, `pulse` and `swing` move the sprite
+as one piece, which for a coin is not a lesser path but the right answer. The
+rest are addressed by **what a part is** rather than by a name from a
+thirteen-word humanoid vocabulary:
+
+| Clip | Addressed at | Which is |
+|---|---|---|
+| `turn` | `trait:spinner` | sails, a waterwheel, a cog, a fan |
+| `sway` | `trait:stalk` `trait:surface` | a canopy, a cape, a flag, a field of wheat |
+| `gust` | `trait:stalk` `trait:crown` | the same, hit once by the wind and settling |
+| `ripple` | `trait:surface` | water, a banner, a curtain |
+| `creak` | `trait:socket` | a shutter, a sign, a lantern hung on a building |
+
+A trait is a property a role implies (every `accessory` is a `stalk`, every leg
+is a `support`) plus anything the rig tags a part with, so a windmill's sails
+keep whatever role they were given and are tagged `spinner`. `gust` was written
+for trees and drives a hero's cape, because "fixed at its base, free at its tip"
+is true of both and `tail` is true of neither.
+
+A clip may name several parts at once and give each one a **spread** — the same
+curve, played a little later by each in turn. That single field is a travelling
+wave across a wheat field, a chain of segments following the one before it, and
+a canopy lagging its trunk.
+
+Nothing here ships a row of identical frames: a clip addressed at a trait the
+subject does not have is dropped, and the build says which trait was missing.
+
+A prop with no such part still rigs as one piece, which is never wrong, only
+plain — and the vision prompt says so, because it had been splitting a glass
+flask into bowl, neck and cork, none of which is a joint.
 
 **Two ZIPs** — `<name>-frames.zip` is every frame as a loose PNG;
 `<name>-animations.zip` is one folder per animation with its own strip, atlas and
@@ -171,6 +199,10 @@ python3 scripts/rig.py --input hero.png --out out/ --backend claude --preview
 # build
 python3 scripts/build.py --input hero.png --out out/ \
     --animations platformer --directions 4 --backend claude
+
+# fix a line of the rig -- tag the sails `spinner` -- and build with that rig
+python3 scripts/build.py --input mill.png --out out/ \
+    --rig out/mill.rig.json --animations building
 
 # iterate on one cycle without rebuilding the sheet
 python3 scripts/animate.py --input hero.png --rig out/hero.rig.json \
@@ -247,7 +279,7 @@ pip install -r requirements-test.txt
 python3 -m pytest tests -q
 ```
 
-489 tests, no network, no model, well under a minute. Fixtures are generated rather
+513 tests, no network, no model, well under a minute. Fixtures are generated rather
 than checked in — `tests/make_fixture.py` builds parametric sprites so a test can
 have the exact property it is about (arms clear of the body or touching, legs
 parted or robed) instead of one PNG having to serve every case.
