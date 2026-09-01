@@ -160,23 +160,28 @@ def _library():
              "silhouette does not. It STEPS rather than fading, and the steps "
              "are uneven on purpose: an even brighten-and-dim reads as a pulse, "
              "and a flame does not pulse. The step is a whole shade, because a "
-             "third of a shade is the same shade",
+             "third of a shade is the same shade. Rest, a small dip and a big "
+             "one alternate rather than running together, because a shallow "
+             "ramp collapses several sizes of step onto the same picture: a "
+             "four-shade flame has three states however many numbers it is "
+             "given, so the order has to guarantee that consecutive frames land "
+             "on different ones",
         tracks={"trait:glow": {"keys": [{"t": 0.0, "cycle": 0.0},
-                                        {"t": 1 / 6.0, "cycle": 1.0},
+                                        {"t": 1 / 6.0, "cycle": -1.0},
                                         {"t": 2 / 6.0, "cycle": 0.0},
-                                        {"t": 3 / 6.0, "cycle": -1.0},
+                                        {"t": 3 / 6.0, "cycle": -2.0},
                                         {"t": 4 / 6.0, "cycle": 1.0},
-                                        {"t": 5 / 6.0, "cycle": -1.0}],
+                                        {"t": 5 / 6.0, "cycle": -3.0}],
                                "spread": 1 / 6.0}})
 
     shimmer = Animation(
         "shimmer", frames=8, fps=8, loop=True,
         note="light travelling across water or glass: a slow ramp step with a "
-             "big spread, so consecutive faces catch the light one after "
-             "another rather than the whole surface flashing at once",
+             "big spread, so consecutive faces darken one after another rather "
+             "than the whole surface catching it at once",
         tracks={"trait:surface": {"keys": [{"t": step / 8.0, "cycle": value}
                                            for step, value in enumerate(
-                                               (0, 1, 2, 1, 0, -1, 0, 1))],
+                                               (0, 1, 2, 1, 0, -1, -2, -1))],
                                   "spread": 0.25}})
 
     return {animation.name: animation for animation in

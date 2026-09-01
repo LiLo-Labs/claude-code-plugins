@@ -163,6 +163,12 @@ def ramps(palette, pixels=None, hue_tolerance=28.0):
     return out
 
 
+# The share of a part's shades a single ramp step is allowed to merge away.
+# A quarter: measured, a step either way costs a well-shaded seventeen-colour
+# sprite one, and a step that crowds a four-shade flame into two costs it half.
+SHADE_LOSS = 0.25
+
+
 def ramp_steps(palette, pixels=None):
     """{colour: [the colours of its ramp, dark to light]}, for stepping along.
 
@@ -186,7 +192,7 @@ def ramp_steps(palette, pixels=None):
     return table
 
 
-def step_ramp(pixels, table, steps, keep_outline=True):
+def step_ramp(pixels, table, steps, keep_outline=True, keep_shading=True):
     """Every opaque pixel moved `steps` along its own ramp, dark to light.
 
     Clamped at both ends rather than wrapped: a highlight that brightens past
@@ -206,18 +212,52 @@ def step_ramp(pixels, table, steps, keep_outline=True):
     Note that this holds the darkest colour of the WHOLE art, not the darkest of
     each ramp: a material's own deepest shadow is a shade like any other and has
     every right to get darker.
+
+    A step never leaves the range of shades THE PART ITSELF USES. That is what
+    makes this a material operation rather than a palette one, and it does not
+    depend on the ramp finder being right. It was found on a torch: `ramps`
+    merges the fire and the timber into one ramp, because they are both hue 21
+    and they touch, so stepping the flame down two shades walked it out of the
+    fire and into the wood and the flame turned brown. Clamped to the flame's
+    own occupied span of that ramp, a step down darkens the fire and stops.
+
+    The consequence is a stronger palette claim than the module docstring makes:
+    every colour a step produces was already present IN THAT PART, not merely
+    somewhere in the art.
+
+    A step also may not COST MOST OF THE SHADES on show. Clamping at the end of a
+    ramp merges whatever is already there, and losing a shade or two is simply
+    what a ramp end looks like -- but a flat block is not a brighter version of a
+    shaded thing, it is a shaded thing with the shading deleted. The step is
+    reduced until it stops costing more than `SHADE_LOSS` of them, and reduced
+    to nothing if that is what it takes: a part whose shades are already crowded
+    at the top of its ramp cannot get much brighter without a colour the artist
+    never drew, which is the palette guarantee doing its job rather than failing
+    at it. Measured, a torch's flame sits in the top three shades of an eight
+    step ramp and can take one step up but not two.
     """
     steps = int(round(steps))
     if not steps or not table:
+        return pixels
+    if keep_shading:
+        before = _shade_count(pixels)
+        floor = before - int(before * SHADE_LOSS)
+        for size in range(abs(steps), 0, -1):
+            moved = step_ramp(pixels, table, size * (1 if steps > 0 else -1),
+                              keep_outline, keep_shading=False)
+            if _shade_count(moved) >= floor:
+                return moved
         return pixels
     out = pixels.copy()
     solid = img.alpha_mask(out)
     if not solid.any():
         return out
     outline = min(table, key=luminance) if keep_outline else None
-    for colour in np.unique(out[solid].reshape(-1, 4), axis=0):
-        key = tuple(int(v) for v in colour)
-        shades = table.get(key[:3] + (key[3],)) or table.get(key)
+    present = [tuple(int(v) for v in colour)
+               for colour in np.unique(pixels[solid].reshape(-1, 4), axis=0)]
+    spans = _spans(present, table)
+    for key in present:
+        shades = table.get(key)
         if not shades:
             continue
         try:
@@ -226,14 +266,50 @@ def step_ramp(pixels, table, steps, keep_outline=True):
             continue
         if key == outline:
             continue
-        floor = shades.index(outline) + 1 if outline in shades else 0
-        floor = min(floor, len(shades) - 1)
-        moved = shades[max(floor, min(len(shades) - 1, index + steps))]
+        low, high = spans[id(shades)]
+        if outline in shades:
+            low = max(low, shades.index(outline) + 1)
+        if low > high:
+            continue
+        moved = shades[max(low, min(high, index + steps))]
         if moved == key:
             continue
-        hit = solid & (out == colour).all(axis=2)
+        # Matched against the ORIGINAL pixels, not against `out`. Reading the
+        # array being written cascades: the first shade is rewritten as the
+        # second, the second's turn then matches both, and every shade in the
+        # ramp ends up at the top. It looked like "a step up washes the sprite
+        # out", and it survived a visual check because a washed-out sprite is a
+        # plausible thing for a brightening step to produce.
+        hit = solid & (pixels == np.array(key, dtype=np.uint8)).all(axis=2)
         out[hit] = moved
     return out
+
+
+def _spans(present, table):
+    """Per ramp, the lowest and highest index this art actually occupies.
+
+    Keyed by the ramp list's identity, which is shared by every colour in it.
+    """
+    spans = {}
+    for key in present:
+        shades = table.get(key)
+        if not shades:
+            continue
+        try:
+            index = shades.index(key)
+        except ValueError:
+            continue
+        low, high = spans.get(id(shades), (index, index))
+        spans[id(shades)] = (min(low, index), max(high, index))
+    return spans
+
+
+def _shade_count(pixels):
+    """How many distinct colours the opaque part of this art is showing."""
+    solid = img.alpha_mask(pixels)
+    if not solid.any():
+        return 0
+    return len(np.unique(pixels[solid].reshape(-1, 4), axis=0))
 
 
 def _touching_pairs(pixels, palette):

@@ -37,17 +37,28 @@ pulses, a window lights up at dusk, water catches the light — none of which is
 rotation of anything, and all of which were unsayable when the vocabulary was
 five affine scalars.
 
-It is also the strongest form of the palette guarantee in the whole plugin: a
-step lands on another shade of the *same ramp*, and every ramp is built from the
-source art's own locked palette, so there is nothing for the enforcement pass to
+It is also the strongest form of the palette guarantee in the whole plugin.
+A step lands on a shade **the part itself already uses** — not merely one that
+exists somewhere in the art — so there is nothing for the enforcement pass to
 catch because nothing can escape.
 
-One rule had to be added, and it was found on a real gem: **the art's darkest
-colour never moves, and nothing steps down onto it.** Ramps are found by hue and
-adjacency, and an outline touches everything it surrounds, so it lands in the
-ramp of whatever it outlines — and a brightening step lifts the outline with the
-fill, which is the most obvious tell in pixel art. Darkening never had the
-problem, because the outline was already at the bottom of its ramp.
+Three rules had to be added, and real art found all three:
+
+- **The art's darkest colour never moves, and nothing steps down onto it.**
+  Ramps are found by hue and adjacency, and an outline touches everything it
+  surrounds, so it lands in the ramp of whatever it outlines — and a step lifts
+  the outline with the fill, which is the most obvious tell in pixel art.
+- **A step never leaves the span of shades the part itself occupies.** A torch's
+  fire and its timber are both hue 21 and they touch, so the ramp finder makes
+  them one ramp — and stepping the flame down walked it out of the fire and into
+  the wood. The flame turned brown. Clamped to its own span, it darkens and
+  stops. This is why the guarantee above is about the *part* and not the art.
+- **A step may not cost most of the shades on show.** Clamping at the end of a
+  ramp merges what is already there; losing one shade is what a ramp end looks
+  like, and losing three of four is the shading being deleted. The step is
+  reduced until it stops costing them, and reduced to nothing if a part is
+  already crowded at the top of its ramp — which is the palette guarantee doing
+  its job rather than failing at it.
 
 ## The palette guarantee
 
@@ -350,7 +361,7 @@ pip install -r requirements-test.txt
 python3 -m pytest tests -q
 ```
 
-555 tests, no network, no model, well under a minute. Fixtures are generated rather
+559 tests, no network, no model, well under a minute. Fixtures are generated rather
 than checked in — `tests/make_fixture.py` builds parametric sprites so a test can
 have the exact property it is about (arms clear of the body or touching, legs
 parted or robed) instead of one PNG having to serve every case.
