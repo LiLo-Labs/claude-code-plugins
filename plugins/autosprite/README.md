@@ -80,6 +80,13 @@ runs against the template backend, so CI needs no model and no network.
 counts and rates are tuned per animation; both are overridable. Presets: `basic`,
 `platformer`, `topdown`, `full`.
 
+**A vision critic** — `--critic claude` shows a rendered clip to a vision model
+and asks what is wrong with the *motion*, then folds the answer back into the
+keyframes. It is the only thing here that judges whether a cycle reads, which no
+measurement in this plugin can. Every round is re-measured, and one that makes
+the character come apart is thrown away — so the model can improve how the
+motion looks and can never break the character to do it.
+
 **Custom animations** — a JSON keyframe table, validated and rendered by the
 same path as the built-ins. This is how a plain-language request ("make the walk
 look tired") becomes motion: write the keyframes, render, watch, adjust.

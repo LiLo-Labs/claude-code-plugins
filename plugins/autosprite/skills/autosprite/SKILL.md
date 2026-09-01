@@ -168,7 +168,26 @@ frames.
 ## Iterating on motion
 
 When the user says a cycle is wrong, do not rebuild the sheet. Change the
-keyframes and re-render that one clip:
+keyframes and re-render that one clip.
+
+**Try the critic first.** `--critic claude` shows the rendered clip to a vision
+model and asks what is wrong with the MOTION, then folds its answer back into
+the keyframes as deltas. It is the only thing here that judges whether a cycle
+*reads*, which is exactly what the debris measurement cannot do:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/animate.py" \
+  --input A --rig W/<name>.rig.json --animation walk --critic claude --out look/
+```
+
+Every round is re-rendered and re-measured, and one that makes the character
+come apart is thrown away, so the critic can only change how the motion reads.
+Two rounds is the default and usually enough; it stops early when it has nothing
+left to say. Read what it says out loud to the user -- its problems list is
+specific ("the staff arm reads as a detached blob", "the legs barely alternate")
+and is often the fastest route to the real complaint.
+
+If the critic is satisfied and the user is not, edit the keyframes by hand:
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/animate.py" \

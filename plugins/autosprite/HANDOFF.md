@@ -34,12 +34,22 @@ That gap is what backlog item 1 exists to close.
 
 ## Backlog, in value order
 
-1. **A vision critic loop.** Render a clip, show the contact sheet to
-   `claude -p`, ask what is wrong with the MOTION, get keyframe deltas back,
-   re-render, repeat until it stops improving. This is the only proposal on the
-   table that attacks "reads wrong", and it uses the vision backend the plugin
-   already ships. Start with `walk` on the robed necromancer and the caped hero,
-   which are the two that score clean and look loose.
+1. ~~**A vision critic loop.**~~ **Done** — `spritepipe/critic.py`, exposed as
+   `animate.py --critic claude --rounds N`. It renders the clip, shows the
+   contact sheet to `claude -p`, and folds the returned keyframe deltas back in;
+   every round is re-measured and one that makes the character come apart is
+   thrown away.
+
+   On the robed necromancer it correctly identified "the staff arm swings too
+   far and reads as a detached blob" and "the legs barely alternate", closed the
+   arms and opened the leg swing from ±26° to ±39°, and the visible result is a
+   modest improvement with shed unchanged at 0%.
+
+   **Still to do here:** it has only been run on one character. Run it across
+   the corpus, and find out whether its adjustments generalise or whether it
+   simply re-derives the same "open the legs" advice for everything. If the
+   latter, the fix is probably to feed it the animation's current keyframe table
+   alongside the picture so it can see what it is adjusting.
 2. **Bring `_creature` up to `_humanoid`.** The humanoid builder got the neck,
    shadow and mirror work; the creature builder did not, and it shows — a winged
    pegasus falls through to `prop`. It needs the same treatment: find the spine,
@@ -80,6 +90,11 @@ reverted.
 - **Joint gap** (child pixels' distance to parent pixels). Reported zero
   detachments on frames that were obviously wrong, because the debris is a
   part's own pixels scattering, not a part separating.
+- **Shed as a fine-grained score.** It is a catastrophe detector, not a dial.
+  Sweeping a leg-swing delta from -8° to +60° moves shed by at most half a
+  percentage point and in no consistent direction: -4° makes it slightly worse,
+  +60° slightly better. This is why the critic's guardrail tolerates two points
+  rather than any increase - a tighter gate rejects good adjustments at random.
 
 ## Reproducing the corpus
 

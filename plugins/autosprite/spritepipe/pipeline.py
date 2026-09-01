@@ -112,7 +112,6 @@ def make_clips(references, rigs, cutouts, animations, direction_plans, locked,
                                  % (plan.name, plan.source))
         rig = rigs[view]
         cut = cutouts[view]
-        reference = references[view] if view in references else references["side"]
         height = rig.size[1]
 
         for animation in motion_module.scale_motion(animations, height):
