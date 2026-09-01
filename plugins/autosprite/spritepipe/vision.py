@@ -36,6 +36,40 @@ Z_BY_ROLE = {
 }
 
 
+FACE_ON = ("front", "back")
+
+# Drawn face-on there is no far side, so a "far" limb is not behind anything and
+# must not be drawn behind the torso. It keeps its role, because every animation
+# and every exporter dispatches on role and the pair still has to swing in
+# counter-phase; only the depth and the name change.
+FACE_ON_Z = {"arm_far": 4, "leg_far": 2, "wing_far": 6}
+FACE_ON_NAMES = {"arm_far": "arm_left", "arm_near": "arm_right",
+                 "leg_far": "leg_left", "leg_near": "leg_right",
+                 "wing_far": "wing_left", "wing_near": "wing_right"}
+
+
+def face_on(parts, notes):
+    """Bring a sagittal rig round to face the camera.
+
+    A profile rig is built on a depth axis the picture does not have: `arm_far`
+    is drawn BEHIND the torso, which is right for a character in profile and
+    wrong for one looking at you, whose arms are both in front and both fully
+    drawn. Renaming them left and right is not cosmetic either -- a user reading
+    `arm_far` on a front-facing sprite has to guess which arm the rigger meant.
+    """
+    renamed = False
+    for part in parts:
+        if part.role in FACE_ON_Z:
+            part.z = FACE_ON_Z[part.role]
+        if part.role in FACE_ON_NAMES and part.name == part.role:
+            part.name = FACE_ON_NAMES[part.role]
+            renamed = True
+    if renamed:
+        notes.append("drawn face-on: the paired limbs are the character's left "
+                     "and right, both in front of the torso, and the animations "
+                     "trade their swing for a lift")
+
+
 # --------------------------------------------------------------------------
 # silhouette measurements the template rigger reasons from
 # --------------------------------------------------------------------------
@@ -398,13 +432,30 @@ class TemplateBackend(Backend):
         kind = character_class
         if kind == "auto":
             kind = self.classify(mask)
+        if kind == "creature" and facing in FACE_ON:
+            # `_creature` builds a SIDE-ON animal: head at the leading end, tail
+            # trailing, legs under the belly. None of that survives the camera
+            # moving round to the front, and `classify` cannot know -- it reads
+            # the silhouette, and a stocky character drawn face-on is wider than
+            # it is tall exactly like a horse. The corpus's 16px roguelike hero
+            # was rigged with its left arm as a head and its right arm as a tail.
+            kind = "humanoid"
+            notes_from_class = ("wider than tall, which usually means a side-on "
+                                "animal, but it is drawn face-on -- rigged as an "
+                                "upright character instead")
+        else:
+            notes_from_class = None
 
         builder = {"humanoid": self._humanoid, "creature": self._creature,
                    "prop": self._prop}.get(kind, self._prop)
         parts, notes = builder(mask, width, height, facing)
+        if notes_from_class:
+            notes.insert(0, notes_from_class)
 
         for part in parts:
             part.z = Z_BY_ROLE.get(part.role, 1)
+        if facing in FACE_ON:
+            face_on(parts, notes)
         built = rig_module.Rig((width, height), parts, kind, facing,
                                anchor=(width // 2, height), actor=self.actor,
                                notes=notes)

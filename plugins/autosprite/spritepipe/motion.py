@@ -169,6 +169,46 @@ class Animation:
                         key[channel] = float(key[channel]) * factor
         return clone
 
+    def fronted(self, swing=0.3, reach=1.0, lift=1.5):
+        """Rewrite a side-on clip for a character drawn face-on.
+
+        Seen from the front, a leg swinging forward is pointing at the camera.
+        It foreshortens to almost nothing, and what a viewer actually reads is
+        the foot leaving the ground. A rig built for a profile swings it 26
+        degrees across the picture instead, which is why a top-down RPG sprite
+        animated with a side-on walk looks like it is doing the splits -- the
+        complaint two of the corpus's top-down assets drew from the critic,
+        both of which measure zero debris and so are invisible to every other
+        check here.
+
+        The phase is what makes a walk read as a walk, so the phase is kept and
+        only what it DRIVES changes: the swing is damped to a fraction of
+        itself, and the part that is lost comes back as motion the camera can
+        see. A leg's swing becomes a lift, so the feet alternate off the floor;
+        an arm's becomes a sideways reach, so the arms open and close. Both
+        follow the sign of the original angle, so limbs that were in
+        counter-phase stay in counter-phase without this needing to know which
+        side of the body each one is on.
+
+        Nothing else is touched. The root bob, the torso lean, the squashes and
+        the frame timing all read the same from any angle.
+        """
+        clone = copy.deepcopy(self)
+        for role, track in clone.tracks.items():
+            if not (role.startswith("arm_") or role.startswith("leg_")):
+                continue
+            peak = max((abs(float(key.get("angle", 0.0))) for key in track.keys),
+                       default=0.0)
+            if peak <= 0.0:
+                continue
+            channel, amount = (("dy", -float(lift)) if role.startswith("leg_")
+                               else ("dx", float(reach)))
+            for key in track.keys:
+                angle = float(key.get("angle", 0.0))
+                key["angle"] = angle * float(swing)
+                key[channel] = float(key.get(channel, REST[channel])) + amount * (angle / peak)
+        return clone
+
     def floored(self, min_sx=0.0, min_sy=0.0):
         """Stop a squash from thinning the sprite below one drawable pixel.
 
@@ -192,6 +232,40 @@ class Animation:
                     key["sx"] = max(float(key["sx"]), min_sx) if key["sx"] >= 0 else key["sx"]
                 if "sy" in key:
                     key["sy"] = max(float(key["sy"]), min_sy) if key["sy"] >= 0 else key["sy"]
+        return clone
+
+    def floored_travel(self, min_pixels=1.0, limbs=False):
+        """Stop a scaled-down translation from rounding away to nothing.
+
+        `scaled` multiplies every pixel offset by the character's height over
+        the height the library was authored at, which is right, and on a small
+        sprite it is fatal: a walk's one-pixel body bob becomes half a pixel on
+        a 16px sprite, the renderer cannot draw half a pixel, and the character
+        slides along the floor instead of walking. Measured on the corpus's
+        16px roguelike, the bob was exactly **zero pixels across all eight
+        frames** -- a keyframe authored, scaled, and then silently discarded.
+
+        A squash has the same problem and takes a floor (`floored`); so does a
+        translation. Scale the channel up until its peak-to-peak reaches one
+        drawable pixel, rather than dropping it: an exaggerated bob is what a
+        pixel artist draws on a 16px character anyway.
+        """
+        if min_pixels <= 0.0:
+            return self
+        clone = copy.deepcopy(self)
+        tracks = ([clone.root] if clone.root else [])
+        if limbs:
+            tracks += list(clone.tracks.values())
+        for track in tracks:
+            for channel in ("dx", "dy"):
+                values = [float(key.get(channel, 0.0)) for key in track.keys]
+                span = max(values) - min(values)
+                if span <= 0.0 or span >= min_pixels:
+                    continue
+                factor = min_pixels / span
+                for key in track.keys:
+                    if channel in key:
+                        key[channel] = float(key[channel]) * factor
         return clone
 
     def to_dict(self):
@@ -477,7 +551,7 @@ def load_custom(path):
 
 
 def scale_motion(animations, reference_height, squash_floor=0.0,
-                 authored_height=32.0):
+                 authored_height=32.0, travel_floor=1.0):
     """Rescale every animation for this character's size.
 
     Pixel offsets scale with the character. Squashes do not -- a squash is a
@@ -487,7 +561,8 @@ def scale_motion(animations, reference_height, squash_floor=0.0,
     actual drawing; pass 0 to skip it.
     """
     factor = max(0.25, float(reference_height) / float(authored_height))
-    scaled = [animation.scaled(factor) for animation in animations]
+    scaled = [animation.scaled(factor).floored_travel(travel_floor)
+              for animation in animations]
     if squash_floor <= 0:
         return scaled
     return [animation.floored(squash_floor, squash_floor) for animation in scaled]

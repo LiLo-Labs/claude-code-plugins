@@ -455,3 +455,60 @@ def test_a_creature_whose_legs_never_part_falls_back_to_halving():
     names = {part.name for part in parts}
     assert "leg_near" in names and "leg_far" in names
     assert any("never separate" in note for note in notes)
+
+
+# -- a character drawn face-on --------------------------------------------
+
+def test_a_face_on_rig_draws_both_arms_in_front_of_the_torso():
+    """In profile the far arm is BEHIND the body, which is right there and
+    wrong for a character looking at you: both arms are drawn, both in front."""
+    built = rig_of(make_fixture.humanoid(), facing="front")
+    order = [part.role for part in built.draw_order()]
+    assert order.index("arm_far") > order.index("torso")
+    assert order.index("leg_far") > order.index("torso")
+
+
+def test_a_profile_rig_still_hides_the_far_arm():
+    built = rig_of(make_fixture.humanoid(), facing="right")
+    order = [part.role for part in built.draw_order()]
+    assert order.index("arm_far") < order.index("torso")
+
+
+def test_a_face_on_rig_names_the_limbs_left_and_right():
+    built = rig_of(make_fixture.humanoid(), facing="front")
+    names = {part.name for part in built.parts}
+    assert {"arm_left", "arm_right", "leg_left", "leg_right"} <= names
+    # The roles are untouched: every animation and every exporter reads role.
+    assert built.by_name("arm_left").role == "arm_far"
+    assert any("face-on" in note for note in built.notes)
+
+
+def test_facing_back_is_face_on_too():
+    built = rig_of(make_fixture.humanoid(), facing="back")
+    assert built.by_name("arm_left") is not None
+
+
+def test_a_face_on_rig_still_validates():
+    built = rig_of(make_fixture.humanoid(), facing="front")
+    assert R.validate(built) == []
+
+
+def test_a_face_on_character_is_never_rigged_as_a_side_on_animal():
+    """`classify` reads the silhouette, and a stocky character drawn face-on is
+    wider than it is tall exactly like a horse. The corpus's 16px roguelike hero
+    was rigged with its left arm as a head and its right arm as a tail."""
+    stocky = np.zeros((14, 16, 4), dtype=np.uint8)
+    stocky[2:10, 2:14] = (90, 120, 90, 255)     # a body wider than it is tall
+    stocky[0:4, 5:11] = (200, 170, 140, 255)    # a head
+    stocky[10:14, 3:6] = (60, 60, 70, 255)      # ... standing on two feet,
+    stocky[10:14, 10:13] = (60, 60, 70, 255)    # which is what `classify` reads
+    assert rig_of(stocky).character_class == "creature"
+    front = rig_of(stocky, facing="front")
+    assert front.character_class == "humanoid"
+    assert front.by_role("tail") == []
+    assert any("face-on" in note for note in front.notes)
+
+
+def test_a_side_on_animal_is_still_a_creature():
+    assert rig_of(make_fixture.creature(), facing="right").character_class == "creature"
+    assert rig_of(make_fixture.creature(), facing="left").character_class == "creature"

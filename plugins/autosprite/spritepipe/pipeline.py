@@ -114,7 +114,11 @@ def make_clips(references, rigs, cutouts, animations, direction_plans, locked,
         cut = cutouts[view]
         height = rig.size[1]
 
-        for animation in motion_module.scale_motion(animations, height):
+        # A character drawn face-on has no depth axis to swing limbs across, so
+        # the clips trade their swing for a lift before they are scaled.
+        chosen = ([clip.fronted() for clip in animations]
+                  if rig.facing in vision_module.FACE_ON else animations)
+        for animation in motion_module.scale_motion(chosen, height):
             frames = []
             for pose in animation.poses(rig):
                 frame = render_module.render_pose(cut, pose, margin=margin)

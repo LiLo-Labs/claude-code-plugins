@@ -164,3 +164,38 @@ def test_an_invalid_rig_is_refused_rather_than_animated(hero_path, tmp_path):
 def test_no_animations_selected_is_refused(hero_path, tmp_path):
     with pytest.raises(ValueError):
         build(hero_path, tmp_path / "out", animations=[])
+
+
+def _feet(clip):
+    """How much lower one half of the figure is than the other, per frame."""
+    out = []
+    for frame in clip.frames:
+        mask = image.alpha_mask(frame)
+        rows, columns = mask.nonzero()
+        if not len(rows):
+            out.append(0)
+            continue
+        middle = (columns.min() + columns.max()) // 2
+        left = mask[:, :middle + 1].nonzero()[0]
+        right = mask[:, middle + 1:].nonzero()[0]
+        out.append((int(left.max()) if len(left) else 0)
+                   - (int(right.max()) if len(right) else 0))
+    return out
+
+
+def test_a_face_on_walk_alternates_the_feet_and_a_profile_one_does_not(hero_path, tmp_path):
+    """A profile walk swings the legs across the picture; from the front there
+    is no across to swing through, and what a viewer reads instead is one foot
+    leaving the floor while the other stays on it."""
+    front = build(hero_path, tmp_path / "front", animations=["walk"], facing="front")
+    side = build(hero_path, tmp_path / "side", animations=["walk"], facing="right")
+    front_clip = next(clip for clip in front.clips if clip.name == "walk")
+    side_clip = next(clip for clip in side.clips if clip.name == "walk")
+    swing = _feet(front_clip)
+    assert max(swing) - min(swing) > max(_feet(side_clip)) - min(_feet(side_clip))
+    assert front.verification.ok, front.verification.report()
+
+
+def test_a_face_on_build_names_the_limbs_left_and_right(hero_path, tmp_path):
+    result = build(hero_path, tmp_path / "out", animations=["walk"], facing="front")
+    assert result.rigs["side"].by_name("arm_left") is not None

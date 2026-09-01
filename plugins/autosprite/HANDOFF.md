@@ -9,7 +9,7 @@ again.
 The pipeline is sound and proven on real art. **20 CC0 sprites** (16×16 to
 76×81; humanoids, creatures, props, and four cases chosen to break a silhouette
 rigger) all build, with all seven verification checks passing on both backends.
-358 tests, no network or model in any of them.
+375 tests, no network or model in any of them.
 
 Quality, measured as **debris** — the share of a frame's pixels not connected to
 its main blob, against the source's own figure:
@@ -40,13 +40,31 @@ only "is this rig right for this picture?". Run across all 20 sprites
 specific and checkable rather than vague. Four themes, in the order they are
 worth fixing:
 
-1. **Front-facing sprites get a profile rig.** Both top-down assets were called
-   out independently: "a sagittal side-view rig applied to a sprite that has no
-   depth axis", "there is no near/far side". Both measure 0.0% debris, so the
-   shed metric cannot see this at all -- it is the clearest example yet of the
-   gap this document opens with. `--facing` accepts only `right|left`; `front`
-   and `back` are in the vision prompt's vocabulary and then quietly treated as
-   `left`.
+1. ~~**Front-facing sprites get a profile rig.**~~ **Done.** Both top-down
+   assets were called out independently: "a sagittal side-view rig applied to a
+   sprite that has no depth axis", "there is no near/far side". Both measure
+   0.0% debris, so the shed metric could not see it at all. `--facing` now takes
+   `front` and `back`, and three things follow from it:
+
+   - **Both limbs of a pair are drawn in front of the torso** and named left and
+     right rather than near and far. The roles are untouched, because every
+     animation and every exporter dispatches on role.
+   - **Every clip trades its swing for travel** (`Animation.fronted`). A leg
+     walking towards the camera foreshortens; what a viewer reads is the foot
+     leaving the floor. The phase is kept and only what it drives changes, so
+     limbs in counter-phase stay in counter-phase without this needing to know
+     which side of the body each one is on. Measured on the built frames, the
+     feet now alternate by 2-6px where a profile rig alternates them by 0.
+   - **A face-on character is never rigged as a side-on animal.** `classify`
+     reads the silhouette, and a stocky character drawn face-on is wider than
+     it is tall exactly like a horse; the 16px roguelike hero was being rigged
+     with its left arm as a head and its right arm as a tail.
+
+   Asked again, the critic's "sagittal rig applied to a front view" complaint is
+   gone from every sprite. What it says instead is that the template rigger's
+   BOXES are wrong on these characters -- the helmet left inside the torso, legs
+   captured as a 4%-tall sliver of foot. That is true, it is theme 3 below, and
+   it is the next thing to fix.
 2. **Limbs invented on blob characters.** The slime and the sumo hulk both get
    arms carved out of a body that has none: "rotating them punches holes in the
    body and leaves floating fragments". The slime is the corpus's worst

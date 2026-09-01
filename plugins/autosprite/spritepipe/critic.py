@@ -216,7 +216,16 @@ def describe_rig(rig):
     if rig is None:
         return "  (not supplied)"
     width, height = rig.size
-    lines = []
+    lines = ["  the character is drawn facing %s" % rig.facing]
+    if rig.facing in ("front", "back"):
+        # Otherwise a model reads "arm_far" as a claim about depth and objects,
+        # correctly, that a character looking at you has no far side. The roles
+        # are a PAIRING, not a depth: they are what makes the two halves swing
+        # in counter-phase, and on a face-on rig they simply mean left and
+        # right. Say so, rather than letting it find a bug that is not there.
+        lines.append("  (drawn face-on: the *_near and *_far roles are only how "
+                     "a pair is named, and mean the character's two sides; "
+                     "neither is behind the other)")
     for part in rig.draw_order():
         x0, y0, x1, y1 = part.box
         lines.append("  %-12s role=%-10s box=[%.2f, %.2f, %.2f, %.2f]"

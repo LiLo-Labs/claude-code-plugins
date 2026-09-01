@@ -179,3 +179,71 @@ def test_a_list_of_animations_loads(tmp_path):
         {"name": "a", "frames": 2, "tracks": {"head": [{"t": 0, "angle": 1}]}},
         {"name": "b", "frames": 2, "tracks": {"head": [{"t": 0, "angle": 2}]}}]))
     assert [a.name for a in motion.load_custom(path)] == ["a", "b"]
+
+
+# -- a clip seen from the front -------------------------------------------
+
+def _peak(track, channel):
+    values = [float(key.get(channel, 0.0)) for key in track.keys]
+    return max(values) - min(values)
+
+
+def test_fronted_damps_the_swing_and_pays_it_back_as_travel():
+    walk = motion.get("walk")
+    front = walk.fronted()
+    for role in ("leg_near", "leg_far", "arm_near", "arm_far"):
+        assert _peak(front.tracks[role], "angle") < _peak(walk.tracks[role], "angle")
+    # legs lift, arms reach sideways
+    assert _peak(front.tracks["leg_near"], "dy") > 0
+    assert _peak(front.tracks["arm_near"], "dx") > 0
+    assert _peak(front.tracks["leg_near"], "dx") == 0
+
+
+def test_fronted_keeps_the_pair_in_counter_phase():
+    """Which side of the body a limb is on is never known here, so the sign of
+    the original swing has to carry the phase through."""
+    front = motion.get("walk").fronted()
+    near = front.tracks["leg_near"].sample(0.0, True)
+    far = front.tracks["leg_far"].sample(0.0, True)
+    assert near.dy * far.dy < 0
+
+
+def test_fronted_leaves_the_body_alone():
+    walk = motion.get("walk")
+    front = walk.fronted()
+    assert front.tracks["torso"].to_list() == walk.tracks["torso"].to_list()
+    assert front.root.to_list() == walk.root.to_list()
+    assert front.frames == walk.frames and front.fps == walk.fps
+
+
+def test_fronted_does_not_mutate_the_library():
+    walk = motion.get("walk")
+    before = walk.tracks["leg_near"].to_list()
+    walk.fronted()
+    assert motion.get("walk").tracks["leg_near"].to_list() == before
+
+
+# -- a translation that would round away ----------------------------------
+
+def test_a_bob_scaled_below_a_pixel_is_floored_not_lost():
+    """A 16px sprite scales the walk's 1px bob to half a pixel, which cannot be
+    drawn, so the character slides instead of walking."""
+    small = motion.get("walk").scaled(0.5)
+    assert _peak(small.root, "dy") == pytest.approx(0.5)
+    assert _peak(small.floored_travel(1.0).root, "dy") == pytest.approx(1.0)
+
+
+def test_a_travel_that_already_reads_is_left_alone():
+    big = motion.get("walk").scaled(3.0)
+    before = big.root.to_list()
+    assert big.floored_travel(1.0).root.to_list() == before
+
+
+def test_a_channel_that_was_never_authored_is_not_invented():
+    still = motion.Animation("still", frames=2, root=[{"t": 0.0}, {"t": 1.0}])
+    assert _peak(still.floored_travel(1.0).root, "dy") == 0.0
+
+
+def test_scale_motion_floors_the_travel_for_a_small_character():
+    scaled = motion.scale_motion([motion.get("walk")], 16)[0]
+    assert _peak(scaled.root, "dy") >= 1.0

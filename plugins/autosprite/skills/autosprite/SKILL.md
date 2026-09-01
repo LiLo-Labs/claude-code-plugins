@@ -155,11 +155,19 @@ What to look for, in order:
    its joint.
 2. **Do the feet slide?** The walk's contact frames should have a foot planted.
    If both feet move every frame the leg amplitudes are too large for the stride.
-3. **Does anything freeze?** The build warns when frames repeat. On a small
-   character the built-in amplitudes can round to nothing; scale the motion up
-   with a custom animation rather than upscaling the art.
+3. **Does anything freeze?** The build warns when frames repeat. Vertical
+   travel is floored at one pixel so a small character's bob cannot round away,
+   but the limb amplitudes still can; scale the motion up with a custom
+   animation rather than upscaling the art.
 4. **Does the near limb read as in front?** If the far arm is drawn over the
    torso, near and far are swapped -- pass the other `--facing`.
+5. **Is the character looking at you?** If it is drawn face-on, `--facing front`
+   (or `back`) is not cosmetic. It draws both limbs of each pair in front of the
+   torso, names them left and right instead of near and far, and trades every
+   clip's sideways limb swing for a lift, because a leg walking towards the
+   camera foreshortens rather than sweeping across the picture. Built as a
+   profile, a top-down RPG sprite splays its legs and reads as doing the splits
+   -- and it will still measure zero debris, so only your eyes will catch it.
 
 Show the user the contact sheet and one or two GIFs, name what you checked, and
 ask about the specific thing you are unsure of. Do not ask them to review 44

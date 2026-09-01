@@ -40,7 +40,8 @@ def main():
     parser.add_argument("--model", default="claude-opus-5")
     parser.add_argument("--class", dest="character_class", default="auto",
                         choices=("auto", "humanoid", "creature", "prop"))
-    parser.add_argument("--facing", default="right", choices=("right", "left"))
+    parser.add_argument("--facing", default="right",
+                        choices=("right", "left", "front", "back"))
     parser.add_argument("--intent", default="",
                         help="what the character is, in a few words; sharpens the rig")
 
