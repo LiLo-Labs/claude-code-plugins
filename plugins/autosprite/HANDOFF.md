@@ -494,6 +494,43 @@ sprite comes apart in the middle of a squash rather than at its extreme. It was
 never a motion problem. A transform was breaking something the artist drew in
 one piece, and the fix belonged where the breakage happened.
 
+## `shear`, and the dead end it found
+
+**`shear` is a seventh channel: a part's top leans away from its base, in
+degrees, without turning.** A rotation moves a limb; a shear deforms a surface,
+which is what cloth, water and smoke do and what a hinge cannot. It is affine,
+so it is one more term in a matrix that was being built anyway -- same
+nearest-neighbour path, same palette guarantee, no new render code. It shares
+`rotate`'s sign so a positive value in either channel tips a part the same way.
+
+`sway` and `ripple` now drive `shear` on `trait:surface` rather than `angle`.
+**Measured on a CC0 flag with the artist's own sixteen frames:** worst-frame
+shed 0.22% -> 0.03%, and closest to the artist in how much of the picture it
+disturbs.
+
+**The dead end.** The obvious next step is to cut a continuous surface into
+vertical strips and use `spread` to travel a wave across them. It tears, and not
+marginally:
+
+| rig | worst-frame shed |
+|---|---|
+| one cloth, sheared as a whole | **0.05%** |
+| 2 strips + spread | 44.6% |
+| 3 strips + spread | 30.9% |
+| 6 strips + spread | 61.3% |
+
+Rigid strips at different phases separate from each other, and `render._reconnect`
+cannot help because it repairs a layer that came apart *internally*, not a gap
+*between* layers. Tested at three strip counts, so it is not a tuning problem.
+
+**What that leaves named.** Against the artist's frames, every variant sits at
+70-79% footprint error, and shear amplitude does not move it: the artist warps
+the cloth's INTERIOR and we lean it rigidly. Cloth needs a continuous per-column
+offset inside one part -- a warp, which is still a permutation of whole pixels
+and therefore still palette-safe, but needs a render path the affine matrix
+cannot provide. That is the next real capability, and the flag is in the corpus
+with its sixteen frames so it can be measured rather than argued about.
+
 ## Dead ends — measured, not guessed
 
 Do not re-try these without new evidence. Each was implemented, measured, and
@@ -577,7 +614,15 @@ characters at all**, and were added for the generalisation work:
 | `subject-wheatfield-drjamgo` | wheat field | A *field* of things, where the motion is a travelling wave and no single part owns it |
 | `subject-mine-drjamgo` | mine entrance | Mostly static with one small feature; the case for "animate almost nothing" |
 
-All six are from Dr. Jamgo's *Basic Hex Tile Set - 16x16*
+Two more carry the artist's own animation of the same motion, which is what
+`quality.footprint` needs and what the hex tiles are too small to provide:
+
+| Slug | Subject | Ground truth |
+|---|---|---|
+| `subject-torch-xlive99` | a wall torch | XLIVE99, CC0, six frames of the flame. 32x32, ten colours, clean pixel art. The bracket never moves, so it isolates `flicker` exactly |
+| `subject-flag-sbs` | a flag | Screaming Brain Studios, CC0 (the pack ships its own `License.txt` saying so), **sixteen** frames of the wave at 192x136. Antarctica, as the least politically loaded of 229 |
+
+All six hex tiles are from Dr. Jamgo's *Basic Hex Tile Set - 16x16*
 (https://opengameart.org/content/basic-hex-tile-set-16x16), CC0, licence text
 verified on 2026-09-01: "No Copyright Notice required. A note of tribute is
 appreciated though." The tiles are cut from the pack's single sheet by

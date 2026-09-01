@@ -141,3 +141,32 @@ def test_a_frame_of_a_different_size_is_compared_on_the_overlap():
     theirs[1, 1] = [200, 30, 30, 255]
     share, _wrong, total = quality.footprint([bigger], rest, [rest, theirs])
     assert total > 0 and 0.0 <= share <= 1.0
+
+
+def test_a_reference_cycle_of_a_different_size_does_not_raise():
+    """Our rest pose goes through `ingest` and the artist's frames usually do
+    not, so the two are routinely a row or two apart. Comparing them at their
+    own sizes is a shape error waiting to happen -- and worse, a silent
+    misalignment when it happens not to raise."""
+    rest = _plain((80, 80, 90), size=8)
+    ours = rest.copy()
+    ours[2, 2] = [200, 30, 30, 255]
+    bigger = _plain((80, 80, 90), size=10)
+    theirs = bigger.copy()
+    theirs[2, 2] = [200, 30, 30, 255]
+    share, wrong, total = quality.footprint([ours], rest, [bigger, theirs])
+    assert (share, wrong, total) == (0.0, 0, 1)
+
+
+def test_the_two_footprints_are_aligned_at_the_top_left():
+    """Which is right because everything here is cropped to its own content
+    box, and is worth asserting because getting it wrong reads as a real
+    difference rather than as a bug."""
+    rest = _plain((80, 80, 90), size=8)
+    ours = rest.copy()
+    ours[1, 1] = [200, 30, 30, 255]
+    bigger = _plain((80, 80, 90), size=12)
+    theirs = bigger.copy()
+    theirs[5, 5] = [200, 30, 30, 255]      # somewhere we do not touch
+    share, wrong, total = quality.footprint([ours], rest, [bigger, theirs])
+    assert (wrong, total) == (1, 1) and share == 1.0

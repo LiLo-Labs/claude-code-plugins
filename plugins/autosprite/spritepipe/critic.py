@@ -58,6 +58,9 @@ CHANNEL_LIMITS = {
     # Steps along a ramp. Four is already the whole of most sprite ramps, so a
     # larger number is not a brighter glow, it is the same clamped one.
     "cycle": 4.0,
+    # Degrees of lean. Past about 40 a surface is not leaning, it is folding
+    # over itself, and nearest-neighbour sampling turns that into a smear.
+    "shear": 40.0,
 }
 MIN_SCALE = 0.2
 

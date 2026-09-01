@@ -1,5 +1,7 @@
 """Forward kinematics, with no pixels involved."""
 
+import math
+
 import numpy as np
 import pytest
 
@@ -158,3 +160,46 @@ def test_posed_leaves_an_unplanted_clip_alone(stander):
     assert not run.planted
     assert [pose.dy for pose in skeleton.posed(stander, run, points)] \
         == [pose.dy for pose in run.poses(stander)]
+
+
+# ---------------------------------------------------------------------------
+# shear: a surface leans, it does not hinge.
+# ---------------------------------------------------------------------------
+
+def test_a_shear_moves_the_top_and_leaves_the_base_alone():
+    """The difference from a rotation. A hinge turns a limb about a joint; a
+    surface has no joint, and cloth pinned at its base slides above it."""
+    matrix = skeleton.local(skeleton.PartPose(shear=30.0), (0, 10))
+    top = matrix @ np.array([0.0, 0.0, 1.0])      # ten pixels above the pivot
+    base = matrix @ np.array([0.0, 10.0, 1.0])    # at the pivot
+    assert top[0] == pytest.approx(10.0 * math.tan(math.radians(30.0)))
+    assert base[0] == pytest.approx(0.0)
+
+
+def test_a_shear_shares_a_rotation_s_sign():
+    """An author who writes 20 into either channel must get the top going the
+    same way, or every clip that uses both reads as a mistake."""
+    above = np.array([0.0, 0.0, 1.0])
+    turned = skeleton.local(skeleton.PartPose(angle=20.0), (0, 10)) @ above
+    leaned = skeleton.local(skeleton.PartPose(shear=20.0), (0, 10)) @ above
+    assert turned[0] > 0 and leaned[0] > 0
+
+
+def test_a_shear_of_zero_is_the_identity():
+    assert np.allclose(skeleton.skew(0.0), np.eye(3))
+
+
+def test_a_shear_keeps_a_part_s_height():
+    """It slides rows sideways; it does not squash them. A surface that got
+    shorter as it leaned would read as the camera moving."""
+    matrix = skeleton.local(skeleton.PartPose(shear=25.0), (0, 10))
+    top = matrix @ np.array([0.0, 0.0, 1.0])
+    base = matrix @ np.array([0.0, 10.0, 1.0])
+    assert (base[1] - top[1]) == pytest.approx(10.0)
+
+
+def test_a_shear_blends_and_composes_like_every_other_channel():
+    half = skeleton.PartPose().blend(skeleton.PartPose(shear=10.0), 0.5)
+    assert half.shear == pytest.approx(5.0)
+    both = skeleton.PartPose(shear=4.0).compose(skeleton.PartPose(shear=3.0))
+    assert both.shear == pytest.approx(7.0)

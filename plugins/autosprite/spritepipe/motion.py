@@ -32,14 +32,22 @@ import math
 
 from .skeleton import PartPose, Pose
 
-# Five affine scalars and one that is not a transform at all. `cycle` is a
-# whole-numbered step along a part's own colour ramp -- a torch flickering, a
-# gem pulsing, a window lighting up, water shimmering. It earns its place next
-# to the others because it is the answer to "what does a subject with no limbs
-# DO", and because it is provably palette-safe: a step lands on another shade
-# of the same ramp, and every ramp comes from the source art's locked palette.
-CHANNELS = ("angle", "dx", "dy", "sx", "sy", "cycle")
-REST = {"angle": 0.0, "dx": 0.0, "dy": 0.0, "sx": 1.0, "sy": 1.0, "cycle": 0.0}
+# Six affine scalars and one that is not a transform at all.
+#
+# `cycle` is a whole-numbered step along a part's own colour ramp -- a torch
+# flickering, a gem pulsing, a window lighting up, water shimmering. It earns
+# its place next to the others because it is the answer to "what does a subject
+# with no limbs DO", and because it is provably palette-safe: a step lands on
+# another shade of the same ramp, and every ramp comes from the locked palette.
+#
+# `shear` leans a part's top away from its base without turning it, in degrees.
+# A rotation moves a limb; a shear deforms a surface, which is what cloth, water
+# and smoke do and what a hinge cannot. It IS affine, so it costs nothing beyond
+# one more term in a matrix that was being built anyway -- same
+# nearest-neighbour path, same guarantee.
+CHANNELS = ("angle", "dx", "dy", "sx", "sy", "cycle", "shear")
+REST = {"angle": 0.0, "dx": 0.0, "dy": 0.0, "sx": 1.0, "sy": 1.0, "cycle": 0.0,
+        "shear": 0.0}
 
 
 def smoothstep(u):
@@ -449,7 +457,7 @@ class Animation:
                 existing = pose.get(root_part.name)
                 pose.set(root_part.name, existing.compose(
                     PartPose(whole.angle, 0.0, 0.0, whole.sx, whole.sy,
-                             whole.cycle)))
+                             whole.cycle, whole.shear)))
         return pose
 
     def _shifted(self, t, index, spread):

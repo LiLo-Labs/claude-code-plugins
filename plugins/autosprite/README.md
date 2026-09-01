@@ -24,11 +24,19 @@ hero.png                                       hero-sprites/
 
 The input file is never written to.
 
-## An operation that is not a movement
+## Two operations that are not a rotation
 
-Five of the six animation channels are an affine transform — `angle`, `dx`,
-`dy`, `sx`, `sy`. The sixth, `cycle`, is a whole-numbered step along a part's
-own shading **ramp**. Nothing moves: every pixel stays exactly where the artist
+Six of the seven animation channels are an affine transform — `angle`, `dx`,
+`dy`, `sx`, `sy` and `shear`.
+
+**`shear`** leans a part's top away from its base, in degrees, without turning
+it. A rotation moves a limb; a shear deforms a *surface*, which is what cloth,
+water and smoke do and what a hinge cannot: the base stays where the artist drew
+it and everything above slides in proportion to how far above it is. It costs
+nothing — one more term in a matrix that was being built anyway.
+
+The seventh, **`cycle`**, is a whole-numbered step along a part's own shading
+**ramp**. Nothing moves: every pixel stays exactly where the artist
 put it and changes shade instead, so the light changes and the silhouette does
 not.
 
@@ -412,7 +420,7 @@ pip install -r requirements-test.txt
 python3 -m pytest tests -q
 ```
 
-592 tests, no network, no model, well under a minute. Fixtures are generated rather
+603 tests, no network, no model, well under a minute. Fixtures are generated rather
 than checked in — `tests/make_fixture.py` builds parametric sprites so a test can
 have the exact property it is about (arms clear of the body or touching, legs
 parted or robed) instead of one PNG having to serve every case.

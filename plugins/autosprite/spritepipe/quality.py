@@ -91,19 +91,26 @@ def shed(frames, reference_pixels):
     return worst, index
 
 
-def disturbed(frames, rest):
+def disturbed(frames, rest, shape=None):
     """Every pixel any frame of a clip changes from the rest pose.
 
     The clip's footprint: the region of the picture the animation touches at
     all, whether it moved something there or vacated it.
+
+    `shape` puts the answer in a canvas of a given size, which is how two
+    footprints measured from differently-trimmed art get compared. Frames are
+    aligned at the TOP-LEFT, which is right because everything here is cropped
+    to its own content box, and is the caller's job to have arranged.
     """
     import numpy as _np
 
-    height, width = rest.shape[:2]
+    height, width = shape or rest.shape[:2]
     out = _np.zeros((height, width), dtype=bool)
+    rest_rows = min(rest.shape[0], height)
+    rest_columns = min(rest.shape[1], width)
     for frame in frames:
-        rows = min(frame.shape[0], height)
-        columns = min(frame.shape[1], width)
+        rows = min(frame.shape[0], rest_rows)
+        columns = min(frame.shape[1], rest_columns)
         patch = _np.zeros((height, width), dtype=bool)
         patch[:rows, :columns] = (frame[:rows, :columns]
                                   != rest[:rows, :columns]).any(axis=2)
@@ -129,11 +136,19 @@ def footprint(frames, rest, reference_frames):
     `reference_frames` are the artist's, the first being their rest pose. It is
     deliberately one-sided: under-moving is a quieter failure than moving the
     wrong thing, and is measured by comparing the totals, which are returned.
+
+    The two sets of art are routinely trimmed to slightly different sizes -- our
+    rest pose goes through `ingest`, the artist's frames usually do not -- so
+    both footprints are measured into one canvas big enough for either, aligned
+    at the top-left. Comparing them at their own sizes is a shape error waiting
+    to happen, and worse, an off-by-two misalignment when it does not raise.
     """
     if not frames or len(reference_frames) < 2:
         return 0.0, 0, 0
-    truth = disturbed(reference_frames[1:], reference_frames[0])
-    ours = disturbed(frames, rest)
+    shape = (max(rest.shape[0], reference_frames[0].shape[0]),
+             max(rest.shape[1], reference_frames[0].shape[1]))
+    truth = disturbed(reference_frames[1:], reference_frames[0], shape)
+    ours = disturbed(frames, rest, shape)
     total = int(ours.sum())
     if not total:
         return 0.0, 0, 0

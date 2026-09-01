@@ -31,15 +31,17 @@ class PartPose:
     everything a subject does that is not a movement.
     """
 
-    __slots__ = ("angle", "dx", "dy", "sx", "sy", "cycle")
+    __slots__ = ("angle", "dx", "dy", "sx", "sy", "cycle", "shear")
 
-    def __init__(self, angle=0.0, dx=0.0, dy=0.0, sx=1.0, sy=1.0, cycle=0.0):
+    def __init__(self, angle=0.0, dx=0.0, dy=0.0, sx=1.0, sy=1.0, cycle=0.0,
+                 shear=0.0):
         self.angle = float(angle)
         self.dx = float(dx)
         self.dy = float(dy)
         self.sx = float(sx)
         self.sy = float(sy)
         self.cycle = float(cycle)
+        self.shear = float(shear)
 
     def blend(self, other, amount):
         """Linear blend towards `other`. Used to ease between keyframes."""
@@ -49,7 +51,8 @@ class PartPose:
                         self.dy * keep + other.dy * amount,
                         self.sx * keep + other.sx * amount,
                         self.sy * keep + other.sy * amount,
-                        self.cycle * keep + other.cycle * amount)
+                        self.cycle * keep + other.cycle * amount,
+                        self.shear * keep + other.shear * amount)
 
     def compose(self, other):
         """This pose with `other`'s DEPARTURE FROM REST applied on top.
@@ -64,11 +67,13 @@ class PartPose:
         return PartPose(self.angle + other.angle,
                         self.dx + other.dx, self.dy + other.dy,
                         self.sx * other.sx, self.sy * other.sy,
-                        self.cycle + other.cycle)
+                        self.cycle + other.cycle, self.shear + other.shear)
 
     def __repr__(self):
-        return "PartPose(angle=%.1f, d=(%.1f, %.1f), s=(%.2f, %.2f), cycle=%+.1f)" % (
-            self.angle, self.dx, self.dy, self.sx, self.sy, self.cycle)
+        return ("PartPose(angle=%.1f, d=(%.1f, %.1f), s=(%.2f, %.2f), "
+                "cycle=%+.1f, shear=%.1f)"
+                % (self.angle, self.dx, self.dy, self.sx, self.sy, self.cycle,
+                   self.shear))
 
 
 class Pose:
@@ -111,11 +116,35 @@ def scale(sx, sy):
     return np.array([[sx, 0.0, 0.0], [0.0, sy, 0.0], [0.0, 0.0, 1.0]])
 
 
+def skew(degrees):
+    """Lean a part's top away from its base without turning it.
+
+    A rotation moves a limb; a skew deforms a surface. It is what cloth, water
+    and smoke do and what a hinge cannot: the base stays put and everything
+    above it slides sideways in proportion to how far above it is.
+
+    In degrees, like `rotate`, because that is the number an author can picture:
+    the angle the part's vertical axis leans to. It shares `rotate`'s sign, so a
+    positive shear and a positive angle tip a part the SAME way -- an author who
+    writes 20 into either channel gets the top moving in one direction, and
+    getting that backwards would make every clip that used both read as a
+    mistake. Screen y points down, hence the negation.
+
+    It is still an affine transform, so it costs nothing: the same
+    nearest-neighbour path, the same supersampled reduction, the same palette
+    guarantee.
+    """
+    matrix = np.eye(3)
+    matrix[0, 1] = -math.tan(math.radians(degrees))
+    return matrix
+
+
 def local(part_pose, pivot):
-    """A part's own transform: rotate and squash about its pivot, then shift."""
+    """A part's own transform: rotate, lean and squash about its pivot, then shift."""
     px, py = float(pivot[0]), float(pivot[1])
     return (translate(px + part_pose.dx, py + part_pose.dy)
             @ rotate(part_pose.angle)
+            @ skew(part_pose.shear)
             @ scale(part_pose.sx, part_pose.sy)
             @ translate(-px, -py))
 

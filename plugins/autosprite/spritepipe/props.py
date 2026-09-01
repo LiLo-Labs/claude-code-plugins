@@ -86,7 +86,10 @@ def _library():
         note="anything fixed at its base and free at its tip rocks in the wind. "
              "Two things stop it reading as a metronome. The spread means each "
              "part in turn starts after the one before, so the motion travels "
-             "across a canopy or a field. And the curve is a gust and a drift "
+             "across a canopy or a field. A stalk hinges and a surface LEANS -- "
+             "cloth has no joint to turn about, so the surface half of this "
+             "drives `shear` rather than `angle`. And the curve is a gust and a "
+             "drift "
              "back rather than an even swing -- an even swing passes through "
              "the same angles on the way out and the way back, so half its "
              "frames are duplicates of the other half, which is what happened "
@@ -100,12 +103,12 @@ def _library():
                                           "easing": "ease_out"},
                                          {"t": 0.84, "angle": -1.5}],
                                 "spread": 0.09},
-                "trait:surface": {"keys": [{"t": 0.0, "angle": 0.0},
-                                           {"t": 0.22, "angle": 4.0,
+                "trait:surface": {"keys": [{"t": 0.0, "shear": 0.0},
+                                           {"t": 0.22, "shear": 5.0,
                                             "easing": "ease_out"},
-                                           {"t": 0.48, "angle": 1.0},
-                                           {"t": 0.66, "angle": -3.0},
-                                           {"t": 0.88, "angle": -0.5}],
+                                           {"t": 0.48, "shear": 1.5},
+                                           {"t": 0.66, "shear": -4.0},
+                                           {"t": 0.88, "shear": -0.5}],
                                   "spread": 0.09}})
 
     gust = Animation(
@@ -127,17 +130,22 @@ def _library():
     ripple = Animation(
         "ripple", frames=8, fps=10, loop=True,
         note="a broad face that has no joint to hinge about -- water, a banner, "
-             "a curtain. It travels: the spread is a whole eighth of the cycle, "
-             "so consecutive faces are visibly out of step rather than breathing "
+             "a curtain -- so it LEANS rather than turning: `shear` keeps the "
+             "base where the artist drew it and slides everything above it. "
+             "Measured on a CC0 flag against the artist\'s own sixteen frames, "
+             "shear takes the worst frame from 0.22% loose to 0.03% and lands "
+             "closest to the artist in how much of the picture it disturbs. It "
+             "travels: the spread is a whole eighth of the cycle, so "
+             "consecutive faces are visibly out of step rather than breathing "
              "together. Asymmetric for the same reason `sway` is: a wave that "
              "retraces its own path spends half its frames redrawing pictures "
              "the viewer has already seen",
-        tracks={"trait:surface": {"keys": [{"t": 0.0, "angle": 0.0, "dy": 0.0},
-                                           {"t": 0.16, "angle": 5.0, "dy": -1.0,
+        tracks={"trait:surface": {"keys": [{"t": 0.0, "shear": 0.0, "dy": 0.0},
+                                           {"t": 0.16, "shear": 5.0, "dy": -1.0,
                                             "easing": "ease_out"},
-                                           {"t": 0.38, "angle": 2.0, "dy": -1.0},
-                                           {"t": 0.58, "angle": -3.0, "dy": 0.0},
-                                           {"t": 0.80, "angle": -1.0, "dy": -1.0}],
+                                           {"t": 0.38, "shear": 2.0, "dy": -1.0},
+                                           {"t": 0.58, "shear": -3.5, "dy": 0.0},
+                                           {"t": 0.80, "shear": -1.0, "dy": -1.0}],
                                   "spread": 0.125}})
 
     creak = Animation(
