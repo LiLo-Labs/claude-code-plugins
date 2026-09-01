@@ -1251,7 +1251,12 @@ def _library():
 #
 # Written once here instead. A rig with nothing that trails is untouched,
 # because the selector matches nothing.
-FOLLOW = {"op": "lag", "on": "trait:stalk", "frames": 1.5, "damp": 1.15,
+# 0.85 rather than 1.0, and it is measured as well as physical: a trailing thing
+# carries LESS than the thing it follows. At 1.0 and above, a pegasus whose tail
+# already swings had that swing amplified until the tail came away from the body
+# -- 1.82% of the character loose at 1.15, 1.44% at 1.0, nothing at 0.85, with
+# exactly as many clips moving their stalk.
+FOLLOW = {"op": "lag", "on": "trait:stalk", "frames": 1.5, "damp": 0.85,
           "channels": ["angle", "dx", "dy"]}
 
 

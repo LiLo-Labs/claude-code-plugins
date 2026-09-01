@@ -328,3 +328,11 @@ def test_a_tail_both_wags_and_trails(caped):
                 for pose in walk.applied(rig).poses(rig)]
     assert any(a != b for a, b in zip(plain, trailing))     # it trails
     assert len(set(plain)) > 1                              # ... and it wagged
+
+
+def test_the_follow_through_trails_by_less_than_it_follows():
+    """Measured as well as physical. At a gain of 1.0 or more, a pegasus whose
+    tail already swings had that swing amplified until the tail came away from
+    the body -- 1.82% of the character loose at 1.15 and nothing at 0.85, with
+    exactly as many clips moving their stalk either way."""
+    assert motion.FOLLOW["damp"] < 1.0
