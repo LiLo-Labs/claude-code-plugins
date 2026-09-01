@@ -199,6 +199,7 @@ each thing was so it is not redone. In the order it landed:
 | planting | **seven** clips keep a foot on the floor; corpus foot lift 265px → 0, and the walk's bob is now emergent |
 | `crouch`, `block` | their sink moved from a root translation into a leg FOLD, so it survives planting: foot lift 45px and 37px → 0 |
 | `_reconnect` | a transform must not break what the artist drew in one piece; the potion's spin 23.8% → 0, corpus 44.4% → **19.5%** |
+| variants | re-verified end to end on real art: a grey ramp recoloured blue keeps all three of its shades, the walk is identical, and every check passes |
 | parity | `--frames`, `--frame-size`, `--fps`, loop points, per-animation ZIP, eight more animations |
 | `climb` | its arm reach was cut from 58° to 46° after measurement: 58 threw a hand clear of a 45px character and took the clip to 9.4% shed, 46 takes it to 0.8% for one point of frame-to-frame change |
 
@@ -265,10 +266,25 @@ Honest and short. The easy things are gone.
    at colour is an open question and a fragile one; the vision backend already
    gets this right.
 
-4. **The critic still reaches for the same four roles.** Across the sweep it
-   proposed changes to both arms and both legs, `torso` in four and `root` in
-   two, and has never once proposed one to `head`, `tail` or a scale channel.
-   Worth understanding before trusting it to tune anything subtle.
+4. **The critic proposes limb angles and nothing else.** Tallied over 40 calls
+   across the two rig audits: 21 verdicts of `rig`, 13 `loose`, 6 `good`, and
+   of the 13 clips that drew motion advice the roles touched were `leg_far` 11,
+   `leg_near` 11, `arm_near` 9, `arm_far` 8, `root` 2, `torso` 1. `head` and
+   `tail`: never. A scale channel: never.
+
+   **Two of the three biases this file used to record are now closed or were
+   never real.** It says "good" six times in forty, so "it never says good" is
+   gone -- showing it the rig gave it a way to be satisfied. And `head` never
+   appearing is not a bias at all: every one of those calls was a `walk`, the
+   `walk` has no `head` track, and the prompt correctly tells it to touch only
+   channels the track already uses. That was an artefact of only ever testing
+   one clip, and this entry used to claim otherwise.
+
+   What survives is narrower and real: it has **never once proposed a scale
+   change**, even though the walk now drives `sy` on both legs for the bent
+   knee, and it reached for `torso` in one clip of thirteen although every walk
+   drives it. Worth understanding before trusting it to tune anything subtle,
+   and worth re-tallying on a clip other than `walk`.
 
 5. **N and S remain `substituted` without a reference.** No amount of rigging
    invents the back of a head. The labels are the honest ceiling and they are
