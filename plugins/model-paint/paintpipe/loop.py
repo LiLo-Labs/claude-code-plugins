@@ -874,6 +874,70 @@ def choose_filaments(backend, mesh, up, field, labels, filaments, intent,
     return chosen
 
 
+
+DESIGN = """The LEFT image of each pair is a 3D model plainly shaded, %(count)d views.
+The RIGHT image of each pair is it painted, one arbitrary colour per part.
+
+The piece: %(intent)s
+
+The parts:
+%(legend)s
+
+Ignore the arbitrary colours. Say what colour each part SHOULD be if this were
+painted properly, with no limit on how many colours are available -- the real
+thing, as it would look finished.
+
+Reply with ONLY a JSON object, no prose:
+{"colours": [{"part": "<part name, exactly as listed>",
+              "hex": "#RRGGBB", "why": "<short>"}, ...]}"""
+
+
+def design_colours(backend, mesh, up, field, labels, intent, out_dir,
+                   directions, views=3, log=print):
+    """What each part should REALLY look like, with no filament limit.
+
+    This is the honest test of the segmentation, and the reason it is worth a
+    call of its own. Rendered in arbitrary distinct colours, a wrong boundary
+    is just one more stripe among eleven. Rendered as the object is meant to
+    look, a rib painted in rock colour is instantly, obviously wrong -- and
+    collapsing the parts onto four filaments hides it completely, because two
+    parts that share a filament cannot disagree.
+
+    Returns {part name: (r, g, b)} in 0..1, falling back to the arbitrary
+    palette for any part the answer skipped.
+    """
+    path, poses, _geometry = show(mesh, up, field, labels, out_dir, "design",
+                                  views=views, directions=directions)
+    legend = "\n".join("  %d: %s" % (i + 1, name)
+                        for i, name in enumerate(labels))
+    prompt = DESIGN % {"count": len(poses), "legend": legend,
+                       "intent": intent or "a 3D model"}
+    with open(path, "rb") as handle:
+        key = "design-%s" % rig_module.digest(handle.read(), legend)
+    answer = backend._run([path], prompt, key) or {}
+
+    out = {}
+    for entry in answer.get("colours") or []:
+        name = str(entry.get("part", "")).strip()
+        text = str(entry.get("hex", "")).strip().lstrip("#")
+        if name not in labels or len(text) not in (3, 6):
+            continue
+        if len(text) == 3:
+            text = "".join(ch * 2 for ch in text)
+        try:
+            out[name] = tuple(int(text[i:i + 2], 16) / 255.0
+                              for i in (0, 2, 4))
+        except ValueError:
+            continue
+        if log:
+            log("    %-32s #%s  %s"
+                % (name, text.upper(), str(entry.get("why", ""))[:38]))
+    fallback = palette(len(labels))
+    for index, name in enumerate(labels):
+        out.setdefault(name, tuple(fallback[index]))
+    return out
+
+
 def paint(backend, mesh, tree, up, intent, out_dir, views=3, rounds=6,
           max_parts=8, log=print):
     """The whole method, in the order a person works.
