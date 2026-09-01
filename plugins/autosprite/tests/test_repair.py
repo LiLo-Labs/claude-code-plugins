@@ -177,16 +177,62 @@ def test_a_squashed_flask_no_longer_comes_apart_at_all():
     assert note is None and again is spin and back is frames
 
 
-def test_a_clip_pulled_apart_by_something_that_is_not_a_swing_says_so():
-    """Two parts driven apart by a translation. Nothing swings them there, so
-    saying "damping did not help" would point the reader at the wrong thing."""
+def _abutting():
+    """A cap resting exactly on a body, sharing no rows with it.
+
+    Two parts that merely touch come apart the instant either MOVES, however
+    little -- there is no overlap to spend.
+    """
     art = np.zeros((14, 10, 4), dtype=np.uint8)
     art[4:14, 2:8] = (80, 110, 160, 255)     # body
     art[0:4, 3:7] = (220, 200, 90, 255)      # a cap sitting on it
     parts = [R.Part("body", "body", (0, 4, 10, 14), None, (5, 14)),
              R.Part("cap", "accessory", (0, 0, 10, 4), "body", (5, 4))]
     built = R.Rig((10, 14), parts, "prop", "right", anchor=(5, 14))
-    cut = cutout.cut(built, art)
+    return art, built, cutout.cut(built, art)
+
+
+def _overlapping():
+    """The same, with the cap's art reaching two rows down into the body, so a
+    small enough lift still leaves them touching and a larger one does not."""
+    art = np.zeros((18, 10, 4), dtype=np.uint8)
+    art[4:18, 2:8] = (80, 110, 160, 255)
+    art[0:6, 3:7] = (220, 200, 90, 255)
+    parts = [R.Part("body", "body", (0, 4, 10, 18), None, (5, 18)),
+             R.Part("cap", "accessory", (0, 0, 10, 6), "body", (5, 6))]
+    built = R.Rig((10, 18), parts, "prop", "right", anchor=(5, 18))
+    return art, built, cutout.cut(built, art)
+
+
+def test_a_clip_pulled_apart_by_a_translation_has_that_translation_damped():
+    """The assumption this file used to make, corrected.
+
+    It said a translation "moves a part without changing its shape and cannot
+    shear it off". Shearing is not the failure `shed` measures -- coming AWAY
+    is, and a translation does that perfectly well. A top-down RPG character
+    found it: its legs are a stub below a torso they barely overlap, and the
+    face-on walk's 1.4px lift detached them on five clips at 6%, with the
+    rotation entirely innocent.
+    """
+    art, built, cut = _overlapping()
+    margin = render.suggest_margin(built)
+    lift = motion.Animation("lift", frames=4, tracks={
+        "accessory": [{"t": 0.0, "dy": 0.0}, {"t": 0.5, "dy": -2.0},
+                      {"t": 1.0, "dy": 0.0}]})
+    frames = render.render_sequence(cut, lift.poses(built), margin=margin)
+    assert quality.shed(frames, art)[0] > repair.TOLERANCE
+
+    fixed, back, note = repair.repair(cut, built, lift, frames, art, margin, render)
+    assert quality.shed(back, art)[0] <= repair.TOLERANCE
+    assert note and "travel" in note
+    assert min(fixed.tracks["accessory"].values("dy")) > -2.0    # ... and it moved less
+
+
+def test_a_clip_no_amount_of_damping_can_hold_together_says_so():
+    """Two parts that only touch come apart however little either moves, so
+    there is no reduction that helps and pretending otherwise would ship a
+    quieter version of a broken clip."""
+    art, built, cut = _abutting()
     margin = render.suggest_margin(built)
     lift = motion.Animation("lift", frames=4, tracks={
         "accessory": [{"t": 0.0, "dy": 0.0}, {"t": 0.5, "dy": -6.0},
@@ -195,7 +241,7 @@ def test_a_clip_pulled_apart_by_something_that_is_not_a_swing_says_so():
     assert quality.shed(frames, art)[0] > repair.TOLERANCE
 
     _, back, note = repair.repair(cut, built, lift, frames, art, margin, render)
-    assert note and "which damping cannot fix" in note
+    assert note and "does not put it back together" in note
     assert "accessory" in note
     assert back is frames
 
@@ -240,3 +286,29 @@ def test_swinging_ignores_a_track_addressing_other_parts(hero_rig):
     animation = motion.Animation("nod", 4, tracks={
         "head": [{"t": 0.0, "angle": 0.0}, {"t": 0.5, "angle": 20.0}]})
     assert repair.swinging(animation, hero_rig, {"arm_near"}) == []
+
+
+def test_damping_one_leg_of_a_pair_damps_the_other(hero_rig):
+    """Two reasons, and the second would be enough on its own. The break often
+    needs both -- on a top-down RPG character the far leg was blamed and
+    damping it alone left 5.96% loose however far it was reduced, because the
+    near leg was lifting away at the same instant. And damping one leg of a pair
+    and not the other makes the cycle limp: they are in counter-phase and are
+    meant to be the same limb seen twice."""
+    from spritepipe import motion, repair
+
+    animation = motion.Animation("stride", 4, tracks={
+        "leg_near": [{"t": 0.0, "angle": 0.0}, {"t": 0.5, "angle": 30.0}],
+        "leg_far": [{"t": 0.0, "angle": 0.0}, {"t": 0.5, "angle": -30.0}]})
+    near = next(part for part in hero_rig.parts if part.role == "leg_near")
+    assert repair.swinging(animation, hero_rig, {near.name}) == ["leg_far", "leg_near"]
+
+
+def test_a_part_with_no_partner_damps_only_itself(hero_rig):
+    from spritepipe import motion, repair
+
+    animation = motion.Animation("nod", 4, tracks={
+        "head": [{"t": 0.0, "angle": 0.0}, {"t": 0.5, "angle": 20.0}],
+        "leg_near": [{"t": 0.0, "angle": 0.0}, {"t": 0.5, "angle": 20.0}]})
+    head = next(part for part in hero_rig.parts if part.role == "head")
+    assert repair.swinging(animation, hero_rig, {head.name}) == ["head"]

@@ -174,11 +174,15 @@ proves something about bookkeeping, and all of them pass on frames that are
 visibly wrong, because mass is conserved when parts are merely scrambled. So the
 build also measures what a viewer sees, and acts on it:
 
-- A clip measured to be coming apart has the responsible swing — and only that
-  one — reduced until it holds together, and the report says which part, on
-  which frame, and by how much. When damping does not help it says so and
-  changes nothing, because that is a rig problem and quietly shipping a quieter
-  broken clip would hide it.
+- A clip measured to be coming apart has the responsible motion reduced until it
+  holds together, and the report says which part, on which frame, and by how
+  much. Rotation first, because it is usually the culprit and the cheapest thing
+  to lose — then **translation**, because a part that merely *abuts* its parent
+  rather than overlapping it comes away the moment it moves at all. A limb's
+  partner is damped with it, because they are in counter-phase and damping one
+  leg and not the other makes the cycle limp. When damping does not help it says
+  so and changes nothing, because that is a rig problem and quietly shipping a
+  quieter broken clip would hide it.
 - A transform is not allowed to break something the artist drew in one piece. A
   flask squashed to 40% loses its two-pixel neck before its five-pixel rim, so
   the cork comes off with nothing having rotated; the renderer threads it back
@@ -434,7 +438,7 @@ pip install -r requirements-test.txt
 python3 -m pytest tests -q
 ```
 
-613 tests, no network, no model, well under a minute. Fixtures are generated rather
+616 tests, no network, no model, well under a minute. Fixtures are generated rather
 than checked in — `tests/make_fixture.py` builds parametric sprites so a test can
 have the exact property it is about (arms clear of the body or touching, legs
 parted or robed) instead of one PNG having to serve every case.

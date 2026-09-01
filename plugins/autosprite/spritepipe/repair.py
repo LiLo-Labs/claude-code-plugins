@@ -82,34 +82,68 @@ def blame(cutout, rig, pose, margin, render_module):
             if now[part.name] > rest[part.name]]
 
 
-def damp(animation, selectors, scale):
-    """The same clip with those tracks' rotation scaled down.
+# Tried in that order. Rotation is the usual culprit and the cheapest thing to
+# reduce, so it gets its own pass before translation is touched at all.
+CHANNEL_SETS = (("angle",), ("angle", "dx", "dy"))
 
-    Rotation only. A translation moves a part without changing its shape and
-    cannot shear it off; a squash is a ratio the whole pipeline already floors
-    elsewhere. It is the swing that throws a limb clear of the body.
+
+def damp(animation, selectors, scale, channels=("angle",)):
+    """The same clip with those tracks' motion scaled down.
+
+    Rotation first, because it is what usually throws a limb clear of the body
+    and because reducing it costs the least readability. But a translation can
+    take a part away too, and this file used to say it could not: "a translation
+    moves a part without changing its shape and cannot shear it off". Shearing a
+    part is not the failure `shed` measures -- COMING AWAY is, and a part that
+    merely abuts its parent rather than overlapping it comes away the moment it
+    is moved at all.
+
+    A top-down RPG character found it. Its legs are a five-pixel stub below a
+    torso they do not overlap, so the face-on walk's 1.4px lift detached them on
+    five clips at 6%, and no amount of damping the rotation helped because the
+    rotation was never the problem. Reducing the lift to 80% takes the walk and
+    the run to exactly zero.
+
+    A squash is still left alone: it is a ratio, and the pipeline floors it
+    elsewhere.
     """
     clone = copy.deepcopy(animation)
     for selector in selectors:
         track = clone.tracks.get(selector)
         if track is None:
             continue
-        track.adjust("angle", lambda value: value * float(scale))
+        for channel in channels:
+            track.adjust(channel, lambda value: value * float(scale))
     return clone
 
 
-def swinging(animation, rig, names):
-    """Every track that rotates a part in `names`, by whatever selector.
+def swinging(animation, rig, names, channels=("angle",)):
+    """Every track that MOVES a part in `names` or its partner limb.
 
     A part may be driven by a role track, a trait track and a name track at
     once, and any of them could be the one throwing it clear.
+
+    A limb's PARTNER is included for two reasons, and the second would be enough
+    on its own. Damping one leg of a pair and not the other makes the cycle
+    limp -- the two are in counter-phase and are meant to be the same limb seen
+    twice. And the break often needs both: on a top-down RPG character whose
+    legs are a stub under the torso, the far leg was blamed and damping it alone
+    left 5.96% loose however far it was reduced, because the near leg was
+    lifting away at the same instant; damping the pair took it to zero.
     """
     from .motion import select
+    from .rig import PAIRED
+
+    wanted = set(names)
+    for name in list(names):
+        part = rig.by_name(name)
+        partner = PAIRED.get(part.role) if part is not None else None
+        if partner:
+            wanted.update(other.name for other in rig.by_role(partner))
 
     found = []
-    wanted = set(names)
     for selector, track in sorted(animation.tracks.items()):
-        if not track.has("angle"):
+        if not any(track.has(channel) for channel in channels):
             continue
         if any(part.name in wanted for part in select(rig, selector)):
             found.append(selector)
@@ -139,41 +173,53 @@ def repair(cutout, rig, animation, frames, reference_pixels, margin,
         if part is not None and part.role not in roles:
             roles.append(part.role)
 
-    swings = swinging(animation, rig, names)
-    if not swings:
+    attempts = [(channels, swinging(animation, rig, names, channels))
+                for channels in CHANNEL_SETS]
+    attempts = [(channels, tracks) for channels, tracks in attempts if tracks]
+    if not attempts:
         # The potion's spin is the case: its squash lives on the root track, and
         # a squash is not what this repairs. Flooring one was measured twice and
         # reverted twice -- see HANDOFF's dead ends -- because a sprite comes
         # apart in the MIDDLE of a squash, not at its extreme.
         return animation, frames, (
             "%s: %.1f%% of the character comes away on frame %d, drawn by %s, "
-            "and nothing in this clip swings it there -- a squash or a "
-            "translation is pulling it apart, which damping cannot fix"
+            "and nothing in this clip moves it there -- a squash is pulling it "
+            "apart, which damping cannot fix"
             % (animation.name, shed * 100, index, " and ".join(roles)))
 
-    for scale in steps:
-        trial = damp(animation, swings, scale)
-        # Rendered exactly the way the pipeline renders it, levelling included.
-        # A planted clip drawn without that pass is a different set of pictures
-        # from the ones the build ships, and measuring those would be measuring
-        # the wrong thing.
+    def rendered(trial):
+        """Exactly the way the pipeline renders it, levelling included.
+
+        A planted clip drawn without that pass is a different set of pictures
+        from the ones the build ships, and measuring those would be measuring
+        the wrong thing.
+        """
         trial_poses = posed(rig, trial, ground)
         drawn = render_module.render_sequence(cutout, trial_poses, margin=margin)
         if trial.planted:
             drawn = render_module.level_to_floor(cutout, trial_poses, drawn, margin)
-        after, _ = quality_module.shed(drawn, reference_pixels)
-        if after <= tolerance:
-            return trial, drawn, (
-                "%s: %s swung far enough to come away from the character "
-                "(%.1f%% of it loose on frame %d), so that swing was reduced to "
-                "%d%%; the rest of the cycle is untouched"
-                % (animation.name, " and ".join(swings), shed * 100, index,
-                   scale * 100))
+        return drawn
 
-    # Nothing in reach fixed it. Say so rather than shipping a quieter version
-    # of a broken clip: a rig this far out needs a better rig, not less motion.
+    swings = attempts[-1][1]
+    for channels, swings in attempts:
+        for scale in steps:
+            trial = damp(animation, swings, scale, channels)
+            drawn = rendered(trial)
+            if quality_module.shed(drawn, reference_pixels)[0] <= tolerance:
+                return trial, drawn, (
+                    "%s: %s moved far enough to come away from the character "
+                    "(%.1f%% of it loose on frame %d), so its %s was reduced to "
+                    "%d%%; the rest of the cycle is untouched"
+                    % (animation.name, " and ".join(swings), shed * 100, index,
+                       "swing" if channels == ("angle",) else "swing and travel",
+                       scale * 100))
+
+    # Nothing in reach fixed it, in either channel set. Say so rather than
+    # shipping a quieter version of a broken clip: a rig this far out needs a
+    # better rig, not less motion.
     return animation, frames, (
         "%s: %.1f%% of the character comes away on frame %d, drawn by %s, and "
-        "damping that swing does not put it back together -- the rig is likely "
-        "wrong for this character rather than the motion being too large"
+        "damping its swing and its travel does not put it back together -- the "
+        "rig is likely wrong for this character rather than the motion being "
+        "too large"
         % (animation.name, shed * 100, index, " and ".join(swings)))

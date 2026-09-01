@@ -553,6 +553,46 @@ honest to infer it from. A test asserts that the untold case gives a different
 answer from the told one. The strip numbers above are unaffected: `shed` is
 measured within a frame and does not care where the frame sits.
 
+## `repair` had a wrong assumption, and the corpus found it
+
+The file said, in a docstring, that damping is rotation-only because "a
+translation moves a part without changing its shape and cannot shear it off".
+Shearing a part is not the failure `shed` measures. **Coming away is**, and a
+part that merely ABUTS its parent rather than overlapping it comes away the
+moment it is moved at all.
+
+A top-down RPG character found it. `topdown-eldiran-rpg` is 26x30 with legs that
+are a five-pixel stub below a torso they do not overlap, and **on the face-on
+path** the walk's 1.4px lift detached them: five clips at ~6%, with `repair`
+correctly saying it could not help, because the rotation it was damping was
+never the problem.
+
+Two changes, and the corpus needed both:
+
+1. **A second pass that damps translation as well as rotation.** Rotation still
+   goes first and alone, so every previously-measured repair is unchanged; only
+   clips that the first pass could not fix get a second chance.
+2. **A limb's partner is damped with it.** Blame named `leg_far`, and damping
+   `leg_far` alone left 5.96% loose *however far it was reduced*, because the
+   near leg was lifting away at the same instant. Damping the pair took it to
+   zero. The second justification would be enough on its own: two legs in
+   counter-phase are the same limb seen twice, and damping one and not the other
+   makes the cycle limp.
+
+**Measured across the whole corpus, building every asset:**
+
+| | before | after |
+|---|---|---|
+| `topdown-eldiran-rpg` | 7.14% | **0.00%** |
+| `creature-slime-andhegames` | 5.45% | **0.00%** |
+| assets with a problem | 3 of 28 | **1 of 28** |
+
+The slime was fixed by the same change without being looked at: it is a 23x28
+blob with two three-pixel feet under a body they barely touch, which is the same
+defect wearing a different shape. Nothing else moved. The one asset left is
+`platformer-grass-prowne`, an 8x23 character with 2px limbs whose vision rig
+measures 0.00% -- and the build says so, by name.
+
 ## Dead ends — measured, not guessed
 
 Do not re-try these without new evidence. Each was implemented, measured, and
