@@ -308,7 +308,47 @@ ramp comes from the locked source palette, so nothing can escape.
 previewed one clip at a time and there was no way to BUILD with it except
 re-running the rigger and hoping. That is also the path a tag travels.
 
-### Three findings from this work that are worth more than the code
+**6. Operators — a principle written once (`operators.py`).** An operator is a
+function from (animation, rig) to animation whose only reach is a keyframe
+number, so the artefact stays a readable table and the palette guarantee is
+untouched by construction. Seven: `lag`, `envelope`, `taper`, `anticipate`,
+`settle`, `damp`, `volume`. Three easings came with them (`back`, `elastic`,
+`bounce`) because all five originals are monotone and therefore cannot overshoot
+or go the wrong way first; a fourth, `arc`, bows a `dx`/`dy` pair.
+
+**And the library uses them.** All sixteen clips give a trailing part
+follow-through, off the torso, or off the head in `idle` and `die` which move
+nothing else above the waist. **Measured:** fifteen of sixteen clips move a real
+hero's cape where none did, and summed worst-frame shed across sixteen corpus
+assets and all sixteen clips is 20.05% with the operators and 20.05% without --
+no asset is worse. The gain is 0.85 rather than 1.0 because at 1.15 a pegasus's
+already-swinging tail was amplified until it came away (1.82% loose), and the
+amplification bought no extra motion at all.
+
+`repair` now works in selector space. It blamed a ROLE and looked that role up
+in the tracks, which stopped being how a track is addressed the moment a clip
+could drive `trait:stalk` -- it would have reported a break it had no way to
+touch.
+
+**7. Two verification bugs of the same kind** -- the check was narrower than the
+invariant, and the fallback hiding the gap was silent.
+
+- **A legitimate `--front` build failed PALETTE.** The check re-ingested one
+  `--reference` at default settings while the pipeline locks against every view
+  at the user's actual parameters -- so any colour only the front view carries
+  failed a correct build, which is what a front view is FOR. The atlas now
+  records every source with the settings it was read at and a digest, and the
+  check rebuilds the allowed set from those. The invariant generalised to what
+  it always meant, not relaxed. Two things fall out: the check no longer needs
+  to be told the reference at all, and a source that changed on disk since the
+  build is reported rather than trusted.
+- **`palette.enforce` was a laundry.** It snaps escapees on every frame with no
+  report, which makes PALETTE pass whether or not the pipeline kept its promise
+  -- and `palette.escapes`, the detector, had no production caller. It now says
+  what it moved and the build warns. Instrumented across six sprites and all
+  sixteen animations: **zero**.
+
+### Findings from this work that are worth more than the code
 
 - **A symmetric curve wastes half its frames.** `sway` swung evenly out and
   back; on the first caped hero it drew five different pictures out of eight,
@@ -325,6 +365,21 @@ re-running the rigger and hoping. That is also the path a tag travels.
 - **A short clip has nowhere to hide.** `bob`'s keys sat between its four frame
   times, so the renderer sampled heights nobody chose and rounded two of them
   together. Keys on the frame times, at whole pixels, fixed it.
+- **Looking at it beat every measurement, twice.** `shed` and `distinct_frames`
+  both scored a windmill whose entire roof rotates at 0.00% and 8/8. That is why
+  `quality.footprint` exists -- and pointing it at the artist's own frames then
+  bought a rigging rule worth 40% to 9%.
+- **A visual check passed a bug for an hour.** `palette.step_ramp` matched each
+  colour against the array it was writing, so every shade in a ramp cascaded to
+  the top. A washed-out sprite is a plausible thing for a brightening step to
+  produce, so it looked like a property of the art rather than a defect -- and I
+  had already written "pixel art has headroom downward and almost none up" into
+  two docstrings and a clip note before the arithmetic said otherwise.
+- **A step must stay inside the part's own material.** A torch's fire and its
+  timber are both hue 21 and they touch, so the ramp finder makes them one ramp
+  and a step walked the flame into the wood. Clamping to the part's own occupied
+  span fixes it without needing the ramp finder to be right, and makes the
+  palette claim stronger: every colour a step produces was already in that part.
 
 ## Backlog, in value order
 
