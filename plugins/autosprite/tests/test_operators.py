@@ -7,6 +7,7 @@ true, but that they changed in the direction the principle names.
 
 import copy
 import json
+import math
 
 import pytest
 
@@ -336,3 +337,75 @@ def test_the_follow_through_trails_by_less_than_it_follows():
     the body -- 1.82% of the character loose at 1.15 and nothing at 0.85, with
     exactly as many clips moving their stalk either way."""
     assert motion.FOLLOW["damp"] < 1.0
+
+
+# --- hinge -----------------------------------------------------------------
+
+def test_a_hinge_narrows_a_door_instead_of_turning_it(caped):
+    """A door that ROTATES goes through the wall. What it does is turn about a
+    vertical axis, which flat-on is a narrowing."""
+    animation = motion.Animation("open", 6, loop=False, tracks={
+        "torso": [{"t": 0.0}]}, ops=[
+        {"op": "hinge", "on": "torso", "degrees": 80.0}])
+    applied = animation.applied(caped)
+    widths = _values(applied, caped, "torso", "sx")
+    angles = _values(applied, caped, "torso", "angle")
+    assert widths[0] == pytest.approx(1.0)
+    assert widths[-1] == pytest.approx(math.cos(math.radians(80.0)), abs=1e-3)
+    assert all(later <= earlier + 1e-6
+               for earlier, later in zip(widths, widths[1:]))     # it only narrows
+    assert set(angles) == {0.0}                                   # ... and never turns
+
+
+def test_a_hinge_of_zero_degrees_leaves_the_door_shut(caped):
+    animation = motion.Animation("shut", 4, loop=False, tracks={"torso": [{"t": 0.0}]},
+                                 ops=[{"op": "hinge", "on": "torso", "degrees": 0.0}])
+    assert _values(animation.applied(caped), caped, "torso", "sx") == [1.0] * 4
+
+
+def test_a_hinge_keeps_the_door_s_height(caped):
+    """It narrows; it does not shrink. A door that got shorter as it opened
+    would read as the camera moving."""
+    animation = motion.Animation("open", 4, loop=False, tracks={"torso": [{"t": 0.0}]},
+                                 ops=[{"op": "hinge", "on": "torso", "degrees": 70.0}])
+    assert _values(animation.applied(caped), caped, "torso", "sy") == [1.0] * 4
+
+
+# --- retime ----------------------------------------------------------------
+
+def test_a_retime_reaches_the_same_poses_on_a_different_schedule(caped):
+    """Timing is not a property of a part, so this is the one operator that
+    touches the whole clip."""
+    keys = [{"t": 0.0, "angle": 0.0}, {"t": 1.0, "angle": 40.0}]
+    plain = motion.Animation("x", 5, loop=False, tracks={"torso": keys})
+    late = motion.Animation("x", 5, loop=False, tracks={"torso": keys}, ops=[
+        {"op": "retime", "curve": [{"t": 0.0, "v": 0.0}, {"t": 0.7, "v": 0.15},
+                                   {"t": 1.0, "v": 1.0}]}])
+    before = _values(plain, caped, "torso")
+    after = _values(late.applied(caped), caped, "torso")
+    assert before[0] == after[0] and before[-1] == pytest.approx(after[-1])
+    assert after[len(after) // 2] < before[len(before) // 2]      # ... held back
+
+
+def test_a_retime_with_the_identity_changes_nothing(caped):
+    keys = [{"t": 0.0, "angle": 0.0}, {"t": 0.5, "angle": 20.0}]
+    plain = motion.Animation("x", 6, loop=False, tracks={"torso": keys})
+    same = motion.Animation("x", 6, loop=False, tracks={"torso": keys}, ops=[
+        {"op": "retime", "curve": [{"t": 0.0, "v": 0.0}, {"t": 1.0, "v": 1.0},
+                                   {"t": 0.5, "v": 0.5, "easing": "linear"}]}])
+    assert _values(same.applied(caped), caped, "torso") == \
+        pytest.approx(_values(plain, caped, "torso"), abs=1e-3)
+
+
+def test_a_retime_moves_the_root_track_too(caped):
+    """Or the body would keep the old schedule while the limbs took the new
+    one, which is worse than not retiming at all."""
+    animation = motion.Animation("x", 5, loop=False,
+                                 root=[{"t": 0.0, "dy": 0.0}, {"t": 1.0, "dy": -8.0}],
+                                 ops=[{"op": "retime", "curve": [
+                                     {"t": 0.0, "v": 0.0}, {"t": 0.7, "v": 0.15},
+                                     {"t": 1.0, "v": 1.0}]}])
+    applied = animation.applied(caped)
+    held = [round(pose.dy, 3) for pose in applied.poses(caped)]
+    assert held[len(held) // 2] > -4.0        # still near the start
+    assert held[-1] == pytest.approx(-8.0)    # and arrives

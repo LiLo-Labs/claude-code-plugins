@@ -36,7 +36,7 @@ before this and never after.
 
 import copy
 
-from .motion import CHANNELS, REST, Animation, Lane, Track, select
+from .motion import CHANNELS, EASINGS, REST, Animation, Lane, Track, select
 from .skeleton import PartPose
 
 OPERATORS = {}
@@ -348,6 +348,76 @@ def anticipate(animation, rig, on, amount=0.18, lead=0.15, channel="angle"):
         return pose
 
     return _bake(clone, rig, on, frame)
+
+
+@operator("hinge", params=("on", "degrees", "ease"),
+          note="a door, a shutter, a lid, a book cover: something that swings "
+               "about an edge in the third dimension, which flat-on is a "
+               "narrowing rather than a turn")
+def hinge(animation, rig, on, degrees=80.0, ease="smooth"):
+    """Open a part about its own edge by narrowing it, not by rotating it.
+
+    A door that ROTATES goes through the wall. What a door does is turn about a
+    vertical axis, and seen flat-on that is `sx = cos(theta)` about the hinge
+    edge -- the far edge sweeps towards the hinge and the drawing gets narrower
+    while its height and its hinge side stay exactly where they were.
+
+    The rig is what makes it read: the part's pivot has to sit ON the hinge
+    edge, or the door narrows about its middle and swings out of its own frame.
+    Nothing here can check that -- it is a fact about the drawing -- so it is
+    said out loud rather than assumed.
+    """
+    import math
+
+    clone = copy.deepcopy(animation)
+    shape = EASINGS.get(ease, EASINGS["smooth"])
+    span = math.radians(float(degrees))
+
+    def frame(moment, base):
+        pose = PartPose(*(getattr(base, channel) for channel in CHANNELS))
+        pose.sx = base.sx * math.cos(span * shape(min(1.0, max(0.0, moment))))
+        return pose
+
+    return _bake(clone, rig, on, frame)
+
+
+@operator("retime", params=("curve",),
+          note="a time warp on the whole clip: the same poses in the same "
+               "order, arrived at on a different schedule. A stagger, a limp, "
+               "a beat held before the release")
+def retime(animation, rig, curve):
+    """Sample every track at f(t) instead of t.
+
+    The one operator that touches the whole clip rather than a selection,
+    because timing is not a property of a part. Everything here can already say
+    what a pose IS and nothing could say WHEN -- so an uneven gait had to be
+    faked by moving every keyframe of every track by hand, consistently, which
+    is exactly the kind of thing that gets done inconsistently.
+
+    `curve` maps 0..1 to 0..1. The identity changes nothing; a curve that rises
+    slowly and then quickly holds the start of the clip and rushes its end.
+    """
+    clone = copy.deepcopy(animation)
+    warp = _curve(curve, clone.easing)
+    tracks = list(clone.tracks.items())
+    if clone.root is not None:
+        tracks.append(("root", clone.root))
+
+    for selector, track in tracks:
+        keys = []
+        for moment in clone.times():
+            warped = min(1.0, max(0.0, warp.sample(moment, False)))
+            pose = track.sample(warped, clone.loop)
+            key = {"t": moment}
+            for channel in CHANNELS:
+                key[channel] = round(float(getattr(pose, channel)), 5)
+            keys.append(key)
+        rebaked = Track(keys, clone.easing, spread=track.spread)
+        if selector == "root":
+            clone.root = rebaked
+        else:
+            clone.tracks[selector] = rebaked
+    return clone
 
 
 @operator("volume", params=("on",),

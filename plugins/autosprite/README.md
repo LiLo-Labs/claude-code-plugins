@@ -220,6 +220,8 @@ it through.
 | `settle` | a one-shot that rings down instead of stopping dead |
 | `damp` | the whole of one track, quieter |
 | `volume` | squash that keeps its area, as a constructor rather than a discipline |
+| `hinge` | a door, shutter or lid: it swings about its edge in the third dimension, which flat-on is a *narrowing* rather than a turn — a door that rotates goes through the wall |
+| `retime` | a time warp on the whole clip: the same poses in the same order, on a different schedule. A stagger, a limp, a beat held before the release |
 
 Addresses are the same selectors as everything else — a role, `name:X`,
 `trait:X` — and deliberately nothing more.
@@ -441,7 +443,7 @@ pip install -r requirements-test.txt
 python3 -m pytest tests -q
 ```
 
-621 tests, no network, no model, well under a minute. Fixtures are generated rather
+634 tests, no network, no model, well under a minute. Fixtures are generated rather
 than checked in — `tests/make_fixture.py` builds parametric sprites so a test can
 have the exact property it is about (arms clear of the body or touching, legs
 parted or robed) instead of one PNG having to serve every case.
