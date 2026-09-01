@@ -286,3 +286,23 @@ def test_the_front_view_s_clips_get_the_face_on_motion(hero_path, tmp_path):
     east = next(clip for clip in result.clips if clip.direction == "E")
     assert max(_width_of(south)) - min(_width_of(south)) \
         < max(_width_of(east)) - min(_width_of(east))
+
+
+def test_a_walking_character_keeps_a_foot_on_the_floor(hero_path, tmp_path):
+    """A rigid leg rotated about the hip lifts its own foot: six pixels of
+    daylight under a 64px character at the walk's own amplitudes. The clip
+    declares itself grounded and the root is corrected back down."""
+    result = build(hero_path, tmp_path / "out", animations=["walk"])
+    clip = next(clip for clip in result.clips if clip.name == "walk")
+    floors = {int(image.alpha_mask(frame).nonzero()[0].max()) for frame in clip.frames}
+    assert len(floors) == 1, "the feet left the floor: %s" % sorted(floors)
+
+
+def test_a_running_character_is_allowed_to_leave_the_ground(hero_path, tmp_path):
+    """A run has a flight phase and a jump is nothing but one, so neither is
+    planted -- holding them down would delete the animation."""
+    result = build(hero_path, tmp_path / "out", animations=["run", "jump"])
+    for name in ("run", "jump"):
+        clip = next(clip for clip in result.clips if clip.name == name)
+        floors = {int(image.alpha_mask(frame).nonzero()[0].max()) for frame in clip.frames}
+        assert len(floors) > 1, "%s never leaves the ground" % name

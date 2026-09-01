@@ -9,7 +9,7 @@ again.
 The pipeline is sound and proven on real art. **20 CC0 sprites** (16×16 to
 76×81; humanoids, creatures, props, and four cases chosen to break a silhouette
 rigger) all build, with all eight verification checks passing on both backends.
-438 tests, no network or model in any of them.
+448 tests, no network or model in any of them.
 
 Quality, measured as **debris** — the share of a frame's pixels not connected to
 its main blob, against the source's own figure:
@@ -370,9 +370,39 @@ two arms because it can see COLOUR. That is the vision backend's job.
    reference is supplied, and no amount of rigging can invent the back of a
    head. The honest ceiling here is what the labels already say.
 
-7. **A pose-plausibility check.** Feet planted during walk contact frames, limb
-   angles inside anatomical range. Would partly close the gap in the section
-   above.
+7. ~~**A pose-plausibility check.**~~ **Done for the one that mattered.** The
+   check was "feet planted during walk contact frames", and measuring it found
+   that **nine of sixteen corpus characters float** -- the lowest drawn row
+   rises by 2 to 6 pixels during a walk, six on a 64px character.
+
+   The cause is geometry, not tuning: a leg here is one rigid piece rotating
+   about the hip, so swinging it t degrees lifts its own foot by L(1 - cos t),
+   which at the walk's 26 degrees is 10% of the leg. A real leg does not do this
+   because it bends; ours cannot, so the correction goes on the root instead.
+   `skeleton.plant` puts the character's lowest point on one row, computed from
+   the parts' actual PIXELS rather than their declared boxes (a rotated box's
+   lowest corner is a corner, not a foot, and the difference is most of the
+   error), and `render.level_to_floor` then closes the last pixel of rasteriser
+   rounding by nudging whole pixels and redrawing only the frames that are off.
+   A `shadow` part is excluded from both, or it stands in for the feet.
+
+   **Measured across the corpus's walks: total foot lift 45px -> 0. All sixteen
+   characters now plant exactly**, with debris unchanged.
+
+   The walk's hand-authored bob was deleted in the same change, because planting
+   gives it back for free and better: with the feet held down the body is lowest
+   where the legs splay at contact and highest where they pass vertically
+   underneath, which is the bob a walk is supposed to have, correctly phased and
+   scaled to the character rather than a fixed pixel count.
+
+   `planted` is per-animation and false by default. A run has a flight phase and
+   a jump is nothing but one, so holding either down would delete the animation;
+   an idle's bob IS the animation and there are no legs moving to correct for.
+   Whether the standing clips (attack, hurt, block, cast, throw) should be
+   planted is the open question -- the same measurement says it would take their
+   combined foot lift from 33px to 5, but it would also flatten the deliberate
+   weight shift in their root tracks, and that trade has not been looked at.
+
 
 ## Dead ends — measured, not guessed
 

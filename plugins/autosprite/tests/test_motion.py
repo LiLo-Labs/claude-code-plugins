@@ -53,12 +53,21 @@ def test_walk_arms_oppose_the_legs():
     assert legs * arms < 0
 
 
-def test_walk_bobs_twice_per_cycle():
-    walk = motion.get("walk")
-    bob = [walk.root.sample(t, True).dy for t in walk.times()]
+def test_run_bobs_twice_per_cycle():
+    run = motion.get("run")
+    bob = [run.root.sample(t, True).dy for t in run.times()]
     troughs = sum(1 for index in range(len(bob))
                   if bob[index] < bob[index - 1] and bob[index] <= bob[(index + 1) % len(bob)])
     assert troughs == 2
+
+
+def test_the_walk_authors_no_bob_at_all():
+    """It does not need one. With the feet planted the body's rise and fall
+    comes out of the leg geometry, correctly phased and scaled to the character
+    -- lowest where the legs are splayed at contact, highest where they pass
+    vertically underneath."""
+    assert motion.get("walk").root is None
+    assert motion.get("walk").planted
 
 
 def test_a_looping_track_wraps_rather_than_holding():
@@ -81,17 +90,17 @@ def test_hold_easing_steps_instead_of_sliding():
 
 def test_scaling_moves_translations_and_leaves_angles_alone():
     """A bob of 1px on a 32px sprite is 3px on a 96px one; the angle is the same."""
-    walk = motion.get("walk")
-    big = walk.scaled(3.0)
+    run = motion.get("run")
+    big = run.scaled(3.0)
     assert big.root.sample(0.25, True).dy == pytest.approx(
-        walk.root.sample(0.25, True).dy * 3.0)
+        run.root.sample(0.25, True).dy * 3.0)
     assert big.tracks["leg_near"].sample(0.0, True).angle == pytest.approx(
-        walk.tracks["leg_near"].sample(0.0, True).angle)
+        run.tracks["leg_near"].sample(0.0, True).angle)
 
 
 def test_scale_motion_uses_the_character_height():
-    scaled = motion.scale_motion([motion.get("walk")], 64.0, authored_height=32.0)
-    assert scaled[0].root.sample(0.25, True).dy == pytest.approx(-2.0)
+    scaled = motion.scale_motion([motion.get("run")], 64.0, authored_height=32.0)
+    assert scaled[0].root.sample(0.25, True).dy == pytest.approx(-4.0)
 
 
 def test_a_track_resolves_onto_every_part_with_that_role(humanoid_rig):
@@ -212,8 +221,9 @@ def test_fronted_leaves_the_body_alone():
     walk = motion.get("walk")
     front = walk.fronted()
     assert front.tracks["torso"].to_list() == walk.tracks["torso"].to_list()
-    assert front.root.to_list() == walk.root.to_list()
     assert front.frames == walk.frames and front.fps == walk.fps
+    run = motion.get("run")
+    assert run.fronted().root.to_list() == run.root.to_list()
 
 
 def test_fronted_does_not_mutate_the_library():
@@ -228,13 +238,13 @@ def test_fronted_does_not_mutate_the_library():
 def test_a_bob_scaled_below_a_pixel_is_floored_not_lost():
     """A 16px sprite scales the walk's 1px bob to half a pixel, which cannot be
     drawn, so the character slides instead of walking."""
-    small = motion.get("walk").scaled(0.5)
+    small = motion.get("idle").scaled(0.5)
     assert _peak(small.root, "dy") == pytest.approx(0.5)
     assert _peak(small.floored_travel(1.0).root, "dy") == pytest.approx(1.0)
 
 
 def test_a_travel_that_already_reads_is_left_alone():
-    big = motion.get("walk").scaled(3.0)
+    big = motion.get("idle").scaled(3.0)
     before = big.root.to_list()
     assert big.floored_travel(1.0).root.to_list() == before
 
@@ -245,7 +255,7 @@ def test_a_channel_that_was_never_authored_is_not_invented():
 
 
 def test_scale_motion_floors_the_travel_for_a_small_character():
-    scaled = motion.scale_motion([motion.get("walk")], 16)[0]
+    scaled = motion.scale_motion([motion.get("idle")], 16)[0]
     assert _peak(scaled.root, "dy") >= 1.0
 
 

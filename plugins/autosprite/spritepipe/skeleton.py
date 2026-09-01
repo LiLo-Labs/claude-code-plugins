@@ -129,3 +129,49 @@ def apply_point(matrix, point):
 def mirror(width):
     """Reflect about the vertical centreline of a `width`-wide image."""
     return np.array([[-1.0, 0.0, float(width) - 1.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]])
+
+
+def lowest_point(rig, pose, points):
+    """The lowest row the character reaches in this pose, in reference space."""
+    transforms = world_transforms(rig, pose)
+    best = None
+    for name, block in points.items():
+        moved = transforms[name] @ block
+        low = float((moved[1] / moved[2]).max())
+        best = low if best is None else max(best, low)
+    return best
+
+
+def plant(rig, poses, points):
+    """Put the character's lowest point on one row in every pose.
+
+    A leg here is one rigid piece rotating about the hip, so swinging it forward
+    by t degrees lifts its foot by L(1 - cos t) -- 10% of the leg at 26 degrees,
+    which on a 64px character is six pixels of daylight under a walking figure.
+    A real leg does not do this because it bends; ours cannot, so the correction
+    goes on the root instead.
+
+    What comes back is the walk's body bob, for free and correctly phased: with
+    the feet held down, the body is at its lowest where the legs are splayed at
+    contact and at its highest where they pass vertically underneath. That is
+    the bob a walk cycle is supposed to have, and it now scales itself to the
+    character instead of being a hand-authored pixel count.
+
+    Only for animations where a foot is genuinely down throughout. A run has a
+    flight phase and a jump is nothing but one.
+    """
+    lows = [lowest_point(rig, pose, points) for pose in poses]
+    floor = max(lows)
+    for pose, low in zip(poses, lows):
+        pose.dy += floor - low
+    return poses
+
+
+def posed(rig, animation, points=None):
+    """The poses to actually render: the animation's own, planted if it claims
+    to be grounded. Everything that renders a clip goes through here, so the
+    repair loop cannot end up measuring poses the pipeline did not draw."""
+    poses = animation.poses(rig)
+    if animation.planted and points:
+        plant(rig, poses, points)
+    return poses

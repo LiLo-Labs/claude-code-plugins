@@ -86,3 +86,75 @@ def test_a_shadow_never_moves_however_far_the_character_does():
     transforms = skeleton.world_transforms(rig, pose)
     assert np.allclose(transforms["shadow"], np.eye(3))
     assert not np.allclose(transforms["torso"], np.eye(3))
+
+
+# -- a foot on the floor --------------------------------------------------
+
+def _leg_points(rig, length=10):
+    """One column of pixels down each leg, in reference coordinates."""
+    points = {}
+    for part in rig.parts:
+        x0, y0, x1, y1 = part.box
+        rows = np.arange(y0, y1)
+        columns = np.full(rows.shape, (x0 + x1) // 2)
+        points[part.name] = np.stack([columns, rows, np.ones(rows.shape)], axis=0)
+    return points
+
+
+@pytest.fixture
+def stander():
+    return R.Rig((12, 20), [
+        R.Part("torso", "torso", (2, 0, 10, 12), None, (6, 12)),
+        R.Part("leg_near", "leg_near", (6, 12, 9, 20), "torso", (7, 12)),
+        R.Part("leg_far", "leg_far", (3, 12, 6, 20), "torso", (4, 12)),
+    ], "humanoid", "right", anchor=(6, 20))
+
+
+def test_swinging_a_rigid_leg_lifts_its_own_foot(stander):
+    """The whole reason planting exists: a leg here is one rigid piece rotating
+    about the hip, so a swing of t degrees lifts its foot by L(1 - cos t)."""
+    points = _leg_points(stander)
+    rest = skeleton.lowest_point(stander, skeleton.Pose(), points)
+    swung = skeleton.Pose()
+    swung.set("leg_near", skeleton.PartPose(angle=30.0))
+    swung.set("leg_far", skeleton.PartPose(angle=-30.0))
+    assert skeleton.lowest_point(stander, swung, points) < rest - 0.5
+
+
+def test_planting_puts_every_pose_on_one_floor(stander):
+    points = _leg_points(stander)
+    poses = []
+    for angle in (0.0, 12.0, 26.0, 12.0):
+        pose = skeleton.Pose()
+        pose.set("leg_near", skeleton.PartPose(angle=angle))
+        pose.set("leg_far", skeleton.PartPose(angle=-angle))
+        poses.append(pose)
+    skeleton.plant(stander, poses, points)
+    floors = [round(skeleton.lowest_point(stander, pose, points), 6) for pose in poses]
+    assert len(set(floors)) == 1
+
+
+def test_planting_gives_back_a_body_bob_lowest_at_contact(stander):
+    """With the feet held down the body is lowest where the legs are splayed and
+    highest where they pass vertically underneath -- which is the bob a walk is
+    supposed to have, arrived at rather than authored."""
+    points = _leg_points(stander)
+    poses = []
+    for angle in (26.0, 0.0):          # contact, then passing
+        pose = skeleton.Pose()
+        pose.set("leg_near", skeleton.PartPose(angle=angle))
+        pose.set("leg_far", skeleton.PartPose(angle=-angle))
+        poses.append(pose)
+    skeleton.plant(stander, poses, points)
+    head = lambda pose: skeleton.apply_point(
+        skeleton.world_transforms(stander, pose)["torso"], (6, 0))[1]
+    assert head(poses[1]) < head(poses[0])
+
+
+def test_posed_leaves_an_unplanted_clip_alone(stander):
+    from spritepipe import motion
+    points = _leg_points(stander)
+    run = motion.get("run")
+    assert not run.planted
+    assert [pose.dy for pose in skeleton.posed(stander, run, points)] \
+        == [pose.dy for pose in run.poses(stander)]

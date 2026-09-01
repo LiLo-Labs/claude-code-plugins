@@ -25,7 +25,7 @@ import copy
 
 from . import image as img
 from . import quality as quality_module
-from .skeleton import Pose
+from .skeleton import Pose, posed
 
 # Below this a frame is as whole as the source art already was, and there is
 # nothing to repair. It is the same figure `pipeline` warns at.
@@ -111,7 +111,9 @@ def repair(cutout, rig, animation, frames, reference_pixels, margin,
     if shed <= tolerance or index is None:
         return animation, frames, None
 
-    roles = blame(cutout, rig, animation.poses(rig)[index], margin, render_module)
+    ground = cutout.ground_points()
+    roles = blame(cutout, rig, posed(rig, animation, ground)[index],
+                  margin, render_module)
     if not roles:
         return animation, frames, None
 
@@ -130,7 +132,8 @@ def repair(cutout, rig, animation, frames, reference_pixels, margin,
 
     for scale in steps:
         trial = damp(animation, swings, scale)
-        drawn = render_module.render_sequence(cutout, trial.poses(rig), margin=margin)
+        drawn = render_module.render_sequence(
+            cutout, posed(rig, trial, ground), margin=margin)
         after, _ = quality_module.shed(drawn, reference_pixels)
         if after <= tolerance:
             return trial, drawn, (

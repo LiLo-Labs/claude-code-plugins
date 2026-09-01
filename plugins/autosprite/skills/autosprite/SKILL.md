@@ -189,7 +189,12 @@ What to look for, in order:
    a `shadow` part that never moves, so the floor stays where the artist drew
    it while the character jumps off it. If a sprite's shadow still rides the
    character, the rigger did not recognise it -- check the rig notes.
-3. **Do the feet slide?** The walk's contact frames should have a foot planted.
+3. **Do the feet slide?** The walk is *planted*: a clip that claims a foot is on
+   the floor throughout has the root corrected down until it is, so the walk's
+   feet sit on exactly one row in every frame and the body's bob comes out of
+   the leg geometry rather than being authored. A run and a jump are not
+   planted, because both genuinely leave the ground. If a walk still floats, the
+   rig's leg boxes are not legs.
    If both feet move every frame the leg amplitudes are too large for the stride.
 4. **Does anything freeze?** The build warns when frames repeat. Vertical
    travel is floored at one pixel so a small character's bob cannot round away,

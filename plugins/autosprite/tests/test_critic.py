@@ -57,11 +57,11 @@ def test_a_negative_delta_closes_a_swing_down():
 
 
 def test_the_root_track_is_adjustable_by_name():
-    walk = motion.get("walk")
-    bouncier, touched = critic.apply_adjustments(walk, {"root": {"dy": 2}})
+    run = motion.get("run")
+    bouncier, touched = critic.apply_adjustments(run, {"root": {"dy": 2}})
     assert touched > 0
-    assert (min(bouncier.root.sample(t, True).dy for t in walk.times())
-            < min(walk.root.sample(t, True).dy for t in walk.times()))
+    assert (min(bouncier.root.sample(t, True).dy for t in run.times())
+            < min(run.root.sample(t, True).dy for t in run.times()))
 
 
 def test_an_adjustment_cannot_run_an_angle_away():

@@ -104,8 +104,13 @@ def _key_pose(key):
 
 class Animation:
     def __init__(self, name, frames, fps=10, loop=True, tracks=None, root=None,
-                 easing="smooth", note="", flip_from=None):
+                 easing="smooth", note="", flip_from=None, planted=False):
         self.name = name
+        # Whether a foot is on the floor throughout. A rigid leg rotated about
+        # the hip lifts its own foot, so a clip that claims to be grounded has
+        # to be corrected back down -- see `skeleton.plant`. A run has a flight
+        # phase and a jump is nothing but one, so neither is grounded.
+        self.planted = bool(planted)
         # A 2D spin has no back face to draw: the object squashes to nothing and
         # comes back mirrored. `flip_from` is the instant it passes edge-on.
         self.flip_from = flip_from
@@ -288,7 +293,7 @@ class Animation:
     def to_dict(self):
         return {"name": self.name, "frames": self.frames, "fps": self.fps,
                 "loop": self.loop, "easing": self.easing, "note": self.note,
-                "flip_from": self.flip_from,
+                "flip_from": self.flip_from, "planted": self.planted,
                 "root": self.root.to_list() if self.root else None,
                 "tracks": {role: track.to_list() for role, track in self.tracks.items()}}
 
@@ -297,7 +302,7 @@ class Animation:
         return cls(data["name"], data["frames"], data.get("fps", 10),
                    data.get("loop", True), data.get("tracks"), data.get("root"),
                    data.get("easing", "smooth"), data.get("note", ""),
-                   data.get("flip_from"))
+                   data.get("flip_from"), data.get("planted", False))
 
 
 def validate_animation(data):
@@ -411,10 +416,11 @@ def _library():
     # actually looks like.
     walk = Animation(
         "walk", frames=8, fps=10, loop=True,
-        note="legs in counter-phase, arms opposing them, two body bobs per "
-             "cycle, and a bent knee on whichever leg is passing",
-        root=[{"t": 0.0, "dy": 0.0}, {"t": 0.25, "dy": -1.0}, {"t": 0.5, "dy": 0.0},
-              {"t": 0.75, "dy": -1.0}, {"t": 1.0, "dy": 0.0}],
+        note="legs in counter-phase, arms opposing them, a bent knee on whichever "
+             "leg is passing, and no authored bob: the feet are planted, so the "
+             "body's rise and fall comes out of the leg geometry itself and "
+             "scales to the character",
+        planted=True,
         tracks={
             "leg_near": [{"t": 0.0, "angle": 26.0, "sy": 1.0},
                          {"t": 0.25, "angle": 0.0, "sy": 1.0},     # planted

@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from spritepipe import image, motion, render, skeleton
+from spritepipe import cutout, image, motion, render, rig as R, skeleton
 
 
 def test_the_identity_pose_reproduces_the_reference_exactly(hero, hero_cutout):
@@ -201,3 +201,67 @@ def test_supersampling_does_not_move_the_part(hero_cutout):
 def test_an_unrotated_part_never_goes_through_the_resampler(hero, hero_cutout):
     """Most parts in most frames take this path, and it stays pixel-exact."""
     assert image.equal(render.render_pose(hero_cutout, skeleton.Pose()), hero.pixels)
+
+
+# -- the last pixel of planting -------------------------------------------
+
+def test_levelling_puts_the_drawn_feet_on_one_row():
+    """`skeleton.plant` is exact in continuous space and then the rasteriser
+    rounds: a foot computed at 31.4 and one at 31.6 land a pixel apart."""
+    art = image.blank(26, 10)
+    art[0:12, 2:8] = (80, 110, 160, 255)
+    art[12:26, 4:6] = (60, 60, 70, 255)         # a long thin leg
+    built = R.Rig((10, 26), [
+        R.Part("torso", "torso", (0, 0, 10, 12), None, (5, 12)),
+        R.Part("leg_near", "leg_near", (3, 12, 7, 26), "torso", (5, 12)),
+    ], "humanoid", "right", anchor=(5, 26))
+    cut = cutout.cut(built, art)
+    poses = []
+    for angle in (0.0, 9.0, 18.0, 9.0):
+        pose = skeleton.Pose()
+        pose.set("leg_near", skeleton.PartPose(angle=angle))
+        poses.append(pose)
+    margin = render.suggest_margin(built)
+    frames = [render.render_pose(cut, pose, margin=margin) for pose in poses]
+    lows = {int(image.alpha_mask(f).nonzero()[0].max()) for f in frames}
+    assert len(lows) > 1, "the fixture is meant to lift its foot"
+
+    levelled = render.level_to_floor(cut, poses, frames, margin)
+    assert len({int(image.alpha_mask(f).nonzero()[0].max()) for f in levelled}) == 1
+
+
+def test_levelling_a_clip_already_on_one_row_redraws_nothing():
+    art = image.blank(12, 8)
+    art[:, :] = (200, 100, 50, 255)
+    built = R.Rig((8, 12), [R.Part("torso", "torso", (0, 0, 8, 12), None, (4, 12))],
+                  "prop", "right", anchor=(4, 12))
+    cut = cutout.cut(built, art)
+    poses = [skeleton.Pose() for _ in range(3)]
+    margin = render.suggest_margin(built)
+    frames = [render.render_pose(cut, pose, margin=margin) for pose in poses]
+    assert render.level_to_floor(cut, poses, frames, margin) is frames
+
+
+def test_a_shadow_does_not_stand_in_for_the_feet_when_levelling():
+    """The shadow is the floor, not the character. It never moves, so measuring
+    it reports the same row every frame and makes this a no-op on exactly the
+    sprites that have one."""
+    art = image.blank(28, 10)
+    art[0:12, 2:8] = (80, 110, 160, 255)
+    art[12:25, 4:6] = (60, 60, 70, 255)
+    art[27:28, 2:8] = (25, 14, 14, 255)         # a contact shadow, below the foot
+    built = R.Rig((10, 28), [
+        R.Part("torso", "torso", (0, 0, 10, 12), None, (5, 12)),
+        R.Part("leg_near", "leg_near", (3, 12, 7, 25), "torso", (5, 12)),
+        R.Part("shadow", "shadow", (2, 27, 8, 28), "torso", (5, 28)),
+    ], "humanoid", "right", anchor=(5, 28))
+    cut = cutout.cut(built, art)
+    poses = []
+    for angle in (0.0, 20.0):
+        pose = skeleton.Pose()
+        pose.set("leg_near", skeleton.PartPose(angle=angle))
+        poses.append(pose)
+    margin = render.suggest_margin(built)
+    frames = [render.render_pose(cut, pose, margin=margin) for pose in poses]
+    levelled = render.level_to_floor(cut, poses, frames, margin)
+    assert levelled is not frames, "the shadow masked the lift"

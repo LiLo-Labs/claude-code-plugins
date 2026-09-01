@@ -55,6 +55,30 @@ class Cutout:
                 return sprite
         return None
 
+    def ground_points(self):
+        """Every part's opaque pixels, in reference coordinates, ready to transform.
+
+        Used to find where the character's lowest point actually is in a pose.
+        The declared BOX is not good enough for that: when a leg rotates, the
+        box's lowest corner is a corner, not a foot, and the two differ by
+        enough to leave a character floating.
+
+        A `shadow` part is excluded, because it is the floor rather than the
+        character and would report the same row in every frame.
+        """
+        points = {}
+        for sprite in self.sprites:
+            part = self.rig.by_name(sprite.name)
+            if part is not None and part.role == "shadow":
+                continue
+            rows, columns = np.nonzero(img.alpha_mask(sprite.pixels))
+            if not rows.size:
+                continue
+            points[sprite.name] = np.stack(
+                [columns + sprite.origin[0], rows + sprite.origin[1],
+                 np.ones(rows.shape)], axis=0)
+        return points
+
     def rest(self):
         """Composite every part at its rest position. Must equal the reference."""
         width, height = self.rig.size

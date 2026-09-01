@@ -28,6 +28,7 @@ from . import quality as quality_module
 from . import render as render_module
 from . import repair as repair_module
 from . import rig as rig_module
+from . import skeleton as skeleton_module
 from . import verify as verify_module
 from . import vision as vision_module
 
@@ -132,9 +133,13 @@ def make_clips(references, rigs, cutouts, animations, direction_plans, locked,
         # the clips trade their swing for a lift before they are scaled.
         chosen = ([clip.fronted() for clip in animations]
                   if rig.facing in vision_module.FACE_ON else animations)
+        ground = cut.ground_points()
         for animation in motion_module.scale_motion(chosen, height):
+            poses = skeleton_module.posed(rig, animation, ground)
             drawn = [render_module.render_pose(cut, pose, margin=margin)
-                     for pose in animation.poses(rig)]
+                     for pose in poses]
+            if animation.planted:
+                drawn = render_module.level_to_floor(cut, poses, drawn, margin)
             if repair:
                 animation, drawn, note = repair_module.repair(
                     cut, rig, animation, drawn, references[view].pixels,
