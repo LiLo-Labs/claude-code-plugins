@@ -168,6 +168,11 @@ def stabilise_clips(clips, padding=0):
         runs = stabilize_module.duplicate_runs(frames)
         if runs:
             report["holds"][clip.key] = runs
+        distinct = stabilize_module.distinct_frames(frames, clip.loop)
+        report["clips"][clip.key]["distinct"] = distinct
+        wanted = len(frames) - (0 if clip.loop else 1)
+        if wanted > 1 and distinct < wanted:
+            report.setdefault("repeats", {})[clip.key] = [distinct, len(frames)]
     return report
 
 
@@ -241,6 +246,11 @@ def build_sheet(reference_path, outdir, animations=("full",), direction_set="1",
         if longest >= 3:
             build.warn("%s holds the same frame for %d frames running; the motion "
                        "may be too small for a character this size" % (key, longest))
+    for key, (distinct, total) in build.report["stabilise"].get("repeats", {}).items():
+        build.warn("%s is %d frames but only %d different pictures; either the "
+                   "motion is too small for a character this size, or the cycle "
+                   "retraces itself and needs a keyframe the two halves do not "
+                   "share" % (key, total, distinct))
 
     reference_pixels = build.references["side"].pixels
     build.report["shed"] = {}

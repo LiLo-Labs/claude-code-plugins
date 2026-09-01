@@ -62,6 +62,28 @@ def stabilise(frames, anchor, padding=0):
     return cropped, box, moved, report
 
 
+def distinct_frames(frames, loop=True):
+    """How many of these frames are different pictures.
+
+    `duplicate_runs` only finds repeats that are ADJACENT, and the repeat that
+    matters most is not: a swing authored with one key at each end and one in
+    the middle is symmetric in time, so frame k and frame N-k are the same
+    image. The built-in walk had that for a long time and nothing noticed --
+    eight frames, five pictures, the second half retracing the first. A
+    character rocking rather than walking, and `--frames 24` on it produces
+    nineteen repeats.
+
+    A one-shot clip that starts and ends at rest is not repeating itself, so its
+    last frame is not counted against it.
+    """
+    if not frames:
+        return 0
+    counted = list(frames)
+    if not loop and len(counted) > 1 and counted[0].tobytes() == counted[-1].tobytes():
+        counted = counted[:-1]
+    return len({frame.tobytes() for frame in counted})
+
+
 def duplicate_runs(frames):
     """Consecutive identical frames, as [first_index, count] pairs.
 

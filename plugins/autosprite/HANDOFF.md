@@ -9,7 +9,7 @@ again.
 The pipeline is sound and proven on real art. **20 CC0 sprites** (16×16 to
 76×81; humanoids, creatures, props, and four cases chosen to break a silhouette
 rigger) all build, with all seven verification checks passing on both backends.
-416 tests, no network or model in any of them.
+422 tests, no network or model in any of them.
 
 Quality, measured as **debris** — the share of a frame's pixels not connected to
 its main blob, against the source's own figure:
@@ -20,6 +20,13 @@ its main blob, against the source's own figure:
 | after quadrupeds read their legs as columns | 68.6% |
 | after the automatic repair | 44.3% |
 | after the landmark fixes and a grounded shadow | **39.4%** |
+
+And on the **vision backend**, which is the recommended one, the whole corpus
+now measures **25.4%** -- of which 23.8 points are the potion's spin alone.
+Every character in the corpus is at or under 0.9%, including
+`platformer-grass-prowne`, whose jump the silhouette rigger cannot save (15.4%)
+and whose vision rig holds together completely. All twenty build with all seven
+checks passing.
 
 **Eighteen of the twenty sprites now shed nothing on any animation.** What is
 left is one character and one prop: `platformer-grass-prowne` (15.4% on jump,

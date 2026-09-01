@@ -283,3 +283,40 @@ def test_resampling_does_not_mutate_the_library():
     before = motion.get("walk").frames
     motion.get("walk").resampled(30)
     assert motion.get("walk").frames == before
+
+
+# -- a cycle, not a pendulum ----------------------------------------------
+
+def _mirrors_itself(animation, rig):
+    """Does pose(t) equal pose(1-t)? That is what makes a swing a pendulum."""
+    for t in (0.125, 0.25, 0.375):
+        here, there = animation.pose_at(rig, t), animation.pose_at(rig, 1.0 - t)
+        for name in set(here.parts) | set(there.parts):
+            a, b = here.get(name), there.get(name)
+            if (round(a.angle, 3), round(a.sy, 3)) != (round(b.angle, 3), round(b.sy, 3)):
+                return False
+    return True
+
+
+def test_the_walk_does_not_retrace_itself(hero_rig):
+    """A swing with one key at each end and one in the middle is symmetric in
+    time, so frame k and frame N-k are the same picture -- eight frames, five
+    images, a character rocking instead of walking. The knee is what breaks it:
+    at each passing pose one leg is planted and straight and the other lifted
+    and bent, and which is which swaps between the halves."""
+    assert not _mirrors_itself(motion.get("walk"), hero_rig)
+
+
+def test_the_two_passing_poses_differ_in_which_knee_is_bent(hero_rig):
+    quarter = motion.get("walk").pose_at(hero_rig, 0.25)
+    three_quarter = motion.get("walk").pose_at(hero_rig, 0.75)
+    assert quarter.get("leg_far").sy < quarter.get("leg_near").sy
+    assert three_quarter.get("leg_near").sy < three_quarter.get("leg_far").sy
+
+
+def test_no_locomotion_cycle_retraces_itself(hero_rig):
+    """Only locomotion. A breathing idle SHOULD retrace itself -- in and out is
+    what breathing is -- and its 1px motion is covered by the build's own
+    "only N different pictures" warning instead."""
+    for name in ("walk", "run"):
+        assert not _mirrors_itself(motion.get(name), hero_rig), name

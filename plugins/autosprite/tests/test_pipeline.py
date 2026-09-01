@@ -183,16 +183,30 @@ def _feet(clip):
     return out
 
 
-def test_a_face_on_walk_alternates_the_feet_and_a_profile_one_does_not(hero_path, tmp_path):
-    """A profile walk swings the legs across the picture; from the front there
-    is no across to swing through, and what a viewer reads instead is one foot
-    leaving the floor while the other stays on it."""
+def _width_of(clip):
+    out = []
+    for frame in clip.frames:
+        columns = image.alpha_mask(frame).nonzero()[1]
+        out.append(int(columns.max()) - int(columns.min()) + 1 if columns.size else 0)
+    return out
+
+
+def test_a_face_on_walk_swings_across_the_picture_far_less(hero_path, tmp_path):
+    """A profile walk sweeps the legs across the picture and the silhouette
+    widens as they splay. Towards the camera there is no across to sweep
+    through: the same phase drives a lift instead, so the character stays the
+    width it was drawn."""
     front = build(hero_path, tmp_path / "front", animations=["walk"], facing="front")
     side = build(hero_path, tmp_path / "side", animations=["walk"], facing="right")
     front_clip = next(clip for clip in front.clips if clip.name == "walk")
     side_clip = next(clip for clip in side.clips if clip.name == "walk")
+
+    front_widths, side_widths = _width_of(front_clip), _width_of(side_clip)
+    assert max(front_widths) - min(front_widths) < max(side_widths) - min(side_widths)
+    assert max(front_widths) < max(side_widths)
+    # ... and the feet still alternate, or it would not read as a walk at all.
     swing = _feet(front_clip)
-    assert max(swing) - min(swing) > max(_feet(side_clip)) - min(_feet(side_clip))
+    assert max(swing) - min(swing) >= 2
     assert front.verification.ok, front.verification.report()
 
 

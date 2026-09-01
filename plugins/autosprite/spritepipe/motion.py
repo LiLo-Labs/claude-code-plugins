@@ -394,16 +394,41 @@ def _library():
                      {"t": 1.0, "angle": -4.0}],
         })
 
+    # The passing poses are what make this a CYCLE rather than a pendulum. A
+    # plain out-and-back swing -- one key at each end and one in the middle --
+    # is symmetric in time, so frame k and frame N-k are the same picture and an
+    # eight-frame walk is really five: measured on a corpus character, the old
+    # version drew 5 distinct images and repeated three of them. The character
+    # rocks instead of walking, and asking for more frames only adds more
+    # repeats.
+    #
+    # What breaks the symmetry is the knee. At each passing pose one leg is
+    # planted and straight while the other is lifted and bent, and which is
+    # which swaps between the two halves of the cycle. That is also what a walk
+    # actually looks like.
     walk = Animation(
         "walk", frames=8, fps=10, loop=True,
-        note="legs in counter-phase, arms opposing the legs, two body bobs per cycle",
+        note="legs in counter-phase, arms opposing them, two body bobs per "
+             "cycle, and a bent knee on whichever leg is passing",
         root=[{"t": 0.0, "dy": 0.0}, {"t": 0.25, "dy": -1.0}, {"t": 0.5, "dy": 0.0},
               {"t": 0.75, "dy": -1.0}, {"t": 1.0, "dy": 0.0}],
         tracks={
-            "leg_near": _swing(26.0, -26.0),
-            "leg_far": _swing(-26.0, 26.0),
-            "arm_near": _swing(-18.0, 18.0),
-            "arm_far": _swing(18.0, -18.0),
+            "leg_near": [{"t": 0.0, "angle": 26.0, "sy": 1.0},
+                         {"t": 0.25, "angle": 0.0, "sy": 1.0},     # planted
+                         {"t": 0.5, "angle": -26.0, "sy": 1.0},
+                         {"t": 0.75, "angle": 0.0, "sy": 0.86},    # lifted, bent
+                         {"t": 1.0, "angle": 26.0, "sy": 1.0}],
+            "leg_far": [{"t": 0.0, "angle": -26.0, "sy": 1.0},
+                        {"t": 0.25, "angle": 0.0, "sy": 0.86},     # lifted, bent
+                        {"t": 0.5, "angle": 26.0, "sy": 1.0},
+                        {"t": 0.75, "angle": 0.0, "sy": 1.0},      # planted
+                        {"t": 1.0, "angle": -26.0, "sy": 1.0}],
+            "arm_near": [{"t": 0.0, "angle": -18.0}, {"t": 0.25, "angle": -3.0},
+                         {"t": 0.5, "angle": 18.0}, {"t": 0.75, "angle": 3.0},
+                         {"t": 1.0, "angle": -18.0}],
+            "arm_far": [{"t": 0.0, "angle": 18.0}, {"t": 0.25, "angle": 3.0},
+                        {"t": 0.5, "angle": -18.0}, {"t": 0.75, "angle": -3.0},
+                        {"t": 1.0, "angle": 18.0}],
             "torso": [{"t": 0.0, "angle": -2.0}, {"t": 0.5, "angle": 2.0},
                       {"t": 1.0, "angle": -2.0}],
             "tail": _swing(-8.0, 8.0, phase=0.15),

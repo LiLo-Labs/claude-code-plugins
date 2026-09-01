@@ -101,3 +101,32 @@ def test_nothing_is_lost_when_it_does_fit():
     frame[2, 2] = (9, 9, 9, 255)
     out, _ = stabilize.fit_to_cell([frame], (2, 5), 20)
     assert int(image.alpha_mask(out[0]).sum()) == 1
+
+
+# -- repeats that are not adjacent ----------------------------------------
+
+def _solid(colour):
+    frame = image.blank(4, 4)
+    frame[:, :] = colour
+    return frame
+
+
+def test_distinct_frames_finds_a_repeat_that_is_not_adjacent():
+    """The repeat that matters most is not adjacent: a swing symmetric in time
+    makes frame k and frame N-k the same picture, and `duplicate_runs` walks
+    straight past it."""
+    frames = [_solid((1, 1, 1, 255)), _solid((2, 2, 2, 255)),
+              _solid((3, 3, 3, 255)), _solid((2, 2, 2, 255))]
+    assert stabilize.duplicate_runs(frames) == []
+    assert stabilize.distinct_frames(frames) == 3
+
+
+def test_a_one_shot_that_ends_where_it_started_is_not_repeating_itself():
+    frames = [_solid((1, 1, 1, 255)), _solid((2, 2, 2, 255)), _solid((1, 1, 1, 255))]
+    assert stabilize.distinct_frames(frames, loop=False) == 2
+    assert stabilize.distinct_frames(frames, loop=True) == 2
+
+
+def test_every_frame_different_counts_them_all():
+    frames = [_solid((index, index, index, 255)) for index in range(1, 6)]
+    assert stabilize.distinct_frames(frames) == 5
