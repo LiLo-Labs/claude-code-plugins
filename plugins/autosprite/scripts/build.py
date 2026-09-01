@@ -52,6 +52,11 @@ def main():
     parser.add_argument("--compress", action="store_true",
                         help="write the sheet as an indexed PNG - lossless here, "
                              "because the palette is the source art's own")
+    parser.add_argument("--no-repair", action="store_true",
+                        help="do not damp a limb that swings clear of the body. "
+                             "By default a clip measured to be coming apart has "
+                             "the responsible swing reduced until it holds "
+                             "together, and the build says so")
     parser.add_argument("--padding", type=int, default=1)
     parser.add_argument("--extrude", type=int, default=1)
     parser.add_argument("--scale", type=int, default=1,
@@ -80,7 +85,7 @@ def main():
             engines=[e.strip() for e in args.engines.split(",") if e.strip()],
             front=args.front, back=args.back, tolerance=args.tolerance,
             native=not args.no_native, custom_animations=custom, kind=args.kind,
-            compress=args.compress)
+            compress=args.compress, repair=not args.no_repair)
     except (ValueError, RuntimeError) as error:
         print("build failed: %s" % error, file=sys.stderr)
         return 2

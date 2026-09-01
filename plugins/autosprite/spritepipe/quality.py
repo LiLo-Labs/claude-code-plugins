@@ -17,21 +17,26 @@ import numpy as np
 from . import image as img
 
 
-def blob_sizes(mask):
-    """Sizes of the 8-connected components, largest first."""
+def label(mask):
+    """Label the 8-connected components. Returns (labels, count).
+
+    Background is -1. Everything here that asks "did the character come apart?"
+    asks it of these labels, so there is one flood fill rather than one per
+    caller.
+    """
     height, width = mask.shape
     seen = np.zeros_like(mask)
-    sizes = []
+    labels = np.full(mask.shape, -1, dtype=np.int32)
+    count = 0
     for start_y in range(height):
         for start_x in range(width):
             if not mask[start_y, start_x] or seen[start_y, start_x]:
                 continue
             stack = [(start_y, start_x)]
             seen[start_y, start_x] = True
-            count = 0
             while stack:
                 y, x = stack.pop()
-                count += 1
+                labels[y, x] = count
                 for dy in (-1, 0, 1):
                     for dx in (-1, 0, 1):
                         ny, nx = y + dy, x + dx
@@ -39,8 +44,24 @@ def blob_sizes(mask):
                                 and mask[ny, nx] and not seen[ny, nx]):
                             seen[ny, nx] = True
                             stack.append((ny, nx))
-            sizes.append(count)
-    return sorted(sizes, reverse=True)
+            count += 1
+    return labels, count
+
+
+def blob_sizes(mask):
+    """Sizes of the 8-connected components, largest first."""
+    labels, count = label(mask)
+    return sorted((int((labels == index).sum()) for index in range(count)),
+                  reverse=True)
+
+
+def loose(mask):
+    """The pixels that are NOT connected to the largest blob."""
+    labels, count = label(mask)
+    if count <= 1:
+        return np.zeros_like(mask)
+    sizes = [int((labels == index).sum()) for index in range(count)]
+    return (labels >= 0) & (labels != int(np.argmax(sizes)))
 
 
 def debris(pixels):

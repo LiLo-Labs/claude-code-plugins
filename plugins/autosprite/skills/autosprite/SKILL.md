@@ -152,7 +152,12 @@ of stills. Read them yourself before showing the user.
 What to look for, in order:
 
 1. **Does the character come apart?** A limb detaching means its pivot is not on
-   its joint.
+   its joint. The build repairs this by itself where it can: a clip measured to
+   be shedding has the responsible swing -- and only that one -- reduced until
+   it holds together, and the build report's `repairs` says which part, on which
+   frame, and by how much. When it says damping did NOT put the character back
+   together, believe it: that is a rig problem, and re-rigging is the fix.
+   `--no-repair` turns it off.
 2. **Do the feet slide?** The walk's contact frames should have a foot planted.
    If both feet move every frame the leg amplitudes are too large for the stride.
 3. **Does anything freeze?** The build warns when frames repeat. Vertical

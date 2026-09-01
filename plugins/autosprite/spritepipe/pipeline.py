@@ -26,6 +26,7 @@ from . import palette as palette_module
 from . import preview as preview_module
 from . import quality as quality_module
 from . import render as render_module
+from . import repair as repair_module
 from . import rig as rig_module
 from . import verify as verify_module
 from . import vision as vision_module
@@ -99,10 +100,10 @@ def union_palette(references):
 
 
 def make_clips(references, rigs, cutouts, animations, direction_plans, locked,
-               build=None):
+               build=None, repair=True):
     """Render every animation in every direction. Frames are not yet stabilised."""
     margin = max(render_module.suggest_margin(rig) for rig in rigs.values())
-    clips, raw = [], []
+    clips, raw, repairs = [], [], []
 
     for plan in direction_plans:
         view = plan.source if plan.source in cutouts else "side"
@@ -119,11 +120,17 @@ def make_clips(references, rigs, cutouts, animations, direction_plans, locked,
         chosen = ([clip.fronted() for clip in animations]
                   if rig.facing in vision_module.FACE_ON else animations)
         for animation in motion_module.scale_motion(chosen, height):
-            frames = []
-            for pose in animation.poses(rig):
-                frame = render_module.render_pose(cut, pose, margin=margin)
-                frame = plan.apply(frame)
-                frames.append(palette_module.enforce(frame, locked))
+            drawn = [render_module.render_pose(cut, pose, margin=margin)
+                     for pose in animation.poses(rig)]
+            if repair:
+                animation, drawn, note = repair_module.repair(
+                    cut, rig, animation, drawn, references[view].pixels,
+                    margin, render_module)
+                if note:
+                    build and build.warn(note)
+                    repairs.append(note)
+            frames = [palette_module.enforce(plan.apply(frame), locked)
+                      for frame in drawn]
             anchor = rig_module.anchor_of(rig)
             clip = pack_module.Clip(
                 animation.name, frames, animation.fps, animation.loop,
@@ -132,7 +139,7 @@ def make_clips(references, rigs, cutouts, animations, direction_plans, locked,
                 fidelity=plan.fidelity, note=animation.note)
             clips.append(clip)
             raw.append(frames)
-    return clips, margin
+    return clips, margin, repairs
 
 
 def stabilise_clips(clips, padding=0):
@@ -170,7 +177,7 @@ def build_sheet(reference_path, outdir, animations=("full",), direction_set="1",
                 extrude=1, scale=1, power_of_two=False, engines=("all",),
                 front=None, back=None, tolerance=12, native=True,
                 custom_animations=None, preview_scale=None, kind="character",
-                compress=False):
+                compress=False, repair=True):
     """The whole pipeline. Returns a Build."""
     build = Build()
     os.makedirs(outdir, exist_ok=True)
@@ -209,8 +216,10 @@ def build_sheet(reference_path, outdir, animations=("full",), direction_set="1",
         build.warn(note)
 
     locked = union_palette(build.references)
-    build.clips, margin = make_clips(build.references, build.rigs, build.cutouts,
-                                     chosen, plans, locked, build)
+    build.clips, margin, repairs = make_clips(
+        build.references, build.rigs, build.cutouts, chosen, plans, locked,
+        build, repair=repair)
+    build.report["repairs"] = repairs
     build.report["margin"] = margin
     build.report["stabilise"] = stabilise_clips(build.clips)
     for key, runs in build.report["stabilise"].get("holds", {}).items():

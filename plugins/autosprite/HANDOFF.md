@@ -9,15 +9,24 @@ again.
 The pipeline is sound and proven on real art. **20 CC0 sprites** (16×16 to
 76×81; humanoids, creatures, props, and four cases chosen to break a silhouette
 rigger) all build, with all seven verification checks passing on both backends.
-375 tests, no network or model in any of them.
+386 tests, no network or model in any of them.
 
 Quality, measured as **debris** — the share of a frame's pixels not connected to
 its main blob, against the source's own figure:
 
-| | silhouette backend | vision backend |
-|---|---|---|
-| the 16-sprite corpus | 60.5% total, was 60.5% at the start | **15.1%** |
-| the 4 adversarial cases | 5.6% | **0.0%** |
+| worst-frame shed, all 7 clips | silhouette backend |
+|---|---|
+| the 20-sprite corpus, at the start | 89.4% |
+| after quadrupeds read their legs as columns | 68.6% |
+| after the automatic repair | **44.3%** |
+
+Fifteen of the twenty sprites now shed nothing on any animation. What is left
+is three characters and one prop: `grafxkid-oldhero` (1.3% on jump),
+`platformer-grass-prowne` (15.4% on jump, an 8-pixel-wide character whose limbs
+are 2 pixels across), and `props-potion-funnydude` (15.8% on spin, the cork
+coming off as the neck vanishes mid-squash). All three are reported by name,
+frame and part in the build's `repairs`, and all three are rig problems rather
+than motion problems -- the repair says so itself.
 
 `scripts/build.py` warns per clip which frame sheds most, so a regression
 announces itself.
@@ -89,6 +98,31 @@ is the normal failure mode of a critic that can see the picture but not the
 code.
 
 ## Backlog, in value order
+
+0. ~~**Repair a clip that measurably comes apart.**~~ **Done** --
+   `spritepipe/repair.py`, on by default, `--no-repair` to turn it off.
+
+   `quality.shed` already said which frame of a clip sheds worst. Rendering each
+   part alone into that frame and intersecting it with the loose pixels says
+   *which parts drew them* -- and doing the same to the REST pose and keeping
+   only the parts that got worse stops a baked contact shadow from being blamed
+   for every frame of every clip. Damping only those roles' rotation, by the
+   smallest step that puts the character back together, took the corpus from
+   103.7% of summed worst-frame shed to 15.4%, with eleven of the fourteen
+   broken clips landing at exactly zero.
+
+   It costs almost nothing in motion, because the other roles keep their full
+   swing: measured on the six clips it repaired, frame-to-frame change fell by
+   between 0.2 and 1.5 points while shed went to zero. And it costs nothing at
+   all on a build where nothing is wrong -- the clip is measured, found whole,
+   and handed back untouched.
+
+   Two failure messages matter as much as the fix. When damping does not help,
+   it says so and changes nothing, because a rig that far out needs a better rig
+   rather than less motion. When the blamed part has no swing in that clip at
+   all, it says a squash or a translation is pulling the character apart --
+   which is the potion's spin, and is the one case here that is genuinely
+   unsolved.
 
 1. ~~**A vision critic loop.**~~ **Done** — `spritepipe/critic.py`, exposed as
    `animate.py --critic claude --rounds N`. It renders the clip, shows the
