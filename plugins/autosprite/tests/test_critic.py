@@ -80,7 +80,7 @@ def test_a_scale_cannot_be_driven_to_nothing():
 
 def test_a_role_the_rig_does_not_have_is_ignored():
     walk = motion.get("walk")
-    same, touched = critic.apply_adjustments(walk, {"wing_near": {"angle": 20}})
+    same, touched = critic.apply_adjustments(walk, {"accessory": {"angle": 20}})
     assert touched == 0
     assert same.to_dict() == walk.to_dict()
 

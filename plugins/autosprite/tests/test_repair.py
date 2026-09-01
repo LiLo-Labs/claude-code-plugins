@@ -82,7 +82,7 @@ def test_damp_does_not_mutate_the_library():
 
 def test_damp_ignores_a_role_the_clip_does_not_drive():
     walk = motion.get("walk")
-    assert repair.damp(walk, ["wing_near"], 0.5).to_dict() == walk.to_dict()
+    assert repair.damp(walk, ["accessory"], 0.5).to_dict() == walk.to_dict()
 
 
 def test_blame_names_the_part_whose_pixels_came_away():

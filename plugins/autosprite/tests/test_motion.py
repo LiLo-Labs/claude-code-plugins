@@ -454,3 +454,37 @@ def test_loop_points_survive_a_round_trip():
     block = motion.get("block")
     again = motion.Animation.from_dict(block.to_dict())
     assert (again.loop_start, again.loop_end) == (block.loop_start, block.loop_end)
+
+
+# -- wings ----------------------------------------------------------------
+
+def test_wings_beat_together_where_limbs_alternate(hero_rig):
+    """A body has to stay under itself, so legs and arms alternate. Wings beat
+    in phase, because that is what produces lift; a wing in counter-phase with
+    its partner reads as a broken bird."""
+    for name in ("idle", "walk", "run", "fly"):
+        animation = motion.get(name)
+        near = animation.tracks["wing_near"].to_list()
+        far = animation.tracks["wing_far"].to_list()
+        assert near == far, name
+
+
+def test_every_role_in_the_vocabulary_is_driven_or_deliberately_not():
+    """A role nothing ever drives is a part the rigger finds, the exporter
+    labels, and no animation ever moves -- which is what `wing_near` and
+    `wing_far` were until `fly` existed."""
+    from spritepipe import rig as R
+    driven = set()
+    for animation in motion.LIBRARY.values():
+        driven |= set(animation.tracks)
+    undriven = set(R.ROLES) - driven
+    # These four are right to be still: a shadow is the floor, and body, prop
+    # and accessory ride whatever they are parented to.
+    assert undriven == {"accessory", "body", "prop", "shadow"}
+
+
+def test_fly_exists_and_is_not_planted():
+    fly = motion.get("fly")
+    assert not fly.planted and fly.loop
+    assert "wing_near" in fly.tracks and "wing_far" in fly.tracks
+    assert motion.validate_animation(fly.to_dict()) == []

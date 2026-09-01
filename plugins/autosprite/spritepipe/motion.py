@@ -428,6 +428,10 @@ def _library():
                         {"t": 1.0, "angle": 0.0}],
             "tail": [{"t": 0.0, "angle": -4.0}, {"t": 0.4, "angle": 4.0},
                      {"t": 1.0, "angle": -4.0}],
+            "wing_near": [{"t": 0.0, "angle": -3.0}, {"t": 0.4, "angle": 3.0},
+                          {"t": 1.0, "angle": -3.0}],
+            "wing_far": [{"t": 0.0, "angle": -3.0}, {"t": 0.4, "angle": 3.0},
+                         {"t": 1.0, "angle": -3.0}],
         })
 
     # The passing poses are what make this a CYCLE rather than a pendulum. A
@@ -469,6 +473,10 @@ def _library():
             "torso": [{"t": 0.0, "angle": -2.0}, {"t": 0.5, "angle": 2.0},
                       {"t": 1.0, "angle": -2.0}],
             "tail": _swing(-8.0, 8.0, phase=0.15),
+            "wing_near": [{"t": 0.0, "angle": -6.0}, {"t": 0.5, "angle": 6.0},
+                          {"t": 1.0, "angle": -6.0}],
+            "wing_far": [{"t": 0.0, "angle": -6.0}, {"t": 0.5, "angle": 6.0},
+                         {"t": 1.0, "angle": -6.0}],
         })
 
     run = Animation(
@@ -494,6 +502,10 @@ def _library():
                       {"t": 1.0, "angle": 7.0}],
             "head": [{"t": 0.0, "angle": -5.0}, {"t": 1.0, "angle": -5.0}],
             "tail": _swing(-16.0, 16.0, phase=0.15),
+            "wing_near": [{"t": 0.0, "angle": -14.0}, {"t": 0.5, "angle": 14.0},
+                          {"t": 1.0, "angle": -14.0}],
+            "wing_far": [{"t": 0.0, "angle": -14.0}, {"t": 0.5, "angle": 14.0},
+                         {"t": 1.0, "angle": -14.0}],
         })
 
     jump = Animation(
@@ -518,6 +530,10 @@ def _library():
                         {"t": 0.85, "angle": -30.0}, {"t": 1.0, "angle": 14.0}],
             "torso": [{"t": 0.0, "angle": 10.0}, {"t": 0.2, "angle": -4.0},
                       {"t": 0.7, "angle": 2.0}, {"t": 1.0, "angle": 12.0}],
+            "wing_near": [{"t": 0.0, "angle": 24.0}, {"t": 0.2, "angle": -34.0},
+                          {"t": 0.7, "angle": 30.0}, {"t": 1.0, "angle": 10.0}],
+            "wing_far": [{"t": 0.0, "angle": 24.0}, {"t": 0.2, "angle": -34.0},
+                         {"t": 0.7, "angle": 30.0}, {"t": 1.0, "angle": 10.0}],
         })
 
     attack = Animation(
@@ -579,6 +595,10 @@ def _library():
             "leg_far": [{"t": 0.0, "angle": 0.0}, {"t": 0.6, "angle": -16.0},
                         {"t": 1.0, "angle": -10.0}],
             "head": [{"t": 0.0, "angle": 0.0}, {"t": 1.0, "angle": 14.0}],
+            "wing_near": [{"t": 0.0, "angle": 0.0}, {"t": 0.3, "angle": -26.0},
+                          {"t": 1.0, "angle": 18.0}],
+            "wing_far": [{"t": 0.0, "angle": 0.0}, {"t": 0.3, "angle": 26.0},
+                         {"t": 1.0, "angle": 22.0}],
         })
 
     crouch = Animation(
@@ -788,7 +808,37 @@ def _library():
             "leg_far": [{"t": 0.0, "angle": -10.0}, {"t": 1.0, "angle": -10.0}],
         })
 
-    return {anim.name: anim for anim in (idle, walk, run, jump, attack, hurt, die,
+    fly = Animation(
+        "fly", frames=6, fps=12, loop=True,
+        note="a wing beat, and the body riding it. The wings lead and the body "
+             "follows a beat behind -- lift arrives after the downstroke, not "
+             "during it -- which is the whole difference between a bird flying "
+             "and a bird flapping. Legs tuck and trail",
+        root=[{"t": 0.0, "dy": 0.0}, {"t": 0.35, "dy": -3.0},
+              {"t": 0.7, "dy": 1.0}, {"t": 1.0, "dy": 0.0}],
+        tracks={
+            "wing_near": [{"t": 0.0, "angle": -46.0}, {"t": 0.25, "angle": 40.0,
+                          "easing": "ease_in"}, {"t": 0.6, "angle": 30.0},
+                          {"t": 1.0, "angle": -46.0}],
+            "wing_far": [{"t": 0.0, "angle": -46.0}, {"t": 0.25, "angle": 40.0,
+                         "easing": "ease_in"}, {"t": 0.6, "angle": 30.0},
+                         {"t": 1.0, "angle": -46.0}],
+            "torso": [{"t": 0.0, "angle": -4.0}, {"t": 0.35, "angle": 3.0},
+                      {"t": 1.0, "angle": -4.0}],
+            "head": [{"t": 0.0, "angle": 4.0}, {"t": 0.5, "angle": -2.0},
+                     {"t": 1.0, "angle": 4.0}],
+            "leg_near": [{"t": 0.0, "angle": -22.0}, {"t": 0.5, "angle": -16.0},
+                         {"t": 1.0, "angle": -22.0}],
+            "leg_far": [{"t": 0.0, "angle": -26.0}, {"t": 0.5, "angle": -20.0},
+                        {"t": 1.0, "angle": -26.0}],
+            "arm_near": [{"t": 0.0, "angle": -18.0}, {"t": 0.5, "angle": -12.0},
+                         {"t": 1.0, "angle": -18.0}],
+            "arm_far": [{"t": 0.0, "angle": -20.0}, {"t": 0.5, "angle": -14.0},
+                        {"t": 1.0, "angle": -20.0}],
+            "tail": _swing(-14.0, 14.0, phase=0.2),
+        })
+
+    return {anim.name: anim for anim in (idle, walk, run, jump, attack, hurt, die, fly,
                                          crouch, land, dash, climb, block, cast,
                                          throw, sleep)}
 
@@ -803,8 +853,9 @@ PRESET_SETS = {
                "hurt", "die"],
     "full": ["idle", "walk", "run", "jump", "attack", "hurt", "die"],
     "everything": ["idle", "walk", "run", "jump", "land", "crouch", "dash",
-                   "climb", "attack", "block", "cast", "throw", "hurt", "die",
-                   "sleep"],
+                   "climb", "fly", "attack", "block", "cast", "throw", "hurt",
+                   "die", "sleep"],
+    "winged": ["idle", "fly", "walk", "attack", "hurt", "die"],
 }
 
 
