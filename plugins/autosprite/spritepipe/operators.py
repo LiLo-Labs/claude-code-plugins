@@ -35,8 +35,9 @@ before this and never after.
 """
 
 import copy
+import math
 
-from .motion import CHANNELS, EASINGS, REST, Animation, Lane, Track, select
+from .motion import CHANNELS, EASINGS, REST, Animation, Lane, Track, phases, select
 from .skeleton import PartPose
 
 OPERATORS = {}
@@ -120,7 +121,11 @@ def _bake(animation, rig, selector, per_frame, spread=None):
         keys.append(key)
     if spread is None:
         spread = existing.spread if existing is not None else 0.0
-    clone.tracks[selector] = Track(keys, clone.easing, spread=spread)
+    # The axis travels with the spread. An operator that kept the spread and
+    # dropped the axis would leave the wave the same size and silently turn it
+    # back to declaration order, which is the failure this is hardest to see.
+    along = existing.along if existing is not None else None
+    clone.tracks[selector] = Track(keys, clone.easing, spread=spread, along=along)
     return clone
 
 
@@ -128,6 +133,37 @@ def _shifted(animation, moment, offset):
     if animation.loop:
         return (moment - offset) % 1.0
     return max(0.0, min(1.0, moment - offset))
+
+
+def _hash(*items):
+    """FNV-1a over the arguments' text.
+
+    Written out rather than reached for because `hash()` is salted per process:
+    a build seeded with it would give a different animation every run, which is
+    the one thing a pipeline that verifies its own output cannot have.
+    """
+    value = 0x811c9dc5
+    for item in items:
+        for byte in str(item).encode("utf-8"):
+            value ^= byte
+            value = (value * 0x01000193) & 0xFFFFFFFF
+    return value
+
+
+def _wander(moment, name, channel, rate, seed):
+    """A loop-closed pseudo-random signal for one part's one channel.
+
+    Whole-numbered frequencies only, so the period is the cycle exactly, and
+    amplitude falling as 1/k so the slow shape dominates and the fast one only
+    roughens it -- which is what wind sounds like and what a pure sine does
+    not. Unnormalised; the caller scales the whole selection together so that
+    parts stay in proportion to each other.
+    """
+    total = 0.0
+    for harmonic in range(1, rate + 1):
+        phase = _hash("phase", seed, name, channel, harmonic) / float(0xFFFFFFFF)
+        total += math.sin(2.0 * math.pi * (harmonic * moment + phase)) / harmonic
+    return total
 
 
 def _curve(points, easing="smooth"):
@@ -207,6 +243,12 @@ def taper(animation, rig, on, gain, channels=("angle", "dx", "dy")):
     several copies of one thing. Emitted as `name:` tracks, which outrank the
     selector they came from, so the original is removed rather than left to
     compose on top of its own tapered copies.
+
+    Both halves read the SAME placement -- `motion.phases`, and the track's own
+    axis if it has one. That is the point of doing it this way rather than by
+    rank: a canopy tapering toward its tip and a wave travelling toward its tip
+    have to agree about which end is the tip, and if one counts parts while the
+    other measures the image, they agree only while the rig is listed tidily.
     """
     clone = copy.deepcopy(animation)
     parts = select(rig, on)
@@ -216,12 +258,14 @@ def taper(animation, rig, on, gain, channels=("angle", "dx", "dy")):
     low, high = float(gain[0]), float(gain[-1])
     channels = tuple(channels)
     spread = source.spread
+    places = phases(rig, parts, source.along)
+    reach = max(places) or 1.0
     del clone.tracks[on]
 
     for index, part in enumerate(parts):
-        share = 0.0 if len(parts) == 1 else index / float(len(parts) - 1)
+        share = 0.0 if len(parts) == 1 else places[index] / reach
         factor = low + (high - low) * share
-        moment_shift = index * spread
+        moment_shift = places[index] * spread
         keys = []
         for moment in clone.times():
             base = source.sample(_shifted(clone, moment, moment_shift), clone.loop)
@@ -412,11 +456,98 @@ def retime(animation, rig, curve):
             for channel in CHANNELS:
                 key[channel] = round(float(getattr(pose, channel)), 5)
             keys.append(key)
-        rebaked = Track(keys, clone.easing, spread=track.spread)
+        rebaked = Track(keys, clone.easing, spread=track.spread,
+                        along=track.along)
         if selector == "root":
             clone.root = rebaked
         else:
             clone.tracks[selector] = rebaked
+    return clone
+
+
+@operator("turbulence",
+          params=("on", "amount", "rate", "channels", "seed"),
+          note="wind is not a sine wave. Every wind clip in the library is one "
+               "curve played by every part, so a field reads as machinery; this "
+               "gives each part its own small, ragged, LOOP-CLOSED wander on "
+               "top of whatever it was already doing")
+def turbulence(animation, rig, on, amount=2.0, rate=3, channels=("angle",),
+               seed=0):
+    """Give every part in a selection its own band-limited wander.
+
+    Three properties, and each is load-bearing.
+
+    **It closes.** The signal is a sum of sines at whole-numbered frequencies
+    in the cycle, so its period is the cycle exactly. Sampled noise would need
+    its ends stitched and would still drift; this cannot, because there is
+    nothing in it that does not repeat. `rate` is the highest harmonic -- 1 is
+    a slow lean, 5 is a jitter -- and it must be a whole number for the same
+    reason.
+
+    **It does not depend on the rig's typing.** The phase of each part's signal
+    is hashed from the part's NAME, with a hash written out here rather than
+    Python's, whose salt changes per process and would make a build
+    irreproducible. Re-ordering a rig file re-orders nothing; renaming a part
+    is the only thing that changes what it does, which is the honest coupling.
+
+    **It composes rather than replaces.** The wander is emitted as `name:`
+    tracks holding nothing but the departure, and `name:` outranks the trait or
+    role selector the parts were addressed by, so the authored swing composes
+    on top: the rotations add. Nothing else in the clip is disturbed, `spread`
+    still spreads the authored curve, and a `taper` applied before or after
+    this one still finds its own track where it left it.
+
+    `amount` is a true ceiling, not an average: the signal is scaled so that
+    the largest departure at any frame of any part is exactly `amount`.
+    """
+    if int(rate) != rate or int(rate) < 1:
+        raise ValueError("turbulence rate must be a whole number of cycles per "
+                         "loop (got %r); a fraction does not close the loop"
+                         % (rate,))
+    clone = copy.deepcopy(animation)
+    parts = select(rig, on)
+    channels = tuple(channels)
+    unknown = [channel for channel in channels if channel not in CHANNELS]
+    if unknown:
+        raise ValueError("turbulence cannot write %s; the channels are %s"
+                         % (", ".join(unknown), ", ".join(CHANNELS)))
+    if not parts or not channels or not amount:
+        return clone
+
+    times = list(clone.times())
+    signals = {}
+    peak = 0.0
+    for part in parts:
+        for channel in channels:
+            wander = [_wander(moment, part.name, channel, int(rate), seed)
+                      for moment in times]
+            signals[(part.name, channel)] = wander
+            peak = max(peak, max(abs(value) for value in wander))
+    if not peak:
+        return clone
+    gain = float(amount) / peak
+
+    for part in parts:
+        selector = "name:%s" % part.name
+        existing = clone.tracks.get(selector)
+        keys = []
+        for index, moment in enumerate(times):
+            base = (existing.sample(moment, clone.loop) if existing is not None
+                    else PartPose())
+            key = {"t": moment}
+            for channel in CHANNELS:
+                value = getattr(base, channel)
+                if channel in channels:
+                    step = signals[(part.name, channel)][index] * gain
+                    # Departure from rest, so a squash MULTIPLIES and a
+                    # rotation adds -- the same distinction `compose` makes.
+                    value = value * (1.0 + step) if REST[channel] else value + step
+                key[channel] = round(float(value), 5)
+            keys.append(key)
+        clone.tracks[selector] = Track(
+            keys, clone.easing,
+            spread=existing.spread if existing is not None else 0.0,
+            along=existing.along if existing is not None else None)
     return clone
 
 

@@ -85,8 +85,16 @@ def _library():
         "sway", frames=8, fps=8, loop=True,
         note="anything fixed at its base and free at its tip rocks in the wind. "
              "Two things stop it reading as a metronome. The spread means each "
-             "part in turn starts after the one before, so the motion travels "
-             "across a canopy or a field. A stalk hinges and a surface RIPPLES "
+             "part starts after the ones upwind of it, so the motion travels "
+             "across a canopy or a field -- and it is `along` x that makes "
+             "\"upwind\" mean anything, because without an axis the order is "
+             "whatever order the rig listed its parts in. Measured on a "
+             "vision-rigged wheat field, that is not a technicality: the rig "
+             "returned four stalks left to right and THEN a full-width sheet "
+             "over all of them, which declaration order plays last, as though "
+             "it stood to the right of the field it covers. By position it "
+             "plays at the centre, where it is. A stalk hinges and a surface "
+             "RIPPLES "
              "-- cloth has no joint to turn about and does not move as one "
              "piece, so the surface half of this drives `wave`. And the stalk "
              "curve is a gust and a drift "
@@ -102,11 +110,12 @@ def _library():
                                          {"t": 0.60, "angle": -5.0,
                                           "easing": "ease_out"},
                                          {"t": 0.84, "angle": -1.5}],
-                                "spread": 0.09},
+                                "spread": 0.09, "along": "x"},
                 "trait:surface": {"keys": [{"t": step / 8.0, "wave": 2.0,
                                             "wave_phase": step / 8.0}
                                            for step in range(8)],
-                                  "easing": "linear", "spread": 0.09}})
+                                  "easing": "linear", "spread": 0.09,
+                                  "along": "x"}})
 
     gust = Animation(
         "gust", frames=10, fps=12, loop=False,
@@ -119,7 +128,7 @@ def _library():
                                          {"t": 0.45, "angle": 13.0},
                                          {"t": 0.75, "angle": -4.0},
                                          {"t": 1.0, "angle": 0.0}],
-                                "spread": 0.06},
+                                "spread": 0.06, "along": "x"},
                 "trait:crown": [{"t": 0.0, "angle": 0.0},
                                 {"t": 0.3, "angle": 6.0, "easing": "ease_out"},
                                 {"t": 1.0, "angle": 0.0}]})
@@ -136,11 +145,14 @@ def _library():
              "gets 36%, and adding a lean ON TOP of the wave makes it worse "
              "again, so cloth is not a thing that leans. The phase advances "
              "linearly across the cycle, and `spread` starts each surface at a "
-             "different point in it",
+             "different point in it -- along x, so it is the same wind "
+             "crossing every surface rather than each one starting wherever "
+             "the rig happened to mention it",
         tracks={"trait:surface": {"keys": [{"t": step / 8.0, "wave": 4.0,
                                             "wave_phase": step / 8.0}
                                            for step in range(8)],
-                                  "easing": "linear", "spread": 0.125}})
+                                  "easing": "linear", "spread": 0.15,
+                                  "along": "x"}})
 
     creak = Animation(
         "creak", frames=6, fps=8, loop=True,
@@ -150,7 +162,7 @@ def _library():
         tracks={"trait:socket": {"keys": [{"t": 0.0, "angle": 0.0},
                                           {"t": 0.35, "angle": 3.0},
                                           {"t": 0.7, "angle": -2.0}],
-                                 "spread": 0.15}})
+                                 "spread": 0.15, "along": "x"}})
 
     # --- palette-space: nothing moves, the shading does --------------------
 
@@ -167,14 +179,20 @@ def _library():
              "ramp collapses several sizes of step onto the same picture: a "
              "four-shade flame has three states however many numbers it is "
              "given, so the order has to guarantee that consecutive frames land "
-             "on different ones",
+             "on different ones. Alone among the spreading clips this one has "
+             "no axis, deliberately: two torches in a room are not a wave "
+             "crossing the room, and ordering them by position would make them "
+             "flicker in a choreographed sweep, which is the one thing "
+             "firelight never does",
         tracks={"trait:glow": {"keys": [{"t": 0.0, "cycle": 0.0},
                                         {"t": 1 / 6.0, "cycle": -1.0},
                                         {"t": 2 / 6.0, "cycle": 0.0},
                                         {"t": 3 / 6.0, "cycle": -2.0},
                                         {"t": 4 / 6.0, "cycle": 1.0},
                                         {"t": 5 / 6.0, "cycle": -3.0}],
-                               "spread": 1 / 6.0}})
+                               "spread": 1 / 6.0}},
+        ops=[{"op": "turbulence", "on": "trait:glow", "amount": 0.6,
+              "channels": ["cycle"], "rate": 3}])
 
     shimmer = Animation(
         "shimmer", frames=8, fps=8, loop=True,
@@ -184,7 +202,9 @@ def _library():
         tracks={"trait:surface": {"keys": [{"t": step / 8.0, "cycle": value}
                                            for step, value in enumerate(
                                                (0, 1, 2, 1, 0, -1, -2, -1))],
-                                  "spread": 0.25}})
+                                  "spread": 0.25, "along": "x"}},
+        ops=[{"op": "turbulence", "on": "trait:surface", "amount": 0.6,
+              "channels": ["cycle"], "rate": 3}])
 
     return {animation.name: animation for animation in
             (bob, spin, tumble, pulse, swing, turn, sway, gust, ripple, creak,

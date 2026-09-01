@@ -367,6 +367,13 @@ def build_sheet(reference_path, outdir, animations=("full",), direction_set="1",
             retimed.append(clone)
         chosen = retimed
 
+    # Advisory, not fatal: these clips build and ship. Every one of them was
+    # found in this plugin's own library first, which is the argument for
+    # saying them out loud rather than trusting the author.
+    for animation in chosen:
+        for note in motion_module.cautions(animation.to_dict()):
+            build.warn("%s: %s" % (animation.name, note))
+
     side_rig = build.rigs["side"]
     drivable = [animation for animation in chosen if animation.drives(side_rig)]
     for animation in chosen:

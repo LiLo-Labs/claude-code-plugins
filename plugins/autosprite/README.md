@@ -222,6 +222,7 @@ it through.
 | `volume` | squash that keeps its area, as a constructor rather than a discipline |
 | `hinge` | a door, shutter or lid: it swings about its edge in the third dimension, which flat-on is a *narrowing* rather than a turn — a door that rotates goes through the wall |
 | `retime` | a time warp on the whole clip: the same poses in the same order, on a different schedule. A stagger, a limp, a beat held before the release |
+| `turbulence` | wind is not a sine wave. Each part gets its own small, ragged, **loop-closed** wander on top of whatever it was already doing — a sum of whole-numbered harmonics, so its period is the cycle exactly, phased from each part's *name* so a build is reproducible and re-ordering a rig file changes nothing |
 
 Addresses are the same selectors as everything else — a role, `name:X`,
 `trait:X` — and deliberately nothing more.
@@ -303,7 +304,28 @@ is true of both and `tail` is true of neither.
 A clip may name several parts at once and give each one a **spread** — the same
 curve, played a little later by each in turn. That single field is a travelling
 wave across a wheat field, a chain of segments following the one before it, and
-a canopy lagging its trunk.
+a canopy lagging its trunk. A track may also say which way the wave travels,
+with **`along`**: `x`, `-x`, `y`, `-y`, `radial` (out from the anchor) or
+`chain` (distance along the skeleton, for a tail that curls back on itself and
+so reads as doubling back in every spatial axis).
+
+Parts are placed on that axis by *position*, not by rank, which is the half that
+matters: three stalks bunched at the left of a field and one alone at the right
+are four ranks and so play at four even intervals, which is four things taking
+turns rather than a wave. Without an axis the order is the order the rig
+happened to LIST its parts in — and the first real multi-part rig this was
+pointed at, a vision-rigged wheat field, returned four stalks left to right and
+then a full-width sheet lying over all of them, which declaration order plays
+last, as though it stood to the right of the field it covers.
+
+> Two spread rules the build now says out loud, both found in *this* library
+> first. A spread of exactly one frame makes every part a **byte-identical**
+> copy of its neighbour, one frame later — two CC0 banners driven by `ripple`
+> were the same eight pictures. And a spread cannot vary a *stepped* channel at
+> all: the renderer rounds `cycle` to whole shades, so moving `shimmer`'s spread
+> from 0.25 to 0.30 produced byte-identical frames and moving `flicker`'s cost
+> the offset torch a third of its pictures. `turbulence` is what varies a
+> stepped channel; both clips ship with one, measured.
 
 Nothing here ships a row of identical frames: a clip addressed at a trait the
 subject does not have is dropped, and the build says which trait was missing.

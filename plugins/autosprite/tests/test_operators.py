@@ -409,3 +409,237 @@ def test_a_retime_moves_the_root_track_too(caped):
     held = [round(pose.dy, 3) for pose in applied.poses(caped)]
     assert held[len(held) // 2] > -4.0        # still near the start
     assert held[-1] == pytest.approx(-8.0)    # and arrives
+
+
+# --- operators and the spread axis -----------------------------------------
+#
+# A track's axis says which way its wave travels. An operator that kept the
+# spread and dropped the axis would leave the wave exactly the same size and
+# silently turn it back to declaration order -- a defect with no visible
+# symptom on any rig that happens to be listed tidily.
+
+@pytest.fixture
+def field():
+    """Four stalks, listed RIGHT TO LEFT, so declaration order and the image
+    disagree about which way is downwind."""
+    return R.Rig((44, 14), [
+        R.Part("soil", "body", (0, 12, 44, 14), None, (22, 14), 0),
+        R.Part("stalk_d", "accessory", (33, 0, 41, 12), "soil", (37, 12), 1),
+        R.Part("stalk_c", "accessory", (22, 0, 30, 12), "soil", (26, 12), 1),
+        R.Part("stalk_b", "accessory", (11, 0, 19, 12), "soil", (15, 12), 1),
+        R.Part("stalk_a", "accessory", (0, 0, 8, 12), "soil", (4, 12), 1),
+    ])
+
+
+def _axed(op):
+    return motion.Animation("wind", 8, tracks={
+        "trait:stalk": {"keys": [{"t": 0.0, "angle": 0.0},
+                                 {"t": 0.5, "angle": 10.0}],
+                        "spread": 0.1, "along": "x"}}, ops=[op])
+
+
+def test_a_baking_operator_keeps_the_axis(field):
+    """`damp` goes through `_bake`, which rebuilds the track from scratch."""
+    applied = _axed({"op": "damp", "on": "trait:stalk", "factor": 0.5}).applied(field)
+    assert applied.tracks["trait:stalk"].along == "x"
+    assert applied.tracks["trait:stalk"].spread == pytest.approx(0.1)
+
+
+def test_retime_keeps_the_axis(field):
+    applied = _axed({"op": "retime",
+                     "curve": [{"t": 0.0, "v": 0.0},
+                               {"t": 1.0, "v": 1.0}]}).applied(field)
+    assert applied.tracks["trait:stalk"].along == "x"
+
+
+def test_an_axed_wave_reaches_the_leftmost_stalk_first(field):
+    """The end-to-end claim. The rig lists these right to left; along x the
+    crest still starts at the left, because that is where the left is."""
+    clip = motion.Animation("wind", 8, tracks={
+        "trait:stalk": {"keys": [{"t": 0.0, "angle": 0.0},
+                                 {"t": 0.25, "angle": 10.0},
+                                 {"t": 0.5, "angle": 0.0}],
+                        "spread": 0.125, "along": "x"}})
+    peak = {}
+    for index, pose in enumerate(clip.poses(field)):
+        for name in ("stalk_a", "stalk_b", "stalk_c", "stalk_d"):
+            angle = pose.get(name).angle
+            if angle > peak.get(name, (-1e9, -1))[0]:
+                peak[name] = (angle, index)
+    order = [peak[name][1] for name in ("stalk_a", "stalk_b", "stalk_c", "stalk_d")]
+    assert order == sorted(order)
+    assert order[0] < order[-1]
+
+
+def test_taper_sizes_a_selection_by_where_its_parts_are(field):
+    """Timing and amplitude have to agree about which end is the tip. Ranked by
+    declaration order this rig tapers backwards; placed on the axis it does
+    not."""
+    op = {"op": "taper", "on": "trait:stalk", "gain": [0.0, 1.0]}
+    placed = _axed(op).applied(field)
+    ranked = motion.Animation("wind", 8, tracks={
+        "trait:stalk": {"keys": [{"t": 0.0, "angle": 0.0},
+                                 {"t": 0.5, "angle": 10.0}],
+                        "spread": 0.1}}, ops=[op]).applied(field)
+
+    def reach(built, name):
+        return max(abs(getattr(pose.get(name), "angle"))
+                   for pose in built.poses(field))
+
+    assert reach(placed, "stalk_a") == pytest.approx(0.0, abs=1e-6)
+    assert reach(placed, "stalk_d") > reach(placed, "stalk_a")
+    # Ranked, the rig's own listing order makes the RIGHTMOST stalk the quiet
+    # one -- the same op, the same rig, the taper pointing the other way.
+    assert reach(ranked, "stalk_d") == pytest.approx(0.0, abs=1e-6)
+
+
+def test_taper_without_an_axis_is_unchanged(caped):
+    """The generalisation does not move any clip that never asked for an axis."""
+    op = {"op": "taper", "on": "trait:stalk", "gain": [0.5, 1.4]}
+    animation = motion.Animation("sway", 8, tracks={
+        "trait:stalk": [{"t": 0.0, "angle": 0.0}, {"t": 0.5, "angle": 20.0}]},
+        ops=[op])
+    built = animation.applied(caped)
+    top = max(abs(pose.get("cape_top").angle) for pose in built.poses(caped))
+    hem = max(abs(pose.get("cape_hem").angle) for pose in built.poses(caped))
+    assert top == pytest.approx(10.0, abs=1e-3)     # 0.5 of 20
+    assert hem == pytest.approx(28.0, abs=1e-3)     # 1.4 of 20
+
+
+# --- turbulence ------------------------------------------------------------
+
+def _rough(field, **kwargs):
+    op = {"op": "turbulence", "on": "trait:stalk"}
+    op.update(kwargs)
+    return motion.Animation("wind", 8, tracks={
+        "trait:stalk": {"keys": [{"t": 0.0, "angle": 0.0},
+                                 {"t": 0.5, "angle": 8.0}],
+                        "spread": 0.1, "along": "x"}}, ops=[op]).applied(field)
+
+
+def _angles(built, field, name):
+    return [round(pose.get(name).angle, 4) for pose in built.poses(field)]
+
+
+def test_turbulence_gives_each_part_a_different_signal(field):
+    """The whole point: one curve played by every part reads as machinery."""
+    built = _rough(field, amount=3.0)
+    plain = motion.Animation("wind", 8, tracks={
+        "trait:stalk": {"keys": [{"t": 0.0, "angle": 0.0},
+                                 {"t": 0.5, "angle": 8.0}],
+                        "spread": 0.1, "along": "x"}})
+    for name in ("stalk_a", "stalk_b", "stalk_c", "stalk_d"):
+        assert _angles(built, field, name) != _angles(plain, field, name)
+    departures = {name: tuple(round(a - b, 4) for a, b in
+                              zip(_angles(built, field, name),
+                                  _angles(plain, field, name)))
+                  for name in ("stalk_a", "stalk_b", "stalk_c", "stalk_d")}
+    assert len(set(departures.values())) == 4
+
+
+def test_turbulence_closes_the_loop_exactly(field):
+    """Sampled noise would need its ends stitched. A sum of whole-numbered
+    harmonics has a period of exactly one cycle and cannot not close."""
+    built = _rough(field, amount=3.0, rate=5)
+    for name in ("stalk_a", "stalk_d"):
+        assert (built.pose_at(field, 0.0).get(name).angle
+                == pytest.approx(built.pose_at(field, 1.0).get(name).angle))
+
+
+def test_amount_is_a_ceiling_that_is_actually_reached(field):
+    """Not an average and not a scale factor: the largest departure at any
+    frame of any part is `amount`, so the dial means what it says."""
+    plain = motion.Animation("wind", 8, tracks={
+        "trait:stalk": {"keys": [{"t": 0.0, "angle": 0.0},
+                                 {"t": 0.5, "angle": 8.0}],
+                        "spread": 0.1, "along": "x"}})
+    built = _rough(field, amount=3.0)
+    biggest = max(abs(a - b)
+                  for name in ("stalk_a", "stalk_b", "stalk_c", "stalk_d")
+                  for a, b in zip(_angles(built, field, name),
+                                  _angles(plain, field, name)))
+    assert biggest == pytest.approx(3.0, abs=1e-3)
+
+
+def test_turbulence_is_reproducible_across_processes(field):
+    """`hash()` is salted per process, so a build seeded with it would animate
+    differently every run. This asserts the exact numbers, which is the only
+    way to catch a switch back to it."""
+    built = _rough(field, amount=2.0, rate=2, seed=7)
+    first = _angles(built, field, "stalk_a")
+    assert first == _angles(_rough(field, amount=2.0, rate=2, seed=7),
+                            field, "stalk_a")
+    assert operators._hash("phase", 0, "stalk_a", "angle", 1) == 1094011853
+
+
+def test_a_different_seed_is_a_different_wind(field):
+    assert (_angles(_rough(field, amount=2.0, seed=1), field, "stalk_a")
+            != _angles(_rough(field, amount=2.0, seed=2), field, "stalk_a"))
+
+
+def test_turbulence_does_not_depend_on_the_order_the_rig_lists_parts(field):
+    """The same lesson as the spread axis. A part's wander is hashed from its
+    name, so re-ordering a rig file changes nothing at all."""
+    shuffled = R.Rig(field.size, [field.parts[0]] + list(reversed(field.parts[1:])))
+    for name in ("stalk_a", "stalk_c"):
+        assert (_angles(_rough(field, amount=3.0), field, name)
+                == _angles(_rough(shuffled, amount=3.0), shuffled, name))
+
+
+def test_turbulence_leaves_the_authored_swing_intact(field):
+    """It composes rather than replaces: the wander is emitted as `name:`
+    tracks and the trait track it was addressed by is untouched."""
+    built = _rough(field, amount=1.0)
+    assert "trait:stalk" in built.tracks
+    assert built.tracks["trait:stalk"].along == "x"
+    assert built.tracks["trait:stalk"].spread == pytest.approx(0.1)
+    assert built.tracks["name:stalk_a"].values("angle") != [0.0] * 8
+
+
+def test_turbulence_and_taper_compose_in_either_order(field):
+    """Two operators that both address the same selection, one emitting
+    `name:` tracks and one consuming the trait track."""
+    ops = [{"op": "taper", "on": "trait:stalk", "gain": [0.4, 1.0]},
+           {"op": "turbulence", "on": "trait:stalk", "amount": 1.5}]
+    forward = motion.Animation("w", 8, tracks={
+        "trait:stalk": {"keys": [{"t": 0.0, "angle": 0.0},
+                                 {"t": 0.5, "angle": 8.0}],
+                        "spread": 0.1, "along": "x"}},
+        ops=ops).applied(field)
+    backward = motion.Animation("w", 8, tracks={
+        "trait:stalk": {"keys": [{"t": 0.0, "angle": 0.0},
+                                 {"t": 0.5, "angle": 8.0}],
+                        "spread": 0.1, "along": "x"}},
+        ops=list(reversed(ops))).applied(field)
+    for built in (forward, backward):
+        reach = {name: max(abs(a) for a in _angles(built, field, name))
+                 for name in ("stalk_a", "stalk_d")}
+        assert reach["stalk_d"] > reach["stalk_a"]
+
+
+def test_a_fractional_rate_is_refused(field):
+    """A frequency that is not a whole number of cycles per loop does not
+    close, and a clip that does not close pops on every repeat."""
+    with pytest.raises(ValueError) as caught:
+        _rough(field, amount=1.0, rate=2.5)
+    assert "close" in str(caught.value)
+
+
+def test_turbulence_refuses_a_channel_that_is_not_one(field):
+    with pytest.raises(ValueError) as caught:
+        _rough(field, amount=1.0, channels=["wobble"])
+    assert "wobble" in str(caught.value)
+
+
+def test_turbulence_on_a_squash_multiplies_rather_than_adds(field):
+    """Rest is 1 for a scale and 0 for a rotation, so a departure of the same
+    size has to be applied differently or a 'quiet' wander erases the part."""
+    built = _rough(field, amount=0.1, channels=["sy"])
+    values = [round(pose.get("stalk_a").sy, 4) for pose in built.poses(field)]
+    assert all(0.85 < value < 1.15 for value in values)
+    assert len(set(values)) > 1
+
+
+def test_turbulence_with_no_amount_changes_nothing(field):
+    built = _rough(field, amount=0.0)
+    assert not any(key.startswith("name:") for key in built.tracks)

@@ -56,6 +56,23 @@ CHANNELS = ("angle", "dx", "dy", "sx", "sy", "cycle", "shear",
 REST = {"angle": 0.0, "dx": 0.0, "dy": 0.0, "sx": 1.0, "sy": 1.0, "cycle": 0.0,
         "shear": 0.0, "wave": 0.0, "wave_phase": 0.0}
 
+# The directions a `spread` can travel in. Four are the compass, and they are
+# separate names rather than one axis and a sign because a clip should be able
+# to SAY which way the wind blows. `radial` is a ripple leaving a stone dropped
+# at the subject's anchor, which is the one wave whose direction is not a line.
+# `chain` is not a direction in the image at all -- it is distance along the
+# skeleton, so a tail of eight segments follows itself however it is drawn,
+# including curled back on itself where every spatial axis reads it as
+# doubling back.
+AXES = ("x", "-x", "y", "-y", "radial", "chain")
+
+# The one channel the renderer ROUNDS. Every other channel feeds a 3x3 matrix
+# that happily takes a fraction of a degree or a pixel; `cycle` is a whole step
+# along a part's own shading ramp, because a third of a shade is the same
+# shade. That makes it behave differently under every mechanism here that works
+# by nudging a number, which is most of them.
+DISCRETE = frozenset(("cycle",))
+
 
 def smoothstep(u):
     return u * u * (3.0 - 2.0 * u)
@@ -170,7 +187,8 @@ class Lane:
 class Track:
     """Keyframes for one role, as a list of {"t": float, <channel>: value}."""
 
-    def __init__(self, keys=None, easing="smooth", lanes=None, spread=0.0):
+    def __init__(self, keys=None, easing="smooth", lanes=None, spread=0.0,
+                 along=None):
         self.keys = sorted((dict(key) for key in keys or ()),
                            key=lambda key: float(key["t"]))
         self.easing = easing
@@ -197,6 +215,25 @@ class Track:
         # the far side of the field bends after the wheat at the near side, and
         # a chain of segments follows the one before it.
         self.spread = float(spread)
+        # WHICH ONE IS "the far side of the field". Without this, the order is
+        # the order the rig happens to list its parts in, which makes the
+        # direction of a travelling wave a property of how carefully whoever
+        # wrote the rig typed it out. `along` makes it a property of the
+        # geometry instead: the parts are placed on an axis and each plays the
+        # curve later in proportion to how far along that axis it sits.
+        #
+        # Proportion, not rank, and that is the substantive half. Three stalks
+        # bunched at the left of a field and one alone at the right are four
+        # ranks and so play at four even intervals, which is not a wave -- it is
+        # four things taking turns. By position they play when the crest
+        # reaches them. The two agree exactly when the parts are evenly spaced
+        # AND listed in order, so this generalises the rank behaviour rather
+        # than replacing it, and every clip that leaves `along` unset samples
+        # byte-for-byte what it did before.
+        if along is not None and along not in AXES:
+            raise ValueError("unknown spread axis %r; expected one of %s"
+                             % (along, ", ".join(AXES)))
+        self.along = along
 
     def has(self, channel):
         """Whether this track says anything at all about one channel."""
@@ -317,7 +354,7 @@ class Track:
         """The serialisable form. A plain list when there is nothing but pose
         keys, so every animation written before lanes existed round-trips
         unchanged."""
-        if not self.lanes and not self.spread:
+        if not self.lanes and not self.spread and self.along is None:
             return self.to_list()
         document = {"keys": self.to_list()}
         if self.lanes:
@@ -325,6 +362,8 @@ class Track:
                                  for channel, lane in self.lanes.items()}
         if self.spread:
             document["spread"] = self.spread
+        if self.along is not None:
+            document["along"] = self.along
         return document
 
     @classmethod
@@ -334,7 +373,8 @@ class Track:
             return data
         if isinstance(data, dict):
             return cls(data.get("keys"), data.get("easing", easing),
-                       data.get("lanes"), data.get("spread", 0.0))
+                       data.get("lanes"), data.get("spread", 0.0),
+                       data.get("along"))
         return cls(data, easing)
 
 
@@ -351,6 +391,75 @@ def select(rig, selector):
         wanted = selector[len("trait:"):]
         return [part for part in rig.parts if part.has_trait(wanted)]
     return [part for part in rig.parts if part.role == selector]
+
+
+def _centre(part):
+    """A part's position, for placing it on a spread axis.
+
+    The BOX centre rather than the pivot, and the difference is not academic:
+    stalks rooted in the same soil share a pivot row exactly, so ordering a
+    field of wheat by pivot height puts every stalk at the same place and the
+    wave stops travelling. What the viewer watches move is the body of the
+    part, so that is what gets placed.
+    """
+    left, top, right, bottom = part.box
+    return ((left + right) / 2.0, (top + bottom) / 2.0)
+
+
+def _depth(rig, part):
+    """How many joints from the root, for `along="chain"`."""
+    by_name = {other.name: other for other in rig.parts}
+    steps, seen = 0, set()
+    while part.parent and part.parent not in seen:
+        seen.add(part.name)
+        part = by_name.get(part.parent)
+        if part is None:
+            break
+        steps += 1
+    return steps
+
+
+def _coordinate(rig, part, along):
+    x, y = _centre(part)
+    if along == "x":
+        return x
+    if along == "-x":
+        return -x
+    if along == "y":
+        return y
+    if along == "-y":
+        return -y
+    anchor_x, anchor_y = rig.anchor
+    return math.hypot(x - anchor_x, y - anchor_y)
+
+
+def phases(rig, parts, along=None):
+    """Where each of `parts` sits in a travelling wave, as a multiple of spread.
+
+    Returns one number per part, in the order given. Without an axis they are
+    0, 1, 2, ... -- the declaration order the spread has always used. With one,
+    they are positions along that axis rescaled to span the same 0..n-1, so
+    `spread` keeps meaning the same thing: the lag from the first part to the
+    last is unchanged and only the distribution between them moves.
+
+    Both degenerate cases collapse to no spread at all, which is right in each:
+    one part has nothing to travel across, and parts stacked at one point on
+    the axis are all at the same place, so there is no crest to arrive later.
+    """
+    count = len(parts)
+    if count < 2:
+        return [0.0] * count
+    if along is None:
+        return [float(index) for index in range(count)]
+    if along == "chain":
+        coordinates = [float(_depth(rig, part)) for part in parts]
+    else:
+        coordinates = [_coordinate(rig, part, along) for part in parts]
+    low, high = min(coordinates), max(coordinates)
+    span = high - low
+    if not span:
+        return [0.0] * count
+    return [(value - low) / span * (count - 1) for value in coordinates]
 
 
 def specificity(selector):
@@ -429,18 +538,21 @@ class Animation:
             pose.flip = t >= float(self.flip_from)
 
         # Resolve each selector once, not once per part.
-        matched = {selector: {part.name: index for index, part
-                              in enumerate(select(rig, selector))}
-                   for selector in self.tracks}
+        matched = {}
+        for selector, track in self.tracks.items():
+            chosen = select(rig, selector)
+            offsets = phases(rig, chosen, track.along)
+            matched[selector] = {part.name: offsets[index]
+                                 for index, part in enumerate(chosen)}
         for part in rig.parts:
             layers = []
             for selector in sorted(self.tracks):
-                index = matched[selector].get(part.name)
-                if index is None:
+                offset = matched[selector].get(part.name)
+                if offset is None:
                     continue
                 track = self.tracks[selector]
                 layers.append((specificity(selector), selector,
-                               track.sample(self._shifted(t, index, track.spread),
+                               track.sample(self._shifted(t, offset, track.spread),
                                             self.loop)))
             if not layers:
                 continue
@@ -468,16 +580,19 @@ class Animation:
                              whole.wave_phase)))
         return pose
 
-    def _shifted(self, t, index, spread):
-        """When part `index` of a matched set plays a track that spreads.
+    def _shifted(self, t, offset, spread):
+        """When a part `offset` places into a matched set that spreads.
 
         Each part in turn plays the same curve a little later, which is a
         travelling wave when the parts are laid out in a line and
-        follow-through when they are a chain.
+        follow-through when they are a chain. `offset` comes from `phases`: a
+        rank without an axis, a position along one with it, and fractional
+        either way once an axis is involved -- which is the point, because a
+        crest does not wait for the next part to be ready for it.
         """
-        if not spread or not index:
+        if not spread or not offset:
             return t
-        moment = t - index * spread
+        moment = t - offset * spread
         return moment % 1.0 if self.loop else max(0.0, min(1.0, moment))
 
     def applied(self, rig):
@@ -763,13 +878,98 @@ def validate_animation(data):
     return problems
 
 
+def cautions(data):
+    """What is SUSPECT about an animation, as a list. Not fatal; worth saying.
+
+    Kept apart from `validate_animation` on purpose. A problem means the clip
+    cannot be built and stops the run; everything here builds perfectly and is
+    still almost certainly not what the author meant, which is a different
+    thing and deserves a different answer than a crash.
+
+    Both entries here were found in this library's OWN clips, which is the
+    argument for the function existing.
+    """
+    notes = []
+
+    def _varies(document, selector, channels):
+        """Whether something else in this clip already gives `selector`'s parts
+        their own values on these channels. `turbulence` is the one that does;
+        the caution below is about a spread being ALONE, not about a spread."""
+        for entry in document.get("ops") or ():
+            if not isinstance(entry, dict) or entry.get("op") != "turbulence":
+                continue
+            if entry.get("on") != selector:
+                continue
+            if channels & set(entry.get("channels") or ("angle",)):
+                return True
+        return False
+
+    frames = data.get("frames")
+    if not isinstance(frames, int) or frames < 1:
+        return notes
+    step = 1.0 / frames
+    tracks = dict(data.get("tracks") or {})
+    if data.get("root") is not None:
+        tracks["the root track"] = data["root"]
+    for selector, track in tracks.items():
+        if not isinstance(track, dict):
+            continue
+        spread = track.get("spread", 0.0)
+        along = track.get("along")
+        if along is not None and not spread:
+            notes.append("%s spreads along %r but has spread=0, so every part "
+                         "plays at the same instant and the axis does nothing"
+                         % (selector, along))
+        if not isinstance(spread, (int, float)) or not spread:
+            continue
+        keys = track.get("keys") or []
+        lanes = track.get("lanes") or {}
+        driven = {channel for channel in CHANNELS
+                  if channel in lanes
+                  or any(channel in key for key in keys)}
+        if driven and driven <= DISCRETE:
+            # A stepped channel is not measured against the frame period at
+            # all: the check below asks whether the lag is a whole frame, and
+            # on a channel the renderer rounds, a lag of any size lands on the
+            # same table either way.
+            if _varies(data, selector, driven):
+                continue
+            # `cycle` is a whole step along a shading ramp, so the renderer
+            # rounds it. A spread on it does not decorrelate anything: it hands
+            # the next part the SAME table read from a different place, and a
+            # fractional spread is absorbed by the rounding entirely. Measured
+            # on two gem faces -- 0.25 and 0.30 of a cycle give byte-identical
+            # frames, and only a per-part wander (`turbulence`) makes the two
+            # faces differ at all.
+            notes.append("%s spreads by %g on %s, which the renderer rounds to "
+                         "whole steps: a spread there reorders one table rather "
+                         "than making two parts differ, and a fractional one is "
+                         "rounded away. `turbulence` is what varies a stepped "
+                         "channel" % (selector, spread, ", ".join(sorted(driven))))
+            continue
+        lag = float(spread) / step
+        if abs(lag - round(lag)) < 1e-9:
+            # Found in `ripple`, `flicker` and `shimmer`. Two banners driven by
+            # `ripple` rendered as the SAME EIGHT PICTURES one frame apart --
+            # byte-identical, checked as bytes. A spread is meant to make a
+            # selection look like several things; a spread of a whole frame
+            # makes it one thing shown several times.
+            notes.append("%s spreads by %g, which is exactly %d frame%s at %d "
+                         "frames: every part it drives renders byte-identical "
+                         "to its neighbour, just later. Move it off a whole "
+                         "frame" % (selector, spread, round(lag),
+                                    "" if round(lag) == 1 else "s", frames))
+    return notes
+
+
 def _track_problems(label, track):
     """Both serialised forms of a track: a bare key list, or keys plus lanes."""
     problems = []
-    lanes, spread = {}, 0.0
+    lanes, spread, along = {}, 0.0, None
     if isinstance(track, dict):
         lanes = track.get("lanes") or {}
         spread = track.get("spread", 0.0)
+        along = track.get("along")
         if not isinstance(lanes, dict):
             return ["%s has lanes that are not an object" % label]
         track = track.get("keys") or []
@@ -783,6 +983,10 @@ def _track_problems(label, track):
                         "must be at least 0 and less than 1" % (label, spread))
     elif not isinstance(spread, (int, float)):
         problems.append("%s has spread=%r, which is not a number" % (label, spread))
+
+    if along is not None and along not in AXES:
+        problems.append("%s spreads along %r, which is not a direction (%s)"
+                        % (label, along, ", ".join(AXES)))
 
     for key in track:
         if not isinstance(key, dict) or "t" not in key:

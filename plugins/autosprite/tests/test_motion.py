@@ -801,3 +801,228 @@ def test_a_spread_of_a_whole_cycle_is_refused():
         "trait:limb": {"keys": [{"t": 0.0, "angle": 1.0}], "spread": 2}}}
     assert any("fraction of the cycle" in problem
                for problem in motion.validate_animation(bad))
+
+
+# ---------------------------------------------------------------------------
+# Which way the wave travels. Without an axis a spread plays parts in the order
+# the rig listed them, which makes the DIRECTION of a wind a property of how
+# carefully somebody typed out a rig file.
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def wheat_rig():
+    """The rig the vision backend actually returned for a CC0 wheat field.
+
+    Four stalks left to right and THEN a full-width sheet lying over all of
+    them -- so declaration order and left-to-right order already disagree in
+    the first real multi-part subject the spread was ever pointed at. The
+    stalks are also unevenly wide, which is the second disagreement: a crest
+    crossing them does not arrive at even intervals.
+    """
+    return R.Rig((14, 13), [
+        R.Part("field_base", "body", (0, 9, 14, 13), None, (7, 13), 0,
+               tags=("ground",)),
+        R.Part("stalk_left", "accessory", (0, 3, 4, 10), "field_base", (2, 10), 1),
+        R.Part("stalk_left_mid", "accessory", (4, 1, 7, 10), "field_base", (5, 10), 1),
+        R.Part("stalk_right_mid", "accessory", (7, 1, 10, 10), "field_base", (8, 10), 1),
+        R.Part("stalk_right", "accessory", (10, 3, 14, 10), "field_base", (12, 10), 1),
+        R.Part("canopy_sheet", "accessory", (0, 1, 14, 10), "field_base", (7, 10), 2),
+    ])
+
+
+def test_without_an_axis_a_spread_is_declaration_order(wheat_rig):
+    parts = motion.select(wheat_rig, "trait:stalk")
+    assert motion.phases(wheat_rig, parts) == [0.0, 1.0, 2.0, 3.0, 4.0]
+
+
+def test_a_part_spanning_the_whole_selection_lands_in_its_middle(wheat_rig):
+    """The defect this was built for. `canopy_sheet` covers the entire field,
+    and declaration order plays it LAST -- as though it stood to the right of
+    every stalk it lies over. By position it plays at the centre, where it is."""
+    parts = motion.select(wheat_rig, "trait:stalk")
+    names = [part.name for part in parts]
+    by_order = dict(zip(names, motion.phases(wheat_rig, parts)))
+    by_place = dict(zip(names, motion.phases(wheat_rig, parts, "x")))
+    assert by_order["canopy_sheet"] == 4.0
+    assert by_place["canopy_sheet"] == pytest.approx(2.0)
+    assert by_place["canopy_sheet"] == pytest.approx(max(by_place.values()) / 2.0)
+
+
+def test_the_crest_crosses_uneven_gaps_in_uneven_time(wheat_rig):
+    """Four stalks of different widths are not four even steps. Ranking them
+    says the wave hops between parts; placing them says it travels."""
+    parts = [part for part in motion.select(wheat_rig, "trait:stalk")
+             if part.name != "canopy_sheet"]
+    places = motion.phases(wheat_rig, parts, "x")
+    gaps = [round(b - a, 3) for a, b in zip(places, places[1:])]
+    assert places[0] == 0.0 and places[-1] == pytest.approx(3.0)
+    assert len(set(gaps)) > 1                       # not evenly spaced
+    assert gaps == sorted(gaps, reverse=True) or gaps[0] > gaps[1]
+
+
+def test_an_axis_reverses_the_wind(wheat_rig):
+    parts = motion.select(wheat_rig, "trait:stalk")
+    forward = motion.phases(wheat_rig, parts, "x")
+    backward = motion.phases(wheat_rig, parts, "-x")
+    top = max(forward)
+    assert backward == pytest.approx([top - value for value in forward])
+
+
+def test_evenly_spaced_parts_listed_in_order_place_exactly_as_they_rank():
+    """The property that makes this a generalisation rather than a change: when
+    the geometry agrees with the declaration order and the spacing is even,
+    placing by position returns the ranks it replaces, exactly."""
+    rig = R.Rig((40, 10), [R.Part("base", "body", (0, 8, 40, 10), None, (20, 10), 0)] +
+                [R.Part("s%d" % i, "accessory", (i * 10, 0, i * 10 + 4, 8),
+                        "base", (i * 10 + 2, 8), 1) for i in range(4)])
+    parts = motion.select(rig, "trait:stalk")
+    assert motion.phases(rig, parts, "x") == pytest.approx([0.0, 1.0, 2.0, 3.0])
+    assert motion.phases(rig, parts, "x") == motion.phases(rig, parts)
+
+
+def test_parts_stacked_at_one_point_have_no_wave_to_travel(windmill_rig):
+    """Four sails share a hub, so along a radius they are all at the same place.
+    That collapses to no spread rather than to an arbitrary order."""
+    parts = motion.select(windmill_rig, "trait:spinner")
+    same = R.Rig((16, 16), [windmill_rig.parts[0]] + [
+        R.Part(part.name, part.role, (7, 5, 9, 7), "tower", (8, 6), 1,
+               tags=("spinner",)) for part in parts])
+    stacked = motion.select(same, "trait:spinner")
+    assert motion.phases(same, stacked, "x") == [0.0, 0.0, 0.0, 0.0]
+
+
+def test_a_chain_is_measured_along_the_skeleton_not_the_image():
+    """A tail curled back on itself doubles back in x, so every spatial axis
+    reads its tip as being beside its root. Depth in the rig does not."""
+    rig = R.Rig((20, 20), [
+        R.Part("body", "body", (0, 8, 10, 16), None, (5, 12), 0),
+        R.Part("tail_a", "tail", (10, 8, 16, 12), "body", (10, 10), 1),
+        R.Part("tail_b", "tail", (12, 4, 18, 8), "tail_a", (16, 8), 1),
+        R.Part("tail_c", "tail", (6, 2, 12, 6), "tail_b", (12, 5), 1),
+    ])
+    parts = motion.select(rig, "trait:stalk")
+    assert [part.name for part in parts] == ["tail_a", "tail_b", "tail_c"]
+    assert motion.phases(rig, parts, "chain") == pytest.approx([0.0, 1.0, 2.0])
+    # In x the tip has come back past the middle segment, so a spatial axis
+    # would play it out of order along its own chain.
+    in_x = motion.phases(rig, parts, "x")
+    assert in_x[2] < in_x[1]
+
+
+def test_the_axis_changes_which_part_is_at_its_peak(wheat_rig):
+    """Not just a table of numbers: the rendered pose differs."""
+    clip = motion.Animation("wind", 8, tracks={
+        "trait:stalk": {"keys": [{"t": 0.0, "angle": 0.0},
+                                 {"t": 0.5, "angle": 12.0}],
+                        "spread": 0.12}})
+    placed = motion.Animation("wind", 8, tracks={
+        "trait:stalk": {"keys": [{"t": 0.0, "angle": 0.0},
+                                 {"t": 0.5, "angle": 12.0}],
+                        "spread": 0.12, "along": "x"}})
+    ranked_pose = clip.pose_at(wheat_rig, 0.5)
+    placed_pose = placed.pose_at(wheat_rig, 0.5)
+    assert (ranked_pose.get("canopy_sheet").angle
+            != pytest.approx(placed_pose.get("canopy_sheet").angle))
+
+
+def test_an_unknown_axis_is_refused_at_construction():
+    with pytest.raises(ValueError) as caught:
+        motion.Track([{"t": 0.0, "angle": 1.0}], spread=0.1, along="sideways")
+    assert "sideways" in str(caught.value)
+
+
+def test_an_unknown_axis_is_reported_by_the_validator():
+    problems = motion.validate_animation({
+        "name": "bad", "frames": 4,
+        "tracks": {"trait:stalk": {"keys": [{"t": 0.0, "angle": 1.0}],
+                                   "spread": 0.1, "along": "widdershins"}}})
+    assert any("widdershins" in problem for problem in problems)
+
+
+def test_an_axis_without_a_spread_is_cautioned_but_still_builds():
+    """An axis with nothing to distribute along it says which way the wind
+    blows and then blows on everything at once. That is a mistake, not a broken
+    clip, so it is a caution and the build goes ahead."""
+    document = {"name": "still", "frames": 4,
+                "tracks": {"trait:stalk": {"keys": [{"t": 0.0, "angle": 1.0}],
+                                           "along": "x"}}}
+    assert motion.validate_animation(document) == []
+    assert any("does nothing" in note for note in motion.cautions(document))
+
+
+def test_an_axis_survives_a_round_trip():
+    animation = motion.Animation.from_dict({
+        "name": "w", "frames": 4,
+        "tracks": {"trait:stalk": {"keys": [{"t": 0.0, "angle": 1.0}],
+                                   "spread": 0.1, "along": "-x"}}})
+    assert animation.tracks["trait:stalk"].along == "-x"
+    assert animation.to_dict()["tracks"]["trait:stalk"]["along"] == "-x"
+
+
+def test_a_track_with_no_axis_still_serialises_as_a_bare_list():
+    """Every clip written before axes existed round-trips unchanged."""
+    animation = motion.Animation("plain", 4, tracks={
+        "trait:stalk": [{"t": 0.0, "angle": 1.0}]})
+    assert isinstance(animation.to_dict()["tracks"]["trait:stalk"], list)
+
+
+# ---------------------------------------------------------------------------
+# Cautions: clips that build perfectly and are still not what anyone meant.
+# All three of these were found in this plugin's OWN library.
+# ---------------------------------------------------------------------------
+
+def test_a_spread_of_a_whole_frame_makes_every_part_a_copy():
+    """`ripple` spread by 0.125 on an eight-frame clip -- exactly one frame --
+    so two banners rendered as the SAME EIGHT PICTURES, byte for byte, one
+    frame apart. A spread is meant to make a selection look like several
+    things."""
+    document = {"name": "r", "frames": 8,
+                "tracks": {"trait:surface": {"keys": [{"t": 0.0, "wave": 0.0},
+                                                      {"t": 0.5, "wave": 4.0}],
+                                             "spread": 0.125}}}
+    assert motion.validate_animation(document) == []
+    assert any("byte-identical" in note for note in motion.cautions(document))
+
+
+def test_a_spread_off_a_whole_frame_is_not_cautioned():
+    document = {"name": "r", "frames": 8,
+                "tracks": {"trait:surface": {"keys": [{"t": 0.0, "wave": 0.0},
+                                                      {"t": 0.5, "wave": 4.0}],
+                                             "spread": 0.15}}}
+    assert motion.cautions(document) == []
+
+
+def test_a_spread_on_a_stepped_channel_is_cautioned_at_any_size():
+    """The renderer rounds `cycle` to whole shades, so a spread there hands the
+    next part the same table read from a different place. Measured on two gem
+    faces: 0.25 and 0.30 of a cycle give byte-identical frames."""
+    for spread in (0.25, 0.3, 0.11):
+        document = {"name": "s", "frames": 8,
+                    "tracks": {"trait:glow": {"keys": [{"t": 0.0, "cycle": 0.0},
+                                                       {"t": 0.5, "cycle": 2.0}],
+                                              "spread": spread}}}
+        notes = motion.cautions(document)
+        assert any("rounds to whole steps" in note for note in notes), spread
+
+
+def test_turbulence_on_the_same_channel_answers_the_stepped_caution():
+    """The caution is about a spread being ALONE on a stepped channel, not
+    about a spread. `flicker` and `shimmer` both carry one and neither is
+    cautioned, because both were given a wander that does vary them."""
+    document = {"name": "s", "frames": 8,
+                "tracks": {"trait:glow": {"keys": [{"t": 0.0, "cycle": 0.0},
+                                                   {"t": 0.5, "cycle": 2.0}],
+                                          "spread": 0.25}},
+                "ops": [{"op": "turbulence", "on": "trait:glow",
+                         "amount": 0.6, "channels": ["cycle"], "rate": 3}]}
+    assert motion.cautions(document) == []
+
+
+def test_the_shipped_libraries_raise_no_cautions():
+    """The check that keeps this honest: it found three clips here when it was
+    written, and it must find none now."""
+    from spritepipe import props as props_module
+    everything = list(motion.LIBRARY.values()) + list(props_module.LIBRARY.values())
+    found = [(clip.name, note) for clip in everything
+             for note in motion.cautions(clip.to_dict())]
+    assert found == []

@@ -277,7 +277,24 @@ part the most specific is the base pose and the rest COMPOSE onto it, so "every
 stalk lags by a frame" adds a lag without replacing anything's authored swing.
 A track may carry a `spread`, so each matched part in turn plays the curve a
 little later -- one field, and it is a wave travelling across a wheat field, a
-chain following the link before it, and a canopy lagging its trunk.
+chain following the link before it, and a canopy lagging its trunk. It may also
+carry an `along`, which is the axis it travels on: `x`, `-x`, `y`, `-y`,
+`radial` (out from the anchor) or `chain` (distance along the skeleton, for a
+tail that curls back on itself and reads as doubling back in every spatial
+axis). Without one, the order is the order the rig happens to LIST its parts
+in, which makes the direction of a wind a property of how carefully somebody
+typed out a rig file.
+
+The placement is by position, not by rank, and that is the substantive half.
+Three stalks bunched at the left of a field and one alone at the right are four
+ranks and so play at four even intervals, which is four things taking turns
+rather than a wave; by position they play when the crest reaches them. The two
+agree exactly when the parts are evenly spaced AND listed in order, so this
+generalises the old behaviour instead of replacing it -- every clip that leaves
+`along` unset samples byte-for-byte what it did before, and the whole suite
+passed unchanged when it landed. `taper` reads the same placement, because a
+canopy tapering toward its tip and a wave travelling toward its tip have to
+agree about which end is the tip.
 
 Seven subject clips use it: `turn`, `sway`, `gust`, `ripple`, `creak`,
 `flicker`, `shimmer`. A clip that ends up driving nothing is dropped with the
@@ -347,6 +364,118 @@ invariant, and the fallback hiding the gap was silent.
   -- and `palette.escapes`, the detector, had no production caller. It now says
   what it moved and the build warns. Instrumented across six sprites and all
   sixteen animations: **zero**.
+
+## A spread of a whole frame is a copy, and three shipped clips were one
+
+The two-banner test that found it is four lines: put a CC0 flag on the canvas
+twice, tag both `surface`, run `ripple`, and ask whether the right banner's
+frames are the left banner's frames rolled by *k*. They were, at *k* = 1 --
+byte-identical, compared as bytes.
+
+The cause is arithmetic. `ripple` spread by 0.125 on an eight-frame clip, and
+0.125 of a cycle IS one frame. Every part it drove was therefore the same
+picture as its neighbour, later. Auditing every spread in both libraries against
+its own frame period found three of six:
+
+| clip | frames | spread | in frames |
+|---|---|---|---|
+| `sway` | 8 | 0.09 | 0.72 |
+| `gust` | 10 | 0.06 | 0.60 |
+| `creak` | 6 | 0.15 | 0.90 |
+| **`ripple`** | 8 | **0.125** | **1.00** |
+| **`flicker`** | 6 | **0.1667** | **1.00** |
+| **`shimmer`** | 8 | **0.25** | **2.00** |
+
+`ripple` was fixed by moving it to 0.15, and the two banners stopped being
+copies. **The other two were not, and the reason is the more useful half.**
+
+### A spread cannot vary a stepped channel at all
+
+`flicker` and `shimmer` drive `cycle`, and the renderer rounds `cycle` to whole
+shades, because a third of a shade is the same shade. So:
+
+- Moving `shimmer` off a whole frame -- 0.25 to 0.30 -- produced **byte-identical
+  frames**. The rounding absorbed the entire change.
+- Moving `flicker` off a whole frame made it **worse**: the offset torch fell
+  from three distinct pictures to two, and gained two consecutive frames on the
+  same shade, which is the one guarantee that clip is built around.
+
+A spread on a rounded channel does not decorrelate anything. It hands the next
+part the same table read from a different place, and every whole-table offset
+is the same set of pictures in a different order. There is no value that helps,
+which is why both spreads were left exactly as they were.
+
+What does work is a per-part wander. `turbulence` at 0.6 of a shade:
+
+| | pictures, part A | pictures, part B | consecutive repeats | is B a copy of A |
+|---|---|---|---|---|
+| two torches, `flicker` as written | 3 of 6 | 3 of 6 | 0 | **yes, by 1 frame** |
+| + turbulence 0.6 | 3 of 6 | 3 of 6 | 0 | no |
+| two gem faces, `shimmer` as written | 5 of 8 | 5 of 8 | 0 | **yes, by 2 frames** |
+| + turbulence 0.6 | 5 of 8 | **4 of 8** | 0 | no |
+
+Free on the torch; on the gem it costs the second face one picture out of eight,
+and that was taken deliberately -- two faces showing the same five pictures two
+frames apart is the exact failure `shimmer` exists to avoid. Shed stayed 0.00%
+throughout.
+
+Below 0.6 nothing happens **at all** (0.3, 0.4 and 0.5 give byte-identical
+frames) and at 0.6 exactly one step flips. On a rounded channel there is no
+gentle version: a wander smaller than half a step is invisible and one large
+enough to see costs a whole step.
+
+Both rules are now `motion.cautions`, which is advisory and separate from
+`validate_animation` on purpose -- a problem means the clip cannot be built and
+stops the run, and every one of these builds perfectly and is still not what
+anyone meant. The build reports them; a test asserts both shipped libraries
+raise none.
+
+## `turbulence`: wind is not a sine wave
+
+Every wind clip in the library is one curve played by every part, so a field
+reads as machinery. `turbulence` gives each part its own small wander on top of
+whatever it was already doing. Three properties, each load-bearing:
+
+- **It closes.** The signal is a sum of sines at whole-numbered frequencies in
+  the cycle, so its period is the cycle exactly. Sampled noise would need its
+  ends stitched and would still drift; this cannot, because nothing in it fails
+  to repeat. A test asserts frame 0 and *t* = 1 agree exactly.
+- **It does not depend on the rig's typing.** Each part's phase is hashed from
+  its NAME, with FNV-1a written out here rather than Python's `hash()`, whose
+  salt changes per process and would make a build irreproducible. A test pins
+  the exact hash, which is the only way to catch a switch back.
+- **It composes rather than replaces.** The wander is emitted as `name:` tracks
+  holding nothing but the departure, and `name:` outranks the trait selector the
+  parts were addressed by, so the authored swing composes on top and the
+  rotations add. `spread` still spreads, `taper` still finds its own track, and
+  the two work in either order.
+
+`amount` is a true ceiling rather than an average: the signal is scaled so the
+largest departure at any frame of any part is exactly `amount`.
+
+### Measured against the artist, and it did NOT pay there
+
+On the CC0 flag, against the artist's own sixteen frames:
+
+| | footprint error | pixels moved |
+|---|---|---|
+| `ripple` as written | 21.4% | 3822 |
+| + turbulence 1.0 on `wave` | 20.9% | 3788 |
+| + turbulence 2.0 on `wave` | 23.0% | 3807 |
+| + turbulence 1.0 on `wave_phase` | **19.7%** | **3076** |
+| + turbulence 1.0 on `angle` | 28.5% | 4252 |
+
+The artist's own frames disturb **4594** pixels, so `ripple` already under-moves
+by 17%. The best-looking row is therefore a trap: `wave_phase` scores lowest by
+moving a third less than the artist, and `footprint` is one-sided by design --
+it punishes moving the wrong pixels and not moving too few. Same-coverage
+against same-coverage, turbulence is worth half a point on 3800 pixels, which is
+about nineteen pixels and inside the noise.
+
+So it is **not** applied to `ripple`, `sway` or `gust`. It ships applied only to
+the two clips where a measurement supports it, both for the discrete-channel
+reason above. The `angle` row is a third independent confirmation that cloth is
+not a thing that leans.
 
 ### Findings from this work that are worth more than the code
 
