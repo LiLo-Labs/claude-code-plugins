@@ -32,6 +32,44 @@ review, which is why the skill insists on watching them.
 
 That gap is what backlog item 1 exists to close.
 
+## What the rig audit found
+
+The rig-aware critic can be pointed at a rig instead of at a motion, and asked
+only "is this rig right for this picture?". Run across all 20 sprites
+(`/tmp/rig_audit.py`), **9 came back blaming the rig**, and its complaints are
+specific and checkable rather than vague. Four themes, in the order they are
+worth fixing:
+
+1. **Front-facing sprites get a profile rig.** Both top-down assets were called
+   out independently: "a sagittal side-view rig applied to a sprite that has no
+   depth axis", "there is no near/far side". Both measure 0.0% debris, so the
+   shed metric cannot see this at all -- it is the clearest example yet of the
+   gap this document opens with. `--facing` accepts only `right|left`; `front`
+   and `back` are in the vision prompt's vocabulary and then quietly treated as
+   `left`.
+2. **Limbs invented on blob characters.** The slime and the sumo hulk both get
+   arms carved out of a body that has none: "rotating them punches holes in the
+   body and leaves floating fragments". The slime is the corpus's worst
+   remaining shed at 18.0%.
+3. **Boxes that swallow their neighbours.** The shieldmaiden's head box spans
+   the full width and the top 57%, taking the staff and the top of both arms
+   with it; the dragon's head box runs almost to the sprite's bottom and drags
+   a foreleg. This is a real class, and it may be checkable offline: a box far
+   larger than the pixels it ends up owning is a box that stole from someone.
+4. **Props rigged as bodies.** The sword's `hilt` is tagged `body` while
+   `blade`, the bulk of the sprite, is tagged `prop` -- the split is inverted.
+   The potion's `flask` box fully contains `bowl` and `neck`. These come from
+   the VISION backend, not the template one.
+
+Two cautions about using it this way. It was shown a `walk` for every asset,
+including the chest and the sword, and several of its complaints are really
+"a walk cycle does not apply to a treasure chest" -- true, but the harness's
+fault. And its claim that overlapping boxes mean "the same pixels are drawn
+twice" is **wrong about the mechanism**: `cutout` gives every pixel to exactly
+one part. It is often right about the effect and wrong about the cause, which
+is the normal failure mode of a critic that can see the picture but not the
+code.
+
 ## Backlog, in value order
 
 1. ~~**A vision critic loop.**~~ **Done** — `spritepipe/critic.py`, exposed as
@@ -169,6 +207,16 @@ reverted.
   not: at `sx=0.14` a 10px potion is a clean sliver; it comes apart in the
   MIDDLE of the range, where its 2px cork lands on the reducer's coverage
   boundary. The first version also let a single 1px highlight veto all squash.
+- **Telling front-facing from side-facing by symmetry.** A front-on character
+  is bilaterally symmetric and a profile is not, so this looks like a free
+  measurement. It is not: measured over the corpus, silhouette symmetry puts a
+  right-facing platformer hero at 0.93 and a front-facing RPG sprite at 0.93,
+  and the front-facing range (0.73-1.00) sits entirely inside the side-facing
+  one (0.14-0.93). Mirroring the COLOURS instead -- on the theory that a
+  profile has one eye off the centreline -- separates them no better (front
+  0.23-1.00, side 0.07-0.77). A standing character's outline is roughly
+  symmetric whichever way it faces. Facing has to be told, by the user or by
+  the vision backend; it cannot be measured from the art.
 - **Blob count with a significance floor** as a quality metric. A 2% floor hides
   exactly the loose 3px fragments that make a frame look broken.
 - **Mass conservation** as a quality metric. Mass is conserved when parts are
