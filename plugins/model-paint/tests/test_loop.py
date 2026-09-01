@@ -103,7 +103,7 @@ class TestAddPartRuns(unittest.TestCase):
         self.poses = [_BoxPose(), _BoxPose(), _BoxPose()]
 
         def fake_show(mesh, up, field, labels, out_dir, tag, views=3,
-                      pixels=520, directions=None):
+                      pixels=520, directions=None, colours=None, focus=None):
             return (os.path.join(HERE, "..", "README.md"), self.poses,
                     self.geometry)
 
@@ -589,7 +589,7 @@ class TestReview(unittest.TestCase):
         self._show = loop.show
 
         def fake_show(mesh, up, field, labels, out_dir, tag, views=3,
-                      pixels=520, directions=None):
+                      pixels=520, directions=None, colours=None, focus=None):
             return (os.path.join(HERE, "..", "README.md"), self.poses,
                     self.geometry)
         loop.show = fake_show

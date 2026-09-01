@@ -292,17 +292,50 @@ def coverage_report(counted, areas, target_views):
     }
 
 
+def frame_on(mesh, faces, margin=1.35):
+    """Where to put the camera to see THESE faces properly, and how wide.
+
+    A whole-object view spends its pixels on the whole object. A barnacle in a
+    520px view of a 190mm shell is about ten pixels across, and no number of
+    rounds lets anyone draw a boundary they cannot see -- the limit is the
+    render, not the loop. So when the work is a small part, the camera goes to
+    the part, which is what a person does when they bring a model up to their
+    eye for the fine bits.
+
+    The margin keeps some surroundings in shot, because a boundary is a
+    statement about two things and the neighbour has to be visible to place it.
+    """
+    faces = np.asarray(faces, dtype=np.int64)
+    if not len(faces):
+        return None, None
+    corners = mesh.vertices[mesh.faces[faces].ravel()]
+    low, high = corners.min(axis=0), corners.max(axis=0)
+    centre = 0.5 * (low + high)
+    radius = float(np.max(high - low)) / 2.0 * float(margin)
+    whole = float(np.ptp(mesh.vertices, axis=0).max()) / 2.0 * 1.06
+    return centre, min(max(radius, whole * 0.02), whole)
+
+
 def poses_from(mesh, directions, up, pixels=900, roll_cycle=(0.0, 22.0, -18.0),
-               log=None):
+               centre=None, radius=None, log=None):
     """Cast the chosen directions. Roll still cycles, for the reason it always did:
     two looks that differ only in azimuth see the same foreshortening, so rolling
-    makes the second an independent test of a shape rather than a repeat."""
+    makes the second an independent test of a shape rather than a repeat.
+
+    `centre` and `radius` frame a detail instead of the whole piece. That is a
+    real camera move: the pixel footprint changes with it, so a part that was
+    ten pixels across becomes hundreds and its boundary becomes something that
+    can actually be drawn.
+    """
     from . import render as render_module
 
     axis = np.asarray(up, dtype=float)
     axis = axis / max(np.linalg.norm(axis), 1e-12)
-    centre = mesh.vertices.mean(axis=0)
-    radius = float(np.ptp(mesh.vertices, axis=0).max()) / 2.0 * 1.06
+    if centre is None:
+        centre = mesh.vertices.mean(axis=0)
+    centre = np.asarray(centre, dtype=float)
+    if radius is None:
+        radius = float(np.ptp(mesh.vertices, axis=0).max()) / 2.0 * 1.06
     out = []
     for index, direction in enumerate(directions):
         roll = roll_cycle[index % len(roll_cycle)]

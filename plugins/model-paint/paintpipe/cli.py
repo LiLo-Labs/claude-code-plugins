@@ -64,7 +64,12 @@ def main(argv=None):
                         help="how many looks to cover the model with")
     parser.add_argument("--rounds", type=int, default=6,
                         help="looks per colour before moving on")
-    parser.add_argument("--max-parts", type=int, default=12)
+    parser.add_argument("--max-parts", type=int, default=24,
+                        help="the continuous stage has no colour limit, so "
+                             "detail is worth naming; filaments are limited "
+                             "later and separately")
+    parser.add_argument("--pixels", type=int, default=760,
+                        help="render size per view while painting")
     parser.add_argument("--model", default="claude-opus-5")
     parser.add_argument("--up", default="",
                         help="override the up axis; default is the model's own")
@@ -108,7 +113,8 @@ def main(argv=None):
                                      model=args.model)
     field, labels = loop.paint(backend, mesh, tree, up, args.intent, args.out,
                                views=args.views, rounds=args.rounds,
-                               max_parts=args.max_parts, log=print)
+                               max_parts=args.max_parts,
+                               pixels=args.pixels, log=print)
     if field is None:
         print("nothing identified; giving up rather than guessing")
         return 1

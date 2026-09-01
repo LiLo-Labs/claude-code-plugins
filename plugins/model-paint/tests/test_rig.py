@@ -309,3 +309,60 @@ class TestCeiling(unittest.TestCase):
             base, pairs, weights, np.ones(40), evidence, min_faces=1000,
             min_hidden=1)
         self.assertEqual(int(refined.max()) + 1, int(base.max()) + 1)
+
+
+class TestFrameOn(unittest.TestCase):
+    """The camera goes to the part when the part is small.
+
+    A barnacle in a 520px view of a 190mm shell is about ten pixels across,
+    and nobody can draw a boundary they cannot see -- the limit is the render,
+    not the loop.
+    """
+
+    def setUp(self):
+        import trimesh
+        # A sphere, not a box: a box's six faces are each as big as the model,
+        # so framing on one cannot be tighter than framing on all of it and
+        # the fixture would pass whatever the code did.
+        self.mesh = trimesh.creation.icosphere(subdivisions=3, radius=50.0)
+
+    def test_a_small_patch_gets_a_small_radius(self):
+        from paintpipe import rig
+        centre, radius = rig.frame_on(self.mesh, [0])
+        whole = float(np.ptp(self.mesh.vertices, axis=0).max()) / 2.0 * 1.06
+        self.assertIsNotNone(centre)
+        self.assertLess(radius, whole,
+                        "framing on one face must be tighter than the model")
+
+    def test_the_frame_never_exceeds_the_model(self):
+        from paintpipe import rig
+        _c, radius = rig.frame_on(self.mesh,
+                                  np.arange(len(self.mesh.faces)))
+        whole = float(np.ptp(self.mesh.vertices, axis=0).max()) / 2.0 * 1.06
+        self.assertLessEqual(radius, whole + 1e-6)
+
+    def test_nothing_to_frame_is_refused_not_guessed(self):
+        from paintpipe import rig
+        centre, radius = rig.frame_on(self.mesh, [])
+        self.assertIsNone(centre)
+        self.assertIsNone(radius)
+
+    def test_a_frame_keeps_the_neighbours_in_shot(self):
+        """A boundary is a statement about two things; the other one has to be
+        visible to place it."""
+        from paintpipe import rig
+        _c, tight = rig.frame_on(self.mesh, [0], margin=1.0)
+        _c, roomy = rig.frame_on(self.mesh, [0], margin=1.35)
+        self.assertGreater(roomy, tight)
+
+    def test_framing_actually_changes_the_pixel_footprint(self):
+        """It is a real camera move, not a crop: the part must occupy more of
+        the frame than it did in the whole-model view."""
+        from paintpipe import rig, preview
+        up = (0.0, 0.0, 1.0)
+        directions = preview.orbit(1, 20.0, up=up)
+        wide = rig.poses_from(self.mesh, directions, up, pixels=96)[0]
+        centre, radius = rig.frame_on(self.mesh, [0, 1])
+        near = rig.poses_from(self.mesh, directions, up, pixels=96,
+                              centre=centre, radius=radius)[0]
+        self.assertLess(near.camera.footprint_mm, wide.camera.footprint_mm)

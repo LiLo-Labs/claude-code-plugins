@@ -101,7 +101,7 @@ def look_from(mesh, tree, up, views=3, pixels=520, log=None):
 
 
 def show(mesh, up, field, labels, out_dir, tag, views=3, pixels=520,
-         directions=None, colours=None):
+         directions=None, colours=None, focus=None):
     """Plain beside painted, same views, numbered. The only picture ever asked about.
 
     `directions` must be the SAME on every call of a run: the agent points at
@@ -113,7 +113,10 @@ def show(mesh, up, field, labels, out_dir, tag, views=3, pixels=520,
     os.makedirs(out_dir, exist_ok=True)
     if directions is None:
         directions = preview.orbit(views, 26.0, up=up)
-    poses = rig_module.poses_from(mesh, directions, up, pixels=pixels)
+    centre, radius = (rig_module.frame_on(mesh, focus)
+                      if focus is not None and len(focus) else (None, None))
+    poses = rig_module.poses_from(mesh, directions, up, pixels=pixels,
+                                  centre=centre, radius=radius)
     if colours is None:
         colours = palette(len(labels))
 
@@ -475,7 +478,16 @@ The piece: %(intent)s
 
 Answer as a painter about to paint it:
 
-1. WHAT PARTS do you see? Name the things you would give their own colour.
+1. WHAT PARTS do you see? Name every thing you would give its own colour, and
+   be thorough: there is NO LIMIT on how many colours are available here, so
+   anything a painter would pick out separately deserves its own entry. Work
+   down the scales -- the big masses first, then what sits on them, then the
+   detail on THAT. If a barnacle has a dark open mouth, the mouth is a part.
+   If a rib has a worn crest, the crest is a part. Twenty or thirty entries on
+   a busy model is right; five is not.
+
+   The printer's limited filaments are somebody else's problem, later. Do not
+   merge two things here because they might end up the same colour.
 
 2. HOW MUCH DETAIL does each part have? Say "flat" if the whole part takes one
    colour, or "detailed" if it is really many separate things of the same kind
@@ -491,6 +503,12 @@ touching or sitting on each other -- just say which goes on first.
 Reply with ONLY a JSON object, no prose:
 {"parts": [{"name": "<short name>", "detail": "flat|detailed",
             "order": <int>, "where": "<where it sits>"}, ...]}"""
+
+
+CLOSE = """ You are looking CLOSE UP at this part now, not at the whole model --
+the camera has moved onto what this colour has taken so far, with its
+surroundings in shot. Work at this scale: the boundary you can see here is the
+one to draw."""
 
 
 BRUSH = """The LEFT image of each pair is a 3D model plainly shaded, %(count)d views.
@@ -590,7 +608,8 @@ def see(backend, mesh, up, intent, out_dir, views=4, pixels=700,
 
 
 def add_part(backend, mesh, tree, up, seeds, labels, part, intent, out_dir,
-             tag, rounds=6, views=3, directions=None, log=print):
+             tag, rounds=6, views=3, directions=None, pixels=760,
+             log=print):
     """Paint ONE colour, looking after every stroke, until that colour is right.
 
     The looking is not an audit at the end. It happens after each application,
@@ -625,6 +644,16 @@ def add_part(backend, mesh, tree, up, seeds, labels, part, intent, out_dir,
 
     used = 0
     for step in range(max(1, int(rounds))):
+        # GO IN CLOSE ONCE THERE IS SOMETHING TO GO IN ON. The first look is
+        # of the whole piece, because the part has to be found before it can
+        # be framed. After that the camera sits on what this colour has taken
+        # so far, with room around it for the neighbours a boundary is drawn
+        # against -- so a barnacle stops being ten pixels wide and its edge
+        # becomes something that can be drawn rather than guessed at.
+        focus = None
+        if seeds.get(slot):
+            focus = rig_module.face_mask(tree, seeds[slot])
+            focus = np.flatnonzero(focus)
         # NO BASE COAT WHILE WORKING. Filling the unclaimed surface with the
         # first colour makes that colour cover the whole model from the very
         # first look, so the agent cannot tell what it has actually painted
@@ -636,9 +665,12 @@ def add_part(backend, mesh, tree, up, seeds, labels, part, intent, out_dir,
         field = field_of(tree, owner, len(mesh.faces))
         path, poses, geometry = show(mesh, up, field, labels, out_dir,
                                      "%s-%d" % (tag, step), views=views,
-                                     directions=directions)
+                                     directions=directions, pixels=pixels,
+                                     focus=focus)
         state = ("Nothing has that colour yet." if not seeds[slot] else
                  "What has it so far is shown in that colour.")
+        if focus is not None and len(focus):
+            state += CLOSE
         fine = str(part.get("detail", "flat")).lower() == "detailed"
         prompt = BRUSH % {"count": len(poses), "name": part["name"],
                           "where": part["where"], "state": state,
@@ -962,7 +994,7 @@ def design_colours(backend, mesh, up, field, labels, intent, out_dir,
 
 
 def paint(backend, mesh, tree, up, intent, out_dir, views=3, rounds=6,
-          max_parts=8, log=print):
+          max_parts=8, pixels=760, log=print):
     """The whole method, in the order a person works.
 
     See what parts there are and how much detail each has; paint them in the
@@ -998,7 +1030,7 @@ def paint(backend, mesh, tree, up, intent, out_dir, views=3, rounds=6,
         seeds, labels, field, _n = add_part(
             backend, mesh, tree, up, seeds, labels, part, intent, out_dir,
             str(index), rounds=rounds, views=len(directions),
-            directions=directions, log=log)
+            directions=directions, pixels=pixels, log=log)
     # NOW LOOK AT THE WHOLE THING. Until this pass nobody has: every call was
     # about one colour, asked before the later colours existed, and allowed to
     # change only that colour. A part whose turn has passed cannot complain
