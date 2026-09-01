@@ -9,7 +9,7 @@ again.
 The pipeline is sound and proven on real art. **20 CC0 sprites** (16×16 to
 76×81; humanoids, creatures, props, and four cases chosen to break a silhouette
 rigger) all build, with all seven verification checks passing on both backends.
-402 tests, no network or model in any of them.
+416 tests, no network or model in any of them.
 
 Quality, measured as **debris** — the share of a frame's pixels not connected to
 its main blob, against the source's own figure:
@@ -18,7 +18,8 @@ its main blob, against the source's own figure:
 |---|---|
 | the 20-sprite corpus, at the start | 89.4% |
 | after quadrupeds read their legs as columns | 68.6% |
-| after the automatic repair | **44.3%** |
+| after the automatic repair | 44.3% |
+| after the landmark fixes and a grounded shadow | **39.4%** |
 
 **Eighteen of the twenty sprites now shed nothing on any animation.** What is
 left is one character and one prop: `platformer-grass-prowne` (15.4% on jump,
@@ -282,8 +283,17 @@ code.
 3. **Per-animation exports.** One PNG + atlas per animation, and the
    folder-per-animation ZIP (`<anim>/spritesheet.png`, `atlas.json`,
    `frames/01.png…`). Concrete parity, entirely deterministic.
-4. **`--frames`, `--frame-size`, loop points.** autosprite.io exposes frame
-   count 2–64, frame size 32–512, and loop start/end. All three are small.
+4. ~~**`--frames`, `--frame-size`.**~~ **Done.** `--frames N` (2-64) resamples
+   every clip; because a track is a continuous curve this is a finer sampling of
+   the same movement rather than an interpolation of finished pictures, and fps
+   moves with the count so the timing is unchanged. `--frame-size N` (8-512)
+   puts every frame in a square cell with the character standing at the bottom
+   centre, so every clip of every character shares one floor and one origin, and
+   refuses rather than crops when the art does not fit.
+
+   **Loop points are still open** and are the cheapest remaining parity item:
+   autosprite.io exposes loop start/end, and here it is atlas metadata plus two
+   flags -- no pixels change.
 5. **A wider motion library.** Seven character clips against their ~100. Climb,
    crouch, dash, land, block, cast, throw, sleep, die-variants. Cheap to add,
    each one a readable keyframe table.
