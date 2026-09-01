@@ -19,16 +19,27 @@ IDENTITY = np.eye(3)
 
 
 class PartPose:
-    """One part's departure from rest."""
+    """One part's departure from rest.
 
-    __slots__ = ("angle", "dx", "dy", "sx", "sy")
+    Five of the six channels are an affine transform and are consumed by
+    `local()` below. `cycle` is not: it is a whole-numbered step along the
+    part's own colour ramp, applied to the pixels rather than to their
+    positions, and the renderer handles it separately. It is here because it is
+    keyed, eased, blended and composed exactly like the others -- a torch's
+    flicker is authored in the same table as a torch's sway -- and because
+    keeping it out would have meant a second parallel animation system for
+    everything a subject does that is not a movement.
+    """
 
-    def __init__(self, angle=0.0, dx=0.0, dy=0.0, sx=1.0, sy=1.0):
+    __slots__ = ("angle", "dx", "dy", "sx", "sy", "cycle")
+
+    def __init__(self, angle=0.0, dx=0.0, dy=0.0, sx=1.0, sy=1.0, cycle=0.0):
         self.angle = float(angle)
         self.dx = float(dx)
         self.dy = float(dy)
         self.sx = float(sx)
         self.sy = float(sy)
+        self.cycle = float(cycle)
 
     def blend(self, other, amount):
         """Linear blend towards `other`. Used to ease between keyframes."""
@@ -37,7 +48,8 @@ class PartPose:
                         self.dx * keep + other.dx * amount,
                         self.dy * keep + other.dy * amount,
                         self.sx * keep + other.sx * amount,
-                        self.sy * keep + other.sy * amount)
+                        self.sy * keep + other.sy * amount,
+                        self.cycle * keep + other.cycle * amount)
 
     def compose(self, other):
         """This pose with `other`'s DEPARTURE FROM REST applied on top.
@@ -51,11 +63,12 @@ class PartPose:
         """
         return PartPose(self.angle + other.angle,
                         self.dx + other.dx, self.dy + other.dy,
-                        self.sx * other.sx, self.sy * other.sy)
+                        self.sx * other.sx, self.sy * other.sy,
+                        self.cycle + other.cycle)
 
     def __repr__(self):
-        return "PartPose(angle=%.1f, d=(%.1f, %.1f), s=(%.2f, %.2f))" % (
-            self.angle, self.dx, self.dy, self.sx, self.sy)
+        return "PartPose(angle=%.1f, d=(%.1f, %.1f), s=(%.2f, %.2f), cycle=%+.1f)" % (
+            self.angle, self.dx, self.dy, self.sx, self.sy, self.cycle)
 
 
 class Pose:

@@ -128,3 +128,85 @@ def test_ramp_ids_are_stable_and_ordered_by_size():
     assert [r["id"] for r in ramps] == list(range(len(ramps)))
     sizes = [len(r["colours"]) for r in ramps]
     assert sizes == sorted(sizes, reverse=True)
+
+
+# ---------------------------------------------------------------------------
+# Stepping along a ramp: an operation that is not a transform at all.
+# ---------------------------------------------------------------------------
+
+def _ramped():
+    """A red material of four shades, outlined in the darkest red of the same
+    hue -- which is what puts the outline INSIDE the material's ramp, as
+    happened on the first real gem this was run against."""
+    shades = [(28, 12, 12), (60, 30, 30), (110, 55, 55), (170, 85, 85),
+              (220, 140, 140)]
+    pixels = image.blank(5, 5)
+    for row, shade in enumerate(shades):
+        pixels[row, :] = list(shade) + [255]
+    return pixels
+
+
+def test_a_step_lands_on_another_shade_of_the_same_ramp():
+    pixels = _ramped()
+    locked = palette.lock(pixels)
+    table = palette.ramp_steps(locked, pixels)
+    for step in (-3, -1, 1, 3):
+        moved = palette.step_ramp(pixels, table, step)
+        assert len(palette.escapes(moved, locked)) == 0
+
+
+def test_a_step_of_zero_returns_the_art_untouched():
+    pixels = _ramped()
+    table = palette.ramp_steps(palette.lock(pixels), pixels)
+    assert image.equal(palette.step_ramp(pixels, table, 0), pixels)
+
+
+def test_a_step_brightens_and_a_negative_step_darkens():
+    pixels = _ramped()
+    table = palette.ramp_steps(palette.lock(pixels), pixels)
+    before = palette.luminance(tuple(int(v) for v in pixels[2, 0][:3]))
+    up = palette.luminance(tuple(int(v) for v in palette.step_ramp(pixels, table, 1)[2, 0][:3]))
+    down = palette.luminance(tuple(int(v) for v in palette.step_ramp(pixels, table, -1)[2, 0][:3]))
+    assert down < before < up
+
+
+def test_a_step_clamps_rather_than_wrapping():
+    """A highlight that brightens past white and reappears as the darkest
+    shadow is not a highlight, it is a glitch."""
+    pixels = _ramped()
+    table = palette.ramp_steps(palette.lock(pixels), pixels)
+    far = palette.step_ramp(pixels, table, 50)
+    brightest = max((tuple(int(v) for v in colour[:3])
+                     for colour in palette.lock(pixels)), key=palette.luminance)
+    assert all(tuple(int(v) for v in far[row, 0][:3]) == brightest
+               for row in range(1, 5))
+
+
+def test_nothing_steps_down_onto_the_outline_either():
+    """Holding the outline still is only half of it: a fill shade darkening
+    onto the outline colour thickens the outline, which reads the same way."""
+    pixels = _ramped()
+    table = palette.ramp_steps(palette.lock(pixels), pixels)
+    outline = tuple(int(v) for v in pixels[0, 0])
+    dark = palette.step_ramp(pixels, table, -9)
+    assert all(tuple(int(v) for v in dark[row, 0]) != outline for row in range(1, 5))
+
+
+def test_the_darkest_shade_does_not_move_because_it_is_the_outline():
+    """Ramps are found by hue and adjacency, and an outline touches everything
+    it surrounds, so it lands in the ramp of whatever it outlines. Lifting it
+    with the fill makes the sprite go soft at the edges, which is the most
+    obvious tell there is."""
+    pixels = _ramped()
+    table = palette.ramp_steps(palette.lock(pixels), pixels)
+    outline = tuple(int(v) for v in pixels[0, 0])
+    assert tuple(int(v) for v in palette.step_ramp(pixels, table, 3)[0, 0]) == outline
+    assert tuple(int(v) for v in palette.step_ramp(pixels, table, 3, keep_outline=False)[0, 0]) \
+        != outline
+
+
+def test_a_transparent_pixel_is_left_transparent():
+    pixels = _ramped()
+    pixels[4, 4] = [0, 0, 0, 0]
+    table = palette.ramp_steps(palette.lock(pixels), pixels)
+    assert palette.step_ramp(pixels, table, 2)[4, 4][3] == 0

@@ -55,6 +55,9 @@ CHANNEL_LIMITS = {
     "dy": 12.0,
     "sx": 1.6,
     "sy": 1.6,
+    # Steps along a ramp. Four is already the whole of most sprite ramps, so a
+    # larger number is not a brighter glow, it is the same clamped one.
+    "cycle": 4.0,
 }
 MIN_SCALE = 0.2
 

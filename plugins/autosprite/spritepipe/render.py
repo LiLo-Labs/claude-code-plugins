@@ -242,8 +242,17 @@ def render_pose(cutout, pose, margin=0):
 
     frame = img.blank(height, width)
     for sprite in cutout.sprites:
+        pixels = sprite.pixels
+        step = int(round(pose.get(sprite.name).cycle))
+        if step:
+            # Before the transform, not after: the supersampled reduction votes
+            # on whatever colours the block holds, and it should be voting on
+            # the shaded ones. Doing it afterwards would also re-shade the
+            # transparent fringe the resampler leaves behind.
+            from . import palette as palette_module
+            pixels = palette_module.step_ramp(pixels, cutout.ramp_table(), step)
         layer = img.blank(height, width)
-        img.paste(layer, sprite.pixels,
+        img.paste(layer, pixels,
                   sprite.origin[0] + margin, sprite.origin[1] + margin)
         matrix = shift @ transforms[sprite.name] @ np.linalg.inv(shift)
         moved = _transform_layer(layer, matrix, (width, height))

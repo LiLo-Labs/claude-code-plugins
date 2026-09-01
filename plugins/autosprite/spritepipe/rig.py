@@ -65,6 +65,7 @@ TRAITS = (
     "surface",    # a broad face that ripples rather than hinges -- cloth, water
     "socket",     # attached and swappable; rides its host
     "ground",     # not part of the subject at all; the floor under it
+    "glow",       # emits or catches light, so it brightens and dims in place
 )
 
 TRAITS_BY_ROLE = {

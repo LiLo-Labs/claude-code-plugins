@@ -27,13 +27,17 @@ from .motion import Animation
 def _library():
     bob = Animation(
         "bob", frames=4, fps=6, loop=True,
-        note="a pickup breathing in place, so the player's eye finds it. It "
-             "rises fast and sinks slowly rather than bobbing evenly, because a "
-             "symmetric rise and fall draws the SAME picture on the way up and "
-             "the way down and a four-frame clip can only afford three",
-        root=[{"t": 0.0, "dy": 0.0},
-              {"t": 0.35, "dy": -2.0, "easing": "ease_out"},
-              {"t": 0.70, "dy": -1.0}])
+        note="a pickup breathing in place, so the player's eye finds it. Two "
+             "things about four numbers. It rises fast and sinks slowly rather "
+             "than bobbing evenly, because a symmetric rise and fall draws the "
+             "SAME picture going up and coming down and a four-frame clip "
+             "cannot afford to spend one on a repeat. And the keys sit exactly "
+             "on the four frame times at whole-pixel heights, because a clip "
+             "this short has nowhere to hide: a key between frames means the "
+             "renderer samples a height nobody chose and rounds two of them "
+             "together",
+        root=[{"t": 0.0, "dy": 0.0}, {"t": 0.25, "dy": -2.0},
+              {"t": 0.5, "dy": -3.0}, {"t": 0.75, "dy": -1.0}])
 
     spin = Animation(
         "spin", frames=8, fps=12, loop=True, flip_from=0.5,
@@ -146,8 +150,38 @@ def _library():
                                           {"t": 0.7, "angle": -2.0}],
                                  "spread": 0.15}})
 
+    # --- palette-space: nothing moves, the shading does --------------------
+
+    flicker = Animation(
+        "flicker", frames=6, fps=12, loop=True,
+        note="a torch, a lantern, a forge, a rune. Nothing moves at all -- "
+             "every pixel stays exactly where the artist put it and steps along "
+             "its own shading ramp instead, so the light changes and the "
+             "silhouette does not. It STEPS rather than fading, and the steps "
+             "are uneven on purpose: an even brighten-and-dim reads as a pulse, "
+             "and a flame does not pulse. The step is a whole shade, because a "
+             "third of a shade is the same shade",
+        tracks={"trait:glow": {"keys": [{"t": 0.0, "cycle": 0.0},
+                                        {"t": 1 / 6.0, "cycle": 1.0},
+                                        {"t": 2 / 6.0, "cycle": 0.0},
+                                        {"t": 3 / 6.0, "cycle": -1.0},
+                                        {"t": 4 / 6.0, "cycle": 1.0},
+                                        {"t": 5 / 6.0, "cycle": -1.0}],
+                               "spread": 1 / 6.0}})
+
+    shimmer = Animation(
+        "shimmer", frames=8, fps=8, loop=True,
+        note="light travelling across water or glass: a slow ramp step with a "
+             "big spread, so consecutive faces catch the light one after "
+             "another rather than the whole surface flashing at once",
+        tracks={"trait:surface": {"keys": [{"t": step / 8.0, "cycle": value}
+                                           for step, value in enumerate(
+                                               (0, 1, 2, 1, 0, -1, 0, 1))],
+                                  "spread": 0.25}})
+
     return {animation.name: animation for animation in
-            (bob, spin, tumble, pulse, swing, turn, sway, gust, ripple, creak)}
+            (bob, spin, tumble, pulse, swing, turn, sway, gust, ripple, creak,
+             flicker, shimmer)}
 
 
 LIBRARY = _library()
@@ -159,13 +193,15 @@ PRESET_SETS = {
     "pickup": ["bob", "spin"],
     "coin": ["spin"],
     "weapon": ["swing", "bob"],
-    "building": ["turn", "creak", "sway"],
+    "building": ["turn", "creak", "sway", "flicker"],
     "machine": ["turn", "creak"],
     "plant": ["sway", "gust"],
     "cloth": ["ripple", "sway", "gust"],
+    "water": ["ripple", "shimmer"],
     "weather": ["ripple", "sway"],
+    "light": ["flicker"],
     "all": ["bob", "spin", "tumble", "pulse", "swing",
-            "turn", "sway", "gust", "ripple", "creak"],
+            "turn", "sway", "gust", "ripple", "creak", "flicker", "shimmer"],
 }
 
 

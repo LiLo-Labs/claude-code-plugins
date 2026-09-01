@@ -48,6 +48,21 @@ class Cutout:
         # absorbed by the root. Not an error -- boxes are not a tiling -- but a
         # large number means the rig missed something the user can see.
         self.strays = strays
+        self._ramps = None
+
+    def ramp_table(self):
+        """The shading ramps of the source art, for the `cycle` channel.
+
+        Built from the WHOLE reference rather than per part, so a step means the
+        same thing everywhere: two parts sharing a material step together, which
+        is what makes a lit window and its frame brighten as one thing.
+        Computed once and kept, because a clip may ask for it on every frame.
+        """
+        if self._ramps is None:
+            from . import palette as palette_module
+            self._ramps = palette_module.ramp_steps(
+                palette_module.lock(self.reference), self.reference)
+        return self._ramps
 
     def by_name(self, name):
         for sprite in self.sprites:

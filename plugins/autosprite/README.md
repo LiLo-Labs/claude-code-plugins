@@ -24,6 +24,31 @@ hero.png                                       hero-sprites/
 
 The input file is never written to.
 
+## An operation that is not a movement
+
+Five of the six animation channels are an affine transform — `angle`, `dx`,
+`dy`, `sx`, `sy`. The sixth, `cycle`, is a whole-numbered step along a part's
+own shading **ramp**. Nothing moves: every pixel stays exactly where the artist
+put it and changes shade instead, so the light changes and the silhouette does
+not.
+
+It is what a subject with no limbs actually does. A torch flickers, a rune
+pulses, a window lights up at dusk, water catches the light — none of which is a
+rotation of anything, and all of which were unsayable when the vocabulary was
+five affine scalars.
+
+It is also the strongest form of the palette guarantee in the whole plugin: a
+step lands on another shade of the *same ramp*, and every ramp is built from the
+source art's own locked palette, so there is nothing for the enforcement pass to
+catch because nothing can escape.
+
+One rule had to be added, and it was found on a real gem: **the art's darkest
+colour never moves, and nothing steps down onto it.** Ramps are found by hue and
+adjacency, and an outline touches everything it surrounds, so it lands in the
+ramp of whatever it outlines — and a brightening step lifts the outline with the
+fill, which is the most obvious tell in pixel art. Darkening never had the
+problem, because the outline was already at the bottom of its ramp.
+
 ## The palette guarantee
 
 **Nothing in this plugin generates a pixel.** There is no image model anywhere
@@ -155,6 +180,8 @@ thirteen-word humanoid vocabulary:
 | `gust` | `trait:stalk` `trait:crown` | the same, hit once by the wind and settling |
 | `ripple` | `trait:surface` | water, a banner, a curtain |
 | `creak` | `trait:socket` | a shutter, a sign, a lantern hung on a building |
+| `flicker` | `trait:glow` | a torch, a forge, a rune, a lit window |
+| `shimmer` | `trait:surface` | light travelling across water or glass |
 
 A trait is a property a role implies (every `accessory` is a `stalk`, every leg
 is a `support`) plus anything the rig tags a part with, so a windmill's sails
@@ -305,7 +332,7 @@ pip install -r requirements-test.txt
 python3 -m pytest tests -q
 ```
 
-526 tests, no network, no model, well under a minute. Fixtures are generated rather
+540 tests, no network, no model, well under a minute. Fixtures are generated rather
 than checked in — `tests/make_fixture.py` builds parametric sprites so a test can
 have the exact property it is about (arms clear of the body or touching, legs
 parted or robed) instead of one PNG having to serve every case.

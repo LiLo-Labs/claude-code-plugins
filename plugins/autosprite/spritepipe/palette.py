@@ -163,6 +163,79 @@ def ramps(palette, pixels=None, hue_tolerance=28.0):
     return out
 
 
+def ramp_steps(palette, pixels=None):
+    """{colour: [the colours of its ramp, dark to light]}, for stepping along.
+
+    This is what makes a palette-SPACE operation possible: a part can be told to
+    move one step lighter without any pixel moving anywhere. A torch flickers, a
+    gem pulses, a window lights up at dusk and water shimmers -- none of which
+    is an affine transform of anything, and all of which are what a subject that
+    does not have limbs actually does.
+
+    It is palette-safe by construction rather than by inspection: the result of
+    a step is always another member of the same ramp, and every ramp is built
+    out of the source art's own locked palette. There is nothing here for
+    `enforce` to catch, because nothing can escape.
+    """
+    table = {}
+    for ramp in ramps(palette, pixels):
+        shades = sorted((tuple(int(v) for v in colour) for colour in ramp["colours"]),
+                        key=luminance)
+        for colour in shades:
+            table[colour] = shades
+    return table
+
+
+def step_ramp(pixels, table, steps, keep_outline=True):
+    """Every opaque pixel moved `steps` along its own ramp, dark to light.
+
+    Clamped at both ends rather than wrapped: a highlight that brightens past
+    white and reappears as the darkest shadow is not a highlight, it is a
+    glitch. A part whose ramp has run out simply stops getting brighter, which
+    is what a real light does to a real surface.
+
+    The art's DARKEST colour does not move, and nothing steps down onto it,
+    because in pixel art that colour is the outline. Ramps are found by hue and
+    adjacency, and an outline touches everything it surrounds, so it lands in
+    the ramp of whatever it outlines -- which means a brightening step lifts the
+    outline with the fill and the sprite goes soft at the edges. It is the most
+    obvious tell there is, and it showed up on the first gem this was run
+    against. Darkening never had the problem, because the outline was already at
+    the bottom of its ramp and clamped there.
+
+    Note that this holds the darkest colour of the WHOLE art, not the darkest of
+    each ramp: a material's own deepest shadow is a shade like any other and has
+    every right to get darker.
+    """
+    steps = int(round(steps))
+    if not steps or not table:
+        return pixels
+    out = pixels.copy()
+    solid = img.alpha_mask(out)
+    if not solid.any():
+        return out
+    outline = min(table, key=luminance) if keep_outline else None
+    for colour in np.unique(out[solid].reshape(-1, 4), axis=0):
+        key = tuple(int(v) for v in colour)
+        shades = table.get(key[:3] + (key[3],)) or table.get(key)
+        if not shades:
+            continue
+        try:
+            index = shades.index(key)
+        except ValueError:
+            continue
+        if key == outline:
+            continue
+        floor = shades.index(outline) + 1 if outline in shades else 0
+        floor = min(floor, len(shades) - 1)
+        moved = shades[max(floor, min(len(shades) - 1, index + steps))]
+        if moved == key:
+            continue
+        hit = solid & (out == colour).all(axis=2)
+        out[hit] = moved
+    return out
+
+
 def _touching_pairs(pixels, palette):
     """Every pair of palette indices that are four-adjacent somewhere in the art."""
     lookup = {tuple(int(v) for v in colour): index

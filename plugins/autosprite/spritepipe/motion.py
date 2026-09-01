@@ -31,8 +31,14 @@ import json
 
 from .skeleton import PartPose, Pose
 
-CHANNELS = ("angle", "dx", "dy", "sx", "sy")
-REST = {"angle": 0.0, "dx": 0.0, "dy": 0.0, "sx": 1.0, "sy": 1.0}
+# Five affine scalars and one that is not a transform at all. `cycle` is a
+# whole-numbered step along a part's own colour ramp -- a torch flickering, a
+# gem pulsing, a window lighting up, water shimmering. It earns its place next
+# to the others because it is the answer to "what does a subject with no limbs
+# DO", and because it is provably palette-safe: a step lands on another shade
+# of the same ramp, and every ramp comes from the source art's locked palette.
+CHANNELS = ("angle", "dx", "dy", "sx", "sy", "cycle")
+REST = {"angle": 0.0, "dx": 0.0, "dy": 0.0, "sx": 1.0, "sy": 1.0, "cycle": 0.0}
 
 
 def smoothstep(u):
@@ -411,7 +417,8 @@ class Animation:
                 # compose onto the root part.
                 existing = pose.get(root_part.name)
                 pose.set(root_part.name, existing.compose(
-                    PartPose(whole.angle, 0.0, 0.0, whole.sx, whole.sy)))
+                    PartPose(whole.angle, 0.0, 0.0, whole.sx, whole.sy,
+                             whole.cycle)))
         return pose
 
     def _shifted(self, t, index, spread):
@@ -442,6 +449,23 @@ class Animation:
         if self.root is not None:
             return True
         return any(select(rig, selector) for selector in self.tracks)
+
+    def palette_only(self):
+        """Whether this clip changes shading and nothing else.
+
+        A flicker returns to the same shade several times a cycle -- that is
+        what a flicker IS -- and a ramp four shades deep cannot offer six
+        different pictures however it is authored. So the "only N different
+        pictures" warning, which is right about a walk, is wrong about this and
+        is told so; what matters here is that no two frames RUNNING are the
+        same, which is a stutter in any clip.
+        """
+        tracks = list(self.tracks.values()) + ([self.root] if self.root else [])
+        if not tracks:
+            return False
+        return all(not any(track.has(channel) for channel in
+                           ("angle", "dx", "dy", "sx", "sy"))
+                   for track in tracks)
 
     def missing(self, rig):
         """The selectors this clip addresses that this rig has nothing for."""

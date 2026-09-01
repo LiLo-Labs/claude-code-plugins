@@ -71,16 +71,52 @@ def test_the_prop_and_character_libraries_do_not_collide():
 # ---------------------------------------------------------------------------
 
 def _samples(track, animation):
-    """What this one track actually draws, frame by frame, as comparable tuples."""
-    return [tuple(round(getattr(track.sample(t, animation.loop), channel), 3)
-                  for channel in motion.CHANNELS)
-            for t in animation.times()]
+    """What this one track actually DRAWS, frame by frame, as comparable tuples.
+
+    `cycle` is rounded to a whole number rather than to three places, because
+    that is what the renderer does with it: a step of 0.996 and a step of 1.0
+    are the same picture, and a test that called them different would pass on a
+    clip the viewer sees hold still.
+    """
+    out = []
+    for t in animation.times():
+        pose = track.sample(t, animation.loop)
+        out.append(tuple(round(getattr(pose, channel),
+                               0 if channel == "cycle" else 3)
+                         for channel in motion.CHANNELS))
+    return out
 
 
-TRAIT_CLIPS = ("turn", "sway", "gust", "ripple", "creak")
+TRAIT_CLIPS = ("turn", "sway", "gust", "ripple", "creak",
+               "flicker", "shimmer")
 
 
 @pytest.mark.parametrize("name", TRAIT_CLIPS)
+def test_no_trait_clip_holds_the_same_picture_for_two_frames_running(name):
+    """The defect a viewer actually sees: a stutter.
+
+    Weaker than requiring every frame to differ, and it is the right rule for a
+    channel with few values -- a flicker returns to its rest shade several times
+    a cycle and that is what a flicker IS, but drawing the same shade twice in a
+    row is a frame the viewer watches nothing happen in. The wrap counts: the
+    last frame runs into the first.
+    """
+    animation = props.get(name)
+    for selector, track in animation.tracks.items():
+        samples = _samples(track, animation)
+        pairs = list(zip(samples, samples[1:]))
+        if animation.loop:
+            pairs.append((samples[-1], samples[0]))
+        for index, (before, after) in enumerate(pairs):
+            assert before != after, (
+                "%s's %s track draws the same pose on frames %d and %d"
+                % (name, selector, index, (index + 1) % animation.frames))
+
+
+AFFINE_TRAIT_CLIPS = ("turn", "sway", "gust", "ripple", "creak")
+
+
+@pytest.mark.parametrize("name", AFFINE_TRAIT_CLIPS)
 def test_a_trait_clip_is_still_distinct_when_it_drives_only_one_part(name):
     """The defect this was written for, and it was found on real art.
 

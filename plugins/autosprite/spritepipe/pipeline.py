@@ -366,7 +366,10 @@ def build_sheet(reference_path, outdir, animations=("full",), direction_set="1",
         if longest >= 3:
             build.warn("%s holds the same frame for %d frames running; the motion "
                        "may be too small for a character this size" % (key, longest))
+    shading_only = {animation.name for animation in chosen if animation.palette_only()}
     for key, (distinct, total) in build.report["stabilise"].get("repeats", {}).items():
+        if key.split(":")[0] in shading_only:
+            continue
         build.warn("%s is %d frames but only %d different pictures; either the "
                    "motion is too small for a character this size, or the cycle "
                    "retraces itself and needs a keyframe the two halves do not "
