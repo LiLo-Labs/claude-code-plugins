@@ -140,9 +140,16 @@ independently, and the exit status is the answer:
 | `ANCHOR` | Every frame of a clip shares one anchor |
 | `REST` | The rig's parts reassemble into the source image **exactly** |
 
-`REST` is the strongest of them and the one that catches a bad rig rather than a
-bad export: if the parts do not reassemble into the original, some pixel of your
-art is in the wrong part and every frame is wrong.
+`REST` is the one that checks the cut rather than an export: it proves that
+splitting the art into parts lost and duplicated nothing. It earned its place —
+it caught a real bug where every pixel outside the rig's declared boxes (115 of
+them on the first real sprite this was run against) was assigned to the root and
+then silently dropped, producing a sheet that built fine and was missing part of
+the art.
+
+It does not check whether the parts are *named* right. A rig that calls the head
+a leg reassembles perfectly, because reassembly is about which pixels went where,
+not what they were called. Only watching the preview GIF answers that.
 
 ## Input handling
 

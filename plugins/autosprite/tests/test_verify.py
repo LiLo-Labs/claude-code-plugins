@@ -133,15 +133,46 @@ def test_a_clip_whose_frames_disagree_about_the_anchor_is_caught(built):
     assert not check(run(built), "ANCHOR")["ok"]
 
 
-def test_a_rig_that_does_not_reassemble_into_the_source_is_caught(built):
-    """The strongest check: a pixel in the wrong part makes every frame wrong."""
+def test_a_mislabelled_rig_still_reassembles_and_rest_says_so(built):
+    """The limit of this check, asserted rather than left to be discovered.
+
+    Shrinking the head box is a rig that is wrong -- the head is cut off -- and
+    it reassembles perfectly, because the pixels it stops covering are carried
+    by the root instead. REST is about the CUT, not about the naming; the
+    preview render is what catches a wrong name.
+    """
     document = json.load(open(built["rig"]))
     for part in document["parts"]:
         if part["role"] == "head":
             part["box"][3] = max(part["box"][1] + 1, part["box"][3] - 2)
     json.dump(document, open(built["rig"], "w"))
-    result = run(built)
-    assert not check(result, "REST")["ok"]
+    assert check(run(built), "REST")["ok"]
+
+
+def test_rest_catches_a_cut_that_loses_pixels(hero_path, monkeypatch):
+    """The regression this check exists for, and has already caught once.
+
+    Boxes are not a tiling: a rig names the parts it can see, so some opaque
+    pixels always fall outside every box. They belong to the root, and the cut
+    grows the root's window to reach them. Cutting the root from its declared
+    box instead drops them, and drops them silently -- the sheet still builds.
+    """
+    from spritepipe import cutout, ingest, vision
+
+    reference = ingest.ingest(hero_path)
+    built = vision.TemplateBackend().rig(reference)
+    for part in built.parts:      # shrink every box so the art is under-covered
+        x0, y0, x1, y1 = part.box
+        part.box = (x0, y0, max(x0 + 1, x1 - 1), max(y0 + 1, y1 - 1))
+
+    pieces = cutout.cut(built, reference.pixels)
+    assert pieces.strays > 0, "the fixture must actually under-cover the art"
+    assert image.equal(pieces.rest(), reference.pixels)
+
+    monkeypatch.setattr(cutout, "extraction_boxes",
+                        lambda rig, owner: [part.box for part in rig.parts])
+    assert not image.equal(cutout.cut(built, reference.pixels).rest(),
+                           reference.pixels)
 
 
 def test_a_structurally_invalid_rig_is_caught_before_the_rest_check(built):

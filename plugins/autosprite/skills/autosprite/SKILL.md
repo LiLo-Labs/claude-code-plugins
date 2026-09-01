@@ -48,10 +48,14 @@ are.
 2. **Read the notes the rigger wrote.** They say what it measured and what it
    had to guess: "the arms never separate from the body in the silhouette" means
    the arm boxes are a proportion, not a measurement, and are the first thing to
-   check.
-3. **Check `rest pose reconstructs the source exactly: True`.** If it is False
-   the parts do not reassemble into the user's image and every frame is suspect.
-   Stop and say so.
+   check. A large **stray count** means many opaque pixels fell outside every
+   box; they are safely carried by the root and will not move independently, but
+   a big number says the rig missed something the user can see.
+3. **Check `rest pose reconstructs the source exactly: True`.** False means the
+   cut lost or duplicated pixels, which is a bug in this plugin rather than in
+   the rig -- stop, say so, and report it. True does NOT mean the rig is right:
+   a rig that calls the head a leg reassembles perfectly. Only the overlay and
+   the GIFs answer that.
 4. **Ask what the character is, once, if it is not obvious**, and pass it as
    `--intent`. "A knight with a shield on his left arm" changes what the vision
    backend calls the shield.

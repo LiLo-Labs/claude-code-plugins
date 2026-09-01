@@ -40,10 +40,14 @@ class PartSprite:
 
 
 class Cutout:
-    def __init__(self, rig, sprites, reference):
+    def __init__(self, rig, sprites, reference, strays=0):
         self.rig = rig
         self.sprites = sprites      # list, already in draw order
         self.reference = reference
+        # How many opaque pixels fell outside every declared box and were
+        # absorbed by the root. Not an error -- boxes are not a tiling -- but a
+        # large number means the rig missed something the user can see.
+        self.strays = strays
 
     def by_name(self, name):
         for sprite in self.sprites:
@@ -88,13 +92,48 @@ def ownership(rig, mask):
 
     # A pixel no box covered still has to go somewhere or it vanishes from every
     # frame. The root carries it: it is the part that never moves relative to
-    # itself, so a stray pixel there is stationary rather than flying.
+    # itself, so a stray pixel there is stationary rather than flying. `cut`
+    # grows the root's extraction window to reach them.
     root = rig.root
     if root is not None:
         stray = mask & (owner < 0)
         if stray.any():
             owner[stray] = rig.parts.index(root)
+
+    _prefer_near(rig, owner, mask)
     return owner
+
+
+def _prefer_near(rig, owner, mask):
+    """A far limb never takes a pixel its near partner's box also covers.
+
+    Rigs routinely carry a `*_far` box drawn over the same pixels as its
+    `*_near` partner: on a pure profile only one arm is visible, and the rig
+    still needs both halves or the walk cycle has one arm. The vision prompt
+    asks for exactly that.
+
+    Smallest-box-wins then decides the shared pixels by whichever box happened
+    to be a couple of pixels tighter -- and when that is the far one, the only
+    visible arm is drawn BEHIND the body and the character appears to have no
+    arms at all. Near means "the one you can see", so near wins the overlap. It
+    is the same principle as smallest-box-wins: the part the viewer would point
+    at is the part that owns the pixel.
+    """
+    from .rig import PAIRED
+
+    for index, part in enumerate(rig.parts):
+        if not part.role.endswith("_far"):
+            continue
+        partner_role = PAIRED.get(part.role)
+        for other_index, other in enumerate(rig.parts):
+            if other.role != partner_role or other_index == index:
+                continue
+            x0, y0 = max(part.box[0], other.box[0]), max(part.box[1], other.box[1])
+            x1, y1 = min(part.box[2], other.box[2]), min(part.box[3], other.box[3])
+            if x1 <= x0 or y1 <= y0:
+                continue
+            window = owner[y0:y1, x0:x1]
+            window[(window == index) & mask[y0:y1, x0:x1]] = other_index
 
 
 def _grow_into(pixels, holes, rounds=64):
@@ -131,36 +170,75 @@ def _grow_into(pixels, holes, rounds=64):
     return pixels
 
 
+def extraction_boxes(rig, owner):
+    """The window each part is actually cut from: its box, grown to its pixels.
+
+    A part is normally cut from its declared box, because that is where its
+    pixels are. The root is the exception: it inherits every pixel no box
+    covered, and on a real rig there are always some -- a vision model draws
+    boxes around the parts it can name, not a tiling of the image, so a hem, a
+    stray tuft of hair or a scrap of shadow falls outside all of them.
+
+    Cutting the root from its declared box would drop exactly those pixels, and
+    drop them SILENTLY: the sheet still builds, still looks right, and is
+    missing a hundred pixels of the user's art. Growing the window to the
+    pixels a part owns is what makes the partition genuinely exact, which is
+    the property `verify.py`'s REST check exists to prove.
+    """
+    boxes = []
+    for index, part in enumerate(rig.parts):
+        x0, y0, x1, y1 = part.box
+        owned = owner == index
+        if owned.any():
+            rows = np.flatnonzero(owned.any(axis=1))
+            cols = np.flatnonzero(owned.any(axis=0))
+            x0, y0 = min(x0, int(cols[0])), min(y0, int(rows[0]))
+            x1, y1 = max(x1, int(cols[-1]) + 1), max(y1, int(rows[-1]) + 1)
+        boxes.append((x0, y0, x1, y1))
+    return boxes
+
+
 def cut(rig, reference_pixels, backfill=True):
     """Split the reference into PartSprites according to the rig."""
     mask = img.alpha_mask(reference_pixels)
     owner = ownership(rig, mask)
+    boxes = extraction_boxes(rig, owner)
 
     sprites = []
     for index, part in enumerate(rig.parts):
-        x0, y0, x1, y1 = part.box
+        x0, y0, x1, y1 = boxes[index]
         own = (owner[y0:y1, x0:x1] == index)
         pixels = np.where(own[:, :, None], reference_pixels[y0:y1, x0:x1], 0).astype(np.uint8)
         sprites.append(PartSprite(part.name, pixels, (x0, y0), part.pivot,
                                   part.z, part.role))
 
     if backfill:
-        _backfill(rig, sprites, owner, mask)
+        _backfill(rig, sprites, owner, mask, boxes)
 
+    strays = int((mask & _uncovered(rig, mask.shape)).sum())
     sprites.sort(key=lambda sprite: (sprite.z, sprite.name))
-    return Cutout(rig, sprites, reference_pixels)
+    return Cutout(rig, sprites, reference_pixels, strays)
 
 
-def _backfill(rig, sprites, owner, mask):
+def _uncovered(rig, shape):
+    """Mask of the pixels no part's declared box reaches."""
+    covered = np.zeros(shape, dtype=bool)
+    for part in rig.parts:
+        x0, y0, x1, y1 = part.box
+        covered[y0:y1, x0:x1] = True
+    return ~covered
+
+
+def _backfill(rig, sprites, owner, mask, boxes):
     """Grow each part under the parts that overlap it from in front."""
     for index, part in enumerate(rig.parts):
-        x0, y0, x1, y1 = part.box
+        x0, y0, x1, y1 = boxes[index]
         sprite = next(s for s in sprites if s.name == part.name)
         holes = np.zeros((y1 - y0, x1 - x0), dtype=bool)
         for other_index, other in enumerate(rig.parts):
             if other_index == index or other.z <= part.z:
                 continue
-            ox0, oy0, ox1, oy1 = other.box
+            ox0, oy0, ox1, oy1 = boxes[other_index]
             ix0, iy0 = max(x0, ox0), max(y0, oy0)
             ix1, iy1 = min(x1, ox1), min(y1, oy1)
             if ix1 <= ix0 or iy1 <= iy0:

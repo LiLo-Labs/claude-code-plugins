@@ -16,9 +16,14 @@ must agree, and the exit status is the answer:
   ANCHOR    every frame of a clip shares one anchor
   REST      the rig's rest pose reconstructs the source image exactly
 
-REST is the one that catches a bad rig rather than a bad export, and it is the
-strongest claim here: if the parts do not reassemble into the original, then
-some pixel of the user's art is in the wrong part and every frame is wrong.
+REST is the one that checks the CUT rather than the export: it proves that
+splitting the art into parts lost and duplicated nothing, so every frame is
+built from all of the user's pixels and only theirs.
+
+What it does not check is whether the parts are named correctly. A rig that
+calls the head a leg reassembles perfectly, because reassembly is about which
+pixels went where, not what they were called. Only the preview render answers
+that, which is why the skill insists on looking at it.
 """
 
 import io

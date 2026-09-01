@@ -74,9 +74,19 @@ def build_rigs(references, backend, character_class="auto", facing="right",
                              % (view, "; ".join(problems)))
         rigs[view] = built
         cutouts[view] = cutout_module.cut(built, reference.pixels)
-        if build is not None and not img.equal(cutouts[view].rest(), reference.pixels):
+        if build is None:
+            continue
+        if not img.equal(cutouts[view].rest(), reference.pixels):
             build.warn("the %s rig's parts do not reassemble into the source "
-                       "image; every frame of that view is suspect" % view)
+                       "image; that is a bug in this plugin, not in the rig" % view)
+        strays = cutouts[view].strays
+        total = max(1, int(img.alpha_mask(reference.pixels).sum()))
+        if strays and strays / total > 0.05:
+            build.warn("%d opaque pixels (%.0f%%) of the %s view fall outside "
+                       "every part box; the root carries them, so they never "
+                       "move independently -- check the overlay if something "
+                       "should have been its own part"
+                       % (strays, strays / total * 100, view))
     return rigs, cutouts
 
 
