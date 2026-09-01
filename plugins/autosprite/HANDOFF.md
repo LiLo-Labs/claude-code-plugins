@@ -9,7 +9,7 @@ again.
 The pipeline is sound and proven on real art. **20 CC0 sprites** (16×16 to
 76×81; humanoids, creatures, props, and four cases chosen to break a silhouette
 rigger) all build, with all eight verification checks passing on both backends.
-428 tests, no network or model in any of them.
+436 tests, no network or model in any of them.
 
 Quality, measured as **debris** — the share of a frame's pixels not connected to
 its main blob, against the source's own figure:
@@ -311,9 +311,26 @@ code.
    **Loop points are still open** and are the cheapest remaining parity item:
    autosprite.io exposes loop start/end, and here it is atlas metadata plus two
    flags -- no pixels change.
-5. **A wider motion library.** Seven character clips against their ~100. Climb,
-   crouch, dash, land, block, cast, throw, sleep, die-variants. Cheap to add,
-   each one a readable keyframe table.
+5. ~~**A wider motion library.**~~ **Done for the obvious eight.** Fifteen
+   character clips now: idle, walk, run, dash, climb, crouch, jump, land,
+   attack, block, cast, throw, hurt, die, sleep, plus the `action` and
+   `everything` preset sets.
+
+   Every one was authored with the pendulum lesson applied and then measured
+   across the corpus: **all 20 sprites build all 15 clips with all 8 checks
+   passing, and only two clips anywhere exceed 5% shed** -- the two already
+   known. Two clips carry a caveat the skill passes on to the user: `climb`
+   reads as reaching rather than gripping, because a profile drawing has no
+   front view to turn towards a wall, and `sleep` lays the character over with
+   a root rotation, the same trick `die` uses, because a standing drawing
+   cannot be folded into a lying pose any other way.
+
+   Tuning three of them was driven by the new distinct-picture warning rather
+   than by taste: `block`'s guard now overshoots and settles instead of holding
+   three identical frames, and `idle`, `crouch` and `sleep` peak their breath
+   off-centre -- quick in and slow out, which is both what breathing is and
+   what stops a four-frame loop drawing the same picture on both off-beats.
+
 6. **Eight directions that are actually drawn.** Today N/S are `substituted`
    unless the user supplies references. The vision backend could rig a supplied
    front/back reference into the same skeleton so the directions share motion.

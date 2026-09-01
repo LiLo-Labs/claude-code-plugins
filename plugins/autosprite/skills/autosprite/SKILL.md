@@ -113,12 +113,21 @@ Ask for the game, not for a list of animations. The answer picks the set:
 
 | The user says | Give them |
 |---|---|
-| A platformer, a metroidvania, "jumping" | `--animations platformer` (idle, walk, run, jump, attack, hurt) |
+| A platformer, a metroidvania, "jumping" | `--animations platformer` (idle, walk, run, jump, land, crouch, dash, attack, hurt) |
 | Top-down, an RPG, roguelike, "moving in 8 directions" | `--animations topdown --directions 8` |
 | RPG Maker | `--animations walk --directions 4` -- MV/MZ needs exactly the four cardinals |
 | "Just a walk cycle" | `--animations basic` |
+| A brawler, an action RPG, "combat" | `--animations action` (adds block, cast, throw) |
 | Nothing in particular | `--animations full` and let them cut it down |
+| "Everything you have" | `--animations everything` -- all fifteen |
 | A coin, a potion, a chest, a pickup | `--kind prop --animations pickup` |
+
+The character library is idle, walk, run, dash, climb, crouch, jump, land,
+attack, block, cast, throw, hurt, die, sleep. Two of them come with a caveat to
+pass on: **climb** reads as reaching rather than gripping, because a profile
+drawing has no front view to turn towards a wall; **sleep** lays the character
+over with a root rotation, the same trick `die` uses, because a standing
+drawing cannot be folded into a lying pose any other way.
 
 Frame counts and rates are already tuned per animation and are visible in the
 build output. Change them only when the user asks or when the build warns that

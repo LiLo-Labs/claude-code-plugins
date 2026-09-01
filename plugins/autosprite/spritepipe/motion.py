@@ -382,15 +382,18 @@ def _lerp_cycle(points, phase, t):
 def _library():
     idle = Animation(
         "idle", frames=4, fps=6, loop=True,
-        note="breathing; the frame a player sees more than any other",
-        root=[{"t": 0.0, "dy": 0.0}, {"t": 0.5, "dy": 1.0}, {"t": 1.0, "dy": 0.0}],
+        note="breathing; the frame a player sees more than any other. The breath "
+             "peaks off-centre because breathing is quick in and slow out -- and "
+             "because a peak exactly halfway makes the two off-beats the same "
+             "picture, which on a small character is half the cycle wasted",
+        root=[{"t": 0.0, "dy": 0.0}, {"t": 0.4, "dy": 1.0}, {"t": 1.0, "dy": 0.0}],
         tracks={
-            "head": [{"t": 0.0, "dy": 0.0}, {"t": 0.6, "dy": 1.0}, {"t": 1.0, "dy": 0.0}],
-            "arm_near": [{"t": 0.0, "angle": 0.0}, {"t": 0.5, "angle": 3.0},
+            "head": [{"t": 0.0, "dy": 0.0}, {"t": 0.55, "dy": 1.0}, {"t": 1.0, "dy": 0.0}],
+            "arm_near": [{"t": 0.0, "angle": 0.0}, {"t": 0.4, "angle": 3.0},
                          {"t": 1.0, "angle": 0.0}],
-            "arm_far": [{"t": 0.0, "angle": 0.0}, {"t": 0.5, "angle": -3.0},
+            "arm_far": [{"t": 0.0, "angle": 0.0}, {"t": 0.4, "angle": -3.0},
                         {"t": 1.0, "angle": 0.0}],
-            "tail": [{"t": 0.0, "angle": -4.0}, {"t": 0.5, "angle": 4.0},
+            "tail": [{"t": 0.0, "angle": -4.0}, {"t": 0.4, "angle": 4.0},
                      {"t": 1.0, "angle": -4.0}],
         })
 
@@ -544,15 +547,219 @@ def _library():
             "head": [{"t": 0.0, "angle": 0.0}, {"t": 1.0, "angle": 14.0}],
         })
 
-    return {anim.name: anim for anim in (idle, walk, run, jump, attack, hurt, die)}
+    crouch = Animation(
+        "crouch", frames=4, fps=6, loop=True,
+        note="held low, breathing; the legs fold and the torso comes forward "
+             "over them rather than the whole character simply sinking. The "
+             "breath peaks off-centre because breathing is quick in and slow "
+             "out -- and because a peak exactly halfway makes the two off-beats "
+             "the same picture",
+        root=[{"t": 0.0, "dy": 3.0}, {"t": 0.4, "dy": 5.0}, {"t": 1.0, "dy": 3.0}],
+        tracks={
+            "leg_near": [{"t": 0.0, "angle": 10.0, "sy": 0.70},
+                         {"t": 0.5, "angle": 12.0, "sy": 0.66},
+                         {"t": 1.0, "angle": 10.0, "sy": 0.70}],
+            "leg_far": [{"t": 0.0, "angle": -8.0, "sy": 0.72},
+                        {"t": 0.5, "angle": -10.0, "sy": 0.68},
+                        {"t": 1.0, "angle": -8.0, "sy": 0.72}],
+            "torso": [{"t": 0.0, "angle": 12.0}, {"t": 0.4, "angle": 17.0},
+                      {"t": 1.0, "angle": 12.0}],
+            "head": [{"t": 0.0, "angle": -8.0}, {"t": 1.0, "angle": -8.0}],
+            "arm_near": [{"t": 0.0, "angle": 22.0}, {"t": 1.0, "angle": 22.0}],
+            "arm_far": [{"t": 0.0, "angle": 18.0}, {"t": 1.0, "angle": 18.0}],
+        })
+
+    land = Animation(
+        "land", frames=5, fps=14, loop=False,
+        note="the impact frame is the whole animation: one frame of deep squash "
+             "with the arms still up from the fall, then two of recovery",
+        root=[{"t": 0.0, "dy": -3.0}, {"t": 0.25, "dy": 4.0, "easing": "ease_in"},
+              {"t": 0.55, "dy": 2.0}, {"t": 1.0, "dy": 0.0}],
+        tracks={
+            "leg_near": [{"t": 0.0, "angle": -6.0, "sy": 1.05},
+                         {"t": 0.25, "angle": 14.0, "sy": 0.58},
+                         {"t": 0.55, "angle": 6.0, "sy": 0.82},
+                         {"t": 1.0, "angle": 0.0, "sy": 1.0}],
+            "leg_far": [{"t": 0.0, "angle": 6.0, "sy": 1.05},
+                        {"t": 0.25, "angle": -12.0, "sy": 0.60},
+                        {"t": 0.55, "angle": -5.0, "sy": 0.84},
+                        {"t": 1.0, "angle": 0.0, "sy": 1.0}],
+            "arm_near": [{"t": 0.0, "angle": -46.0}, {"t": 0.25, "angle": -20.0},
+                         {"t": 1.0, "angle": 0.0}],
+            "arm_far": [{"t": 0.0, "angle": 40.0}, {"t": 0.25, "angle": 18.0},
+                        {"t": 1.0, "angle": 0.0}],
+            "torso": [{"t": 0.0, "angle": -4.0}, {"t": 0.25, "angle": 16.0},
+                      {"t": 0.55, "angle": 6.0}, {"t": 1.0, "angle": 0.0}],
+            "head": [{"t": 0.25, "angle": 10.0}, {"t": 1.0, "angle": 0.0}],
+        })
+
+    dash = Animation(
+        "dash", frames=6, fps=16, loop=True,
+        note="a run with the lean doubled and the stride shortened -- speed reads "
+             "as commitment forward, not as a wider gait",
+        root=[{"t": 0.0, "dy": -1.0}, {"t": 0.33, "dy": -2.0},
+              {"t": 0.66, "dy": -1.0}, {"t": 1.0, "dy": -1.0}],
+        tracks={
+            "leg_near": [{"t": 0.0, "angle": 34.0, "sy": 1.0},
+                         {"t": 0.25, "angle": 4.0, "sy": 0.78},
+                         {"t": 0.5, "angle": -30.0, "sy": 1.0},
+                         {"t": 0.75, "angle": 8.0, "sy": 0.92},
+                         {"t": 1.0, "angle": 34.0, "sy": 1.0}],
+            "leg_far": [{"t": 0.0, "angle": -30.0, "sy": 1.0},
+                        {"t": 0.25, "angle": 8.0, "sy": 0.92},
+                        {"t": 0.5, "angle": 34.0, "sy": 1.0},
+                        {"t": 0.75, "angle": 4.0, "sy": 0.78},
+                        {"t": 1.0, "angle": -30.0, "sy": 1.0}],
+            "arm_near": [{"t": 0.0, "angle": -44.0}, {"t": 0.25, "angle": -8.0},
+                         {"t": 0.5, "angle": 30.0}, {"t": 0.75, "angle": -4.0},
+                         {"t": 1.0, "angle": -44.0}],
+            "arm_far": [{"t": 0.0, "angle": 30.0}, {"t": 0.25, "angle": -4.0},
+                        {"t": 0.5, "angle": -44.0}, {"t": 0.75, "angle": -8.0},
+                        {"t": 1.0, "angle": 30.0}],
+            "torso": [{"t": 0.0, "angle": 16.0}, {"t": 0.5, "angle": 19.0},
+                      {"t": 1.0, "angle": 16.0}],
+            "head": [{"t": 0.0, "angle": -12.0}, {"t": 1.0, "angle": -12.0}],
+            "tail": _swing(-22.0, 22.0, phase=0.15),
+        })
+
+    climb = Animation(
+        "climb", frames=8, fps=8, loop=True,
+        note="hand over hand: the arms alternate reaching up, the legs follow "
+             "half a beat behind, and the body rises once per full reach. A "
+             "profile drawing has no front view to turn towards a wall, so this "
+             "reads as reaching rather than as gripping -- say so to the user",
+        root=[{"t": 0.0, "dy": 0.0}, {"t": 0.25, "dy": -1.0}, {"t": 0.5, "dy": 0.0},
+              {"t": 0.75, "dy": -1.0}, {"t": 1.0, "dy": 0.0}],
+        tracks={
+            "arm_near": [{"t": 0.0, "angle": -58.0, "sy": 1.0},
+                         {"t": 0.25, "angle": -20.0, "sy": 0.9},
+                         {"t": 0.5, "angle": 6.0, "sy": 1.0},
+                         {"t": 0.75, "angle": -26.0, "sy": 1.0},
+                         {"t": 1.0, "angle": -58.0, "sy": 1.0}],
+            "arm_far": [{"t": 0.0, "angle": 6.0, "sy": 1.0},
+                        {"t": 0.25, "angle": -26.0, "sy": 1.0},
+                        {"t": 0.5, "angle": -58.0, "sy": 1.0},
+                        {"t": 0.75, "angle": -20.0, "sy": 0.9},
+                        {"t": 1.0, "angle": 6.0, "sy": 1.0}],
+            "leg_near": [{"t": 0.0, "angle": 8.0, "sy": 1.0},
+                         {"t": 0.25, "angle": 20.0, "sy": 0.84},
+                         {"t": 0.5, "angle": -12.0, "sy": 1.0},
+                         {"t": 0.75, "angle": 2.0, "sy": 1.0},
+                         {"t": 1.0, "angle": 8.0, "sy": 1.0}],
+            "leg_far": [{"t": 0.0, "angle": -12.0, "sy": 1.0},
+                        {"t": 0.25, "angle": 2.0, "sy": 1.0},
+                        {"t": 0.5, "angle": 8.0, "sy": 1.0},
+                        {"t": 0.75, "angle": 20.0, "sy": 0.84},
+                        {"t": 1.0, "angle": -12.0, "sy": 1.0}],
+            "torso": [{"t": 0.0, "angle": -3.0}, {"t": 0.5, "angle": 3.0},
+                      {"t": 1.0, "angle": -3.0}],
+        })
+
+    block = Animation(
+        "block", frames=4, fps=12, loop=False,
+        note="up fast, held: the guard frame is the one a player sees, so it "
+             "arrives on frame two and stays",
+        root=[{"t": 0.0, "dy": 0.0}, {"t": 0.33, "dy": 2.0, "easing": "ease_in"},
+              {"t": 0.66, "dy": 1.0}, {"t": 1.0, "dy": 1.0}],
+        tracks={
+            "arm_near": [{"t": 0.0, "angle": 0.0}, {"t": 0.33, "angle": -72.0},
+                         {"t": 0.66, "angle": -58.0}, {"t": 1.0, "angle": -60.0}],
+            "arm_far": [{"t": 0.0, "angle": 0.0}, {"t": 0.33, "angle": -48.0},
+                        {"t": 0.66, "angle": -42.0}, {"t": 1.0, "angle": -44.0}],
+            "torso": [{"t": 0.0, "angle": 0.0}, {"t": 0.33, "angle": -12.0},
+                      {"t": 0.66, "angle": -6.0}, {"t": 1.0, "angle": -7.0}],
+            "head": [{"t": 0.0, "angle": 0.0}, {"t": 0.33, "angle": 6.0},
+                     {"t": 1.0, "angle": 6.0}],
+            "leg_near": [{"t": 0.0, "angle": 0.0}, {"t": 0.33, "angle": 8.0, "sy": 0.9},
+                         {"t": 1.0, "angle": 7.0, "sy": 0.9}],
+            "leg_far": [{"t": 0.0, "angle": 0.0}, {"t": 0.33, "angle": -10.0, "sy": 0.92},
+                        {"t": 1.0, "angle": -9.0, "sy": 0.92}],
+        })
+
+    cast = Animation(
+        "cast", frames=7, fps=12, loop=False,
+        note="gather, hold, release: the hold is what makes it read as a spell "
+             "rather than a swipe, so it gets two frames of its own",
+        root=[{"t": 0.0, "dy": 0.0}, {"t": 0.3, "dy": 1.0}, {"t": 0.55, "dy": -1.0},
+              {"t": 0.75, "dy": -1.0}, {"t": 1.0, "dy": 0.0}],
+        tracks={
+            "arm_near": [{"t": 0.0, "angle": 0.0}, {"t": 0.3, "angle": 40.0},
+                         {"t": 0.55, "angle": -70.0, "easing": "ease_in"},
+                         {"t": 0.75, "angle": -76.0}, {"t": 1.0, "angle": -10.0}],
+            "arm_far": [{"t": 0.0, "angle": 0.0}, {"t": 0.3, "angle": 30.0},
+                        {"t": 0.55, "angle": -52.0}, {"t": 0.75, "angle": -58.0},
+                        {"t": 1.0, "angle": -6.0}],
+            "torso": [{"t": 0.0, "angle": 0.0}, {"t": 0.3, "angle": 10.0},
+                      {"t": 0.55, "angle": -12.0}, {"t": 0.75, "angle": -10.0},
+                      {"t": 1.0, "angle": 0.0}],
+            "head": [{"t": 0.3, "angle": 8.0}, {"t": 0.55, "angle": -8.0},
+                     {"t": 1.0, "angle": 0.0}],
+            "leg_near": [{"t": 0.3, "angle": 8.0, "sy": 0.92}, {"t": 0.55, "angle": -6.0},
+                         {"t": 1.0, "angle": 0.0}],
+            "leg_far": [{"t": 0.3, "angle": -6.0, "sy": 0.94}, {"t": 0.55, "angle": 8.0},
+                        {"t": 1.0, "angle": 0.0}],
+        })
+
+    throw = Animation(
+        "throw", frames=6, fps=14, loop=False,
+        note="the arm goes back further than it comes forward, and the body "
+             "steps into it -- an overarm throw is a whole-body move",
+        root=[{"t": 0.0, "dy": 0.0}, {"t": 0.3, "dy": 1.0}, {"t": 0.5, "dy": -1.0},
+              {"t": 1.0, "dy": 0.0}],
+        tracks={
+            "arm_near": [{"t": 0.0, "angle": 0.0}, {"t": 0.3, "angle": 78.0},
+                         {"t": 0.5, "angle": -62.0, "easing": "ease_in"},
+                         {"t": 0.7, "angle": -40.0}, {"t": 1.0, "angle": -8.0}],
+            "arm_far": [{"t": 0.0, "angle": 0.0}, {"t": 0.3, "angle": -34.0},
+                        {"t": 0.5, "angle": 30.0}, {"t": 1.0, "angle": 4.0}],
+            "torso": [{"t": 0.0, "angle": 0.0}, {"t": 0.3, "angle": -14.0},
+                      {"t": 0.5, "angle": 16.0}, {"t": 1.0, "angle": 4.0}],
+            "head": [{"t": 0.3, "angle": -6.0}, {"t": 0.5, "angle": 8.0},
+                     {"t": 1.0, "angle": 0.0}],
+            "leg_near": [{"t": 0.3, "angle": -12.0}, {"t": 0.5, "angle": 22.0},
+                         {"t": 1.0, "angle": 6.0}],
+            "leg_far": [{"t": 0.3, "angle": 14.0}, {"t": 0.5, "angle": -18.0},
+                        {"t": 1.0, "angle": -4.0}],
+        })
+
+    sleep = Animation(
+        "sleep", frames=4, fps=3, loop=True,
+        note="lying down and breathing slowly. The root carries the whole "
+             "character over, as `die` does, because a standing profile drawing "
+             "cannot be folded into a lying pose any other way -- and a slumped "
+             "upright figure reads as standing still, not as sleeping",
+        root=[{"t": 0.0, "angle": -78.0, "dy": 6.0},
+              {"t": 0.4, "angle": -80.0, "dy": 7.0},
+              {"t": 1.0, "angle": -78.0, "dy": 6.0}],
+        tracks={
+            "head": [{"t": 0.0, "angle": 12.0}, {"t": 0.4, "angle": 15.0},
+                     {"t": 1.0, "angle": 12.0}],
+            "torso": [{"t": 0.0, "angle": 4.0, "sy": 0.97},
+                      {"t": 0.4, "angle": 6.0, "sy": 1.0},
+                      {"t": 1.0, "angle": 4.0, "sy": 0.97}],
+            "arm_near": [{"t": 0.0, "angle": -18.0}, {"t": 1.0, "angle": -18.0}],
+            "arm_far": [{"t": 0.0, "angle": 14.0}, {"t": 1.0, "angle": 14.0}],
+            "leg_near": [{"t": 0.0, "angle": 14.0}, {"t": 1.0, "angle": 14.0}],
+            "leg_far": [{"t": 0.0, "angle": -10.0}, {"t": 1.0, "angle": -10.0}],
+        })
+
+    return {anim.name: anim for anim in (idle, walk, run, jump, attack, hurt, die,
+                                         crouch, land, dash, climb, block, cast,
+                                         throw, sleep)}
 
 
 LIBRARY = _library()
 PRESET_SETS = {
     "basic": ["idle", "walk"],
-    "platformer": ["idle", "walk", "run", "jump", "attack", "hurt"],
+    "platformer": ["idle", "walk", "run", "jump", "land", "crouch", "dash",
+                   "attack", "hurt"],
     "topdown": ["idle", "walk", "run", "attack", "hurt", "die"],
+    "action": ["idle", "walk", "run", "attack", "block", "cast", "throw",
+               "hurt", "die"],
     "full": ["idle", "walk", "run", "jump", "attack", "hurt", "die"],
+    "everything": ["idle", "walk", "run", "jump", "land", "crouch", "dash",
+                   "climb", "attack", "block", "cast", "throw", "hurt", "die",
+                   "sleep"],
 }
 
 

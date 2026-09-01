@@ -320,3 +320,65 @@ def test_no_locomotion_cycle_retraces_itself(hero_rig):
     "only N different pictures" warning instead."""
     for name in ("walk", "run"):
         assert not _mirrors_itself(motion.get(name), hero_rig), name
+
+
+# -- the wider library ----------------------------------------------------
+
+NEW = ("crouch", "land", "dash", "climb", "block", "cast", "throw", "sleep")
+
+
+def test_every_new_clip_is_in_the_library_and_says_what_it_is():
+    for name in NEW:
+        animation = motion.get(name)
+        assert animation.note, name
+        assert 2 <= animation.frames <= 64, name
+
+
+def test_the_everything_preset_covers_the_whole_library():
+    assert set(motion.PRESET_SETS["everything"]) == set(motion.LIBRARY)
+
+
+def test_the_new_clips_all_validate():
+    for name in NEW:
+        assert motion.validate_animation(motion.get(name).to_dict()) == [], name
+
+
+def test_land_squashes_hardest_on_the_impact_frame(hero_rig):
+    """The impact frame is the whole animation. If the deepest squash is not
+    there, what the clip reads as is a character sinking rather than landing."""
+    land = motion.get("land")
+    depths = [min(land.pose_at(hero_rig, t).get("leg_near").sy,
+                  land.pose_at(hero_rig, t).get("leg_far").sy)
+              for t in land.times()]
+    assert depths.index(min(depths)) == 1
+    assert min(depths) < 0.7
+
+
+def test_sleep_puts_the_character_down_rather_than_slouching(hero_rig):
+    """A slumped upright figure reads as standing still. Only the root taking
+    the whole character over reads as lying down."""
+    root = motion.get("sleep").pose_at(hero_rig, 0.0).get(hero_rig.root.name)
+    assert abs(root.angle) > 60
+
+
+def test_dash_leans_further_than_run(hero_rig):
+    lean = lambda name, t: motion.get(name).pose_at(hero_rig, t).get("torso").angle
+    assert lean("dash", 0.0) > lean("run", 0.0)
+
+
+def test_the_new_looping_cycles_do_not_retrace_themselves(hero_rig):
+    """Locomotion only -- a breathing hold like `crouch` or `sleep` should
+    retrace itself, which is what breathing is."""
+    for name in ("dash", "climb"):
+        assert not _mirrors_itself(motion.get(name), hero_rig), name
+
+
+def test_a_breathing_hold_peaks_off_centre(hero_rig):
+    """Quick in, slow out -- and a peak exactly halfway makes the two off-beats
+    the same picture, which on a four-frame loop is half the cycle wasted."""
+    for name in ("idle", "crouch", "sleep"):
+        animation = motion.get(name)
+        quarter = animation.pose_at(hero_rig, 0.25)
+        three = animation.pose_at(hero_rig, 0.75)
+        assert (quarter.dy, quarter.get(hero_rig.root.name).angle) \
+            != (three.dy, three.get(hero_rig.root.name).angle), name
