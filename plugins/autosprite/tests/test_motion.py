@@ -395,13 +395,21 @@ def test_a_breathing_hold_peaks_off_centre(hero_rig):
 
 
 def test_only_the_clips_that_keep_a_foot_down_are_planted():
-    """Measured per clip, not chosen. Planting attack, hurt, cast and throw puts
-    their feet on the floor AND gives them more body travel, because the drop
-    their legs produce was previously cancelled by the root. Planting crouch or
-    block takes their head travel from 31 and 32 down to 8 and 12 -- the hold
-    that defines them lives in the root, so holding the feet flattens it."""
     grounded = {name for name, animation in motion.LIBRARY.items() if animation.planted}
-    assert grounded == {"walk", "attack", "hurt", "cast", "throw"}
+    assert grounded == {"walk", "attack", "hurt", "cast", "throw", "crouch", "block"}
+
+
+def test_a_hold_sinks_from_the_legs_rather_than_the_root():
+    """`crouch` and `block` first put their sink in a root translation, which
+    lifted their feet off the floor (45px and 48px across the corpus) and made
+    them impossible to plant -- planting a root-driven sink just deletes it.
+    Folding the legs instead produces the same drop with the feet planted."""
+    for name in ("crouch", "block"):
+        animation = motion.get(name)
+        assert animation.root is None, name
+        for role in ("leg_near", "leg_far"):
+            heights = [key.get("sy", 1.0) for key in animation.tracks[role].keys]
+            assert max(heights) - min(heights) > 0.2, name
 
 
 def test_a_clip_that_leaves_the_ground_is_never_planted():

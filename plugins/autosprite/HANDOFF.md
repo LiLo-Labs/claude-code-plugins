@@ -9,7 +9,7 @@ again.
 The pipeline is sound and proven on real art. **20 CC0 sprites** (16×16 to
 76×81; humanoids, creatures, props, and four cases chosen to break a silhouette
 rigger) all build, with all eight verification checks passing on both backends.
-461 tests, no network or model in any of them.
+462 tests, no network or model in any of them.
 
 Quality, measured as **debris** — the share of a frame's pixels not connected to
 its main blob, against the source's own figure:
@@ -196,7 +196,8 @@ each thing was so it is not redone. In the order it landed:
 | landmarks | `find_crown` (a raised sword is not a head), a local-minimum neck (a hood has none), a boot gap is not a hip |
 | `shadow` role | a baked contact shadow is the floor; it stays put |
 | the walk | was a pendulum retracing itself: 8 frames, 5 pictures. A bent knee at the passing pose fixes it |
-| planting | five clips keep a foot on the floor; corpus foot lift 183px → 0, and the walk's bob is now emergent |
+| planting | **seven** clips keep a foot on the floor; corpus foot lift 265px → 0, and the walk's bob is now emergent |
+| `crouch`, `block` | their sink moved from a root translation into a leg FOLD, so it survives planting: foot lift 45px and 37px → 0 |
 | parity | `--frames`, `--frame-size`, `--fps`, loop points, per-animation ZIP, eight more animations |
 | `climb` | its arm reach was cut from 58° to 46° after measurement: 58 threw a hand clear of a 45px character and took the clip to 9.4% shed, 46 takes it to 0.8% for one point of frame-to-frame change |
 
@@ -251,32 +252,24 @@ Honest and short. The easy things are gone.
    measurement" and pointing at the vision backend may simply be the honest
    ceiling.
 
-2. **`crouch` and `block` sink from the root rather than the legs.** Both are a
-   hold, and both put the hold in a root translation, which means their feet
-   leave the floor (45px and 48px across the corpus) and they cannot be planted
-   -- planting them takes their head travel from 31 and 32 down to 8 and 12.
-   Re-authored as a leg FOLD (a falling `sy` over time rather than a static one),
-   the sink would survive planting and the feet would stay down. Small, and the
-   measurement to judge it by already exists.
-
-3. **A wider motion library still.** Fifteen character clips against
+2. **A wider motion library still.** Fifteen character clips against
    autosprite.io's ~100. Roll, slide, swim, fly, shoot, push, pull, wave, sit,
    kneel, taunt, revive. Each is a readable keyframe table; each must be checked
    against the distinct-picture warning, because a symmetric swing draws half as
    many pictures as it claims.
 
-4. **`topdown-dcss` is a cloaked humanoid the silhouette reads as a prop.** Its
+3. **`topdown-dcss` is a cloaked humanoid the silhouette reads as a prop.** Its
    outline is a smooth bell: no parting, no neck. The critic can see a head and
    two arms because it can see COLOUR. Whether the classifier should ever look
    at colour is an open question and a fragile one; the vision backend already
    gets this right.
 
-5. **The critic still reaches for the same four roles.** Across the sweep it
+4. **The critic still reaches for the same four roles.** Across the sweep it
    proposed changes to both arms and both legs, `torso` in four and `root` in
    two, and has never once proposed one to `head`, `tail` or a scale channel.
    Worth understanding before trusting it to tune anything subtle.
 
-6. **N and S remain `substituted` without a reference.** No amount of rigging
+5. **N and S remain `substituted` without a reference.** No amount of rigging
    invents the back of a head. The labels are the honest ceiling and they are
    already said out loud; this is on the list only so nobody mistakes it for an
    oversight.

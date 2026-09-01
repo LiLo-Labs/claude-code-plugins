@@ -132,8 +132,14 @@ def repair(cutout, rig, animation, frames, reference_pixels, margin,
 
     for scale in steps:
         trial = damp(animation, swings, scale)
-        drawn = render_module.render_sequence(
-            cutout, posed(rig, trial, ground), margin=margin)
+        # Rendered exactly the way the pipeline renders it, levelling included.
+        # A planted clip drawn without that pass is a different set of pictures
+        # from the ones the build ships, and measuring those would be measuring
+        # the wrong thing.
+        trial_poses = posed(rig, trial, ground)
+        drawn = render_module.render_sequence(cutout, trial_poses, margin=margin)
+        if trial.planted:
+            drawn = render_module.level_to_floor(cutout, trial_poses, drawn, margin)
         after, _ = quality_module.shed(drawn, reference_pixels)
         if after <= tolerance:
             return trial, drawn, (

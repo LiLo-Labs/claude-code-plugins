@@ -582,20 +582,21 @@ def _library():
         })
 
     crouch = Animation(
-        "crouch", frames=4, fps=6, loop=True,
-        note="held low, breathing; the legs fold and the torso comes forward "
-             "over them rather than the whole character simply sinking. The "
-             "breath peaks off-centre because breathing is quick in and slow "
-             "out -- and because a peak exactly halfway makes the two off-beats "
-             "the same picture",
-        root=[{"t": 0.0, "dy": 3.0}, {"t": 0.4, "dy": 5.0}, {"t": 1.0, "dy": 3.0}],
+        "crouch", frames=4, fps=6, loop=True, planted=True,
+        note="held low, breathing. The sink is in the LEGS folding, not in a "
+             "root translation: a rigid leg shortened to 62% takes the hip down "
+             "with it, and because the feet are planted the body follows. "
+             "Authoring it in the root instead lifted the feet off the floor and "
+             "made the clip impossible to plant. The breath peaks off-centre "
+             "because breathing is quick in and slow out -- and because a peak "
+             "exactly halfway makes the two off-beats the same picture",
         tracks={
-            "leg_near": [{"t": 0.0, "angle": 10.0, "sy": 0.70},
-                         {"t": 0.5, "angle": 12.0, "sy": 0.66},
-                         {"t": 1.0, "angle": 10.0, "sy": 0.70}],
-            "leg_far": [{"t": 0.0, "angle": -8.0, "sy": 0.72},
-                        {"t": 0.5, "angle": -10.0, "sy": 0.68},
-                        {"t": 1.0, "angle": -8.0, "sy": 0.72}],
+            "leg_near": [{"t": 0.0, "angle": 10.0, "sy": 0.80},
+                         {"t": 0.4, "angle": 12.0, "sy": 0.45},
+                         {"t": 1.0, "angle": 10.0, "sy": 0.80}],
+            "leg_far": [{"t": 0.0, "angle": -8.0, "sy": 0.82},
+                        {"t": 0.4, "angle": -10.0, "sy": 0.47},
+                        {"t": 1.0, "angle": -8.0, "sy": 0.82}],
             "torso": [{"t": 0.0, "angle": 12.0}, {"t": 0.4, "angle": 17.0},
                       {"t": 1.0, "angle": 12.0}],
             "head": [{"t": 0.0, "angle": -8.0}, {"t": 1.0, "angle": -8.0}],
@@ -695,12 +696,12 @@ def _library():
         })
 
     block = Animation(
-        "block", frames=4, fps=12, loop=True, loop_start=2,
+        "block", frames=4, fps=12, loop=True, loop_start=2, planted=True,
         note="up fast, then held: the guard frame is the one a player sees, so "
              "it arrives on frame two and the loop repeats from there. A game "
-             "plays the raise once and holds the guard while the button is down",
-        root=[{"t": 0.0, "dy": 0.0}, {"t": 0.33, "dy": 2.0, "easing": "ease_in"},
-              {"t": 0.66, "dy": 1.0}, {"t": 1.0, "dy": 1.0}],
+             "plays the raise once and holds the guard while the button is down. "
+             "The brace is in the legs bending rather than the root dropping, so "
+             "the feet stay on the floor",
         tracks={
             "arm_near": [{"t": 0.0, "angle": 0.0}, {"t": 0.33, "angle": -72.0},
                          {"t": 0.66, "angle": -58.0}, {"t": 1.0, "angle": -60.0}],
@@ -710,10 +711,14 @@ def _library():
                       {"t": 0.66, "angle": -6.0}, {"t": 1.0, "angle": -7.0}],
             "head": [{"t": 0.0, "angle": 0.0}, {"t": 0.33, "angle": 6.0},
                      {"t": 1.0, "angle": 6.0}],
-            "leg_near": [{"t": 0.0, "angle": 0.0}, {"t": 0.33, "angle": 8.0, "sy": 0.9},
-                         {"t": 1.0, "angle": 7.0, "sy": 0.9}],
-            "leg_far": [{"t": 0.0, "angle": 0.0}, {"t": 0.33, "angle": -10.0, "sy": 0.92},
-                        {"t": 1.0, "angle": -9.0, "sy": 0.92}],
+            "leg_near": [{"t": 0.0, "angle": 0.0, "sy": 1.0},
+                         {"t": 0.33, "angle": 8.0, "sy": 0.66},
+                         {"t": 0.66, "angle": 7.0, "sy": 0.78},
+                         {"t": 1.0, "angle": 7.0, "sy": 0.76}],
+            "leg_far": [{"t": 0.0, "angle": 0.0, "sy": 1.0},
+                        {"t": 0.33, "angle": -10.0, "sy": 0.68},
+                        {"t": 0.66, "angle": -9.0, "sy": 0.80},
+                        {"t": 1.0, "angle": -9.0, "sy": 0.78}],
         })
 
     cast = Animation(
