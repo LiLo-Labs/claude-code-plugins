@@ -195,7 +195,10 @@ build also measures what a viewer sees, and acts on it:
 and asks what is wrong with the *motion* -- or with the RIG, which it is also
 shown, so it can answer "this rig is wrong for this character" rather than
 tuning a limb the character does not have -- then folds the answer back into the
-keyframes. It is the only thing here that judges whether a cycle reads, which no
+keyframes. It is also told the exact list of channels the clip writes, because
+without it, shown a torch flicker and told the animation was made by rotating
+parts about their joints, it reported a pop, a drift and a stall on a clip where
+nothing moves at all. It is the only thing here that judges whether a cycle reads, which no
 measurement in this plugin can. Every round is re-measured, and one that makes
 the character come apart is thrown away — so the model can improve how the
 motion looks and can never break the character to do it.
@@ -438,7 +441,7 @@ pip install -r requirements-test.txt
 python3 -m pytest tests -q
 ```
 
-616 tests, no network, no model, well under a minute. Fixtures are generated rather
+621 tests, no network, no model, well under a minute. Fixtures are generated rather
 than checked in — `tests/make_fixture.py` builds parametric sprites so a test can
 have the exact property it is about (arms clear of the body or touching, legs
 parted or robed) instead of one PNG having to serve every case.

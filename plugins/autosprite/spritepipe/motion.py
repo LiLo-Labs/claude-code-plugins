@@ -511,6 +511,26 @@ class Animation:
             return True
         return any(select(rig, selector) for selector in self.tracks)
 
+    def driven(self):
+        """{selector: the channels it actually writes}, sorted, for reporting.
+
+        What a clip DOES, as opposed to what the vocabulary allows. The critic
+        needs it: shown six frames of a torch flicker and told the animation was
+        made by rotating parts about their joints, it reported that the flame
+        popped larger, drifted sideways and stalled -- none of which had
+        happened, because the clip writes one channel and that channel moves
+        nothing.
+        """
+        found = {}
+        tracks = dict(self.tracks)
+        if self.root is not None:
+            tracks["root"] = self.root
+        for selector, track in tracks.items():
+            used = [channel for channel in CHANNELS if track.has(channel)]
+            if used:
+                found[selector] = used
+        return found
+
     def palette_only(self):
         """Whether this clip changes shading and nothing else.
 

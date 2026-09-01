@@ -593,6 +593,43 @@ defect wearing a different shape. Nothing else moved. The one asset left is
 `platformer-grass-prowne`, an 8x23 character with 2px limbs whose vision rig
 measures 0.00% -- and the build says so, by name.
 
+## What the critic is actually worth, measured
+
+Run on the new subject clips, it did two things nothing else here can and one
+thing that had to be fixed.
+
+**It caught a clip every measurement scored perfectly.** The corpus windmill's
+turn, on the rig the vision backend returned, is 0.00% shed with 8 of 8 distinct
+frames -- and the whole roof rotates with the sails. The critic returned verdict
+`rig` and said: *"The tower's roof and upper wall tip and wobble with the sails
+instead of standing still, so the building reads as leaning rather than the
+sails spinning"*, and *"the sails are two separate blades either side of the
+tower and cannot be isolated by one axis-aligned box"*. That is the diagnosis
+this session reached by looking at the frames, arrived at independently. It also
+caught something that was missed: the hex tile was given the `shadow` role, and
+it is the mill's ground platform rather than a cast shadow.
+
+**It caught a rig that measured identically to a correct one.** The flag was
+hand-rigged as pole + cloth. There is no pole in that drawing -- the "pole" part
+was a 1%-wide sliver containing no pixels -- and the critic said so, and said the
+subject should be one part with a surface trait. Rigged its way: same 0.00% shed,
+same 16% footprint error, 3818 vs 3822 pixels disturbed. **No measurement here
+can tell those two rigs apart.** The critic could.
+
+**And it confabulated, on the one kind of clip where nothing moves.** Shown a
+gem's `flicker` it reported that the gem popped larger, drifted sideways and
+stalled for four frames. Measured: every pose has dx=0, dy=0, sx=1, sy=1, five
+of six pictures are distinct, and consecutive frames differ by 379 pixels. All
+three complaints were invented -- and the pipeline's guard caught it, because
+the adjustments named channels no track in the clip has.
+
+The cause was in the prompt: it told the critic the animation "was made by
+cutting the character into parts and rotating them about their joints", which
+is false for a clip that only steps a colour ramp. It is now given the exact
+list of channels the clip writes, told the list is exhaustive, and told that
+`cycle` moves nothing. Re-run on the same gem: verdict `good`, no invented
+problems.
+
 ## Dead ends — measured, not guessed
 
 ### Lifting the hip above where the silhouette parts

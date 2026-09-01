@@ -75,9 +75,19 @@ image is the ORIGINAL character for reference; the rest are the animation's \
 frames in order.
 
 The animation is "%(name)s" (%(frames)d frames, %(fps)g fps, %(loop)s). It was \
-made by cutting the original character into parts and rotating them about their \
-joints -- no pixel was drawn or invented. So the ART cannot be wrong; only the \
-MOTION, or the RIG the motion is applied to, can be.
+made by cutting the original character into parts and transforming them about \
+their joints -- no pixel was drawn or invented. So the ART cannot be wrong; only \
+the MOTION, or the RIG the motion is applied to, can be.
+
+**This clip changes only these things, and nothing else:**
+
+%(drives)s
+
+That list is exhaustive. A part whose row is missing does not move at all; a \
+channel not listed for a part is not touched. Do not report a drift, a pop, a \
+lift or a squash that is not in that list -- it did not happen, and asking for \
+it to be corrected wastes the round. `cycle` is a step along the part's own \
+shading ramp: the light changes and NOTHING MOVES.
 
 The character was cut into these parts. Boxes are fractions of the image, \
 [left, top, right, bottom], origin top-left:
@@ -186,6 +196,7 @@ class HeadlessCritic:
         import subprocess
 
         prompt = REVIEW_PROMPT % {
+            "drives": describe_drives(animation),
             "name": animation.name,
             "frames": animation.frames,
             "fps": animation.fps,
@@ -214,6 +225,15 @@ class HeadlessCritic:
         return Critique(data.get("verdict", "good"), data.get("problems"),
                         data.get("adjustments"), data.get("rig_problems"),
                         self.actor)
+
+
+def describe_drives(animation):
+    """The channels a clip actually writes, one line per part."""
+    driven = animation.driven()
+    if not driven:
+        return "  (nothing at all -- every frame is the rest pose)"
+    return "\n".join("  %-16s %s" % (selector, ", ".join(channels))
+                      for selector, channels in sorted(driven.items()))
 
 
 def describe_rig(rig):

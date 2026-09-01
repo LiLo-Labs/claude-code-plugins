@@ -250,3 +250,47 @@ def test_a_critique_without_rig_problems_still_adjusts(hero_cutout, hero_rig, he
                                   hero.pixels, scripted, str(tmp_path), rounds=1)
     assert "rig is the problem" not in history[0]["outcome"]
     assert best.to_dict() != motion.get("walk").to_dict()
+
+
+# ---------------------------------------------------------------------------
+# Telling the critic what the clip actually changes.
+# ---------------------------------------------------------------------------
+
+def test_a_clip_reports_exactly_the_channels_it_writes():
+    walk = motion.get("walk")
+    driven = walk.driven()
+    assert driven["leg_near"] == ["angle", "sy"]
+    assert "wave" not in driven["torso"]
+    assert all(channels for channels in driven.values())
+
+
+def test_a_root_track_is_reported_under_root():
+    run = motion.get("run")
+    assert "dy" in run.driven()["root"]
+
+
+def test_a_palette_only_clip_says_it_moves_nothing():
+    from spritepipe import props
+
+    driven = props.get("flicker").driven()
+    assert driven == {"trait:glow": ["cycle"]}
+
+
+def test_the_prompt_lists_what_the_clip_changes_and_says_the_list_is_complete():
+    """The confabulation this exists to stop. Shown six frames of a torch
+    flicker and told the animation was made by rotating parts about their
+    joints, the critic reported that the flame popped larger, drifted sideways
+    and stalled -- and none of it had happened, because the clip writes one
+    channel and that channel moves nothing. Measured: consecutive frames of that
+    gem differ by 379 pixels and every pose has dx=0, dy=0, sx=1, sy=1."""
+    from spritepipe import props
+
+    text = critic.describe_drives(props.get("flicker"))
+    assert "trait:glow" in text and "cycle" in text
+    assert "exhaustive" in critic.REVIEW_PROMPT
+    assert "NOTHING MOVES" in critic.REVIEW_PROMPT
+
+
+def test_a_clip_that_moves_nothing_at_all_says_so_rather_than_printing_nothing():
+    empty = motion.Animation("still", 4, tracks={"torso": [{"t": 0.0}]})
+    assert "nothing at all" in critic.describe_drives(empty)
