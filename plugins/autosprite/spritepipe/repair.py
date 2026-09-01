@@ -93,9 +93,7 @@ def damp(animation, roles, scale):
         track = clone.tracks.get(role)
         if track is None:
             continue
-        for key in track.keys:
-            if "angle" in key:
-                key["angle"] = float(key["angle"]) * float(scale)
+        track.adjust("angle", lambda value: value * float(scale))
     return clone
 
 
@@ -118,7 +116,7 @@ def repair(cutout, rig, animation, frames, reference_pixels, margin,
         return animation, frames, None
 
     swings = [role for role in roles if role in animation.tracks
-              and any("angle" in key for key in animation.tracks[role].keys)]
+              and animation.tracks[role].has("angle")]
     if not swings:
         # The potion's spin is the case: its squash lives on the root track, and
         # a squash is not what this repairs. Flooring one was measured twice and

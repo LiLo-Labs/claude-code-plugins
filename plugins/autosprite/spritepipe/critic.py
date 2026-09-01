@@ -261,24 +261,21 @@ def apply_adjustments(animation, adjustments):
                 except (TypeError, ValueError):
                     continue
                 rest = motion_module.REST[channel]
-                widest = max((abs(float(key.get(channel, rest)) - rest)
-                              for key in track.keys), default=0.0)
-                for key in track.keys:
-                    if channel not in key:
-                        continue
-                    value = float(key[channel])
+                widest = max((abs(value - rest) for value in track.values(channel)),
+                             default=0.0)
+                limit = CHANNEL_LIMITS[channel]
+
+                def move(value, rest=rest, delta=delta, widest=widest, limit=limit,
+                         channel=channel):
                     if widest > 1e-6:
-                        share = (value - rest) / widest
-                        value = value + delta * share
+                        value = value + delta * ((value - rest) / widest)
                     else:
                         value = value + delta
-                    limit = CHANNEL_LIMITS[channel]
                     if channel in ("sx", "sy"):
-                        value = max(MIN_SCALE, min(limit, value))
-                    else:
-                        value = max(-limit, min(limit, value))
-                    key[channel] = round(value, 3)
-                    changed += 1
+                        return round(max(MIN_SCALE, min(limit, value)), 3)
+                    return round(max(-limit, min(limit, value)), 3)
+
+                changed += track.adjust(channel, move)
     return clone, changed
 
 

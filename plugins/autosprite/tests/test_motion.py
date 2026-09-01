@@ -488,3 +488,183 @@ def test_fly_exists_and_is_not_planted():
     assert not fly.planted and fly.loop
     assert "wing_near" in fly.tracks and "wing_far" in fly.tracks
     assert motion.validate_animation(fly.to_dict()) == []
+
+
+# ---------------------------------------------------------------------------
+# Lanes: one channel of one role, on its own timeline.
+# ---------------------------------------------------------------------------
+
+def test_a_pose_key_asserts_rest_for_every_channel_it_omits():
+    """The limit lanes exist to lift, asserted on a real clip.
+
+    `cast` keys leg_near at t=0.3 with a squash and never mentions `sy` again.
+    The squash unwinds by t=0.55 -- not because anyone authored the unwind, but
+    because the later keys omit the channel and omission means rest. Any change
+    to sampling has to keep producing these three numbers or sixteen hand-tuned
+    clips have silently moved.
+    """
+    track = motion.get("cast").tracks["leg_near"]
+    assert track.sample(0.30, True).sy == pytest.approx(0.92)
+    assert track.sample(0.40, True).sy == pytest.approx(0.948, abs=1e-3)
+    assert track.sample(0.55, True).sy == pytest.approx(1.0)
+
+
+def test_no_clip_in_the_library_uses_a_lane_yet():
+    """So the test above is a statement about every clip, not just `cast`."""
+    tracks = [track for animation in motion.LIBRARY.values()
+              for track in list(animation.tracks.values())
+              + ([animation.root] if animation.root else [])]
+    assert tracks and not any(track.lanes for track in tracks)
+
+
+def test_a_lane_gives_one_channel_a_timeline_the_others_do_not_share():
+    """The whole point: a squash that peaks where the rotation has no key.
+
+    Written as the comparison, because the pose-key version is not merely
+    clumsier -- it is a different animation. Adding a `sy` key at t=0.6 to a
+    track whose angle is keyed at 0 and 0.5 pulls the ANGLE to rest at 0.6 as
+    well, because that key omits it. The lane leaves the angle alone.
+    """
+    keys = [{"t": 0.0, "angle": 0.0}, {"t": 0.5, "angle": 30.0}]
+    squash = [{"t": 0.6, "v": 0.8}, {"t": 0.9, "v": 1.0}]
+
+    laned = motion.Track(keys, lanes={"sy": squash})
+    posed = motion.Track(keys + [{"t": 0.6, "sy": 0.8}, {"t": 0.9, "sy": 1.0}])
+
+    assert laned.sample(0.6, True).sy == pytest.approx(0.8)
+    assert posed.sample(0.6, True).sy == pytest.approx(0.8)
+
+    # ... and the angle at that instant is the thing that differs.
+    assert laned.sample(0.6, True).angle == pytest.approx(26.88, abs=0.05)
+    assert posed.sample(0.6, True).angle == pytest.approx(0.0)
+
+
+def test_a_lane_leaves_every_channel_it_does_not_name_alone():
+    track = motion.Track([{"t": 0.0, "angle": 10.0, "dx": 3.0}],
+                         lanes={"sy": [{"t": 0.0, "v": 0.5}]})
+    pose = track.sample(0.4, True)
+    assert (pose.angle, pose.dx, pose.sx, pose.sy) == (10.0, 3.0, 1.0, 0.5)
+
+
+def test_a_track_may_be_nothing_but_lanes():
+    track = motion.Track(lanes={"angle": [{"t": 0.0, "v": 0.0},
+                                          {"t": 0.5, "v": 20.0}]})
+    assert track.sample(0.5, True).angle == pytest.approx(20.0)
+    assert track.sample(0.5, True).sx == 1.0     # every other channel at rest
+
+
+def test_a_track_with_neither_keys_nor_lanes_is_refused():
+    with pytest.raises(ValueError):
+        motion.Track([])
+
+
+def test_a_lane_on_a_channel_that_does_not_exist_is_refused():
+    with pytest.raises(ValueError):
+        motion.Track([{"t": 0.0}], lanes={"wobble": [{"t": 0.0, "v": 1.0}]})
+
+
+def test_a_lane_keyframe_without_a_value_is_refused():
+    with pytest.raises(ValueError):
+        motion.Lane([{"t": 0.0}])
+
+
+def test_a_lane_wraps_the_way_a_track_does():
+    """A looping lane's last key leads back to its first a period later, so the
+    frame before the wrap moves like every other one."""
+    lane = motion.Lane([{"t": 0.0, "v": 0.0}, {"t": 0.5, "v": 10.0}])
+    assert lane.sample(0.75, True) == pytest.approx(5.0)
+    assert lane.sample(0.75, False) == pytest.approx(10.0)   # clamped instead
+
+
+def test_a_lane_survives_being_written_out_and_read_back():
+    track = motion.Track([{"t": 0.0, "angle": 0.0}],
+                         lanes={"dy": [{"t": 0.2, "v": -2.0}, {"t": 0.8, "v": 0.0}]})
+    restored = motion.Track.of(json.loads(json.dumps(track.to_dict())))
+    for moment in (0.0, 0.3, 0.5, 0.9):
+        assert restored.sample(moment, True).dy == pytest.approx(
+            track.sample(moment, True).dy)
+
+
+def test_a_track_without_lanes_still_serialises_as_a_plain_list():
+    """Every animation written before lanes existed round-trips unchanged."""
+    assert motion.get("walk").tracks["leg_near"].to_dict() == \
+        motion.get("walk").tracks["leg_near"].to_list()
+
+
+def test_scaling_for_a_bigger_character_scales_a_translation_lane():
+    animation = motion.Animation("bobbing", 4, tracks={
+        "torso": motion.Track([{"t": 0.0}], lanes={"dy": [{"t": 0.0, "v": -1.0},
+                                                          {"t": 0.5, "v": 0.0}]})})
+    assert animation.scaled(3.0).tracks["torso"].values("dy") == [-3.0, 0.0]
+
+
+def test_a_squash_floor_reaches_into_a_lane():
+    animation = motion.Animation("squashing", 4, tracks={
+        "torso": motion.Track([{"t": 0.0}], lanes={"sy": [{"t": 0.0, "v": 0.1}]})})
+    assert animation.floored(0.0, 0.4).tracks["torso"].values("sy") == [0.4]
+
+
+def test_damping_a_broken_clip_reaches_into_an_angle_lane():
+    """`repair` damps the swing that threw a limb clear of the body. It has to
+    find that swing whichever way the track stores it."""
+    from spritepipe import repair
+
+    animation = motion.Animation("swinging", 4, tracks={
+        "arm_near": motion.Track([{"t": 0.0}],
+                                 lanes={"angle": [{"t": 0.0, "v": 90.0}]})})
+    assert repair.damp(animation, ["arm_near"], 0.5) \
+        .tracks["arm_near"].values("angle") == [45.0]
+
+
+def test_a_face_on_rewrite_turns_a_lane_swing_into_a_lift():
+    """`fronted` reads an angle and re-emits it on another channel. With a lane
+    the target channel has no key at the angle's instants, so the offset has to
+    be derived at the angle's own times rather than merged into a shared key."""
+    animation = motion.Animation("striding", 4, tracks={
+        "leg_near": motion.Track([{"t": 0.0}],
+                                 lanes={"angle": [{"t": 0.0, "v": 20.0},
+                                                  {"t": 0.5, "v": -20.0}]})})
+    track = animation.fronted(swing=0.3, lift=1.5).tracks["leg_near"]
+    assert track.values("angle") == [pytest.approx(6.0), pytest.approx(-6.0)]
+    # Peak forward swing lifts the foot; the far end of the stride puts it down.
+    assert track.values("dy") == [pytest.approx(-1.5), pytest.approx(1.5)]
+
+
+def test_a_custom_animation_may_be_written_with_lanes(tmp_path):
+    """The user-facing path: a JSON file with a lane in it validates, loads and
+    samples. This is what "make the squash land after the punch" has to be
+    writable as."""
+    document = {"name": "punch", "frames": 6, "fps": 12, "loop": False,
+                "tracks": {"arm_near": {
+                    "keys": [{"t": 0.0, "angle": -20.0}, {"t": 0.4, "angle": 70.0}],
+                    "lanes": {"sx": [{"t": 0.55, "v": 1.15}, {"t": 1.0, "v": 1.0}]}}}}
+    assert motion.validate_animation(document) == []
+    path = tmp_path / "punch.json"
+    path.write_text(json.dumps(document))
+    animation, = motion.load_custom(str(path))
+    track = animation.tracks["arm_near"]
+    # The stretch peaks after the swing has already arrived -- follow-through.
+    assert track.sample(0.4, False).angle == pytest.approx(70.0)
+    assert track.sample(0.4, False).sx == pytest.approx(1.15)
+    assert track.sample(0.55, False).sx == pytest.approx(1.15)
+    assert track.sample(1.0, False).sx == pytest.approx(1.0)
+
+
+def test_a_lane_with_a_bad_keyframe_is_reported_rather_than_rendered():
+    bad = {"name": "x", "frames": 4, "tracks": {"head": {
+        "keys": [{"t": 0.0}], "lanes": {"angle": [{"t": 0.0}]}}}}
+    problems = motion.validate_animation(bad)
+    assert any("lane keyframe that is not" in problem for problem in problems)
+
+
+def test_a_lane_on_a_channel_that_is_not_a_channel_is_reported():
+    bad = {"name": "x", "frames": 4, "tracks": {"head": {
+        "keys": [{"t": 0.0}], "lanes": {"wobble": [{"t": 0.0, "v": 1.0}]}}}}
+    assert any("not a channel" in problem
+               for problem in motion.validate_animation(bad))
+
+
+def test_a_broken_root_track_is_reported_rather_than_ignored():
+    """The root track was validated by nothing at all until lanes arrived."""
+    bad = {"name": "x", "frames": 4, "root": [{"dy": -2.0}]}
+    assert any("no t" in problem for problem in motion.validate_animation(bad))

@@ -113,6 +113,26 @@ motion looks and can never break the character to do it.
 same path as the built-ins. This is how a plain-language request ("make the walk
 look tired") becomes motion: write the keyframes, render, watch, adjust.
 
+A keyframe carries a whole pose, which is compact and has one hard limit: every
+channel of a part shares one set of instants, and a key that omits a channel is
+asserting that channel is at rest. "The stretch peaks two frames after the punch
+lands" is therefore unsayable — adding the late `sx` key drags the angle back to
+zero with it. So a track may also carry **lanes**: one channel, on its own
+timeline, with its own easing.
+
+```json
+"arm_near": {
+  "keys":  [{"t": 0.0, "angle": -25}, {"t": 0.35, "angle": 75, "easing": "ease_out"}],
+  "lanes": {"sx": [{"t": 0.45, "v": 1.2}, {"t": 0.8, "v": 1.0}]}
+}
+```
+
+A lane replaces one channel and leaves every other one alone, so the sixteen
+built-in clips — none of which uses a lane — sample exactly as they did. This is
+the mechanism behind overlapping action and follow-through, which is most of
+what separates motion that reads as animation from motion that reads as parts
+moving.
+
 **Eight-direction movement** — with every direction labelled `drawn`,
 `mirrored`, `foreshortened` or `substituted`, so nothing claims to be a view it
 is not. `--reference-front` and `--reference-back` turn the cardinals into
@@ -227,7 +247,7 @@ pip install -r requirements-test.txt
 python3 -m pytest tests -q
 ```
 
-467 tests, no network, no model, well under a minute. Fixtures are generated rather
+489 tests, no network, no model, well under a minute. Fixtures are generated rather
 than checked in — `tests/make_fixture.py` builds parametric sprites so a test can
 have the exact property it is about (arms clear of the body or touching, legs
 parted or robed) instead of one PNG having to serve every case.

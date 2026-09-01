@@ -50,17 +50,179 @@ EASINGS = {
 }
 
 
-class Track:
-    """Keyframes for one role, as a list of {"t": float, <channel>: value}."""
+class Lane:
+    """Keyframes for ONE channel of one role, on its own timeline.
+
+    A `Track` key carries a whole pose: `{"t": 0.3, "angle": 8, "sy": 0.92}`.
+    That is compact and readable and it has one hard limit -- every channel of a
+    role shares one set of instants. Overlapping action and follow-through are
+    exactly the thing that limit forbids: "the hand rotates, and the squash it
+    answers peaks two frames later" cannot be written, because there is one
+    timeline and both values have to sit on it.
+
+    A lane is that timeline, per channel. `sy` can have three keys at times the
+    `angle` never mentions, with its own easing on each segment. It is the
+    smallest change that makes secondary motion sayable, and it costs the
+    existing library nothing: a track with no lanes samples exactly as before.
+
+    Keys are `{"t": float, "v": float}` with an optional per-key `easing`,
+    which -- as in `Track` -- is read from the RIGHT key of a segment, because
+    an easing describes an arrival.
+    """
 
     def __init__(self, keys, easing="smooth"):
         self.keys = sorted((dict(key) for key in keys), key=lambda key: float(key["t"]))
-        self.easing = easing
         if not self.keys:
+            raise ValueError("a lane needs at least one keyframe")
+        for key in self.keys:
+            if "v" not in key:
+                raise ValueError("a lane keyframe needs a value: %r" % (key,))
+        self.easing = easing
+
+    def sample(self, t, loop):
+        """The channel's value at time t. Wraps for a loop, clamps for a one-shot.
+
+        Deliberately the same shape as `Track.sample`, on a scalar instead of a
+        pose, so a lane and a track agree about what a looping key list means.
+        """
+        keys = self.keys
+        if len(keys) == 1:
+            return float(keys[0]["v"])
+
+        if loop:
+            first, last = keys[0], keys[-1]
+            if t < float(first["t"]):
+                return self._between(last, first, t + 1.0, float(last["t"]),
+                                     float(first["t"]) + 1.0)
+            if t >= float(last["t"]):
+                return self._between(last, first, t, float(last["t"]),
+                                     float(first["t"]) + 1.0)
+        else:
+            if t <= float(keys[0]["t"]):
+                return float(keys[0]["v"])
+            if t >= float(keys[-1]["t"]):
+                return float(keys[-1]["v"])
+
+        for left, right in zip(keys, keys[1:]):
+            if float(left["t"]) <= t <= float(right["t"]):
+                return self._between(left, right, t, float(left["t"]), float(right["t"]))
+        return float(keys[-1]["v"])
+
+    def _between(self, left, right, t, t0, t1):
+        span = t1 - t0
+        raw = 0.0 if span <= 0 else (t - t0) / span
+        ease = EASINGS.get(right.get("easing", self.easing), smoothstep)
+        amount = ease(max(0.0, min(1.0, raw)))
+        return float(left["v"]) * (1.0 - amount) + float(right["v"]) * amount
+
+    def to_list(self):
+        return [dict(key) for key in self.keys]
+
+
+class Track:
+    """Keyframes for one role, as a list of {"t": float, <channel>: value}."""
+
+    def __init__(self, keys=None, easing="smooth", lanes=None):
+        self.keys = sorted((dict(key) for key in keys or ()),
+                           key=lambda key: float(key["t"]))
+        self.easing = easing
+        # Per-channel timelines, which OVERRIDE the pose keys for the channels
+        # they name and leave every other channel alone. Written this way round
+        # on purpose: the sixteen clips in this library are pose keys and stay
+        # byte-for-byte what they were, while a new clip that needs a squash to
+        # lag its own rotation writes one lane and inherits the rest.
+        self.lanes = {}
+        for channel, keyframes in (lanes or {}).items():
+            if channel not in CHANNELS:
+                raise ValueError("unknown channel %r; expected one of %s"
+                                 % (channel, ", ".join(CHANNELS)))
+            self.lanes[channel] = (keyframes if isinstance(keyframes, Lane)
+                                   else Lane(keyframes, easing))
+        if not self.keys and not self.lanes:
             raise ValueError("a track needs at least one keyframe")
+        if not self.keys:
+            # Lane-only: every channel a lane does not name holds at rest.
+            self.keys = [{"t": 0.0}]
+
+    def has(self, channel):
+        """Whether this track says anything at all about one channel."""
+        return channel in self.lanes or any(channel in key for key in self.keys)
+
+    def values(self, channel):
+        """Every authored value of one channel, for measuring its range.
+
+        A pose key that omits the channel still contributes its REST value,
+        because that is what sampling the track there actually returns -- the
+        peak-to-peak of a bob authored on half the keys is measured against the
+        zero the other half assert, not against nothing.
+        """
+        if channel in self.lanes:
+            return [float(key["v"]) for key in self.lanes[channel].keys]
+        return [float(key.get(channel, REST[channel])) for key in self.keys]
+
+    def adjust(self, channel, function):
+        """Map a function over every authored value of one channel, in place.
+
+        Only where the channel is actually written: a key that omits it is
+        asserting rest, and rest is not a number anyone edited. Returns how many
+        values it touched, which is what the critic reports as its edit count.
+        """
+        if channel in self.lanes:
+            keys = self.lanes[channel].keys
+            for key in keys:
+                key["v"] = function(float(key["v"]))
+            return len(keys)
+        touched = 0
+        for key in self.keys:
+            if channel in key:
+                key[channel] = function(float(key[channel]))
+                touched += 1
+        return touched
+
+    def foreshorten(self, swing, channel, amount, peak):
+        """Damp every rotation and re-emit what it loses on another channel.
+
+        `Animation.fronted` needs exactly this: seen head-on, a leg's swing
+        across the picture becomes a lift off the floor. It lives on Track
+        because the two storage forms answer it differently -- a pose key
+        already carries both channels at one instant, while an angle LANE has
+        instants the target channel may know nothing about, so the offset is
+        derived at the angle's own times and sampled from wherever the target
+        currently lives.
+        """
+        if "angle" not in self.lanes:
+            for key in self.keys:
+                angle = float(key.get("angle", 0.0))
+                key["angle"] = angle * swing
+                key[channel] = (float(key.get(channel, REST[channel]))
+                                + amount * (angle / peak))
+            return self
+
+        lane = self.lanes["angle"]
+        derived = []
+        for key in lane.keys:
+            moment, angle = float(key["t"]), float(key["v"])
+            if channel in self.lanes:
+                base = self.lanes[channel].sample(moment, True)
+            else:
+                base = getattr(self._pose_at(moment, True), channel)
+            entry = {"t": moment, "v": base + amount * (angle / peak)}
+            if "easing" in key:
+                entry["easing"] = key["easing"]
+            derived.append(entry)
+        for key in lane.keys:
+            key["v"] = float(key["v"]) * swing
+        self.lanes[channel] = Lane(derived, self.easing)
+        return self
 
     def sample(self, t, loop):
         """The PartPose at time t. Wraps for a loop, clamps for a one-shot."""
+        pose = self._pose_at(t, loop)
+        for channel, lane in self.lanes.items():
+            setattr(pose, channel, lane.sample(t, loop))
+        return pose
+
+    def _pose_at(self, t, loop):
         keys = self.keys
         if len(keys) == 1:
             return _key_pose(keys[0])
@@ -97,6 +259,25 @@ class Track:
     def to_list(self):
         return [dict(key) for key in self.keys]
 
+    def to_dict(self):
+        """The serialisable form. A plain list when there are no lanes, so
+        every animation written before lanes existed round-trips unchanged."""
+        if not self.lanes:
+            return self.to_list()
+        return {"keys": self.to_list(),
+                "lanes": {channel: lane.to_list()
+                          for channel, lane in self.lanes.items()}}
+
+    @classmethod
+    def of(cls, data, easing="smooth"):
+        """Build from either serialised form, or pass a Track straight through."""
+        if isinstance(data, cls):
+            return data
+        if isinstance(data, dict):
+            return cls(data.get("keys"), data.get("easing", easing),
+                       data.get("lanes"))
+        return cls(data, easing)
+
 
 def _key_pose(key):
     return PartPose(*(float(key.get(name, REST[name])) for name in CHANNELS))
@@ -127,9 +308,9 @@ class Animation:
         self.loop = bool(loop)
         self.easing = easing
         self.note = note
-        self.tracks = {role: track if isinstance(track, Track) else Track(track, easing)
+        self.tracks = {role: Track.of(track, easing)
                        for role, track in (tracks or {}).items()}
-        self.root = Track(root, easing) if root and not isinstance(root, Track) else root
+        self.root = Track.of(root, easing) if root is not None else None
 
     def times(self):
         """Where each frame samples. See the loop note in the module docstring."""
@@ -200,10 +381,8 @@ class Animation:
             return self
         clone = copy.deepcopy(self)
         for track in list(clone.tracks.values()) + ([clone.root] if clone.root else []):
-            for key in track.keys:
-                for channel in ("dx", "dy"):
-                    if channel in key:
-                        key[channel] = float(key[channel]) * factor
+            for channel in ("dx", "dy"):
+                track.adjust(channel, lambda value: value * factor)
         return clone
 
     def fronted(self, swing=0.3, reach=1.0, lift=1.5):
@@ -234,16 +413,12 @@ class Animation:
         for role, track in clone.tracks.items():
             if not (role.startswith("arm_") or role.startswith("leg_")):
                 continue
-            peak = max((abs(float(key.get("angle", 0.0))) for key in track.keys),
-                       default=0.0)
+            peak = max((abs(value) for value in track.values("angle")), default=0.0)
             if peak <= 0.0:
                 continue
             channel, amount = (("dy", -float(lift)) if role.startswith("leg_")
                                else ("dx", float(reach)))
-            for key in track.keys:
-                angle = float(key.get("angle", 0.0))
-                key["angle"] = angle * float(swing)
-                key[channel] = float(key.get(channel, REST[channel])) + amount * (angle / peak)
+            track.foreshorten(float(swing), channel, amount, peak)
         return clone
 
     def floored(self, min_sx=0.0, min_sy=0.0):
@@ -264,11 +439,9 @@ class Animation:
         clone = copy.deepcopy(self)
         tracks = list(clone.tracks.values()) + ([clone.root] if clone.root else [])
         for track in tracks:
-            for key in track.keys:
-                if "sx" in key:
-                    key["sx"] = max(float(key["sx"]), min_sx) if key["sx"] >= 0 else key["sx"]
-                if "sy" in key:
-                    key["sy"] = max(float(key["sy"]), min_sy) if key["sy"] >= 0 else key["sy"]
+            for channel, minimum in (("sx", min_sx), ("sy", min_sy)):
+                track.adjust(channel, lambda value, floor=minimum:
+                             max(value, floor) if value >= 0 else value)
         return clone
 
     def floored_travel(self, min_pixels=1.0, limbs=False):
@@ -295,14 +468,12 @@ class Animation:
             tracks += list(clone.tracks.values())
         for track in tracks:
             for channel in ("dx", "dy"):
-                values = [float(key.get(channel, 0.0)) for key in track.keys]
+                values = track.values(channel)
                 span = max(values) - min(values)
                 if span <= 0.0 or span >= min_pixels:
                     continue
                 factor = min_pixels / span
-                for key in track.keys:
-                    if channel in key:
-                        key[channel] = float(key[channel]) * factor
+                track.adjust(channel, lambda value, gain=factor: value * gain)
         return clone
 
     def to_dict(self):
@@ -310,8 +481,8 @@ class Animation:
                 "loop": self.loop, "easing": self.easing, "note": self.note,
                 "flip_from": self.flip_from, "planted": self.planted,
                 "loop_start": self.loop_start, "loop_end": self.loop_end,
-                "root": self.root.to_list() if self.root else None,
-                "tracks": {role: track.to_list() for role, track in self.tracks.items()}}
+                "root": self.root.to_dict() if self.root else None,
+                "tracks": {role: track.to_dict() for role, track in self.tracks.items()}}
 
     @classmethod
     def from_dict(cls, data):
@@ -360,22 +531,55 @@ def validate_animation(data):
         problems.append("no tracks and no root track: every frame would be identical")
 
     from .rig import ROLES
-    for role, keys in tracks.items():
+    for role, track in tracks.items():
         if role not in ROLES:
             problems.append("track %r is not a rig role (%s)" % (role, ", ".join(ROLES)))
+        problems.extend(_track_problems("track %r" % role, track))
+    if data.get("root") is not None:
+        problems.extend(_track_problems("the root track", data["root"]))
+    return problems
+
+
+def _track_problems(label, track):
+    """Both serialised forms of a track: a bare key list, or keys plus lanes."""
+    problems = []
+    lanes = {}
+    if isinstance(track, dict):
+        lanes = track.get("lanes") or {}
+        if not isinstance(lanes, dict):
+            return ["%s has lanes that are not an object" % label]
+        track = track.get("keys") or []
+        if not track and not lanes:
+            return ["%s has no keyframes" % label]
+    elif not isinstance(track, list) or not track:
+        return ["%s has no keyframes" % label]
+
+    for key in track:
+        if not isinstance(key, dict) or "t" not in key:
+            problems.append("%s has a keyframe with no t: %r" % (label, key))
+            continue
+        if not 0.0 <= float(key["t"]) <= 1.0:
+            problems.append("%s has t=%s outside 0..1" % (label, key["t"]))
+        unknown = set(key) - set(CHANNELS) - {"t", "easing"}
+        if unknown:
+            problems.append("%s has unknown channels %s"
+                            % (label, ", ".join(sorted(unknown))))
+
+    for channel, keys in lanes.items():
+        if channel not in CHANNELS:
+            problems.append("%s has a lane for %r, which is not a channel (%s)"
+                            % (label, channel, ", ".join(CHANNELS)))
         if not isinstance(keys, list) or not keys:
-            problems.append("track %r has no keyframes" % role)
+            problems.append("%s has an empty %s lane" % (label, channel))
             continue
         for key in keys:
-            if not isinstance(key, dict) or "t" not in key:
-                problems.append("track %r has a keyframe with no t: %r" % (role, key))
+            if not isinstance(key, dict) or "t" not in key or "v" not in key:
+                problems.append("%s has a %s lane keyframe that is not "
+                                "{t, v}: %r" % (label, channel, key))
                 continue
             if not 0.0 <= float(key["t"]) <= 1.0:
-                problems.append("track %r has t=%s outside 0..1" % (role, key["t"]))
-            unknown = set(key) - set(CHANNELS) - {"t", "easing"}
-            if unknown:
-                problems.append("track %r has unknown channels %s"
-                                % (role, ", ".join(sorted(unknown))))
+                problems.append("%s has a %s lane key at t=%s outside 0..1"
+                                % (label, channel, key["t"]))
     return problems
 
 
