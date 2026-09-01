@@ -1,0 +1,186 @@
+# AutoSprite Plugin
+
+Turns one character image into a finished, engine-ready animated sprite sheet
+from a single command.
+
+```
+hero.png                                       hero-sprites/
+                          /autosprite            hero.png                 ← the sheet
+                         ─────────────────►      hero.autosprite.json     ← clips, fps, loop, rects
+                                                 hero.rig.json            ← the parts, editable
+                                                 hero.png.meta            ← Unity, pre-sliced
+                                                 hero.tres                ← Godot SpriteFrames
+                                                 hero.phaser.json         ← Phaser / PixiJS
+                                                 hero.unreal-paper2d.json ← Unreal Paper2D
+                                                 hero.gamemaker.json      ← GameMaker strip params
+                                                 $hero.png                ← RPG Maker MV/MZ
+                                                 hero-frames.zip          ← every frame as a PNG
+                                                 preview/*.gif            ← what you actually review
+```
+
+The input file is never written to.
+
+## The palette guarantee
+
+**Nothing in this plugin generates a pixel.** There is no image model anywhere
+in it, and that is the design rather than a limitation: every pixel of every
+output frame came out of the image you supplied, so the sheet is unambiguously
+your art, and the pipeline can make a claim a generative one cannot.
+
+Three mechanisms hold it:
+
+1. **Every transform is nearest-neighbour.** Rotation, scaling, foreshortening
+   and packing all sample without interpolating, so no colour is ever averaged
+   into existence.
+2. **Every composite is an alpha test, not a blend.** Two overlapping parts
+   never average into a third colour.
+3. **`verify.py` checks it and reports.** The `PALETTE` check compares the
+   finished sheet's colours against the source's and fails on any escape.
+
+The corollary is a real constraint, stated plainly: this plugin cannot draw a
+view your reference does not contain. A back view needs a back drawing. It will
+tell you which directions it approximated rather than implying otherwise.
+
+## How it works
+
+```
+vision   ->  names the character's parts and where they hinge     rig.json
+cutout   ->  cuts those parts out of your own pixels              parts
+motion   ->  poses the skeleton over time                         poses
+render   ->  composites the posed parts                           frames
+pack     ->  lays the frames out                                  sheet.png
+atlas    ->  writes what every engine needs to read it            *.json/.tres/.meta
+verify   ->  proves the sheet still contains exactly those frames  PASS/FAIL
+```
+
+Only the first stage has an opinion, and it is deliberately the smallest one: a
+part is a name, a box, a parent and a pivot — four things a vision model can be
+held to and a human can correct in ten seconds by editing one line of JSON.
+Everything a model is bad at stays out. Masks come from the pixels. Angles and
+timing come from a keyframe table you can read and argue with.
+
+### Two rigging backends
+
+| Backend | Needs | Use it when |
+|---|---|---|
+| `--backend template` | nothing at all | The default silhouette read. Finds the neck at the last narrow row before the shoulders and the hips where the outline parts and stays parted. Right more often than not on a standing character |
+| `--backend claude` | a `claude` CLI on PATH; **no API key** | The silhouette will lie: a staff held across the body, a cape, a mount, a robot, a 3/4 view |
+
+`claude -p` runs with the session's own credentials, so the vision path costs
+nothing beyond the Claude subscription you already have. The whole test suite
+runs against the template backend, so CI needs no model and no network.
+
+## What it makes
+
+**Character animations** — idle, walk, run, jump, attack, hurt, die. Frame
+counts and rates are tuned per animation; both are overridable. Presets: `basic`,
+`platformer`, `topdown`, `full`.
+
+**Custom animations** — a JSON keyframe table, validated and rendered by the
+same path as the built-ins. This is how a plain-language request ("make the walk
+look tired") becomes motion: write the keyframes, render, watch, adjust.
+
+**Eight-direction movement** — with every direction labelled `drawn`,
+`mirrored`, `foreshortened` or `substituted`, so nothing claims to be a view it
+is not. `--reference-front` and `--reference-back` turn the cardinals into
+drawn ones.
+
+**Props** — bob, spin, tumble, pulse, swing. A prop rigs as one piece, which is
+never wrong, only plain.
+
+**Outfit and skin variants** — recoloured by shading RAMP rather than by colour,
+so the shading survives. Ramps are found by hue *and by adjacency*: two shades
+belong to one material only if they touch somewhere in the art, which is what
+separates brown boots from tan skin when hue alone cannot.
+
+## Usage
+
+```bash
+/autosprite hero.png --game platformer
+```
+
+Or the scripts directly:
+
+```bash
+# rig, and look at the overlay before anything else
+python3 scripts/rig.py --input hero.png --out out/ --backend claude --preview
+
+# build
+python3 scripts/build.py --input hero.png --out out/ \
+    --animations platformer --directions 4 --backend claude
+
+# iterate on one cycle without rebuilding the sheet
+python3 scripts/animate.py --input hero.png --rig out/hero.rig.json \
+    --animation walk --custom my-walk.json --out look/
+
+# recolour by ramp
+python3 scripts/variants.py --input hero.png --out var/ --describe
+python3 scripts/variants.py --input hero.png --out var/ \
+    --name 0=skin,1=cloak,2=boots \
+    --variant '{"cloak": {"hue": 0}}' --variant-name red
+
+# prove an output directory
+python3 scripts/verify.py --dir out/ --reference hero.png --rig out/hero.rig.json
+```
+
+## The verification gate
+
+Every failure mode of a sprite-sheet generator is silent. A rect off by one row
+looks perfect and animates with a one-pixel jitter. A pivot flipped in the Unity
+meta puts every sprite underground. An engine file that disagrees with the atlas
+works in Phaser and not in Godot. So each check compares two artefacts produced
+independently, and the exit status is the answer:
+
+| Check | What it proves |
+|---|---|
+| `RECT` | Every atlas rect lies inside the sheet and has content in it |
+| `ZIP` | Every frame in the ZIP is byte-identical to its crop from the sheet |
+| `PALETTE` | Every colour in the sheet came from the source art |
+| `ENGINES` | Every engine file's rects, counts and animation names match the atlas |
+| `ANCHOR` | Every frame of a clip shares one anchor |
+| `REST` | The rig's parts reassemble into the source image **exactly** |
+
+`REST` is the strongest of them and the one that catches a bad rig rather than a
+bad export: if the parts do not reassemble into the original, some pixel of your
+art is in the wrong part and every frame is wrong.
+
+## Input handling
+
+Real files are not clean, and three things go wrong silently:
+
+- **An opaque background.** Flooded from the border, comparing against each
+  seed's own colour so a gradient stops the flood instead of eating into the
+  character. Art that already has alpha is believed and left alone.
+- **Art that is an upscale.** A 32×32 sprite exported at 512×512 is 16×16 blocks
+  of flat colour; rigging it at 512 shears every block into staircases on the
+  first rotation. The block size is detected and the whole pipeline runs at
+  native resolution.
+- **Anti-aliased art.** The palette guarantee still holds, but it stops meaning
+  much at 900 colours. The ingest report says so rather than quietly posterising
+  your art.
+
+## Layout
+
+`grid` (default) gives uniform cells, one row per clip, **every frame aligned by
+its anchor** — not centred, because centring a jump's apex frame in its cell puts
+the character's feet back on the floor and deletes the jump. `packed` shelf-packs
+tightly and is typically half the texture. Padding and extrude both default to 1
+and exist for the same reason: the GPU samples slightly outside a rect whenever a
+sprite is drawn at a non-integer position, and extrude puts the character's own
+colour there instead of a transparent halo.
+
+## Tests
+
+```bash
+pip install -r requirements-test.txt
+python3 -m pytest tests -q
+```
+
+270 tests, no network, no model, a few seconds. Fixtures are generated rather
+than checked in — `tests/make_fixture.py` builds parametric sprites so a test can
+have the exact property it is about (arms clear of the body or touching, legs
+parted or robed) instead of one PNG having to serve every case.
+
+The verification tests are the ones worth reading: each breaks exactly one
+artefact of a known-good build and asserts the matching check goes red, because a
+verifier that cannot fail is worth nothing.

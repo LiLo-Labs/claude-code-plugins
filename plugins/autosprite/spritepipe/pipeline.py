@@ -1,0 +1,229 @@
+"""End to end: a character image in, a verified sprite sheet out.
+
+The order below is not arbitrary. Two constraints fix most of it:
+
+**Stabilisation is global, not per clip.** Every frame of every animation in
+every direction is cropped to ONE box, so the anchor sits in the same place in
+all of them. Stabilising per clip gives each animation its own box, and the
+character then jumps when the game switches from idle to walk -- which is the
+bug that looks like a physics problem and is not.
+
+**The palette is enforced after the direction transform, not before.** The
+foreshortening squash is the last thing that touches pixels, so it is the last
+place a colour could escape, and enforcing before it would prove nothing.
+"""
+
+import os
+
+from . import atlas as atlas_module
+from . import cutout as cutout_module
+from . import directions as directions_module
+from . import image as img
+from . import ingest as ingest_module
+from . import motion as motion_module
+from . import pack as pack_module
+from . import palette as palette_module
+from . import preview as preview_module
+from . import render as render_module
+from . import rig as rig_module
+from . import verify as verify_module
+from . import vision as vision_module
+
+
+class Build:
+    """Everything one run produced, so the caller can report on all of it."""
+
+    def __init__(self):
+        self.references = {}
+        self.rigs = {}
+        self.cutouts = {}
+        self.clips = []
+        self.sheet = None
+        self.written = {}
+        self.previews = {}
+        self.verification = None
+        self.report = {"warnings": []}
+
+    def warn(self, message):
+        self.report["warnings"].append(message)
+        return message
+
+
+def load_references(paths, tolerance=12, native=True):
+    """{view: Reference} for every view the user supplied."""
+    references = {}
+    for view, path in paths.items():
+        if path:
+            references[view] = ingest_module.ingest(path, tolerance=tolerance,
+                                                    native=native)
+    if "side" not in references:
+        raise ValueError("a side (or main) reference is required")
+    return references
+
+
+def build_rigs(references, backend, character_class="auto", facing="right",
+               intent="", build=None):
+    """Rig every supplied view with the same backend."""
+    rigs, cutouts = {}, {}
+    for view, reference in references.items():
+        built = backend.rig(reference, character_class=character_class,
+                            facing=facing, intent=intent)
+        problems = rig_module.validate(built)
+        if problems:
+            raise ValueError("the %s rig is not usable: %s"
+                             % (view, "; ".join(problems)))
+        rigs[view] = built
+        cutouts[view] = cutout_module.cut(built, reference.pixels)
+        if build is not None and not img.equal(cutouts[view].rest(), reference.pixels):
+            build.warn("the %s rig's parts do not reassemble into the source "
+                       "image; every frame of that view is suspect" % view)
+    return rigs, cutouts
+
+
+def union_palette(references):
+    """One palette across every view, so all directions share the guarantee."""
+    import numpy as np
+    stacked = np.concatenate([reference.palette for reference in references.values()])
+    return np.unique(stacked, axis=0) if stacked.size else stacked
+
+
+def make_clips(references, rigs, cutouts, animations, direction_plans, locked,
+               build=None):
+    """Render every animation in every direction. Frames are not yet stabilised."""
+    margin = max(render_module.suggest_margin(rig) for rig in rigs.values())
+    clips, raw = [], []
+
+    for plan in direction_plans:
+        view = plan.source if plan.source in cutouts else "side"
+        if plan.source not in cutouts and plan.source != "side":
+            build and build.warn("direction %s wanted the %s view, which was not "
+                                 "supplied; using the side view"
+                                 % (plan.name, plan.source))
+        rig = rigs[view]
+        cut = cutouts[view]
+        height = rig.size[1]
+
+        for animation in motion_module.scale_motion(animations, height):
+            frames = []
+            for pose in animation.poses(rig):
+                frame = render_module.render_pose(cut, pose, margin=margin)
+                frame = plan.apply(frame)
+                frames.append(palette_module.enforce(frame, locked))
+            anchor = rig_module.anchor_of(rig)
+            clip = pack_module.Clip(
+                animation.name, frames, animation.fps, animation.loop,
+                direction=plan.name if len(direction_plans) > 1 else None,
+                anchor=(anchor[0] + margin, anchor[1] + margin),
+                fidelity=plan.fidelity, note=animation.note)
+            clips.append(clip)
+            raw.append(frames)
+    return clips, margin
+
+
+def stabilise_clips(clips, padding=0):
+    """Crop each clip's frames to that clip's own box, keeping the anchor exact.
+
+    Per clip rather than across the whole sheet. Cropping every animation to one
+    box would make the idle frames as large as the death rotation, which on a
+    small character more than doubles the texture for nothing.
+
+    What must NOT vary is the anchor, and it does not: every clip is rendered on
+    the same margined canvas from the same rig, so the anchor starts at the same
+    place in all of them, and each clip's crop simply records where that point
+    ended up. The packer then aligns the cells by anchor rather than by edge, so
+    the character does not jump when the game switches animations -- which is the
+    property the shared box was there to protect.
+    """
+    from . import stabilize as stabilize_module
+
+    report = {"clips": {}, "holds": {}}
+    for clip in clips:
+        frames, box, anchor, clip_report = stabilize_module.stabilise(
+            clip.frames, clip.anchor, padding=padding)
+        clip.frames = frames
+        clip.anchor = anchor
+        report["clips"][clip.key] = clip_report
+        runs = stabilize_module.duplicate_runs(frames)
+        if runs:
+            report["holds"][clip.key] = runs
+    return report
+
+
+def build_sheet(reference_path, outdir, animations=("full",), direction_set="1",
+                backend="template", model="claude-opus-5", character_class="auto",
+                facing="right", intent="", name=None, layout="grid", padding=1,
+                extrude=1, scale=1, power_of_two=False, engines=("all",),
+                front=None, back=None, tolerance=12, native=True,
+                custom_animations=None, preview_scale=None, kind="character"):
+    """The whole pipeline. Returns a Build."""
+    build = Build()
+    os.makedirs(outdir, exist_ok=True)
+    name = name or os.path.splitext(os.path.basename(reference_path))[0]
+
+    build.references = load_references(
+        {"side": reference_path, "front": front, "back": back},
+        tolerance=tolerance, native=native)
+    build.report["references"] = {view: reference.summary()
+                                  for view, reference in build.references.items()}
+
+    engine = (backend if not isinstance(backend, str)
+              else vision_module.make_backend(backend, os.path.join(outdir, ".work"),
+                                              model=model))
+    if kind == "prop" and character_class == "auto":
+        character_class = "prop"
+    build.rigs, build.cutouts = build_rigs(
+        build.references, engine, character_class, facing, intent, build)
+    build.report["rig"] = {view: rig.to_dict() for view, rig in build.rigs.items()}
+    build.report["rig_actor"] = engine.actor
+
+    if kind == "prop":
+        from . import props as props_module
+        chosen = props_module.resolve(animations)
+    else:
+        chosen = motion_module.resolve(animations)
+    if custom_animations:
+        chosen = list(chosen) + list(custom_animations)
+    if not chosen:
+        raise ValueError("no animations selected")
+
+    plans = directions_module.plan(direction_set, build.references)
+    build.report["directions"] = [plan.to_dict() for plan in plans]
+    note = directions_module.advice(plans)
+    if note:
+        build.warn(note)
+
+    locked = union_palette(build.references)
+    build.clips, margin = make_clips(build.references, build.rigs, build.cutouts,
+                                     chosen, plans, locked, build)
+    build.report["margin"] = margin
+    build.report["stabilise"] = stabilise_clips(build.clips)
+    for key, runs in build.report["stabilise"].get("holds", {}).items():
+        longest = max(count for _, count in runs)
+        if longest >= 3:
+            build.warn("%s holds the same frame for %d frames running; the motion "
+                       "may be too small for a character this size" % (key, longest))
+
+    build.sheet = pack_module.pack(build.clips, layout=layout, padding=padding,
+                                   extrude=extrude, power_of_two=power_of_two,
+                                   scale=scale)
+    build.written = atlas_module.write(
+        build.sheet, outdir, name, engines=engines, clips=build.sheet.clips,
+        reference_report=build.report["references"]["side"])
+
+    rig_path = os.path.join(outdir, "%s.rig.json" % name)
+    build.rigs["side"].save(rig_path)
+    build.written["rig"] = rig_path
+
+    build.previews = preview_module.write_all(
+        build.sheet.clips, os.path.join(outdir, "preview"),
+        scale=preview_scale or max(1, min(6, 96 // max(1, build.sheet.cell[1]
+                                                       if build.sheet.cell else 32))))
+    build.verification = verify_module.verify_directory(
+        outdir, name=name, reference_path=reference_path, rig_path=rig_path)
+    build.report["name"] = name
+    build.report["sheet"] = {"size": list(build.sheet.size),
+                             "layout": layout,
+                             "cell": list(build.sheet.cell) if build.sheet.cell else None,
+                             "clips": len(build.clips),
+                             "frames": len(build.sheet.placements)}
+    return build
