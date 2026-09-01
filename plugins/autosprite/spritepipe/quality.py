@@ -89,3 +89,53 @@ def shed(frames, reference_pixels):
         if excess > worst:
             worst, index = excess, position
     return worst, index
+
+
+def disturbed(frames, rest):
+    """Every pixel any frame of a clip changes from the rest pose.
+
+    The clip's footprint: the region of the picture the animation touches at
+    all, whether it moved something there or vacated it.
+    """
+    import numpy as _np
+
+    height, width = rest.shape[:2]
+    out = _np.zeros((height, width), dtype=bool)
+    for frame in frames:
+        rows = min(frame.shape[0], height)
+        columns = min(frame.shape[1], width)
+        patch = _np.zeros((height, width), dtype=bool)
+        patch[:rows, :columns] = (frame[:rows, :columns]
+                                  != rest[:rows, :columns]).any(axis=2)
+        out |= patch
+    return out
+
+
+def footprint(frames, rest, reference_frames):
+    """(share, wrong, total): how much of what we move, the artist never moves.
+
+    Every other measurement in this plugin asks whether a frame is INTACT.
+    `shed` catches a limb that came away; `distinct_frames` catches a cycle that
+    holds still. Both pass, with a perfect score, on an animation that is
+    coherent and moves entirely the wrong pixels -- a windmill whose whole roof
+    turns with its sails is one connected blob in every frame, and eight
+    different pictures.
+
+    So when an asset ships the artist's own frames of the same motion, compare
+    the two FOOTPRINTS. Of the pixels our clip disturbs, what share does the
+    artist never touch? That number caught a rig whose sails box covered a third
+    of the image and which `shed` scored at 0.00%.
+
+    `reference_frames` are the artist's, the first being their rest pose. It is
+    deliberately one-sided: under-moving is a quieter failure than moving the
+    wrong thing, and is measured by comparing the totals, which are returned.
+    """
+    if not frames or len(reference_frames) < 2:
+        return 0.0, 0, 0
+    truth = disturbed(reference_frames[1:], reference_frames[0])
+    ours = disturbed(frames, rest)
+    total = int(ours.sum())
+    if not total:
+        return 0.0, 0, 0
+    wrong = int((ours & ~truth).sum())
+    return wrong / float(total), wrong, total

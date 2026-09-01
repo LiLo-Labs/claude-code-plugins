@@ -1,5 +1,6 @@
 """The partition must be exact, and a swinging limb must not tear the body."""
 
+import numpy as np
 import pytest
 
 import make_fixture
@@ -188,3 +189,77 @@ def test_the_partition_stays_exact_with_a_duplicated_arm():
     art = full_block((20, 20))
     pieces = cutout.cut(duplicated_arm_rig(), art)
     assert image.equal(pieces.rest(), art)
+
+
+# ---------------------------------------------------------------------------
+# A part that turns claims a disc, not a rectangle.
+# ---------------------------------------------------------------------------
+
+def _windmill():
+    """A tower with sails crossing it. No rectangle separates the two."""
+    pixels = image.blank(16, 16)
+    pixels[4:16, 6:10] = [110, 100, 96, 255]        # the tower
+    for offset in range(-5, 6):                      # an X through the hub (7, 5)
+        for x, y in ((7 + offset, 5 + offset), (7 + offset, 5 - offset)):
+            if 0 <= x < 16 and 0 <= y < 16:
+                pixels[y, x] = [230, 200, 90, 255]
+    return pixels
+
+
+def _rig(tags):
+    return R.Rig((16, 16), [
+        R.Part("tower", "body", (0, 0, 16, 16), None, (8, 15), 0),
+        R.Part("sails", "accessory", (0, 0, 16, 11), "tower", (7, 5), 3, 1.0, tags),
+    ])
+
+
+def test_a_spinner_claims_only_the_disc_it_can_turn_within():
+    """Sails drawn as a cross through a tower cannot be separated from the
+    tower by a rectangle. They can by a disc about the hub."""
+    pixels = _windmill()
+    plain = cutout.cut(_rig(()), pixels).by_name("sails")
+    spun = cutout.cut(_rig(("spinner",)), pixels).by_name("sails")
+    assert image.alpha_mask(spun.pixels).sum() < image.alpha_mask(plain.pixels).sum()
+
+
+def test_a_pixel_a_spinner_gives_up_is_not_lost():
+    """The property that makes this safe at all: ownership stays a total
+    function, so the cut still reassembles into the source exactly."""
+    pixels = _windmill()
+    assert image.equal(cutout.cut(_rig(("spinner",)), pixels).rest(), pixels)
+
+
+def test_a_spinner_keeps_everything_within_the_disc():
+    pixels = _windmill()
+    sails = cutout.cut(_rig(("spinner",)), pixels).by_name("sails")
+    rows, columns = np.nonzero(image.alpha_mask(sails.pixels))
+    radius = min(7 - 0, 16 - 7, 5 - 0, 11 - 5)
+    for row, column in zip(rows, columns):
+        x = column + sails.origin[0]
+        y = row + sails.origin[1]
+        assert (x - 7) ** 2 + (y - 5) ** 2 <= radius ** 2
+
+
+def test_a_hub_outside_its_own_box_clips_nothing_rather_than_everything():
+    """A radius of zero would silently empty the part, which is worse than the
+    loose box it was meant to tighten."""
+    pixels = _windmill()
+    rig = R.Rig((16, 16), [
+        R.Part("tower", "body", (0, 0, 16, 16), None, (8, 15), 0),
+        R.Part("sails", "accessory", (2, 2, 12, 8), "tower", (0, 0), 3, 1.0,
+               ("spinner",)),
+    ])
+    assert image.alpha_mask(cutout.cut(rig, pixels).by_name("sails").pixels).any()
+
+
+def test_a_limb_is_not_disc_clipped():
+    """An arm rotates about its pivot too, and it is long. Only a part that
+    turns a FULL revolution sweeps its whole extent through a circle."""
+    pixels = _windmill()
+    arm = R.Rig((16, 16), [
+        R.Part("tower", "body", (0, 0, 16, 16), None, (8, 15), 0),
+        R.Part("sails", "arm_near", (0, 0, 16, 11), "tower", (7, 5), 3),
+    ])
+    plain = cutout.cut(_rig(()), pixels).by_name("sails")
+    limb = cutout.cut(arm, pixels).by_name("sails")
+    assert image.alpha_mask(limb.pixels).sum() == image.alpha_mask(plain.pixels).sum()

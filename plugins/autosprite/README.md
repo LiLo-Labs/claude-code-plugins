@@ -107,6 +107,24 @@ points are tuned per animation and all three are overridable (`--frames`,
 `--fps`, `--loop-start`/`--loop-end`). Presets: `basic`, `platformer`,
 `topdown`, `action`, `full`, `everything`.
 
+**A measurement for whether the RIGHT pixels moved** — every other measurement
+here asks whether a frame is *intact*. `shed` catches a limb that came away;
+`distinct_frames` catches a cycle that holds still. Both pass, with a perfect
+score, on an animation that is coherent and moves entirely the wrong pixels: a
+windmill whose whole roof turns with its sails is one connected blob in every
+frame and eight different pictures. When an asset ships the artist's own frames
+of the same motion, `quality.footprint` compares the two footprints and reports
+what share of what we move the artist never touches. It caught a rig scoring
+0.00% shed and 8/8 distinct frames whose sails box covered a third of the image.
+
+It also paid for a rigging rule: **a part that turns claims a disc, not a
+rectangle.** Sails drawn as a cross through a tower cannot be separated from the
+tower by any rectangle, so a `spinner` claims only the disc about its pivot —
+anything further out leaves the rigger's own box on the way round. Measured
+against the artist's four sail frames, that takes footprint error from 40% to
+**9%**, with `shed` reporting 0.00% either way. A pixel the spinner gives up
+falls to the next smallest box that covers it, so `REST` is untouched.
+
 **A build that checks and repairs its own pictures** — every other check here
 proves something about bookkeeping, and all of them pass on frames that are
 visibly wrong, because mass is conserved when parts are merely scrambled. So the
@@ -332,7 +350,7 @@ pip install -r requirements-test.txt
 python3 -m pytest tests -q
 ```
 
-540 tests, no network, no model, well under a minute. Fixtures are generated rather
+555 tests, no network, no model, well under a minute. Fixtures are generated rather
 than checked in — `tests/make_fixture.py` builds parametric sprites so a test can
 have the exact property it is about (arms clear of the body or touching, legs
 parted or robed) instead of one PNG having to serve every case.

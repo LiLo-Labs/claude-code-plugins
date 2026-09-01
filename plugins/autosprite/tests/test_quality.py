@@ -81,3 +81,63 @@ def test_a_real_frame_that_comes_apart_is_caught():
     torn[rows[len(rows) // 2]] = 0            # cut the character in half
     worst, _ = quality.shed([torn], art)
     assert worst > 0.1
+
+
+# ---------------------------------------------------------------------------
+# Footprint: the first measurement here that asks whether the RIGHT pixels moved.
+# ---------------------------------------------------------------------------
+
+def _plain(colour, size=8):
+    pixels = image.blank(size, size)
+    pixels[:, :] = list(colour) + [255]
+    return pixels
+
+
+def test_a_clip_that_moves_nothing_has_no_footprint():
+    rest = _plain((80, 80, 90))
+    assert quality.footprint([rest, rest], rest, [rest, rest]) == (0.0, 0, 0)
+
+
+def test_moving_exactly_what_the_artist_moved_scores_zero():
+    rest = _plain((80, 80, 90))
+    moved = rest.copy()
+    moved[2:4, 2:4] = [200, 30, 30, 255]
+    share, wrong, total = quality.footprint([rest, moved], rest, [rest, moved])
+    assert (share, wrong, total) == (0.0, 0, 4)
+
+
+def test_moving_pixels_the_artist_never_touches_is_caught():
+    """The defect this exists for. Both clips below are perfectly intact and
+    perfectly distinct; only this says which one is right."""
+    rest = _plain((80, 80, 90))
+    theirs = rest.copy()
+    theirs[2:4, 2:4] = [200, 30, 30, 255]
+    ours = rest.copy()
+    ours[6:8, 6:8] = [200, 30, 30, 255]
+    share, wrong, total = quality.footprint([rest, ours], rest, [rest, theirs])
+    assert (wrong, total) == (4, 4) and share == 1.0
+
+
+def test_shed_passes_the_very_clip_footprint_fails():
+    """Stated outright, because it is why the measurement was added: a clip can
+    be one connected blob in every frame and move entirely the wrong thing."""
+    rest = _plain((80, 80, 90))
+    theirs = rest.copy()
+    theirs[0:2, 0:2] = [200, 30, 30, 255]
+    ours = rest.copy()
+    ours[6:8, 6:8] = [200, 30, 30, 255]
+    assert quality.shed([rest, ours], rest)[0] == 0.0
+    assert quality.footprint([rest, ours], rest, [rest, theirs])[0] == 1.0
+
+
+def test_a_frame_of_a_different_size_is_compared_on_the_overlap():
+    """Frames come back cropped to their common content box, so they are
+    routinely a different shape from the source they are judged against."""
+    rest = _plain((80, 80, 90))
+    bigger = image.blank(12, 12)
+    bigger[:8, :8] = rest
+    bigger[1, 1] = [200, 30, 30, 255]
+    theirs = rest.copy()
+    theirs[1, 1] = [200, 30, 30, 255]
+    share, _wrong, total = quality.footprint([bigger], rest, [rest, theirs])
+    assert total > 0 and 0.0 <= share <= 1.0
