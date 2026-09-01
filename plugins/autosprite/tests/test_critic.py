@@ -328,3 +328,26 @@ def test_a_shadow_really_does_keep_the_identity_transform():
         {"t": 0.0, "dy": 0.0}, {"t": 0.5, "dy": -6.0}])
     for pose in animation.poses(rig):
         assert np.allclose(skeleton.world_transforms(rig, pose)["base"], np.eye(3))
+
+
+def test_a_track_that_addresses_nothing_is_not_shown_to_the_critic():
+    """A humanoid clip carries `tail` and `wing_far` tracks because the library
+    is written once for every rig, and a person simply ignores them. Shown the
+    unfiltered list, the critic reported that as a RIG PROBLEM on three of the
+    eight characters it was given -- a finding spent on something working as
+    intended."""
+    from spritepipe import rig as R
+
+    plain = R.Rig((10, 20), [
+        R.Part("torso", "torso", (2, 6, 8, 14), None, (5, 14), 1),
+        R.Part("head", "head", (3, 0, 7, 6), "torso", (5, 6), 2)])
+    walk = motion.get("walk")
+    assert "tail" in walk.driven()
+    text = critic.describe_drives(walk, plain)
+    assert "torso" in text
+    assert "tail" not in text and "wing" not in text
+
+
+def test_the_unfiltered_list_is_still_what_the_clip_says_it_drives():
+    """`driven()` is about the clip; the filter is about this rig."""
+    assert "tail" in motion.get("walk").driven()

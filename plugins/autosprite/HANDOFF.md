@@ -649,6 +649,59 @@ list of channels the clip writes, told the list is exhaustive, and told that
 `cycle` moves nothing. Re-run on the same gem: verdict `good`, no invented
 problems.
 
+## Open: characters are drawn in a STANCE, and the library assumes neutral
+
+Found by following one of the critic's motion complaints to its cause, and
+measured — but not acted on, because the threshold cannot be justified from
+eleven samples.
+
+The critic said of `platformer-mv-male`'s walk: *"the legs split hard only once
+in the cycle; the opposite contact never opens, so it reads as a single lunge
+rather than an alternating walk."* The numbers agree: its silhouette widths per
+frame are **[15, 15, 16, 20, 27, 21, 16, 14]** — one half of the cycle splays to
+27 and the other stays at 15. Every other corpus character's half-cycle width gap
+is 0–5; this one is 12.
+
+**It is not the hips.** They sit within 1.5px of symmetric about the torso.
+**It is not erosion.** The leg keeps 74 opaque pixels at both ±26°.
+**It is the ART.** That leg is drawn as a diagonal band -- columns 3-7 at the
+top, 0-4 at the bottom, a 9° lean. Rotating it +26° adds to the lean and the
+horizontal extent doubles (x 21..34); rotating it −26° cancels the lean and it
+stays narrow (x 31..39). The library's swings are symmetric and the rest pose
+they are added to is not.
+
+The right measurement is a limb's own AXIS -- the centre of its top third to the
+centre of its bottom third -- not pivot-to-centroid, which is nearly blind to a
+uniform lean (it reports 4° where the axis reports 9°).
+
+| asset | far leg axis | near leg axis | difference |
+|---|---|---|---|
+| `awkward-musket-officer` | −6.3° | −5.9° | 0.4° |
+| `topdown-eldiran-rpg` | 0.0° | −4.8° | 4.8° |
+| `fry-caped` | −10.7° | −3.8° | 6.9° |
+| `awkward-necromancer-robe` | −4.1° | +4.1° | 8.2° |
+| `awkward-shieldmaiden` | 0.0° | −9.0° | 9.0° |
+| **`platformer-mv-male`** | **−9.2°** | **+0.8°** | **10.0°** |
+| `platformer-sumohulk-16` | +5.7° | +16.7° | 11.0° |
+| `platformer-forest-64` | −10.6° | +2.9° | 13.4° |
+| `topdown-kenney-roguelike` | −7.8° | +7.8° | 15.5° |
+| **`platformer-grass-prowne`** | **−14.0°** | **−33.0°** | **19.0°** |
+| `creature-slime-andhegames` | 0.0° | −49.4° | 49.4° |
+
+`platformer-grass-prowne` -- the corpus's worst asset -- has a leg drawn at 33°.
+
+**Why nothing was shipped.** A threshold at 8° fires on eight of eleven, which
+is noise; at 15° it fires on four and misses the case that started this. Most
+pixel art *is* drawn in a slight stance, and there is no sample here big enough
+to say where "slight" ends. Two options when it is picked up, and the second is
+probably wrong:
+
+1. **Warn**, naming both axes, and let the user supply a neutral frame or edit
+   the rig. Honest, cheap, and the only one consistent with never redrawing.
+2. **Neutralise** -- subtract each limb's drawn lean from its animation angles.
+   `REST` survives (it is about the cut) but frame 0 of every clip stops looking
+   like the source art: the character visibly straightens before it walks.
+
 ## Dead ends — measured, not guessed
 
 ### Giving a sliver arm the outer-strip fallback instead

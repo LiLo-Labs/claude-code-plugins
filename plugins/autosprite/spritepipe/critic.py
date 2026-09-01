@@ -218,7 +218,7 @@ class HeadlessCritic:
         import subprocess
 
         prompt = REVIEW_PROMPT % {
-            "drives": describe_drives(animation),
+            "drives": describe_drives(animation, rig),
             "name": animation.name,
             "frames": animation.frames,
             "fps": animation.fps,
@@ -249,9 +249,23 @@ class HeadlessCritic:
                         self.actor)
 
 
-def describe_drives(animation):
-    """The channels a clip actually writes, one line per part."""
+def describe_drives(animation, rig=None):
+    """The channels a clip writes ON THIS RIG, one line per part.
+
+    Filtered to selectors that actually resolve, because a track addressing a
+    part the character does not have is a no-op by design -- the library is
+    written once for every rig, so a humanoid clip carries `tail` and `wing_far`
+    tracks that a person simply ignores. Shown the unfiltered list, the critic
+    reported "the clip drives tail, wing_far and wing_near, but this is a plain
+    humanoid" as a RIG PROBLEM on three of the eight characters it was given,
+    spending a finding on something that is working as intended.
+    """
+    from . import motion as motion_module
+
     driven = animation.driven()
+    if rig is not None:
+        driven = {selector: channels for selector, channels in driven.items()
+                  if selector == "root" or motion_module.select(rig, selector)}
     if not driven:
         return "  (nothing at all -- every frame is the rest pose)"
     return "\n".join("  %-16s %s" % (selector, ", ".join(channels))
