@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 
 import make_fixture
-from spritepipe import image, ingest, rig as R, vision
+from spritepipe import image, ingest, motion, rig as R, vision
 
 
 def rig_of(pixels, **kwargs):
@@ -672,3 +672,66 @@ def test_renaming_a_limb_face_on_takes_its_children_with_it():
     vision.face_on(parts, [])
     assert parts[1].name == "arm_right"
     assert parts[2].parent == "arm_right"
+
+
+# ---------------------------------------------------------------------------
+# Traits from the model: how anything that is not a humanoid gets animated.
+# ---------------------------------------------------------------------------
+
+def test_the_prompt_offers_every_trait_and_says_what_each_one_means():
+    """A windmill's sails are not in the thirteen-name role list and never will
+    be, so the prompt has to offer the vocabulary that reaches them."""
+    from spritepipe import rig as R
+    prompt = vision.DESCRIBE_PROMPT % {"width": 32, "height": 32,
+                                       "roles": ", ".join(R.ROLES),
+                                       "traits": ", ".join(R.TRAITS),
+                                       "intent": ""}
+    for trait in ("spinner", "stalk", "surface", "glow", "socket"):
+        assert trait in prompt
+    assert "windmill" in prompt and "waterwheel" in prompt
+
+
+def test_a_trait_the_model_names_reaches_the_rig(hero):
+    answer = json.dumps({"class": "prop", "facing": "right", "parts": [
+        {"name": "tower", "role": "body", "box": [0.3, 0.4, 0.7, 1.0],
+         "parent": None, "pivot": [0.5, 1.0]},
+        {"name": "sails", "role": "accessory", "box": [0.1, 0.0, 0.9, 0.5],
+         "parent": "tower", "pivot": [0.5, 0.25], "traits": ["spinner"]},
+    ]})
+    built = vision.HeadlessBackend("/tmp").parse(answer, hero)
+    assert built.by_name("sails").has_trait("spinner")
+    assert motion.select(built, "trait:spinner") == [built.by_name("sails")]
+
+
+def test_a_trait_that_is_not_a_trait_is_dropped_and_reported(hero):
+    answer = json.dumps({"class": "prop", "parts": [
+        {"name": "body", "role": "body", "box": [0.0, 0.0, 1.0, 1.0],
+         "parent": None, "pivot": [0.5, 1.0], "traits": ["wobbly"]},
+    ]})
+    built = vision.HeadlessBackend("/tmp").parse(answer, hero)
+    assert built.by_name("body").tags == ()
+    assert any("not a trait" in note for note in built.notes)
+
+
+def test_a_trait_the_role_already_implies_is_not_stored_twice(hero):
+    """An accessory is already a stalk. Recording it again would put it in the
+    rig file as though the rigger had decided something it had not."""
+    answer = json.dumps({"class": "humanoid", "parts": [
+        {"name": "body", "role": "body", "box": [0.0, 0.2, 1.0, 1.0],
+         "parent": None, "pivot": [0.5, 1.0]},
+        {"name": "cape", "role": "accessory", "box": [0.0, 0.0, 0.4, 0.8],
+         "parent": "body", "pivot": [0.2, 0.2], "traits": ["stalk"]},
+    ]})
+    cape = vision.HeadlessBackend("/tmp").parse(answer, hero).by_name("cape")
+    assert cape.tags == ()
+    assert cape.has_trait("stalk")      # ... and it still is one
+
+
+def test_the_prompt_no_longer_assumes_the_subject_is_a_character():
+    from spritepipe import rig as R
+    prompt = vision.DESCRIBE_PROMPT % {"width": 32, "height": 32,
+                                       "roles": ", ".join(R.ROLES),
+                                       "traits": ", ".join(R.TRAITS),
+                                       "intent": ""}
+    assert "It may not be a character" in prompt
+    assert "tight to the thing that moves" in prompt

@@ -797,13 +797,17 @@ class TemplateBackend(Backend):
                 ["one piece: props animate as a whole, never articulated"])
 
 
-DESCRIBE_PROMPT = """You are looking at one game character sprite, shown at its \
+DESCRIBE_PROMPT = """You are looking at one game sprite, shown at its \
 native resolution and then again at 6x so you can see individual pixels. The \
-image is %(width)dx%(height)d pixels, origin top-left, and the character fills \
+image is %(width)dx%(height)d pixels, origin top-left, and the subject fills \
 it edge to edge -- it has already been trimmed.
 
-Your job is to say which rectangle of this image is which part of the character, \
-so that a skeletal animator can cut those rectangles out and swing them.
+It may not be a character. It may be a windmill, a tree, a lantern, a banner, a \
+waterwheel or a cottage. Answer for whatever it actually is.
+
+Your job is to say which rectangle of this image is which part of the subject, \
+and what each part DOES, so that an animator can cut those rectangles out and \
+move them.
 
 %(intent)s
 
@@ -814,7 +818,8 @@ Answer with JSON only. No prose, no markdown fence.
   "facing": "right" | "left" | "front" | "back",
   "parts": [
     {"name": "torso", "role": "torso", "box": [x0, y0, x1, y1],
-     "parent": null, "pivot": [x, y], "confidence": 0.0-1.0}
+     "parent": null, "pivot": [x, y], "confidence": 0.0-1.0,
+     "traits": []}
   ]
 }
 
@@ -825,6 +830,29 @@ Rules that decide whether this rig works or produces a broken character:
 - **role must be one of**: %(roles)s. The animator dispatches on role and
   ignores name, so a "sword_arm" named part with role "arm_near" animates
   correctly. Use "body" for anything that should simply ride its parent.
+- **traits say what a part DOES, and are how anything that is not a humanoid
+  gets animated at all.** The role list above is thirteen anatomical names; a
+  windmill's sails are not in it and never will be. Give such a part role
+  "accessory" or "body" and then the traits that are true of it, from:
+  %(traits)s. They mean:
+    * `spinner` -- turns continuously about a hub: sails, a waterwheel, a cog,
+      a fan, a gear. Its pivot must be the hub it turns about.
+    * `stalk` -- fixed at its base and free at its tip, so it trails and sways:
+      a tree's canopy, a flag, a cape, a plume of smoke, a hanging rope.
+    * `surface` -- a broad face with no joint, that ripples rather than hinges:
+      water, a banner, a curtain, a field of crops.
+    * `glow` -- emits or catches light, so it brightens and dims WITHOUT moving:
+      a torch flame, a forge, a rune, a lit window, a lantern's glass.
+    * `socket` -- hangs off the subject and can swing a little: a shutter, a
+      sign, a door, a lantern on a bracket.
+    * `crown` -- sits on top of the main mass and counter-moves.
+    * `mass` -- the main body everything else hangs off.
+  Most parts need no traits: their role already implies the right ones (an
+  accessory already sways, a leg already takes weight). Add a trait only when
+  the drawing shows something the role does not already say. A part with no
+  trait and no matching role simply rides its parent, which for a chimney is
+  correct and for a windmill's sails is the difference between a windmill and a
+  house that bobs.
 - **Exactly one part has "parent": null.** That is the root -- torso for a
   humanoid, body for anything else. Every other part names its parent.
 - **On an inanimate object the root is its main mass**, with role "body". A
@@ -836,7 +864,12 @@ Rules that decide whether this rig works or produces a broken character:
   joint and its rim is not an accessory: splitting a rigid thing into pieces
   only gives them a chance to come apart. Emit the extra parts only where the
   drawing shows something that could actually move separately -- a chest's lid,
-  a lantern's swinging handle.
+  a lantern's swinging handle, a windmill's sails.
+- **A box must be tight to the thing that moves.** This matters most for a part
+  that turns: a box drawn round a windmill's sails that also contains the tower
+  will drag the tower round with them and leave a hole where it was. If the
+  moving part and the still part cannot be separated by a rectangle, say so by
+  emitting one part -- a wrong articulation is worse than none.
 - **pivot is the joint: the point that stays still when the part rotates.**
   A shoulder, not the middle of the arm. A neck, not the middle of the head.
   It usually sits just inside the PARENT, on the edge they share.
@@ -898,6 +931,7 @@ class HeadlessBackend(Backend):
         prompt = DESCRIBE_PROMPT % {
             "width": width, "height": height,
             "roles": ", ".join(rig_module.ROLES),
+            "traits": ", ".join(rig_module.TRAITS),
             "intent": ("The user says this is: %s\n" % intent) if intent else "",
         }
         prompt += "\n\nRead these two files: %s and %s\n" % (native, zoomed)
@@ -954,9 +988,17 @@ class HeadlessBackend(Backend):
             if pivot is None:
                 pivot = ((box[0] + box[2]) // 2, box[1])
                 notes.append("%s: no pivot given, using the top-centre of its box" % name)
+            tags = []
+            for tag in entry.get("traits") or entry.get("tags") or ():
+                tag = str(tag)
+                if tag not in rig_module.TRAITS:
+                    notes.append("%s: %r is not a trait, ignored" % (name, tag))
+                    continue
+                if tag not in rig_module.TRAITS_BY_ROLE.get(role, ()):
+                    tags.append(tag)
             parts.append(rig_module.Part(name, role, box, entry.get("parent"), pivot,
                                          Z_BY_ROLE.get(role, 1),
-                                         float(entry.get("confidence", 0.7))))
+                                         float(entry.get("confidence", 0.7)), tags))
 
         roots = [part for part in parts if part.parent is None]
         if not roots:
