@@ -94,6 +94,28 @@ The character was cut into these parts. Boxes are fractions of the image, \
 
 %(rig)s
 
+What the roles DO, so you are not guessing:
+
+  shadow            never moves, in any clip. It keeps the identity transform \
+even when the whole subject jumps, bobs or squashes -- so it is the right role \
+for a cast shadow AND for a base or ground tile the subject stands on.
+  prop, accessory   ride whatever they are parented to; they have no motion of \
+their own unless a clip names them.
+  body              rides its parent. Use it for anything that should simply \
+follow.
+  a tagged trait    (`spinner`, `stalk`, `surface`, `glow`) is what lets a clip \
+address a part that is not a limb.
+
+Two things follow, and they pull in opposite directions, so read both.
+
+A part that is NOT in the channel list above does not move on its own at all. \
+Do not report a drift, a pop or a squash of such a part; it did not happen.
+
+But a part that IS driven carries every pixel its box contains, whatever those \
+pixels are of. If something that ought to stand still is turning or sliding \
+with a driven part, the BOX is wrong -- it has swallowed something that is not \
+that part -- and that is exactly the kind of rig problem worth reporting.
+
 Judge the motion and the rig, not the drawing. Answer with JSON only, no prose, \
 no fence.
 

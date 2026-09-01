@@ -605,9 +605,28 @@ frames -- and the whole roof rotates with the sails. The critic returned verdict
 instead of standing still, so the building reads as leaning rather than the
 sails spinning"*, and *"the sails are two separate blades either side of the
 tower and cannot be isolated by one axis-aligned box"*. That is the diagnosis
-this session reached by looking at the frames, arrived at independently. It also
-caught something that was missed: the hex tile was given the `shadow` role, and
-it is the mill's ground platform rather than a cast shadow.
+this session reached by looking at the frames, arrived at independently.
+
+It also said, in the same breath, that the hex tile should not have the `shadow`
+role because "treating it as shadow lets the base drift and squash with the
+character". **That is false**, and I repeated it before checking: a `shadow`
+part is in `skeleton.GROUNDED` and keeps the IDENTITY transform in every clip,
+measured across `turn`, `bob` and `pulse`. The vision backend got that role
+right and the critic was reasoning from guessed semantics. The prompt now states
+what each role does.
+
+**And the first attempt at that fix was worse than the bug.** Adding "do not
+report that a part will drift or squash unless a channel says it moves" made the
+critic call this same visibly-broken windmill `good` on **three runs out of
+three** -- because the roof it is dragging round belongs to a part that IS
+driven, so the rule read as forbidding the observation. The rule now says both
+halves: a part not in the channel list does not move on its own, AND a part that
+is driven carries every pixel its box contains, so something standing still that
+moves anyway is a box that swallowed it. Two runs after: verdict `rig` both
+times, with a sharper diagnosis than the original -- one of them proposing the
+tightened box by coordinates.
+
+A prompt change is a code change and has to be measured the same way.
 
 **It caught a rig that measured identically to a correct one.** The flag was
 hand-rigged as pole + cloth. There is no pole in that drawing -- the "pole" part

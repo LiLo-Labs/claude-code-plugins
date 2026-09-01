@@ -294,3 +294,37 @@ def test_the_prompt_lists_what_the_clip_changes_and_says_the_list_is_complete():
 def test_a_clip_that_moves_nothing_at_all_says_so_rather_than_printing_nothing():
     empty = motion.Animation("still", 4, tracks={"torso": [{"t": 0.0}]})
     assert "nothing at all" in critic.describe_drives(empty)
+
+
+def test_the_prompt_says_what_the_roles_do():
+    """The critic reported that a `shadow` part would "drift and squash with the
+    character". It does not: a shadow keeps the identity transform in every
+    clip, measured across turn, bob and pulse. It was reasoning from guessed
+    semantics, so it is now told."""
+    assert "never moves, in any clip" in critic.REVIEW_PROMPT
+    assert "does not move on its own at all" in critic.REVIEW_PROMPT
+
+
+def test_the_prompt_still_invites_the_finding_it_almost_suppressed():
+    """The first wording of the rule above -- "do not report that a part will
+    drift or squash unless a channel says it moves" -- made the critic call a
+    visibly broken windmill "good" on three runs out of three, because the roof
+    it was dragging round belongs to a part that IS driven. A driven part
+    carries every pixel its box contains, and something standing still that
+    moves anyway is a box that swallowed it."""
+    assert "carries every pixel its box contains" in critic.REVIEW_PROMPT
+    assert "the BOX is wrong" in critic.REVIEW_PROMPT
+
+
+def test_a_shadow_really_does_keep_the_identity_transform():
+    """The claim the prompt above makes, asserted rather than promised."""
+    import numpy as np
+    from spritepipe import rig as R, skeleton
+
+    rig = R.Rig((10, 12), [
+        R.Part("body", "body", (2, 0, 8, 10), None, (5, 10), 1),
+        R.Part("base", "shadow", (0, 10, 10, 12), "body", (5, 12), -3)])
+    animation = motion.Animation("hop", 4, root=[
+        {"t": 0.0, "dy": 0.0}, {"t": 0.5, "dy": -6.0}])
+    for pose in animation.poses(rig):
+        assert np.allclose(skeleton.world_transforms(rig, pose)["base"], np.eye(3))
