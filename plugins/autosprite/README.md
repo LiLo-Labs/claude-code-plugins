@@ -76,12 +76,34 @@ runs against the template backend, so CI needs no model and no network.
 
 ## What it makes
 
-**Character animations** — idle, walk, run, jump, attack, hurt, die. Frame
-counts and rates are tuned per animation; both are overridable. Presets: `basic`,
-`platformer`, `topdown`, `full`.
+**Fifteen character animations** — idle, walk, run, dash, climb, crouch, jump,
+land, attack, block, cast, throw, hurt, die, sleep. Frame counts, rates and loop
+points are tuned per animation and all three are overridable (`--frames`,
+`--fps`, `--loop-start`/`--loop-end`). Presets: `basic`, `platformer`,
+`topdown`, `action`, `full`, `everything`.
+
+**A build that checks and repairs its own pictures** — every other check here
+proves something about bookkeeping, and all of them pass on frames that are
+visibly wrong, because mass is conserved when parts are merely scrambled. So the
+build also measures what a viewer sees, and acts on it:
+
+- A clip measured to be coming apart has the responsible swing — and only that
+  one — reduced until it holds together, and the report says which part, on
+  which frame, and by how much. When damping does not help it says so and
+  changes nothing, because that is a rig problem and quietly shipping a quieter
+  broken clip would hide it.
+- A transform is not allowed to break something the artist drew in one piece. A
+  flask squashed to 40% loses its two-pixel neck before its five-pixel rim, so
+  the cork comes off with nothing having rotated; the renderer threads it back
+  with the colour that block would have had.
+- A clip that claims a foot is on the floor has the root corrected until it is,
+  because a rigid leg rotated about the hip lifts its own foot. The walk's body
+  bob then comes out of the leg geometry rather than being authored.
 
 **A vision critic** — `--critic claude` shows a rendered clip to a vision model
-and asks what is wrong with the *motion*, then folds the answer back into the
+and asks what is wrong with the *motion* -- or with the RIG, which it is also
+shown, so it can answer "this rig is wrong for this character" rather than
+tuning a limb the character does not have -- then folds the answer back into the
 keyframes. It is the only thing here that judges whether a cycle reads, which no
 measurement in this plugin can. Every round is re-measured, and one that makes
 the character come apart is thrown away — so the model can improve how the
@@ -94,10 +116,20 @@ look tired") becomes motion: write the keyframes, render, watch, adjust.
 **Eight-direction movement** — with every direction labelled `drawn`,
 `mirrored`, `foreshortened` or `substituted`, so nothing claims to be a view it
 is not. `--reference-front` and `--reference-back` turn the cardinals into
-drawn ones.
+drawn ones, and each is rigged **face-on** rather than with the side view's
+facing: both limbs of a pair in front of the torso, named left and right, and
+every clip trading its sideways swing for a lift. A leg walking towards the
+camera foreshortens; it does not sweep across the picture. `--facing front` does
+the same for a single sprite drawn that way.
 
 **Props** — bob, spin, tumble, pulse, swing. A prop rigs as one piece, which is
-never wrong, only plain.
+never wrong, only plain — and the vision prompt now says so, because it had been
+splitting a glass flask into bowl, neck and cork, none of which is a joint.
+
+**Two ZIPs** — `<name>-frames.zip` is every frame as a loose PNG;
+`<name>-animations.zip` is one folder per animation with its own strip, atlas and
+numbered frames, which is what an importer taking one animation at a time
+wants.
 
 **Outfit and skin variants** — recoloured by shading RAMP rather than by colour,
 so the shading survives. Ramps are found by hue *and by adjacency*: two shades
@@ -146,6 +178,7 @@ independently, and the exit status is the answer:
 |---|---|
 | `RECT` | Every atlas rect lies inside the sheet and has content in it |
 | `ZIP` | Every frame in the ZIP is byte-identical to its crop from the sheet |
+| `ANIMZIP` | Every frame in the per-animation ZIP is byte-identical to its master crop and to its own strip |
 | `PALETTE` | Every colour in the sheet came from the source art |
 | `ENGINES` | Every engine file's rects, counts and animation names match the atlas |
 | `ANCHOR` | Every frame of a clip shares one anchor |
@@ -194,7 +227,7 @@ pip install -r requirements-test.txt
 python3 -m pytest tests -q
 ```
 
-270 tests, no network, no model, a few seconds. Fixtures are generated rather
+467 tests, no network, no model, well under a minute. Fixtures are generated rather
 than checked in — `tests/make_fixture.py` builds parametric sprites so a test can
 have the exact property it is about (arms clear of the body or touching, legs
 parted or robed) instead of one PNG having to serve every case.
