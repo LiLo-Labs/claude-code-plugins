@@ -261,3 +261,28 @@ def test_a_cell_too_small_for_the_character_is_refused(hero_path, tmp_path):
 def test_the_frame_count_is_bounded(hero_path, tmp_path):
     with pytest.raises(ValueError):
         build(hero_path, tmp_path / "out", animations=["walk"], frames=200)
+
+
+def test_a_supplied_front_reference_is_rigged_face_on(hero_path, tmp_path):
+    """Rigging it with the side view's facing gives a sagittal near/far rig to a
+    picture with no depth axis -- the exact defect `--facing front` exists to
+    fix, reintroduced through the back door for anyone who supplies the extra
+    references."""
+    result = build(hero_path, tmp_path / "out", animations=["walk"],
+                   direction_set="4", front=hero_path)
+    assert result.rigs["side"].facing == "right"
+    assert result.rigs["front"].facing == "front"
+    assert result.rigs["front"].by_name("arm_left") is not None
+    assert result.rigs["side"].by_name("arm_left") is None
+    assert result.verification.ok, result.verification.report()
+
+
+def test_the_front_view_s_clips_get_the_face_on_motion(hero_path, tmp_path):
+    """The southward direction is drawn from the front reference, so it must
+    lift its feet rather than sweep its legs across the picture."""
+    result = build(hero_path, tmp_path / "out", animations=["walk"],
+                   direction_set="4", front=hero_path)
+    south = next(clip for clip in result.clips if clip.direction == "S")
+    east = next(clip for clip in result.clips if clip.direction == "E")
+    assert max(_width_of(south)) - min(_width_of(south)) \
+        < max(_width_of(east)) - min(_width_of(east))

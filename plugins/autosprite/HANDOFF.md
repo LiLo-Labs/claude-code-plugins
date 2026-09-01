@@ -9,7 +9,7 @@ again.
 The pipeline is sound and proven on real art. **20 CC0 sprites** (16×16 to
 76×81; humanoids, creatures, props, and four cases chosen to break a silhouette
 rigger) all build, with all eight verification checks passing on both backends.
-436 tests, no network or model in any of them.
+438 tests, no network or model in any of them.
 
 Quality, measured as **debris** — the share of a frame's pixels not connected to
 its main blob, against the source's own figure:
@@ -331,9 +331,18 @@ code.
    off-centre -- quick in and slow out, which is both what breathing is and
    what stops a four-frame loop drawing the same picture on both off-beats.
 
-6. **Eight directions that are actually drawn.** Today N/S are `substituted`
-   unless the user supplies references. The vision backend could rig a supplied
-   front/back reference into the same skeleton so the directions share motion.
+6. **Eight directions that are actually drawn.** Half done. A supplied front or
+   back reference is now rigged **face-on** rather than with the side view's
+   facing, which had been quietly giving a picture with no depth axis a
+   sagittal near/far rig -- the exact defect `--facing front` exists to fix,
+   reintroduced through the back door for anyone who supplied the extra
+   references. The southward walk of a four-direction sheet now lifts its feet
+   where the eastward one sweeps its legs across the picture.
+
+   What is still open is the harder half: N and S remain `substituted` when no
+   reference is supplied, and no amount of rigging can invent the back of a
+   head. The honest ceiling here is what the labels already say.
+
 7. **A pose-plausibility check.** Feet planted during walk contact frames, limb
    angles inside anatomical range. Would partly close the gap in the section
    above.

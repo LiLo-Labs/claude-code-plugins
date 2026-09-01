@@ -159,6 +159,12 @@ direction with how it was made and you must repeat that label honestly:
   This is the one worth flagging out loud. `--reference-front` and
   `--reference-back` turn N and S from substituted into drawn.
 
+A supplied front or back reference is rigged **face-on**, not with the side
+view's facing: both limbs of a pair in front of the torso, named left and right,
+and every clip trading its sideways swing for a lift. So the southward walk of a
+four-direction sheet lifts its feet where the eastward one sweeps its legs
+across the picture, which is what those two views actually look like.
+
 Never describe an 8-direction sheet built from one side view as eight views of
 the character. Say which are drawn and which are approximated, and offer the two
 extra references that would fix the cardinals.

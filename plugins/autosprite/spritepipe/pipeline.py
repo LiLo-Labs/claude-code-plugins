@@ -63,13 +63,26 @@ def load_references(paths, tolerance=12, native=True):
     return references
 
 
+# Which way each supplied view is drawn. The side view takes the user's own
+# --facing; the other two are what they say they are.
+VIEW_FACING = {"front": "front", "back": "back"}
+
+
 def build_rigs(references, backend, character_class="auto", facing="right",
                intent="", build=None):
-    """Rig every supplied view with the same backend."""
+    """Rig every supplied view with the same backend, each facing its own way.
+
+    A front reference is a drawing of a character looking at the camera, and
+    rigging it with the side view's facing gives it a sagittal near/far rig on a
+    picture with no depth axis -- the exact defect `--facing front` exists to
+    fix, reintroduced through the back door for anyone who supplies the extra
+    references. The view says which way it faces; the user's `--facing` only
+    decides which way the SIDE view is turned.
+    """
     rigs, cutouts = {}, {}
     for view, reference in references.items():
         built = backend.rig(reference, character_class=character_class,
-                            facing=facing, intent=intent)
+                            facing=VIEW_FACING.get(view, facing), intent=intent)
         problems = rig_module.validate(built)
         if problems:
             raise ValueError("the %s rig is not usable: %s"
