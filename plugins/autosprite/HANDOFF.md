@@ -181,242 +181,87 @@ cannot fix: `topdown-dcss` is a cloaked humanoid whose outline is a smooth bell
 with no parting and no neck, so it rigs as a prop. The critic can see a head and
 two arms because it can see COLOUR. That is the vision backend's job.
 
+## What has been done
+
+Everything the original backlog listed is finished, and it is worth knowing what
+each thing was so it is not redone. In the order it landed:
+
+| | what it was |
+|---|---|
+| `quality.py` | measures what a viewer sees; every other check proved only bookkeeping |
+| `critic.py` | asks a vision model what is wrong, and is shown the RIG so it can answer "the rig is wrong" |
+| `repair.py` | damps exactly the part that measurably came apart; 103.7% of summed shed to 15.4% |
+| quadruped legs | read as COLUMNS, not rows; pegasus 9.7%→0, horse 9.2%→0, dragon 1.9%→0 |
+| `--facing front\|back` | face-on rigs and face-on motion, including for a supplied `--reference-front` |
+| landmarks | `find_crown` (a raised sword is not a head), a local-minimum neck (a hood has none), a boot gap is not a hip |
+| `shadow` role | a baked contact shadow is the floor; it stays put |
+| the walk | was a pendulum retracing itself: 8 frames, 5 pictures. A bent knee at the passing pose fixes it |
+| planting | five clips keep a foot on the floor; corpus foot lift 183px → 0, and the walk's bob is now emergent |
+| parity | `--frames`, `--frame-size`, `--fps`, loop points, per-animation ZIP, eight more animations |
+
+The full history of each, with the numbers, is in the git log; the commits lead
+with the failure rather than the change.
+
 ## Backlog, in value order
 
-0. ~~**Repair a clip that measurably comes apart.**~~ **Done** --
-   `spritepipe/repair.py`, on by default, `--no-repair` to turn it off.
+Honest and short. The easy things are gone.
 
-   `quality.shed` already said which frame of a clip sheds worst. Rendering each
-   part alone into that frame and intersecting it with the loose pixels says
-   *which parts drew them* -- and doing the same to the REST pose and keeping
-   only the parts that got worse stops a baked contact shadow from being blamed
-   for every frame of every clip. Damping only those roles' rotation, by the
-   smallest step that puts the character back together, took the corpus from
-   103.7% of summed worst-frame shed to 15.4%, with eleven of the fourteen
-   broken clips landing at exactly zero.
+1. **The rigger splits one mass and calls the halves a pair.** The silhouette
+   backend's remaining defect, and the critic says it of five corpus characters:
+   a floor-length robe hem, a slime, a squat blob, a tunic, a cape. It cuts the
+   mass down the middle, calls the halves `leg_far` and `leg_near`, and swings
+   them apart.
 
-   It costs almost nothing in motion, because the other roles keep their full
-   swing: measured on the six clips it repaired, frame-to-frame change fell by
-   between 0.2 and 1.5 points while shed went to zero. And it costs nothing at
-   all on a build where nothing is wrong -- the clip is measured, found whole,
-   and handed back untouched.
+   The obvious detector -- are these two limbs actually similar? -- is a
+   measured dead end below, and fails in the wrong direction. What has NOT been
+   tried: asking whether the *silhouette between them* is continuous. Two real
+   legs have a gap; a robe hem cut in half does not. `find_split` already looks
+   for that gap and returns None here, and `_humanoid` then invents a hip line
+   by proportion anyway. **Making the proportional fallback emit no legs at all
+   -- one `body` below the waist -- is the untried experiment**, and it is
+   measurable: does the corpus's shed drop, and does the critic stop saying it?
 
-   Two failure messages matter as much as the fix. When damping does not help,
-   it says so and changes nothing, because a rig that far out needs a better rig
-   rather than less motion. When the blamed part has no swing in that clip at
-   all, it says a squash or a translation is pulling the character apart --
-   which is the potion's spin, and is the one case here that is genuinely
-   unsolved.
+2. **`crouch` and `block` sink from the root rather than the legs.** Both are a
+   hold, and both put the hold in a root translation, which means their feet
+   leave the floor (45px and 48px across the corpus) and they cannot be planted
+   -- planting them takes their head travel from 31 and 32 down to 8 and 12.
+   Re-authored as a leg FOLD (a falling `sy` over time rather than a static one),
+   the sink would survive planting and the feet would stay down. Small, and the
+   measurement to judge it by already exists.
 
-1. ~~**A vision critic loop.**~~ **Done** — `spritepipe/critic.py`, exposed as
-   `animate.py --critic claude --rounds N`. It renders the clip, shows the
-   contact sheet to `claude -p`, and folds the returned keyframe deltas back in;
-   every round is re-measured and one that makes the character come apart is
-   thrown away.
+3. **A wider motion library still.** Fifteen character clips against
+   autosprite.io's ~100. Roll, slide, swim, fly, shoot, push, pull, wave, sit,
+   kneel, taunt, revive. Each is a readable keyframe table; each must be checked
+   against the distinct-picture warning, because a symmetric swing draws half as
+   many pictures as it claims.
 
-   On the robed necromancer it correctly identified "the staff arm swings too
-   far and reads as a detached blob" and "the legs barely alternate", closed the
-   arms and opened the leg swing from ±26° to ±39°, and the visible result is a
-   modest improvement with shed unchanged at 0%.
+4. **`topdown-dcss` is a cloaked humanoid the silhouette reads as a prop.** Its
+   outline is a smooth bell: no parting, no neck. The critic can see a head and
+   two arms because it can see COLOUR. Whether the classifier should ever look
+   at colour is an open question and a fragile one; the vision backend already
+   gets this right.
 
-   **Run across six characters' walk cycles, and the answer is mixed.** It does
-   discriminate — the SIGNS differ, correctly:
+5. **The critic still reaches for the same four roles.** Across the sweep it
+   proposed changes to both arms and both legs, `torso` in four and `root` in
+   two, and has never once proposed one to `head`, `tail` or a scale channel.
+   Worth understanding before trusting it to tune anything subtle.
 
-   | character | legs | what it said |
-   |---|---|---|
-   | grafxkid-oldhero | **-10** | "stride too wide, the legs splay and read as loose blobs" |
-   | platformer-mv-male | **-7** | "the legs splay so wide they merge into one blob" |
-   | fry-caped | **+7** | "leg swing too small, several frames read nearly identical" |
-   | creature-horse | **+5** | "stride amplitude too small for a body this size" |
-   | awkward-shieldmaiden | +6 | but arms **-8**: "the shield arm reads as a detached blob" |
-   | creature-slime | **+7** | "leg swing too small" |
+6. **N and S remain `substituted` without a reference.** No amount of rigging
+   invents the back of a head. The labels are the honest ceiling and they are
+   already said out loud; this is on the list only so nobody mistakes it for an
+   oversight.
 
-   It closes down the two characters whose legs splay and opens up the ones whose
-   legs barely move. That is not a canned response. It also independently
-   corroborated a measurement: it called the shieldmaiden's shield arm a
-   detached blob, and shed measures 5.6% on her attack.
+## Two things that are broken and will stay broken without new ideas
 
-   Three biases were visible in that table. **One is now fixed.**
-
-   - **It judges the motion, not the rig.** ~~Fixed.~~ The critic is now shown
-     the RIG — every part, its role, and its box as fractions of the sprite —
-     alongside the contact sheet, and is asked to check the rig against the
-     picture *first*. It can now answer verdict `"rig"` with a list of
-     `rig_problems` and no adjustments at all, and `refine()` stops immediately
-     rather than tuning motion on top of a wrong skeleton.
-
-     The proof is the case that exposed the bias. On `creature-slime`, rigged
-     (wrongly) as a humanoid, it used to advise `{"leg_near": {"angle": 7}, ...}`
-     on limbs that do not exist. It now returns:
-
-     > This is a legless, armless slime blob; `arm_far`, `arm_near`, `leg_far`
-     > and `leg_near` carve limbs out of a body that has none.
-     >
-     > The `head` box `[0.00-0.11]` takes only the top sliver of the blob, while
-     > the face sits well below it inside the torso part.
-     >
-     > `torso` spans the full width and overlaps both arm boxes, so the same
-     > pixels are drawn by parts that rotate in opposite directions, creating
-     > the vertical seam.
-
-     …with `adjustments: {}`. Every one of those three is true and checkable
-     against the rig table. This makes the critic useful for a second job it
-     could not do before: **auditing the rigger**. Its rig complaints are the
-     cheapest source of leads for backlog item 2.
-
-   Two biases remain:
-
-   - **It never says "good".** Six of six came back "loose". It will always find
-     something, so a round is not evidence that anything was wrong. The prompt
-     now warns it about this bias explicitly; that has not been re-measured
-     across the six-character sweep, and doing so is the next check.
-   - **It always reaches for the same four roles** (both arms, both legs), and
-     touched `torso` in four and `root` in two. It has not once proposed a
-     change to `head`, `tail` or a scale channel.
-2. ~~**Bring `_creature` up to `_humanoid`.**~~ **Done for the legs.**
-
-   The classification half was fixed first: `find_split` now looks past up to
-   two merged rows at the floor, because hooves, boots on a ground line and
-   baked contact shadows all merge the last row back into one span. A winged
-   pony with six clearly parted rows of legs was being demoted to a one-piece
-   prop by its hooves meeting on the final row.
-
-   The builder half is now fixed too, and by measurement rather than by taste.
-   A leave-one-out ablation — re-render the clip with one part frozen at rest
-   and see how much shed goes away — put **all 9.8% of the pegasus's shed on a
-   single part, `leg_far`**, and the cause was visible the moment you looked at
-   it: `pair_boxes` reads a band row by row and halves any row that has not
-   parted yet, which is right under a biped's hips and wrong under a horse. The
-   pegasus's bottom row is one merged hoof, so the halving stretched `leg_far`
-   from 5 pixels wide to 15 — a slab holding BOTH leg pairs, rotating about its
-   middle.
-
-   A side-on animal's legs are **columns**, so `leg_columns` measures each
-   column's reach below the belly line, keeps the ones reaching 60% of the
-   deepest, and returns their runs (bridging one-column notches). Shallow
-   columns — belly fringe, contact shadow, a dragging tail tip — no longer
-   widen a leg. `split_leg_groups` then splits those runs at the largest gap,
-   which is the animal's own length, and `_leg_pair` builds four legs:
-   **forelegs take the arm roles** and hindlegs the leg roles, matching what
-   the vision backend independently chose, so the walk swings them in
-   counter-phase for free.
-
-   | | before | after |
-   |---|---|---|
-   | pegasus, all 7 clips | 9.7% | **0.0%** |
-   | horse, all 7 clips | 9.2% | **0.0%** |
-   | dragon, all 7 clips | 1.9% | **0.0%** |
-   | whole corpus, template backend | 89.4% | **68.6%** |
-
-   Every creature in the corpus now sheds nothing on any animation, with no
-   other asset changed. What is NOT done: the pegasus's **wings** are still
-   swallowed into `body`, because a silhouette cannot tell a wing from a
-   shoulder. The vision backend finds them. That may simply be the honest
-   division of labour between the two backends.
-
-3. ~~**Per-animation exports.**~~ **Done.** `<name>-animations.zip` carries one
-   folder per clip -- `<anim>/spritesheet.png`, `<anim>/atlas.json`,
-   `<anim>/frames/01.png…` -- which is the shape autosprite.io's download has and
-   what a user feeding an importer one animation at a time (GameMaker's
-   multi-select flow is exactly that) needs instead of a flat archive of every
-   frame of every clip.
-
-   Every frame is cut out of the finished sheet rather than kept from before
-   packing, and a new **ANIMZIP** check proves each one byte-identical to its
-   master crop and to its own strip. A second copy of the same pixels is
-   precisely the thing that drifts silently; it only earns its place if that
-   cannot happen.
-
-4. ~~**`--frames`, `--frame-size`.**~~ **Done.** `--frames N` (2-64) resamples
-   every clip; because a track is a continuous curve this is a finer sampling of
-   the same movement rather than an interpolation of finished pictures, and fps
-   moves with the count so the timing is unchanged. `--frame-size N` (8-512)
-   puts every frame in a square cell with the character standing at the bottom
-   centre, so every clip of every character shares one floor and one origin, and
-   refuses rather than crops when the art does not fit.
-
-   ~~**Loop points**~~ **done too.** `--loop-start` / `--loop-end` name the
-   frames a clip repeats between, for a clip that is an intro followed by a
-   hold, and `--fps` overrides the rate without touching the frame count. They
-   move with `--frames`, because they name frames and a sixteen-frame version of
-   a four-frame clip would otherwise loop the wrong quarter. `block` ships with
-   them: the guard is raised once and held while the button is down, which is
-   what a game actually does with it. They land in the native atlas and, because
-   Aseprite has no in/out points on a tag, as a second `<name>_loop` frameTag --
-   two tags being what every importer that reads them already understands.
-
-   **The parity backlog is now empty.**
-5. ~~**A wider motion library.**~~ **Done for the obvious eight.** Fifteen
-   character clips now: idle, walk, run, dash, climb, crouch, jump, land,
-   attack, block, cast, throw, hurt, die, sleep, plus the `action` and
-   `everything` preset sets.
-
-   Every one was authored with the pendulum lesson applied and then measured
-   across the corpus: **all 20 sprites build all 15 clips with all 8 checks
-   passing, and only two clips anywhere exceed 5% shed** -- the two already
-   known. Two clips carry a caveat the skill passes on to the user: `climb`
-   reads as reaching rather than gripping, because a profile drawing has no
-   front view to turn towards a wall, and `sleep` lays the character over with
-   a root rotation, the same trick `die` uses, because a standing drawing
-   cannot be folded into a lying pose any other way.
-
-   Tuning three of them was driven by the new distinct-picture warning rather
-   than by taste: `block`'s guard now overshoots and settles instead of holding
-   three identical frames, and `idle`, `crouch` and `sleep` peak their breath
-   off-centre -- quick in and slow out, which is both what breathing is and
-   what stops a four-frame loop drawing the same picture on both off-beats.
-
-6. **Eight directions that are actually drawn.** Half done. A supplied front or
-   back reference is now rigged **face-on** rather than with the side view's
-   facing, which had been quietly giving a picture with no depth axis a
-   sagittal near/far rig -- the exact defect `--facing front` exists to fix,
-   reintroduced through the back door for anyone who supplied the extra
-   references. The southward walk of a four-direction sheet now lifts its feet
-   where the eastward one sweeps its legs across the picture.
-
-   What is still open is the harder half: N and S remain `substituted` when no
-   reference is supplied, and no amount of rigging can invent the back of a
-   head. The honest ceiling here is what the labels already say.
-
-7. ~~**A pose-plausibility check.**~~ **Done for the one that mattered.** The
-   check was "feet planted during walk contact frames", and measuring it found
-   that **nine of sixteen corpus characters float** -- the lowest drawn row
-   rises by 2 to 6 pixels during a walk, six on a 64px character.
-
-   The cause is geometry, not tuning: a leg here is one rigid piece rotating
-   about the hip, so swinging it t degrees lifts its own foot by L(1 - cos t),
-   which at the walk's 26 degrees is 10% of the leg. A real leg does not do this
-   because it bends; ours cannot, so the correction goes on the root instead.
-   `skeleton.plant` puts the character's lowest point on one row, computed from
-   the parts' actual PIXELS rather than their declared boxes (a rotated box's
-   lowest corner is a corner, not a foot, and the difference is most of the
-   error), and `render.level_to_floor` then closes the last pixel of rasteriser
-   rounding by nudging whole pixels and redrawing only the frames that are off.
-   A `shadow` part is excluded from both, or it stands in for the feet.
-
-   **Measured across the corpus's walks: total foot lift 45px -> 0. All sixteen
-   characters now plant exactly**, with debris unchanged.
-
-   The walk's hand-authored bob was deleted in the same change, because planting
-   gives it back for free and better: with the feet held down the body is lowest
-   where the legs splay at contact and highest where they pass vertically
-   underneath, which is the bob a walk is supposed to have, correctly phased and
-   scaled to the character rather than a fixed pixel count.
-
-   `planted` is per-animation and false by default, and which clips get it was
-   measured rather than chosen. Planting **attack, hurt, cast and throw** puts
-   their feet on the floor AND gives them MORE body travel -- attack's head
-   travel goes 12 -> 27 and hurt's 10 -> 24 -- because the drop their legs
-   produce was previously being cancelled by the root. Planting **crouch** or
-   **block** takes their head travel from 31 and 32 down to 8 and 12: the hold
-   that defines those two lives in the root, so holding the feet flattens them.
-   A **run** has a flight phase, a **jump** is nothing but one, a **climb** is
-   not on a floor, and an **idle**'s bob IS the animation with no leg motion to
-   correct for.
-
-   Five clips now plant exactly. Combined foot lift across the corpus:
-   **183px -> 0**.
-
+- **`props-potion-funnydude`'s spin, 23.8%.** The flask's 2px neck vanishes
+  before its wider rim does, so the cork comes away mid-squash. Not a rig
+  problem -- the rig is one part -- and not a damping problem, because the
+  failure is in the MIDDLE of the squash range, which is the twice-measured
+  dead end below. It would need the reducer to preserve connectivity, which is
+  a change to `render._mode_downscale` and has not been attempted.
+- **`platformer-grass-prowne`'s jump on the silhouette backend, 15.4%.** An
+  8-pixel-wide character whose limbs are 2 pixels across. Its VISION rig holds
+  together completely, which is the honest answer for a sprite this small.
 
 ## Dead ends — measured, not guessed
 
