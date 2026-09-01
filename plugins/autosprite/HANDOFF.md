@@ -198,6 +198,7 @@ each thing was so it is not redone. In the order it landed:
 | the walk | was a pendulum retracing itself: 8 frames, 5 pictures. A bent knee at the passing pose fixes it |
 | planting | five clips keep a foot on the floor; corpus foot lift 183px → 0, and the walk's bob is now emergent |
 | parity | `--frames`, `--frame-size`, `--fps`, loop points, per-animation ZIP, eight more animations |
+| `climb` | its arm reach was cut from 58° to 46° after measurement: 58 threw a hand clear of a 45px character and took the clip to 9.4% shed, 46 takes it to 0.8% for one point of frame-to-frame change |
 
 The full history of each, with the numbers, is in the git log; the commits lead
 with the failure rather than the change.
@@ -207,19 +208,48 @@ with the failure rather than the change.
 Honest and short. The easy things are gone.
 
 1. **The rigger splits one mass and calls the halves a pair.** The silhouette
-   backend's remaining defect, and the critic says it of five corpus characters:
-   a floor-length robe hem, a slime, a squat blob, a tunic, a cape. It cuts the
+   backend's remaining defect, said by the critic of five corpus characters: a
+   floor-length robe hem, a slime, a squat blob, a tunic, a cape. It cuts the
    mass down the middle, calls the halves `leg_far` and `leg_near`, and swings
    them apart.
 
-   The obvious detector -- are these two limbs actually similar? -- is a
-   measured dead end below, and fails in the wrong direction. What has NOT been
-   tried: asking whether the *silhouette between them* is continuous. Two real
-   legs have a gap; a robe hem cut in half does not. `find_split` already looks
-   for that gap and returns None here, and `_humanoid` then invents a hip line
-   by proportion anyway. **Making the proportional fallback emit no legs at all
-   -- one `body` below the waist -- is the untried experiment**, and it is
-   measurable: does the corpus's shed drop, and does the critic stop saying it?
+   **The intervention is now validated and the detector is not.** Rigging the
+   necromancer's lower body as ONE part instead of two legs and asking the
+   critic about both:
+
+   | | verdict | what it said |
+   |---|---|---|
+   | two legs | `rig` | "a robed, legless figure whose bottom is a single skirt/hem, not two limbs... the two 'legs' swing apart and read as detached blobs floating under the body" |
+   | one hem | `loose` | the rig complaint is **gone**. Instead: "the cycle is nearly frozen... the body's rise-and-fall is too shallow to register twice per cycle, which is the only thing that can sell a walk on a legless, hem-bodied character" |
+
+   So the fix is two things, not one: rig the hem as one part, AND give such a
+   character a motion that suits it -- a deeper bob and a hem sway -- because a
+   walk with no legs has nothing else to read. Note that planting makes this
+   worse, not better: a character with no legs has nothing to plant against, so
+   `plant` produces no bob at all, which is exactly the "too shallow" complaint.
+   `skeleton.posed` should skip planting a rig with no leg parts, and the walk
+   would then want its authored bob back for that case only.
+
+   Measured, without the new motion: shed is **0.0% either way** (the repair
+   already stops the tearing) and liveliness FALLS by 1 to 5 points on all five
+   characters. So there is no number here to justify shipping the rig change on
+   its own -- the motion has to come with it.
+
+   **The unsolved part is telling which characters want it.** Every corpus
+   silhouette parts somewhere, so "never parts" does not discriminate.
+   `find_split` returning None catches the necromancer correctly and `fry-caped`
+   incorrectly -- the caped hero has real legs whose gap is closed near the
+   floor by his cape, which is a false negative in `find_split` rather than a
+   legless character. The only separator found is "the deepest parting is within
+   20% of the floor" (fry-caped 11%, necromancer 39%), and that is a threshold
+   fitted to two points, which this file already records going wrong twice.
+   **This wants more robed and blob-shaped CC0 art before it is worth fitting.**
+
+   And it is worth remembering what the vision backend is for: a model can see
+   that a robe hem is a robe hem, and already rigs these correctly. The
+   silhouette rigger saying "the hip line is a proportion rather than a
+   measurement" and pointing at the vision backend may simply be the honest
+   ceiling.
 
 2. **`crouch` and `block` sink from the root rather than the legs.** Both are a
    hold, and both put the hold in a root translation, which means their feet

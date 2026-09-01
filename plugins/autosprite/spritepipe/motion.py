@@ -665,16 +665,21 @@ def _library():
         root=[{"t": 0.0, "dy": 0.0}, {"t": 0.25, "dy": -1.0}, {"t": 0.5, "dy": 0.0},
               {"t": 0.75, "dy": -1.0}, {"t": 1.0, "dy": 0.0}],
         tracks={
-            "arm_near": [{"t": 0.0, "angle": -58.0, "sy": 1.0},
-                         {"t": 0.25, "angle": -20.0, "sy": 0.9},
-                         {"t": 0.5, "angle": 6.0, "sy": 1.0},
-                         {"t": 0.75, "angle": -26.0, "sy": 1.0},
-                         {"t": 1.0, "angle": -58.0, "sy": 1.0}],
-            "arm_far": [{"t": 0.0, "angle": 6.0, "sy": 1.0},
-                        {"t": 0.25, "angle": -26.0, "sy": 1.0},
-                        {"t": 0.5, "angle": -58.0, "sy": 1.0},
-                        {"t": 0.75, "angle": -20.0, "sy": 0.9},
-                        {"t": 1.0, "angle": 6.0, "sy": 1.0}],
+            # 46 degrees, not the 58 this was first written with. Measured over
+            # the corpus, 58 threw a hand clear of the body on a 45px character
+            # and took the clip to 9.4% shed; 46 takes it to 0.8% and costs one
+            # point of frame-to-frame change. A profile drawing has a narrow
+            # silhouette to keep an arm inside.
+            "arm_near": [{"t": 0.0, "angle": -46.0, "sy": 1.0},
+                         {"t": 0.25, "angle": -16.0, "sy": 0.9},
+                         {"t": 0.5, "angle": 5.0, "sy": 1.0},
+                         {"t": 0.75, "angle": -21.0, "sy": 1.0},
+                         {"t": 1.0, "angle": -46.0, "sy": 1.0}],
+            "arm_far": [{"t": 0.0, "angle": 5.0, "sy": 1.0},
+                        {"t": 0.25, "angle": -21.0, "sy": 1.0},
+                        {"t": 0.5, "angle": -46.0, "sy": 1.0},
+                        {"t": 0.75, "angle": -16.0, "sy": 0.9},
+                        {"t": 1.0, "angle": 5.0, "sy": 1.0}],
             "leg_near": [{"t": 0.0, "angle": 8.0, "sy": 1.0},
                          {"t": 0.25, "angle": 20.0, "sy": 0.84},
                          {"t": 0.5, "angle": -12.0, "sy": 1.0},
