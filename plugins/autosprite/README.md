@@ -1,5 +1,9 @@
 # AutoSprite Plugin
 
+> **Picking this work up?** Start with [HANDOFF.md](HANDOFF.md): what is
+> measured to work, the ordered backlog, and the dead ends that are not worth
+> walking again.
+
 Turns one character image into a finished, engine-ready animated sprite sheet
 from a single command.
 
