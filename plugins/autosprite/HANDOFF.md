@@ -8,8 +8,8 @@ again.
 
 The pipeline is sound and proven on real art. **20 CC0 sprites** (16×16 to
 76×81; humanoids, creatures, props, and four cases chosen to break a silhouette
-rigger) all build, with all seven verification checks passing on both backends.
-422 tests, no network or model in any of them.
+rigger) all build, with all eight verification checks passing on both backends.
+428 tests, no network or model in any of them.
 
 Quality, measured as **debris** — the share of a frame's pixels not connected to
 its main blob, against the source's own figure:
@@ -287,9 +287,19 @@ code.
    shoulder. The vision backend finds them. That may simply be the honest
    division of labour between the two backends.
 
-3. **Per-animation exports.** One PNG + atlas per animation, and the
-   folder-per-animation ZIP (`<anim>/spritesheet.png`, `atlas.json`,
-   `frames/01.png…`). Concrete parity, entirely deterministic.
+3. ~~**Per-animation exports.**~~ **Done.** `<name>-animations.zip` carries one
+   folder per clip -- `<anim>/spritesheet.png`, `<anim>/atlas.json`,
+   `<anim>/frames/01.png…` -- which is the shape autosprite.io's download has and
+   what a user feeding an importer one animation at a time (GameMaker's
+   multi-select flow is exactly that) needs instead of a flat archive of every
+   frame of every clip.
+
+   Every frame is cut out of the finished sheet rather than kept from before
+   packing, and a new **ANIMZIP** check proves each one byte-identical to its
+   master crop and to its own strip. A second copy of the same pixels is
+   precisely the thing that drifts silently; it only earns its place if that
+   cannot happen.
+
 4. ~~**`--frames`, `--frame-size`.**~~ **Done.** `--frames N` (2-64) resamples
    every clip; because a track is a continuous curve this is a finer sampling of
    the same movement rather than an interpolation of finished pictures, and fps

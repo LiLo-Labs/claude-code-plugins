@@ -97,6 +97,7 @@ def verify_directory(outdir, name=None, reference_path=None, rig_path=None):
 
     _check_rects(result, atlas, sheet)
     _check_zip(result, outdir, name, atlas, sheet)
+    _check_animation_zip(result, outdir, name, atlas, sheet)
     _check_palette(result, sheet, reference_path)
     _check_engines(result, outdir, name, atlas, sheet)
     _check_anchors(result, atlas)
@@ -162,6 +163,62 @@ def _check_zip(result, outdir, name, atlas, sheet):
                              if (missing or mismatched or extra) else ""))
     return result.add("ZIP", True, "%d frames byte-identical to their sheet crops"
                       % len(expected))
+
+
+def _check_animation_zip(result, outdir, name, atlas, sheet):
+    """Every frame in the folder-per-animation archive is the master sheet's own.
+
+    The per-animation download is a second copy of the same pixels, and a second
+    copy is exactly the thing that silently drifts. It only earns its place if
+    it is provably the same bytes, so check every frame against the master crop
+    and check each strip against its own frames.
+    """
+    zip_path = os.path.join(outdir, "%s-animations.zip" % name)
+    if not os.path.exists(zip_path):
+        return result.add("ANIMZIP", True, "no per-animation ZIP written", skipped=True)
+
+    def read(archive, entry):
+        with archive.open(entry) as handle:
+            return np.array(PILImage.open(io.BytesIO(handle.read())).convert("RGBA"),
+                            dtype=np.uint8)
+
+    problems, checked = [], 0
+    with zipfile.ZipFile(zip_path) as archive:
+        names = set(archive.namelist())
+        for clip in atlas["clips"]:
+            key = clip["key"]
+            strip_entry = "%s/spritesheet.png" % key
+            atlas_entry = "%s/atlas.json" % key
+            if strip_entry not in names or atlas_entry not in names:
+                problems.append("%s: missing spritesheet or atlas" % key)
+                continue
+            strip = read(archive, strip_entry)
+            local = json.loads(archive.read(atlas_entry).decode("utf-8"))
+            if len(local["frames"]) != len(clip["frames"]):
+                problems.append("%s: %d frames in the folder, %d in the sheet"
+                                % (key, len(local["frames"]), len(clip["frames"])))
+                continue
+            for entry, frame in zip(local["frames"], clip["frames"]):
+                master = sheet[frame["y"]:frame["y"] + frame["h"],
+                               frame["x"]:frame["x"] + frame["w"]]
+                path = "%s/frames/%s.png" % (key, entry["name"])
+                if path not in names:
+                    problems.append("%s: no %s" % (key, path))
+                    continue
+                if not img.equal(read(archive, path), master):
+                    problems.append("%s/%s differs from the sheet" % (key, entry["name"]))
+                cut = strip[entry["y"]:entry["y"] + entry["h"],
+                            entry["x"]:entry["x"] + entry["w"]]
+                if not img.equal(cut, master):
+                    problems.append("%s/%s differs from its own strip" % (key, entry["name"]))
+                checked += 1
+
+    if problems:
+        return result.add("ANIMZIP", False, "%d problem(s): %s"
+                          % (len(problems), "; ".join(problems[:4])))
+    return result.add("ANIMZIP", True,
+                      "%d frames across %d animations, byte-identical to the sheet"
+                      % (checked, len(atlas["clips"])))
 
 
 def _check_palette(result, sheet, reference_path):

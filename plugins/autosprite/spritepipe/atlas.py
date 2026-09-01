@@ -423,6 +423,71 @@ def write_frames_zip(sheet, path):
     return count
 
 
+def write_animation_zip(sheet, path, name):
+    """One folder per animation: a strip, its own atlas, and its own frames.
+
+    autosprite.io's download is shaped this way -- `<anim>/spritesheet.png`,
+    `<anim>/atlas.json`, `<anim>/frames/01.png` -- and a user who wants only the
+    walk, or who is feeding an importer one animation at a time (GameMaker's
+    multi-select flow is exactly that), should not have to sort a flat archive
+    of every frame of every clip first.
+
+    Every frame is cut out of the finished sheet rather than kept from before
+    packing, and each strip is those crops laid side by side, so the bytes in
+    here and the bytes in the master sheet cannot disagree. `verify` checks that
+    they do not.
+    """
+    import io as _io
+    from PIL import Image as PILImage
+
+    def encode(pixels):
+        buffer = _io.BytesIO()
+        PILImage.fromarray(np.ascontiguousarray(pixels), mode="RGBA").save(buffer, "PNG")
+        return buffer.getvalue()
+
+    written = 0
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
+        for clip_key, placements in sorted(sheet.by_clip().items()):
+            clip = sheet.clip(clip_key)
+            crops = [sheet.pixels[p.y:p.y + p.height, p.x:p.x + p.width]
+                     for p in placements]
+            if not crops:
+                continue
+            width = sum(crop.shape[1] for crop in crops)
+            height = max(crop.shape[0] for crop in crops)
+            strip = img.blank(height, width)
+            frames, x = [], 0
+            for index, (crop, placement) in enumerate(zip(crops, placements)):
+                img.paste(strip, crop, x, 0)
+                frames.append({
+                    "name": "%02d" % (index + 1),
+                    "x": x, "y": 0,
+                    "w": crop.shape[1], "h": crop.shape[0],
+                    "anchor": list(placement.anchor),
+                })
+                archive.writestr("%s/frames/%02d.png" % (clip_key, index + 1),
+                                 encode(crop))
+                written += 1
+                x += crop.shape[1]
+            archive.writestr("%s/spritesheet.png" % clip_key, encode(strip))
+            archive.writestr("%s/atlas.json" % clip_key, json.dumps({
+                "format": "autosprite-atlas/1",
+                "generator": APP,
+                "image": "spritesheet.png",
+                "size": {"w": width, "h": height},
+                "layout": "strip",
+                "animation": clip.name,
+                "direction": clip.direction,
+                "fps": clip.fps,
+                "loop": clip.loop,
+                "duration_ms": _duration_ms(clip.fps),
+                "fidelity": clip.fidelity,
+                "note": clip.note,
+                "frames": frames,
+            }, indent=2))
+    return written
+
+
 def _compress_sheet(sheet, sheet_path):
     """Rewrite the sheet as an indexed PNG when that is genuinely smaller.
 
@@ -520,4 +585,8 @@ def write(sheet, outdir, name, engines=("all",), clips=None, reference_report=No
     zip_path = os.path.join(outdir, "%s-frames.zip" % name)
     written["frames_zip"] = zip_path
     written["frames_zip_count"] = write_frames_zip(sheet, zip_path)
+
+    animations_path = os.path.join(outdir, "%s-animations.zip" % name)
+    written["animations_zip"] = animations_path
+    written["animations_zip_count"] = write_animation_zip(sheet, animations_path, name)
     return written

@@ -1,11 +1,15 @@
 """Each engine file must be the thing that engine's importer actually reads."""
 
+import io
+import json
 import os
 import re
 import zipfile
 
 import numpy as np
 import pytest
+
+from PIL import Image as PILImage
 
 from spritepipe import atlas, image, pack
 
@@ -266,3 +270,66 @@ def test_an_unknown_layout_is_refused_by_name():
     with pytest.raises(ValueError) as error:
         pack.pack([pack.Clip("a", frames(2, 4, 4, [1, 2, 3, 255]))], layout="spiral")
     assert "spiral" in str(error.value)
+
+
+# -- one folder per animation ---------------------------------------------
+
+def test_the_per_animation_zip_has_a_folder_for_each_clip(sheet, tmp_path):
+    path = tmp_path / "anim.zip"
+    count = atlas.write_animation_zip(sheet, str(path), "hero")
+    with zipfile.ZipFile(str(path)) as archive:
+        names = set(archive.namelist())
+    for clip_key in sheet.by_clip():
+        assert "%s/spritesheet.png" % clip_key in names
+        assert "%s/atlas.json" % clip_key in names
+        assert "%s/frames/01.png" % clip_key in names
+    assert count == sum(len(p) for p in sheet.by_clip().values())
+
+
+def test_each_animation_folder_carries_its_own_timing(sheet, tmp_path):
+    path = tmp_path / "anim.zip"
+    atlas.write_animation_zip(sheet, str(path), "hero")
+    with zipfile.ZipFile(str(path)) as archive:
+        for clip_key in sheet.by_clip():
+            local = json.loads(archive.read("%s/atlas.json" % clip_key).decode())
+            clip = sheet.clip(clip_key)
+            assert local["fps"] == clip.fps
+            assert local["loop"] == clip.loop
+            assert local["animation"] == clip.name
+            assert local["image"] == "spritesheet.png"
+
+
+def test_every_frame_in_the_folder_is_the_master_sheet_s_own_bytes(sheet, tmp_path):
+    """A second copy of the same pixels is exactly the thing that drifts, so it
+    only earns its place if it is provably the same bytes."""
+    path = tmp_path / "anim.zip"
+    atlas.write_animation_zip(sheet, str(path), "hero")
+    with zipfile.ZipFile(str(path)) as archive:
+        for clip_key, placements in sheet.by_clip().items():
+            for index, placement in enumerate(placements):
+                stored = np.array(PILImage.open(io.BytesIO(
+                    archive.read("%s/frames/%02d.png" % (clip_key, index + 1))
+                )).convert("RGBA"), dtype=np.uint8)
+                master = sheet.pixels[
+                    placement.y:placement.y + placement.height,
+                    placement.x:placement.x + placement.width]
+                assert image.equal(stored, master)
+
+
+def test_the_strip_is_its_own_frames_laid_side_by_side(sheet, tmp_path):
+    path = tmp_path / "anim.zip"
+    atlas.write_animation_zip(sheet, str(path), "hero")
+    with zipfile.ZipFile(str(path)) as archive:
+        for clip_key in sheet.by_clip():
+            strip = np.array(PILImage.open(io.BytesIO(
+                archive.read("%s/spritesheet.png" % clip_key))).convert("RGBA"),
+                dtype=np.uint8)
+            local = json.loads(archive.read("%s/atlas.json" % clip_key).decode())
+            assert strip.shape[1] == local["size"]["w"]
+            for entry in local["frames"]:
+                cut = strip[entry["y"]:entry["y"] + entry["h"],
+                            entry["x"]:entry["x"] + entry["w"]]
+                stored = np.array(PILImage.open(io.BytesIO(
+                    archive.read("%s/frames/%s.png" % (clip_key, entry["name"]))
+                )).convert("RGBA"), dtype=np.uint8)
+                assert image.equal(cut, stored)

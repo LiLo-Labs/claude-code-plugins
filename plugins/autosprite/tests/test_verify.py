@@ -211,3 +211,41 @@ def test_the_report_names_every_check_and_its_verdict(built):
     for name in ("ATLAS", "RECT", "ZIP", "PALETTE", "ENGINES", "ANCHOR", "REST"):
         assert name in text
     assert "passed" in text
+
+
+def test_a_tampered_per_animation_frame_is_caught(built):
+    """The per-animation download is a second copy of the same pixels, and a
+    second copy is the thing that silently drifts."""
+    import io as _io
+    from PIL import Image as _PIL
+
+    path = os.path.join(built["dir"], "hero-animations.zip")
+    with zipfile.ZipFile(path) as archive:
+        entries = {entry: archive.read(entry) for entry in archive.namelist()}
+    target = next(entry for entry in entries if entry.endswith("frames/01.png"))
+    corrupted = _PIL.open(_io.BytesIO(entries[target])).convert("RGBA")
+    pixels = corrupted.load()
+    pixels[0, 0] = (255, 0, 255, 255)
+    buffer = _io.BytesIO()
+    corrupted.save(buffer, "PNG")
+    entries[target] = buffer.getvalue()
+    with zipfile.ZipFile(path, "w") as archive:
+        for entry, data in entries.items():
+            archive.writestr(entry, data)
+
+    result = run(built)
+    assert not result.ok
+    assert not check(result, "ANIMZIP")["ok"]
+
+
+def test_a_missing_animation_folder_is_caught(built):
+    path = os.path.join(built["dir"], "hero-animations.zip")
+    with zipfile.ZipFile(path) as archive:
+        entries = {entry: archive.read(entry) for entry in archive.namelist()
+                   if not entry.startswith("walk/")}
+    with zipfile.ZipFile(path, "w") as archive:
+        for entry, data in entries.items():
+            archive.writestr(entry, data)
+    result = run(built)
+    assert not result.ok
+    assert not check(result, "ANIMZIP")["ok"]
