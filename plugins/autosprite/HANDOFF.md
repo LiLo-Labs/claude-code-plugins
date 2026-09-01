@@ -595,6 +595,36 @@ measures 0.00% -- and the build says so, by name.
 
 ## Dead ends — measured, not guessed
 
+### Lifting the hip above where the silhouette parts
+
+Anatomically true, looks obviously right, and it was **built, measured and
+reverted**. The silhouette parts where the legs separate FROM EACH OTHER, which
+is the crotch; a drawn leg's top is above that, inside the torso. Pivoting at
+the split gives a short leg on a low joint, and rotating that swings the foot a
+long way for very little visible bend.
+
+It does fix the corpus's worst asset. `platformer-grass-prowne` is 8x23 with 2px
+limbs and its jump threw **15.4%** of the sprite loose, which no amount of
+damping recovered; lifting the hip by 40% of the visible leg length takes it to
+**0.00%** through the full pipeline. Summed pre-repair shed across sixteen
+character assets went 109.9% -> 99.7%.
+
+And it is not worth it, for two reasons the synthetic fixture caught and the
+corpus did not:
+
+- **The character gains 8.3% mass as it moves.** A leg whose top is inside the
+  torso reveals backfilled torso when it swings, so the silhouette grows; the
+  mass-conservation test allows 5%.
+- **The face-on walk's feet stop alternating entirely** -- the measured lift
+  goes to exactly zero, so the clip stops reading as a walk at all.
+
+Both are the common case, and the benefit is one asset whose VISION rig already
+measures 0.00%. 25% and 60% lifts are worse than 40% and worse than none.
+If this is revisited, the thing to fix first is the mass gain, and the question
+to answer is why planting cancels the face-on lift once the legs are longer.
+
+
+
 Do not re-try these without new evidence. Each was implemented, measured, and
 reverted.
 
