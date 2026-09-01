@@ -1,8 +1,10 @@
 """Each engine file must be the thing that engine's importer actually reads."""
 
+import os
 import re
 import zipfile
 
+import numpy as np
 import pytest
 
 from spritepipe import atlas, image, pack
@@ -193,3 +195,74 @@ def test_the_web_set_writes_only_web_formats(sheet, tmp_path):
     written = atlas.write(sheet, str(tmp_path), "hero", engines=("web",))
     assert "unity" not in written and "godot" not in written
     assert "phaser" in written
+
+
+# -- the compressed sheet --------------------------------------------------
+
+def test_an_indexed_sheet_is_pixel_identical(sheet, tmp_path, clips):
+    """Lossless, not quantised: the sheet's palette is the source art's own."""
+    written = atlas.write(sheet, str(tmp_path), "hero", engines=("web",),
+                          clips=clips, compress=True)
+    assert image.equal(image.load(written["sheet"]), sheet.pixels)
+
+
+def test_an_indexed_sheet_is_only_kept_when_it_is_smaller(sheet, tmp_path, clips):
+    """A 256-entry palette table is a fixed cost that a tiny sheet loses on."""
+    plain_dir, small_dir = str(tmp_path / "a"), str(tmp_path / "b")
+    plain = atlas.write(sheet, plain_dir, "hero", engines=("web",), clips=clips)
+    packed = atlas.write(sheet, small_dir, "hero", engines=("web",), clips=clips,
+                         compress=True)
+    assert os.path.getsize(packed["sheet"]) <= os.path.getsize(plain["sheet"])
+    assert "indexed" in packed["sheet_format"] or "full RGBA" in packed["sheet_format"]
+
+
+def test_a_sheet_with_too_many_colours_stays_rgba(tmp_path):
+    rng = np.random.default_rng(11)
+    noisy = image.blank(40, 40)
+    noisy[:, :, :3] = rng.integers(0, 255, (40, 40, 3), dtype=np.uint8)
+    noisy[:, :, 3] = 255
+    assert not image.save_indexed(noisy, str(tmp_path / "x.png"))
+
+
+def test_save_indexed_keeps_transparency(tmp_path):
+    art = image.blank(8, 8)
+    art[2:6, 2:6] = [200, 40, 40, 255]
+    path = str(tmp_path / "x.png")
+    assert image.save_indexed(art, path)
+    assert image.equal(image.load(path), art)
+
+
+# -- the strip layout ------------------------------------------------------
+
+def test_a_strip_is_one_row_of_every_frame(clips):
+    strip = pack.pack(clips, layout="strip", padding=1, extrude=1)
+    total = sum(len(c.frames) for c in clips)
+    assert len(strip.placements) == total
+    assert len({p.y for p in strip.placements}) == 1, "a strip has exactly one row"
+    assert strip.size[1] < strip.size[0]
+
+
+def test_a_strip_keeps_the_grid_cell_and_anchor(clips):
+    grid = pack.pack(clips, layout="grid", padding=1, extrude=1)
+    strip = pack.pack(clips, layout="strip", padding=1, extrude=1)
+    assert strip.cell == grid.cell
+    assert {tuple(p.anchor) for p in strip.placements} == {tuple(p.anchor) for p in grid.placements}
+
+
+def test_a_strip_frame_matches_the_grid_frame(clips):
+    grid = pack.pack(clips, layout="grid", padding=1, extrude=1)
+    strip = pack.pack(clips, layout="strip", padding=1, extrude=1)
+    by_name = {p.name: p for p in grid.placements}
+    for placement in strip.placements:
+        other = by_name[placement.name]
+        assert image.equal(
+            strip.pixels[placement.y:placement.y + placement.height,
+                         placement.x:placement.x + placement.width],
+            grid.pixels[other.y:other.y + other.height,
+                        other.x:other.x + other.width])
+
+
+def test_an_unknown_layout_is_refused_by_name():
+    with pytest.raises(ValueError) as error:
+        pack.pack([pack.Clip("a", frames(2, 4, 4, [1, 2, 3, 255]))], layout="spiral")
+    assert "spiral" in str(error.value)

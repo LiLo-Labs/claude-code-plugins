@@ -166,7 +166,8 @@ def build_sheet(reference_path, outdir, animations=("full",), direction_set="1",
                 facing="right", intent="", name=None, layout="grid", padding=1,
                 extrude=1, scale=1, power_of_two=False, engines=("all",),
                 front=None, back=None, tolerance=12, native=True,
-                custom_animations=None, preview_scale=None, kind="character"):
+                custom_animations=None, preview_scale=None, kind="character",
+                compress=False):
     """The whole pipeline. Returns a Build."""
     build = Build()
     os.makedirs(outdir, exist_ok=True)
@@ -231,7 +232,7 @@ def build_sheet(reference_path, outdir, animations=("full",), direction_set="1",
                                    scale=scale)
     build.written = atlas_module.write(
         build.sheet, outdir, name, engines=engines, clips=build.sheet.clips,
-        reference_report=build.report["references"]["side"])
+        reference_report=build.report["references"]["side"], compress=compress)
 
     rig_path = os.path.join(outdir, "%s.rig.json" % name)
     build.rigs["side"].save(rig_path)

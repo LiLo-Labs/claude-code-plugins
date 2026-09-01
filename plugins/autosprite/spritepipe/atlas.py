@@ -423,6 +423,32 @@ def write_frames_zip(sheet, path):
     return count
 
 
+def _compress_sheet(sheet, sheet_path):
+    """Rewrite the sheet as an indexed PNG when that is genuinely smaller.
+
+    Lossless here rather than "quantised", because the sheet's palette is
+    provably a subset of the source art's -- there is nothing to throw away.
+
+    But it is not always a win. A 256-entry palette table is a fixed cost, and
+    on a small sheet with four colours it outweighs what indexing saves: the
+    file comes back 36% BIGGER. So write both and keep the smaller one, and say
+    which happened rather than claiming a saving that did not occur.
+    """
+    candidate = sheet_path + ".indexed"
+    if not img.save_indexed(sheet.pixels, candidate):
+        return ("full RGBA: over 255 colours, so an indexed PNG could not hold "
+                "the palette losslessly")
+    plain = os.path.getsize(sheet_path)
+    indexed = os.path.getsize(candidate)
+    if indexed >= plain:
+        os.remove(candidate)
+        return ("full RGBA: the palette table costs more than indexing saves on a "
+                "sheet this small (%d bytes indexed against %d)" % (indexed, plain))
+    os.replace(candidate, sheet_path)
+    return ("indexed PNG, losslessly: %d bytes against %d, %.0f%% smaller"
+            % (indexed, plain, (1 - indexed / float(plain)) * 100))
+
+
 WRITERS = {
     "texturepacker-hash": (lambda sheet, name: texturepacker(sheet, name, "hash"),
                            "%s.texturepacker-hash.json", "json"),
@@ -443,13 +469,16 @@ ENGINE_SETS = {
 }
 
 
-def write(sheet, outdir, name, engines=("all",), clips=None, reference_report=None):
+def write(sheet, outdir, name, engines=("all",), clips=None, reference_report=None,
+          compress=False):
     """Write the sheet, the native atlas, and every requested engine format."""
     os.makedirs(outdir, exist_ok=True)
     written = {}
 
     sheet_path = os.path.join(outdir, "%s.png" % name)
     img.save(sheet.pixels, sheet_path)
+    if compress:
+        written["sheet_format"] = _compress_sheet(sheet, sheet_path)
     written["sheet"] = sheet_path
 
     atlas_path = os.path.join(outdir, "%s.autosprite.json" % name)

@@ -44,7 +44,13 @@ def main():
     parser.add_argument("--intent", default="",
                         help="what the character is, in a few words; sharpens the rig")
 
-    parser.add_argument("--layout", default="grid", choices=("grid", "packed"))
+    parser.add_argument("--layout", default="grid",
+                        choices=("grid", "packed", "strip"),
+                        help="grid: uniform cells, one row per clip. packed: tight. "
+                             "strip: one horizontal row, what Import Strip wants")
+    parser.add_argument("--compress", action="store_true",
+                        help="write the sheet as an indexed PNG - lossless here, "
+                             "because the palette is the source art's own")
     parser.add_argument("--padding", type=int, default=1)
     parser.add_argument("--extrude", type=int, default=1)
     parser.add_argument("--scale", type=int, default=1,
@@ -72,7 +78,8 @@ def main():
             power_of_two=args.power_of_two,
             engines=[e.strip() for e in args.engines.split(",") if e.strip()],
             front=args.front, back=args.back, tolerance=args.tolerance,
-            native=not args.no_native, custom_animations=custom, kind=args.kind)
+            native=not args.no_native, custom_animations=custom, kind=args.kind,
+            compress=args.compress)
     except (ValueError, RuntimeError) as error:
         print("build failed: %s" % error, file=sys.stderr)
         return 2
@@ -116,9 +123,11 @@ def _human(build, report):
     for key in ("sheet", "atlas", "rig", "frames_zip"):
         if key in build.written:
             lines.append("  %-10s %s" % (key, build.written[key]))
+    if build.written.get("sheet_format"):
+        lines.append("  %-10s %s" % ("", build.written["sheet_format"]))
     engines = [k for k in build.written
                if k not in ("sheet", "atlas", "rig", "frames_zip",
-                            "frames_zip_count", "rpgmaker_report")]
+                            "frames_zip_count", "rpgmaker_report", "sheet_format")]
     if engines:
         lines.append("  %-10s %s" % ("engines", ", ".join(sorted(engines))))
     if build.previews.get("contact_sheet"):

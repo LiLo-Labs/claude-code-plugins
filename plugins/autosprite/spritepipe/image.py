@@ -27,6 +27,45 @@ def save(array, path):
     PILImage.fromarray(np.ascontiguousarray(array), mode="RGBA").save(path, "PNG")
 
 
+def save_indexed(array, path, max_colors=255):
+    """Write as a palette PNG, or return False and write nothing.
+
+    AutoSprite offers a "compressed" export that is a palette-quantised PNG
+    around 70% smaller than full RGBA. This plugin can offer the same thing
+    without the "quantised" part: the sheet's palette is provably a subset of
+    the source art's, so on any sprite with 255 colours or fewer the indexed
+    file is LOSSLESS -- the same pixels, in a fraction of the bytes.
+
+    Index 255 is reserved for transparency, so the caller gets an exact
+    round-trip or nothing. A sprite with more colours than that is a
+    photograph, and it says so rather than throwing away colours the palette
+    guarantee promised to keep.
+    """
+    from PIL import Image as PILImage
+
+    solid = alpha_mask(array)
+    colours = unique_colors(array)
+    if len(colours) > max_colors:
+        return False
+
+    table = {tuple(int(v) for v in colour): index
+             for index, colour in enumerate(colours)}
+    indexed = np.full(array.shape[:2], max_colors, dtype=np.uint8)
+    flat = array[solid]
+    if flat.size:
+        indexed[solid] = [table[tuple(int(v) for v in row)] for row in flat]
+
+    palette = []
+    for colour in colours:
+        palette.extend(int(v) for v in colour[:3])
+    palette.extend([0, 0, 0] * (256 - len(colours)))
+
+    picture = PILImage.fromarray(indexed, mode="P")
+    picture.putpalette(palette[:768])
+    picture.save(path, "PNG", transparency=max_colors, optimize=True)
+    return True
+
+
 def blank(height, width):
     return np.zeros((int(height), int(width), 4), dtype=np.uint8)
 

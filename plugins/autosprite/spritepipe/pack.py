@@ -144,7 +144,10 @@ def pack(clips, layout="grid", padding=1, extrude=1, power_of_two=False,
                       clip.fidelity, clip.note)
                  for clip in clips]
 
-    builder = _pack_grid if layout == "grid" else _pack_shelf
+    builder = {"grid": _pack_grid, "packed": _pack_shelf,
+               "strip": _pack_strip}.get(layout)
+    if builder is None:
+        raise ValueError("unknown layout %r (grid | packed | strip)" % layout)
     pixels, placements, cell = builder(clips, padding, extrude, max_width)
 
     if power_of_two:
@@ -206,6 +209,37 @@ def _pack_grid(clips, padding, extrude, max_width):
                 index * step_x + gutter, row * step_y + gutter, cell_w, cell_h,
                 cell_anchor))
     return pixels, placements, (cell_w, cell_h)
+
+
+def _pack_strip(clips, padding, extrude, max_width):
+    """Every frame in one row, clips end to end. A horizontal strip.
+
+    The oldest sprite-sheet layout there is, and still the one several importers
+    want by default: GameMaker's Import Strip, and anything that slices by
+    dividing the width by a frame count. It is the same cells as the grid,
+    unrolled, so the anchor alignment carries over unchanged.
+    """
+    pixels, placements, cell = _pack_grid(clips, padding, extrude, 1 << 30)
+    gutter = padding + extrude
+    step_x = cell[0] + 2 * gutter
+    step_y = cell[1] + 2 * gutter
+    total = len(placements)
+    width = total * step_x
+    if width > max_width:
+        raise ValueError("a strip of %d frames is %dpx wide, over the %dpx limit; "
+                         "use --layout grid" % (total, width, max_width))
+
+    strip = img.blank(step_y, width)
+    ordered = sorted(placements, key=lambda p: (p.clip, p.index))
+    out = []
+    for slot, placement in enumerate(ordered):
+        window = pixels[placement.y - gutter:placement.y - gutter + step_y,
+                        placement.x - gutter:placement.x - gutter + step_x]
+        img.paste(strip, window, slot * step_x, 0)
+        out.append(Placement(placement.name, placement.clip, placement.index,
+                             slot * step_x + gutter, gutter,
+                             placement.width, placement.height, placement.anchor))
+    return strip, out, cell
 
 
 def _pack_shelf(clips, padding, extrude, max_width):

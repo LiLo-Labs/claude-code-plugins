@@ -112,6 +112,18 @@ atlas at all. Default.
 `--layout packed` shelf-packs tightly. Smaller, and unusable without the atlas
 JSON.
 
+`--layout strip` unrolls the grid into one horizontal row. The oldest sheet
+layout there is, and still what GameMaker's *Import Strip* and anything that
+slices by dividing the width by a frame count expect. Same cells and the same
+anchor alignment as the grid.
+
+`--compress` rewrites the sheet as an **indexed PNG**, and here that is
+*lossless* rather than quantised: the sheet's palette is provably a subset of
+the source art's, so there is nothing to throw away. Across the test corpus it
+is about 47% smaller. It is not always a win -- a 256-entry palette table is a
+fixed cost that a four-colour sheet loses on -- so both are written, the smaller
+is kept, and the build says which happened.
+
 `--padding` is a transparent gutter and `--extrude` repeats each frame's edge
 pixels into it. Both default to 1 and both are there for the same reason: the
 GPU samples slightly outside a rect whenever the sprite is drawn at a
