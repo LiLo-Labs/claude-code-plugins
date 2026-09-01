@@ -25,13 +25,43 @@ def test_runs_finds_the_spans_not_the_width():
 def test_the_neck_is_the_last_narrow_row_not_the_first():
     """Taking the first cuts a uniform-width head in half."""
     mask = image.alpha_mask(make_fixture.humanoid())
-    shoulder = vision.find_shoulder(mask)
-    neck = vision.find_neck(mask, shoulder)
+    neck = vision.find_neck(mask)
+    shoulder = vision.find_shoulder(mask, neck)
     assert neck < shoulder
     widths = vision.row_widths(mask)
     assert widths[neck] <= widths[shoulder]
     # The head is rows 1..6 in this fixture; the neck must be at its bottom.
     assert neck >= 4
+
+
+def test_the_neck_is_found_when_the_head_is_wider_than_the_shoulders():
+    """A chibi's head is the widest part of the character, so the body never
+    widens below it. A landmark that looks for widening shoulders puts the neck
+    two rows below the crown, and the rig then animates the face as torso."""
+    art = image.blank(18, 12)
+    art[0:8, 1:11] = [230, 190, 140, 255]      # a big head, 10 wide
+    art[8:9, 4:8] = [230, 190, 140, 255]       # a narrow neck, 4 wide
+    art[9:14, 3:9] = [40, 90, 200, 255]        # a smaller body, 6 wide
+    art[14:18, 3:5] = [60, 60, 90, 255]        # legs, parted
+    art[14:18, 7:9] = [60, 60, 90, 255]
+    mask = image.alpha_mask(image.trim(art)[0])
+    neck = vision.find_neck(mask)
+    assert neck == 8, "the neck is the narrow row, not the top of the skull"
+    assert vision.find_shoulder(mask, neck) > neck
+
+
+def test_a_chibi_gets_a_head_worth_the_name():
+    """The failure this fixes: a 2-row head on a 17-row character."""
+    art = image.blank(18, 12)
+    art[0:8, 1:11] = [230, 190, 140, 255]
+    art[8:9, 4:8] = [230, 190, 140, 255]
+    art[9:14, 3:9] = [40, 90, 200, 255]
+    art[14:18, 3:5] = [60, 60, 90, 255]
+    art[14:18, 7:9] = [60, 60, 90, 255]
+    built = rig_of(image.trim(art)[0])
+    head = built.first_role("head")
+    assert head is not None
+    assert head.height >= 7, "the head box must actually contain the head"
 
 
 def test_the_leg_split_is_found_from_the_feet_not_from_the_middle():
@@ -216,3 +246,103 @@ def test_unparseable_output_names_what_it_saw():
 def test_make_backend_rejects_an_unknown_name():
     with pytest.raises(ValueError):
         vision.make_backend("midjourney", "/tmp")
+
+
+# -- a pair the silhouette only half-resolves ------------------------------
+
+def test_one_arm_is_completed_by_mirroring_rather_than_failing_the_build():
+    """A profile hides the far arm, and a cape can swallow one leg entirely.
+    Emitting only the limb that was found produces a rig `validate` refuses, so
+    a real character would not build at all rather than animate imperfectly."""
+    left, right, mirrored = vision._complete_pair((2, 5, 6, 14), None, (6, 4, 18, 16), 24)
+    assert mirrored
+    assert right is not None
+    assert right[2] - right[0] == 6 - 2, "the partner keeps the found limb's width"
+    centre = (6 + 18) / 2.0
+    assert abs((left[0] + left[2]) / 2.0 - centre) == abs((right[0] + right[2]) / 2.0 - centre)
+
+
+def test_a_mirror_that_lands_outside_is_shifted_back_in_not_truncated():
+    """A truncated box is a one-pixel limb: it validates, animates, and looks
+    exactly like the character lost an arm anyway."""
+    _, right, mirrored = vision._complete_pair((0, 5, 4, 14), None, (2, 4, 8, 16), 10)
+    assert mirrored
+    assert right[2] - right[0] == 4
+    assert 0 <= right[0] and right[2] <= 10
+
+
+def test_completing_a_pair_leaves_a_complete_pair_alone():
+    left, right, mirrored = vision._complete_pair((1, 2, 3, 4), (7, 2, 9, 4), (0, 0, 10, 10))
+    assert not mirrored and left == (1, 2, 3, 4) and right == (7, 2, 9, 4)
+
+
+def test_completing_a_pair_leaves_two_missing_limbs_alone():
+    """Both missing is the other fallback's job, not this one's."""
+    left, right, mirrored = vision._complete_pair(None, None, (0, 0, 10, 10))
+    assert (left, right, mirrored) == (None, None, False)
+
+
+def test_a_character_with_one_visible_arm_produces_a_valid_rig():
+    """The failure this fixes: the build died on real art with 'no arm_far'."""
+    art = image.blank(30, 20)
+    art[2:9, 8:13] = [230, 190, 140, 255]        # head
+    art[9:20, 6:15] = [40, 90, 200, 255]         # torso
+    art[10:18, 2:5] = [230, 190, 140, 255]       # ONE arm, clear of the body
+    art[20:29, 6:9] = [60, 60, 90, 255]          # legs, parted
+    art[20:29, 12:15] = [60, 60, 90, 255]
+    built = rig_of(image.trim(art)[0])
+    assert R.validate(built) == []
+    assert built.first_role("arm_near") is not None
+    assert built.first_role("arm_far") is not None
+    assert any("mirror" in note for note in built.notes)
+
+
+# -- art that is drawn in more than one piece ------------------------------
+
+def with_drop_shadow(art, rows=1, gap=1):
+    """A character with a detached shadow blob below its feet, as real art has."""
+    height, width = art.shape[:2]
+    out = image.blank(height + gap + rows, width)
+    image.paste(out, art, 0, 0)
+    out[height + gap:height + gap + rows, width // 3:width - width // 3] = [90, 90, 100, 255]
+    return out
+
+
+def test_a_detached_shadow_does_not_stand_in_for_the_feet():
+    """Scanning up from the bottom hits the shadow, finds one run, and concludes
+    the legs never part -- which demotes a person to a one-piece prop."""
+    art = image.trim(make_fixture.humanoid())[0]
+    plain = vision.find_split(image.alpha_mask(art))
+    shadowed = vision.find_split(image.alpha_mask(with_drop_shadow(art)))
+    assert plain is not None
+    assert shadowed == plain, "the shadow must not move the hip line"
+
+
+def test_body_mask_drops_a_detached_shadow():
+    art = image.trim(make_fixture.humanoid())[0]
+    body = vision.body_mask(image.alpha_mask(with_drop_shadow(art)))
+    assert not body[art.shape[0]:].any(), "the shadow must not count as body"
+    assert body[:art.shape[0]].any(), "the character must still be there"
+
+
+def test_body_mask_keeps_a_character_genuinely_drawn_in_two_pieces():
+    """A floating sword or a detached head is art, not a shadow."""
+    art = image.blank(20, 20)
+    art[0:8, 2:10] = [200, 40, 40, 255]
+    art[12:20, 2:10] = [40, 90, 200, 255]      # same size, clearly deliberate
+    kept = vision.body_mask(image.alpha_mask(art))
+    assert kept.sum() == image.alpha_mask(art).sum()
+
+
+def test_a_shadowed_character_still_rigs_as_a_humanoid():
+    built = rig_of(image.trim(with_drop_shadow(image.trim(make_fixture.humanoid())[0]))[0])
+    assert built.character_class == "humanoid"
+    assert R.validate(built) == []
+
+
+def test_the_shadow_is_still_owned_by_some_part():
+    """Measurements ignore it; the cut must not - it is the user's art."""
+    art = image.trim(with_drop_shadow(image.trim(make_fixture.humanoid())[0]))[0]
+    built = rig_of(art)
+    from spritepipe import cutout
+    assert image.equal(cutout.cut(built, art).rest(), art)

@@ -83,42 +83,94 @@ def _bbox(spans):
             max(span[2] for span in spans), max(ys) + 1)
 
 
-def find_shoulder(mask, low=0.10, high=0.55):
-    """The row where the silhouette widens most sharply. That is the shoulders.
+def find_neck(mask, low=0.10, high=0.55):
+    """The narrowest row in the upper body. That is the neck.
 
-    Scanning for the narrowest row alone finds the top of the head on any
-    character whose head is a uniform-width block, which is most pixel art. The
-    step is the reliable landmark; the neck is then found relative to it.
+    Deliberately independent of where the shoulders are, because the obvious
+    landmark -- the row where the silhouette widens into the shoulders -- is
+    wrong for a whole category of sprite. A chibi's head is the WIDEST part of
+    the character, so the body never widens below it, and a shoulder-first
+    search puts the "shoulders" two rows down from the crown and the neck above
+    them. The rig then has a two-row head on a seventeen-row character and the
+    face animates as part of the torso.
+
+    A neck is narrow whether the head above it is bigger or smaller than the
+    body below it, so search for narrowness and nothing else. The LAST row
+    achieving the minimum is taken, so a head of uniform width resolves to its
+    bottom row rather than its top one.
     """
     height = mask.shape[0]
-    y0, y1 = max(1, int(height * low)), max(3, int(height * high))
-    widths = row_widths(mask)[y0:y1].astype(float)
-    if widths.size < 2:
-        return max(1, int(height * 0.3))
-    return int(y0 + int(np.argmax(np.diff(widths))) + 1)
-
-
-def find_neck(mask, shoulder=None):
-    """The last row that still belongs to the head.
-
-    Walking down from the top, the head is the narrow part and the neck is the
-    LAST narrow row before the shoulders, not the first. Taking the first is how
-    a rig ends up cutting a character's face in half.
-    """
-    height = mask.shape[0]
-    if shoulder is None:
-        shoulder = find_shoulder(mask)
-    y0 = max(0, int(height * 0.06))
-    y1 = max(y0 + 1, min(shoulder, height - 1))
+    y0 = max(1, int(height * low))
+    y1 = max(y0 + 1, min(int(height * high), height - 1))
     widths = row_widths(mask)[y0:y1].astype(float)
     if widths.size == 0 or not widths.any():
-        return max(0, shoulder - 1)
+        return max(0, int(height * 0.3))
     widths[widths == 0] = np.inf
-    narrowest = float(widths.min())
-    # Last occurrence of the minimum, so a uniform-width head resolves to its
-    # bottom row rather than its top one.
-    last = int(np.flatnonzero(widths <= narrowest)[-1])
+    last = int(np.flatnonzero(widths <= float(widths.min()))[-1])
     return int(y0 + last)
+
+
+def find_shoulder(mask, neck=None):
+    """The first row below the neck that is at least as wide as the neck.
+
+    Derived from the neck rather than the other way round. Its only job is to
+    say where the arms start, and the arms start where the body stops being a
+    neck -- which is true whether the shoulders are broader than the head or
+    narrower.
+    """
+    height = mask.shape[0]
+    if neck is None:
+        neck = find_neck(mask)
+    widths = row_widths(mask)
+    limit = min(height, max(neck + 2, int(height * 0.75)))
+    for y in range(neck + 1, limit):
+        if widths[y] >= widths[neck]:
+            return int(y)
+    return int(min(neck + 1, height - 1))
+
+
+def body_mask(mask, keep=0.15):
+    """The character without anything detached from it.
+
+    Real sprites routinely carry a baked drop shadow: a separate blob a row or
+    two below the feet. It is part of the art and the rig must still own it, but
+    it is not part of the BODY, and letting it stand in for the feet breaks
+    every measurement taken from the bottom up -- the leg split most of all,
+    which then finds a single shadow-shaped run, concludes the legs never part,
+    and demotes a person to a one-piece prop.
+
+    So measurements use the largest connected component and boxes use the whole
+    mask. Anything holding at least `keep` of the art is kept as body, so a
+    character genuinely drawn in two pieces is not thrown away.
+    """
+    height, width = mask.shape
+    seen = np.zeros_like(mask)
+    best, best_size, total = None, 0, int(mask.sum())
+    kept = np.zeros_like(mask)
+    for sy in range(height):
+        for sx in range(width):
+            if mask[sy, sx] and not seen[sy, sx]:
+                stack, blob = [(sy, sx)], []
+                seen[sy, sx] = True
+                while stack:
+                    y, x = stack.pop()
+                    blob.append((y, x))
+                    for dy in (-1, 0, 1):
+                        for dx in (-1, 0, 1):
+                            ny, nx = y + dy, x + dx
+                            if (0 <= ny < height and 0 <= nx < width
+                                    and mask[ny, nx] and not seen[ny, nx]):
+                                seen[ny, nx] = True
+                                stack.append((ny, nx))
+                if len(blob) > best_size:
+                    best, best_size = blob, len(blob)
+                if total and len(blob) >= total * keep:
+                    for y, x in blob:
+                        kept[y, x] = True
+    if not kept.any() and best:
+        for y, x in best:
+            kept[y, x] = True
+    return kept if kept.any() else mask
 
 
 def find_split(mask, floor=0.35):
@@ -136,6 +188,7 @@ def find_split(mask, floor=0.35):
     caller falls back to a proportion, and records that it did.
     """
     height = mask.shape[0]
+    mask = body_mask(mask)
     bottom = None
     for y in range(height - 1, -1, -1):
         if mask[y].any():
@@ -179,6 +232,49 @@ def core_and_limbs(mask, y0, y1, center_x):
             else:
                 right.append((y,) + span)
     return _bbox(core), _bbox(left), _bbox(right)
+
+
+def _complete_pair(left, right, reference_box, width=None):
+    """Given one of a symmetric pair, invent its partner by mirroring.
+
+    A silhouette routinely resolves only one of a pair: on a profile the near
+    arm hides the far one, and a cape or a long coat can swallow one leg
+    entirely. Emitting the one that was found and stopping there produces a rig
+    that `validate` rejects outright -- paired limbs animate in counter-phase
+    and need both halves -- so a real character would fail to build at all
+    rather than animate imperfectly.
+
+    Mirroring about the parent's centreline is the right guess and a cheap one:
+    on a symmetric character it is where the partner actually is, and where it
+    is not, it is still hidden behind the body and never seen.
+
+    The mirror is SHIFTED back inside the image rather than truncated when it
+    lands outside. On a character trimmed tight to an outstretched arm, the
+    reflection falls past the opposite edge, and a truncated box is an empty or
+    one-pixel limb -- which validates, animates, and looks like the character
+    lost an arm anyway.
+
+    Returns (left, right, mirrored) where `mirrored` says a partner was invented.
+    """
+    if (left is None) == (right is None):
+        return left, right, False
+    centre = (reference_box[0] + reference_box[2]) / 2.0
+    found = left if right is None else right
+    x0, y0, x1, y1 = found
+    span = x1 - x0
+    mirror_x0 = int(round(2 * centre - x1))
+    mirror_x1 = mirror_x0 + span
+    if width is not None:
+        if mirror_x0 < 0:
+            mirror_x0, mirror_x1 = 0, min(int(width), span)
+        elif mirror_x1 > width:
+            mirror_x0, mirror_x1 = max(0, int(width) - span), int(width)
+    partner = (mirror_x0, y0, mirror_x1, y1)
+    if partner[2] <= partner[0]:
+        partner = found
+    if right is None:
+        return left, partner, True
+    return partner, right, True
 
 
 def pair_boxes(mask, y0, y1):
@@ -251,18 +347,29 @@ class TemplateBackend(Backend):
         the silhouette has LEGS -- a bottom that parts and stays parted -- and
         proportion only then decides whether they are a person's or an animal's.
 
-        With no legs, a shoulder step is what is left: a narrow head over a
-        markedly wider body is a person even under a robe. Nothing else is, and
-        prop is the safe answer, because a prop animates as one piece and one
-        piece is never wrong -- only plain.
+        With no legs, the question is whether the shape has a NECK: a row
+        markedly narrower than the mass below it. That works for a chibi, whose
+        head is the widest part of the character and which therefore has no
+        shoulder step at all. Testing for widening shoulders instead demotes
+        every big-headed sprite -- a large fraction of all pixel art -- to a
+        one-piece prop.
         """
         height, width = mask.shape
         tall = height >= width * 1.15
         if find_split(mask) is not None:
             return "humanoid" if tall else "creature"
-        if tall and self._has_shoulders(mask):
+        if tall and self._has_neck(mask):
             return "humanoid"
         return "prop"
+
+    def _has_neck(self, mask, ratio=0.8):
+        """Is there a row narrow enough, with enough mass below it, to be a neck?"""
+        neck = find_neck(mask)
+        widths = row_widths(mask)
+        below = widths[neck + 1:]
+        if below.size == 0 or not below.any():
+            return False
+        return float(widths[neck]) <= float(below.max()) * ratio
 
     def _has_shoulders(self, mask, ratio=1.25):
         shoulder = find_shoulder(mask)
@@ -274,8 +381,8 @@ class TemplateBackend(Backend):
 
     def _humanoid(self, mask, width, height, facing):
         notes = []
-        shoulder = find_shoulder(mask)
-        neck = find_neck(mask, shoulder)
+        neck = find_neck(mask)
+        shoulder = find_shoulder(mask, neck)
         split = find_split(mask)
         if split is None:
             split = int(height * 0.62)
@@ -306,6 +413,19 @@ class TemplateBackend(Backend):
             notes.append("the arms never separate from the body in the "
                          "silhouette, so each arm is the outer third of the "
                          "torso; a vision rig will do better here")
+        else:
+            left_arm, right_arm, mirrored = _complete_pair(
+                left_arm, right_arm, torso_box, width)
+            if mirrored:
+                notes.append("only one arm separates from the body in the "
+                             "silhouette; the other is its mirror about the "
+                             "torso's centreline")
+        left_leg, right_leg, mirrored_legs = _complete_pair(
+            left_leg, right_leg, torso_box, width)
+        if mirrored_legs:
+            notes.append("only one leg separates from the body in the "
+                         "silhouette; the other is its mirror about the "
+                         "torso's centreline")
 
         far_arm, near_arm = (left_arm, right_arm) if facing == "right" else (right_arm, left_arm)
         far_leg, near_leg = (left_leg, right_leg) if facing == "right" else (right_leg, left_leg)
