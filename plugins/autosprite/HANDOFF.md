@@ -9,7 +9,7 @@ again.
 The pipeline is sound and proven on real art. **20 CC0 sprites** (16×16 to
 76×81; humanoids, creatures, props, and four cases chosen to break a silhouette
 rigger) all build, with all seven verification checks passing on both backends.
-322 tests, no network or model in any of them.
+350 tests, no network or model in any of them.
 
 Quality, measured as **debris** — the share of a frame's pixels not connected to
 its main blob, against the source's own figure:
@@ -62,22 +62,43 @@ That gap is what backlog item 1 exists to close.
    corroborated a measurement: it called the shieldmaiden's shield arm a
    detached blob, and shed measures 5.6% on her attack.
 
-   Three biases to know about, all visible in that table:
+   Three biases were visible in that table. **One is now fixed.**
+
+   - **It judges the motion, not the rig.** ~~Fixed.~~ The critic is now shown
+     the RIG — every part, its role, and its box as fractions of the sprite —
+     alongside the contact sheet, and is asked to check the rig against the
+     picture *first*. It can now answer verdict `"rig"` with a list of
+     `rig_problems` and no adjustments at all, and `refine()` stops immediately
+     rather than tuning motion on top of a wrong skeleton.
+
+     The proof is the case that exposed the bias. On `creature-slime`, rigged
+     (wrongly) as a humanoid, it used to advise `{"leg_near": {"angle": 7}, ...}`
+     on limbs that do not exist. It now returns:
+
+     > This is a legless, armless slime blob; `arm_far`, `arm_near`, `leg_far`
+     > and `leg_near` carve limbs out of a body that has none.
+     >
+     > The `head` box `[0.00-0.11]` takes only the top sliver of the blob, while
+     > the face sits well below it inside the torso part.
+     >
+     > `torso` spans the full width and overlaps both arm boxes, so the same
+     > pixels are drawn by parts that rotate in opposite directions, creating
+     > the vertical seam.
+
+     …with `adjustments: {}`. Every one of those three is true and checkable
+     against the rig table. This makes the critic useful for a second job it
+     could not do before: **auditing the rigger**. Its rig complaints are the
+     cheapest source of leads for backlog item 2.
+
+   Two biases remain:
 
    - **It never says "good".** Six of six came back "loose". It will always find
-     something, so a round is not evidence that anything was wrong.
+     something, so a round is not evidence that anything was wrong. The prompt
+     now warns it about this bias explicitly; that has not been re-measured
+     across the six-character sweep, and doing so is the next check.
    - **It always reaches for the same four roles** (both arms, both legs), and
      touched `torso` in four and `root` in two. It has not once proposed a
      change to `head`, `tail` or a scale channel.
-   - **It judges the motion, not the rig, and so accepts a wrong rig's premise.**
-     It advised opening the slime's LEG swing. The slime has no legs; the
-     silhouette rigger mis-classified it as a humanoid and invented some. The
-     critic cannot see that, because it is only shown the frames.
-
-   The obvious next move for this item: show the critic the RIG alongside the
-   picture — which parts exist, where their boxes are — so it can answer "this
-   rig is wrong" as well as "this motion is wrong". That is likely worth more
-   than any further tuning of the adjustment deltas.
 2. **Bring `_creature` up to `_humanoid`.** Half done.
 
    The classification half is fixed: `find_split` now looks past up to two

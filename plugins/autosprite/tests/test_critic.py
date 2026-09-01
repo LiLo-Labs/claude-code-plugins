@@ -19,14 +19,17 @@ class Scripted:
     def __init__(self, *critiques):
         self.queue = list(critiques)
         self.seen = []
+        self.rigs = []
 
-    def review(self, contact_sheet_path, animation):
+    def review(self, contact_sheet_path, animation, rig=None):
         self.seen.append(contact_sheet_path)
+        self.rigs.append(rig)
         if not self.queue:
             return critic.Critique(actor=self.actor)
         head = self.queue.pop(0)
         return critic.Critique(head.get("verdict", "loose"), head.get("problems"),
-                               head.get("adjustments"), self.actor)
+                               head.get("adjustments"), head.get("rig_problems"),
+                               self.actor)
 
 
 # -- adjustments -----------------------------------------------------------
@@ -186,3 +189,64 @@ def test_make_critic_rejects_an_unknown_name():
 
 def test_make_critic_gives_the_null_one_by_default():
     assert isinstance(critic.make_critic("none", "/tmp"), critic.NullCritic)
+
+
+# -- the critic can see the rig --------------------------------------------
+
+def test_the_critic_is_handed_the_rig(hero_cutout, hero_rig, hero, tmp_path):
+    """Shown only frames it can only answer "the motion is wrong", so it
+    rationalises whatever rig it is given -- it once advised opening the leg
+    swing of a slime that has no legs."""
+    scripted = Scripted({"verdict": "good", "adjustments": {}})
+    critic.refine(hero_cutout, hero_rig, motion.get("walk"), hero.pixels,
+                  scripted, str(tmp_path), rounds=1)
+    assert scripted.rigs and scripted.rigs[0] is hero_rig
+
+
+def test_the_rig_is_described_as_fractions(hero_rig):
+    text = critic.describe_rig(hero_rig)
+    assert "role=" in text and "box=[" in text
+    for part in hero_rig.parts:
+        assert part.name in text
+    for number in text.split("[")[1].split("]")[0].split(","):
+        assert 0.0 <= float(number) <= 1.0, "boxes travel as fractions, not pixels"
+
+
+def test_describing_no_rig_does_not_crash():
+    assert "not supplied" in critic.describe_rig(None)
+
+
+def test_blaming_the_rig_stops_the_loop(hero_cutout, hero_rig, hero, tmp_path):
+    """Tuning the swing of a limb the character does not have is wasted work."""
+    scripted = Scripted(
+        {"verdict": "rig",
+         "rig_problems": ["this character is a blob; it has no arms or legs"],
+         "adjustments": {"leg_near": {"angle": 20}}},
+        {"adjustments": {"leg_near": {"angle": -5}}})
+    walk = motion.get("walk")
+    best, history = critic.refine(hero_cutout, hero_rig, walk, hero.pixels,
+                                  scripted, str(tmp_path), rounds=3)
+    assert best.to_dict() == walk.to_dict(), "no adjustment may be applied"
+    assert len(history) == 1
+    assert "rig is the problem" in history[0]["outcome"]
+
+
+def test_rig_problems_alone_are_enough_to_stop(hero_cutout, hero_rig, hero, tmp_path):
+    scripted = Scripted({"verdict": "loose",
+                         "rig_problems": ["the head box stops halfway down the face"],
+                         "adjustments": {"head": {"angle": 4}}})
+    walk = motion.get("walk")
+    best, history = critic.refine(hero_cutout, hero_rig, walk, hero.pixels,
+                                  scripted, str(tmp_path), rounds=2)
+    assert best.to_dict() == walk.to_dict()
+    assert "head box" in history[0]["outcome"]
+
+
+def test_a_critique_without_rig_problems_still_adjusts(hero_cutout, hero_rig, hero,
+                                                       tmp_path):
+    scripted = Scripted({"adjustments": {"leg_near": {"angle": -4},
+                                         "leg_far": {"angle": -4}}})
+    best, history = critic.refine(hero_cutout, hero_rig, motion.get("walk"),
+                                  hero.pixels, scripted, str(tmp_path), rounds=1)
+    assert "rig is the problem" not in history[0]["outcome"]
+    assert best.to_dict() != motion.get("walk").to_dict()

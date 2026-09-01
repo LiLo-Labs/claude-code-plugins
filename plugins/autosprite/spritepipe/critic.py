@@ -31,6 +31,13 @@ anything a viewer would call broken.
 **The critic only moves numbers that already exist.** It returns deltas on the
 channels of the tracks the animation already has. It cannot add a limb, invent a
 track, or reach past the keyframe table into the renderer.
+
+It is also shown the RIG, and that is not a detail. Run across six characters
+without it, the critic advised opening the SLIME's leg swing -- a slime that has
+no legs, whose silhouette rig had invented some. Shown only frames, it can only
+ever answer "this motion is wrong", so it rationalises whatever rig it is given.
+Shown the parts as well, it can say the rig is the problem, which is the more
+useful answer and the one a human reviewer would give.
 """
 
 import copy
@@ -60,15 +67,31 @@ frames in order.
 The animation is "%(name)s" (%(frames)d frames, %(fps)g fps, %(loop)s). It was \
 made by cutting the original character into parts and rotating them about their \
 joints -- no pixel was drawn or invented. So the ART cannot be wrong; only the \
-MOTION can be.
+MOTION, or the RIG the motion is applied to, can be.
 
-Judge the motion, not the drawing. Answer with JSON only, no prose, no fence.
+The character was cut into these parts. Boxes are fractions of the image, \
+[left, top, right, bottom], origin top-left:
+
+%(rig)s
+
+Judge the motion and the rig, not the drawing. Answer with JSON only, no prose, \
+no fence.
 
 {
-  "verdict": "good" | "loose" | "broken",
+  "verdict": "good" | "loose" | "broken" | "rig",
   "problems": ["one short sentence each, most important first"],
+  "rig_problems": ["parts that are wrong for THIS character, if any"],
   "adjustments": {"<role>": {"<channel>": <delta>}}
 }
+
+**Check the rig against the picture first.** The parts above were guessed, and \
+on some characters the guess is simply wrong -- a legless blob given legs, a \
+quadruped given a torso and arms, a head box that stops halfway down the face. \
+If the rig does not match what you can see, say verdict "rig", list what is \
+wrong in rig_problems, and return NO adjustments: tuning the swing of a limb \
+the character does not have is wasted work, and the rig has to be fixed first.
+
+Only when the parts are broadly right, judge the motion:
 
 Roles you may adjust: %(roles)s
 Channels: angle (degrees, clockwise positive for a right-facing character), \
@@ -92,15 +115,21 @@ What to look for, in order:
 - **Is the body stiff?** A little counter-rotation on the head and torso is what \
   makes a cycle look alive.
 
+You are not obliged to find fault. If the motion already reads well, say \
+verdict "good" with no adjustments -- across six characters this critic said \
+"loose" every single time, which is a bias to correct for, not a finding.
+
 Be conservative. Deltas above about 15 degrees or 4 pixels are large. If the \
 motion already reads well, say verdict "good", give an empty adjustments object, \
 and do not invent work."""
 
 
 class Critique:
-    def __init__(self, verdict="good", problems=None, adjustments=None, actor="unknown"):
+    def __init__(self, verdict="good", problems=None, adjustments=None,
+                 rig_problems=None, actor="unknown"):
         self.verdict = verdict
         self.problems = list(problems or [])
+        self.rig_problems = list(rig_problems or [])
         self.adjustments = dict(adjustments or {})
         self.actor = actor
 
@@ -108,8 +137,14 @@ class Critique:
     def wants_change(self):
         return bool(self.adjustments)
 
+    @property
+    def blames_the_rig(self):
+        """No amount of keyframe tuning fixes a limb the character does not have."""
+        return self.verdict == "rig" or bool(self.rig_problems)
+
     def to_dict(self):
         return {"verdict": self.verdict, "problems": self.problems,
+                "rig_problems": self.rig_problems,
                 "adjustments": self.adjustments, "actor": self.actor}
 
 
@@ -122,7 +157,7 @@ class NullCritic:
 
     actor = "deterministic:null-critic@0.1.0"
 
-    def review(self, contact_sheet_path, animation):
+    def review(self, contact_sheet_path, animation, rig=None):
         return Critique(actor=self.actor)
 
 
@@ -136,7 +171,7 @@ class HeadlessCritic:
         self.executable = executable
         self.actor = "llm:%s@critic" % model
 
-    def review(self, contact_sheet_path, animation):
+    def review(self, contact_sheet_path, animation, rig=None):
         from .vision import _extract_json
         import subprocess
 
@@ -146,6 +181,7 @@ class HeadlessCritic:
             "fps": animation.fps,
             "loop": "looping" if animation.loop else "one-shot",
             "roles": ", ".join(sorted(set(animation.tracks) | {"root"})),
+            "rig": describe_rig(rig),
         }
         prompt += "\n\nRead this file: %s\n" % contact_sheet_path
 
@@ -166,7 +202,27 @@ class HeadlessCritic:
         answer = payload.get("result", "") if isinstance(payload, dict) else str(payload)
         data = _extract_json(answer)
         return Critique(data.get("verdict", "good"), data.get("problems"),
-                        data.get("adjustments"), self.actor)
+                        data.get("adjustments"), data.get("rig_problems"),
+                        self.actor)
+
+
+def describe_rig(rig):
+    """The parts, as fractions, in the order they are drawn. Small on purpose.
+
+    A model reads a short table far better than a wall of pixel coordinates, and
+    fractions travel between the sheet it is looking at and the rig underneath
+    without either of them having to agree on a scale.
+    """
+    if rig is None:
+        return "  (not supplied)"
+    width, height = rig.size
+    lines = []
+    for part in rig.draw_order():
+        x0, y0, x1, y1 = part.box
+        lines.append("  %-12s role=%-10s box=[%.2f, %.2f, %.2f, %.2f]"
+                     % (part.name, part.role, x0 / float(width), y0 / float(height),
+                        x1 / float(width), y1 / float(height)))
+    return "\n".join(lines) or "  (no parts)"
 
 
 def apply_adjustments(animation, adjustments):
@@ -277,9 +333,15 @@ def refine(cutout, rig, animation, reference_pixels, critic, workdir, rounds=2,
     for index in range(max(0, int(rounds))):
         path = os.path.join(workdir, "%s-round%d.png" % (best.name, index))
         contact_sheet(best_frames, reference_pixels, path)
-        critique = critic.review(path, best)
+        critique = critic.review(path, best, rig)
         entry = {"round": index, "sheet": path, "critique": critique.to_dict(),
                  "shed_before": round(best_shed, 4)}
+
+        if critique.blames_the_rig:
+            entry["outcome"] = ("the rig is the problem, not the motion: %s"
+                                % "; ".join(critique.rig_problems[:2]))
+            history.append(entry)
+            break
 
         if not critique.wants_change:
             entry["outcome"] = "no change asked for"

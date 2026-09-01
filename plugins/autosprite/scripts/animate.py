@@ -117,6 +117,8 @@ def main():
             print("  %s" % animation.note)
         for entry in critique_history:
             print("  critic round %d: %s" % (entry["round"], entry["outcome"]))
+            for problem in entry["critique"].get("rig_problems", [])[:3]:
+                print("      RIG: %s" % problem)
             for problem in entry["critique"]["problems"][:3]:
                 print("      %s" % problem)
         if out["holds"]:
