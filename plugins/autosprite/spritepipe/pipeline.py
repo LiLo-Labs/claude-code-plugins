@@ -106,6 +106,52 @@ def build_rigs(references, backend, character_class="auto", facing="right",
     return rigs, cutouts
 
 
+def outfit_views(references, rigs, attach, tolerance, native, source_path, build):
+    """Composite the items onto every view and re-rig from the composed art.
+
+    Only the side view is outfitted: an item drawn from the side is not a
+    drawing of that item from the front, and silently pasting it there would be
+    inventing a view -- the same thing `directions` refuses to do for the
+    character itself. A front reference keeps its own unoutfitted rig and says
+    so.
+    """
+    from . import ingest as ingest_module
+    from . import outfit as outfit_module
+
+    items = []
+    for entry in attach:
+        pixels = ingest_module.ingest(entry["path"], tolerance=tolerance,
+                                      native=native).pixels
+        items.append({"socket": entry["socket"], "pixels": pixels,
+                      "name": entry.get("name") or "%s_%s" % (
+                          entry["socket"],
+                          os.path.splitext(os.path.basename(entry["path"]))[0]),
+                      "grip": entry.get("grip"), "tags": entry.get("tags", ())})
+
+    composed, rig = outfit_module.attach(references["side"].pixels, rigs["side"],
+                                         items)
+    img.save(composed, source_path)
+    references = dict(references)
+    references["side"] = ingest_module.ingest(source_path, tolerance=tolerance,
+                                              native=False)
+    rigs = dict(rigs)
+    rigs["side"] = rig
+    if len(references) > 1:
+        build.warn("only the side view was outfitted; a front or back reference "
+                   "keeps its own art, because an item drawn from the side is "
+                   "not a drawing of that item from the front")
+    problems = rig_module.validate(rig)
+    if problems:
+        raise ValueError("the outfitted rig is not usable: %s" % "; ".join(problems))
+    cutouts = dict()
+    for view, reference in references.items():
+        cutouts[view] = cutout_module.cut(rigs[view], reference.pixels)
+    if not img.equal(cutouts["side"].rest(), references["side"].pixels):
+        raise ValueError("the outfitted art does not reassemble from its own "
+                         "rig; that is a bug in this plugin")
+    return references, rigs, cutouts
+
+
 def _plain(selector):
     """A selector as something to say out loud in a build report."""
     if selector.startswith("trait:"):
@@ -211,7 +257,8 @@ def build_sheet(reference_path, outdir, animations=("full",), direction_set="1",
                 front=None, back=None, tolerance=12, native=True,
                 custom_animations=None, preview_scale=None, kind="character",
                 compress=False, repair=True, frames=None,
-                frame_size=None, fps=None, loop_start=None, loop_end=None):
+                frame_size=None, fps=None, loop_start=None, loop_end=None,
+                attach=None):
     """The whole pipeline. Returns a Build."""
     build = Build()
     os.makedirs(outdir, exist_ok=True)
@@ -230,6 +277,16 @@ def build_sheet(reference_path, outdir, animations=("full",), direction_set="1",
         character_class = "prop"
     build.rigs, build.cutouts = build_rigs(
         build.references, engine, character_class, facing, intent, build)
+    if attach:
+        outfit_source = os.path.join(outdir, "%s.source.png" % name)
+        build.references, build.rigs, build.cutouts = outfit_views(
+            build.references, build.rigs, attach, tolerance, native,
+            outfit_source, build)
+        build.written["source"] = outfit_source
+        # Everything downstream -- the palette lock, the REST check, the
+        # verifier's reference -- now means the composed art, which is the
+        # art that was actually rigged and is the honest thing to check.
+        reference_path = outfit_source
     build.report["rig"] = {view: rig.to_dict() for view, rig in build.rigs.items()}
     build.report["rig_actor"] = engine.actor
 
@@ -336,6 +393,11 @@ def build_sheet(reference_path, outdir, animations=("full",), direction_set="1",
     rig_path = os.path.join(outdir, "%s.rig.json" % name)
     build.rigs["side"].save(rig_path)
     build.written["rig"] = rig_path
+    if attach:
+        # `atlas.write` returns a fresh dict, so the composed source has to be
+        # put back. It is worth reporting: it is the art that was actually
+        # rigged, and the art the verifier checks the palette against.
+        build.written["source"] = outfit_source
 
     build.previews = preview_module.write_all(
         build.sheet.clips, os.path.join(outdir, "preview"),

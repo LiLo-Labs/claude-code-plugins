@@ -179,6 +179,28 @@ flask into bowl, neck and cork, none of which is a joint.
 numbered frames, which is what an importer taking one animation at a time
 wants.
 
+**Outfitting** — `--attach hand=sword.png`. A sword drawn once ends up in the
+right hand of a character it has never met, in front of the arm, and swings
+through every clip. Sockets — `hand`, `off_hand`, `head`, `waist`, `chest` — are
+**derived from the rig rather than declared**, which is what makes "works with
+every character" true rather than aspirational: a hand is the free end of the
+near arm, and every humanoid rig has one whether or not its author thought about
+outfitting. A rig with no far arm has no off-hand and says so, instead of putting
+a shield in the middle of the torso.
+
+The item is composited into the source art *before anything else runs*, and the
+composed image is written out as `<name>.source.png`. That is what makes it cost
+nothing: the item is a rig part parented to the arm, so forward kinematics
+carries it and there is no second pipeline to keep in step — and every check
+still means what it meant. REST still proves the parts reassemble into the
+source exactly, because the composed art **is** the source. PALETTE still proves
+every output colour came from the input, because the input now contains the
+sword's colours. Nothing was relaxed to let an item in.
+
+The limitation, stated rather than discovered: an item goes **in front of** the
+part it hangs on. Compositing at rest cannot record pixels hidden at rest, so a
+scabbard behind the body would lose whatever the body covers.
+
 **Outfit and skin variants** — recoloured by shading RAMP rather than by colour,
 so the shading survives. Ramps are found by hue *and by adjacency*: two shades
 belong to one material only if they touch somewhere in the art, which is what
@@ -203,6 +225,10 @@ python3 scripts/build.py --input hero.png --out out/ \
 # fix a line of the rig -- tag the sails `spinner` -- and build with that rig
 python3 scripts/build.py --input mill.png --out out/ \
     --rig out/mill.rig.json --animations building
+
+# put a sword in their hand; @27,27 says where it is held
+python3 scripts/build.py --input hero.png --out out/ \
+    --attach hand=sword.png@27,27 --attach head=hat.png
 
 # iterate on one cycle without rebuilding the sheet
 python3 scripts/animate.py --input hero.png --rig out/hero.rig.json \
@@ -279,7 +305,7 @@ pip install -r requirements-test.txt
 python3 -m pytest tests -q
 ```
 
-513 tests, no network, no model, well under a minute. Fixtures are generated rather
+526 tests, no network, no model, well under a minute. Fixtures are generated rather
 than checked in — `tests/make_fixture.py` builds parametric sprites so a test can
 have the exact property it is about (arms clear of the body or touching, legs
 parted or robed) instead of one PNG having to serve every case.

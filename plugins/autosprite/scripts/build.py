@@ -50,6 +50,14 @@ def main():
                         choices=("right", "left", "front", "back"))
     parser.add_argument("--intent", default="",
                         help="what the character is, in a few words; sharpens the rig")
+    parser.add_argument("--attach", action="append", default=[], metavar="SOCKET=FILE",
+                        help="put an item image on the character and animate it "
+                             "with them: --attach hand=sword.png. Sockets are "
+                             "hand, off_hand, head, waist, chest, and are derived "
+                             "from the rig, so one item works on any character "
+                             "that has the part. Add @X,Y to say where the item "
+                             "is held if its own bottom centre is not the grip: "
+                             "--attach hand=sword.png@27,27. Repeatable")
 
     parser.add_argument("--layout", default="grid",
                         choices=("grid", "packed", "strip"),
@@ -100,6 +108,11 @@ def main():
     args = parser.parse_args()
 
     custom = motion.load_custom(args.custom) if args.custom else None
+    try:
+        attach = [_attachment(entry) for entry in args.attach]
+    except ValueError as error:
+        print("build failed: %s" % error, file=sys.stderr)
+        return 2
 
     try:
         build = pipeline.build_sheet(
@@ -117,7 +130,7 @@ def main():
             compress=args.compress, repair=not args.no_repair,
             frames=args.frames, frame_size=args.frame_size,
             fps=args.fps, loop_start=args.loop_start,
-            loop_end=args.loop_end)
+            loop_end=args.loop_end, attach=attach)
     except (ValueError, RuntimeError) as error:
         print("build failed: %s" % error, file=sys.stderr)
         return 2
@@ -132,6 +145,24 @@ def main():
     else:
         print(_human(build, report))
     return 0 if build.verification.ok else 1
+
+
+def _attachment(entry):
+    """SOCKET=FILE, optionally FILE@X,Y for where the item is held."""
+    if "=" not in entry:
+        raise ValueError("--attach wants SOCKET=FILE, not %r" % entry)
+    socket, path = entry.split("=", 1)
+    grip = None
+    if "@" in path:
+        path, point = path.rsplit("@", 1)
+        try:
+            x, y = point.split(",")
+            grip = (int(x), int(y))
+        except ValueError:
+            raise ValueError("--attach %r: the grip after @ must be X,Y" % entry)
+    if not os.path.exists(path):
+        raise ValueError("--attach %r: no such file %s" % (entry, path))
+    return {"socket": socket.strip(), "path": path, "grip": grip}
 
 
 def _human(build, report):
