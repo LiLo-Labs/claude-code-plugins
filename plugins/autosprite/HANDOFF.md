@@ -207,6 +207,49 @@ each thing was so it is not redone. In the order it landed:
 The full history of each, with the numbers, is in the git log; the commits lead
 with the failure rather than the change.
 
+## The new direction, and the first evidence for it
+
+The ask has changed: not fifteen named clips for characters, but **an
+open-ended set of operations applicable to any subject from a single image** --
+items, buildings, weather, plants -- with modular attachment so one item works
+on any host, at a quality that reads as animation rather than as motion.
+
+Six non-character subjects are now in the corpus, all CC0 from Dr. Jamgo's
+*Basic Hex Tile Set - 16x16* (licence text: "No Copyright Notice required. A
+note of tribute is appreciated though.", verified 2026-09-01 at
+https://opengameart.org/content/basic-hex-tile-set-16x16): a **windmill**, a
+**cottage**, a **farmhouse**, a **tree**, a **wheat field** and a **mine**. The
+windmill matters most: the source pack ships **four rotation frames of its
+sails**, so the artist's own animation sits beside it in
+`reference-cycle/` as ground truth.
+
+**What a windmill does today.** It builds, verifies, and offers exactly two
+animations: `bob` and `spin`. The rigger says *"one piece: props animate as a
+whole, never articulated"*, so the only thing on offer is a house that bobs, or
+a house that spins.
+
+**What happens when you push it by hand.** The vision backend, told what it is
+looking at, DOES find the sails -- `sails`, pivot [7, 5], which is the hub, at
+0.72 confidence. Driving that part through a full 360° over eight frames gives
+**eight distinct frames, zero palette escapes, and sails that visibly turn**.
+The architecture can already do this.
+
+It is also not good enough, and the way it fails is the specification for what
+comes next:
+
+ - **8.6% shed.** The sails' box is `[0, 0, 15, 12]` -- the whole top of the
+   image, tower included -- so rotating it drags tower pixels round with it and
+   leaves a hole. A part that turns continuously needs a box tight to the thing
+   that turns, and 4% of the sprite already falls outside every box.
+ - **`accessory` is the wrong word and nothing drives it.** It was the closest
+   role available. The vocabulary has no word for "this rotates about its hub",
+   "this sways from its base", "this ripples", "this flickers".
+ - Compared against the artist's own four frames, ours turn and theirs turn
+   *and stay attached*.
+
+That is the whole problem stated in one subject: **the geometry works, the
+vocabulary does not.**
+
 ## Backlog, in value order
 
 Honest and short. The easy things are gone.
@@ -384,11 +427,30 @@ reverted.
 
 ## Reproducing the corpus
 
-The sprites are CC0 from OpenGameArt and Kenney, fetched into `/tmp/sprites/` by
+The sprites are CC0 from OpenGameArt and Kenney, fetched into `/tmp/corpus/` by
 a workflow; they are **not** checked in (`.gitignore` excludes PNGs, and vendored
 art would bloat the repo). Each has a `meta.json` recording title, author,
-licence and the licence page. To rebuild it, re-run the acquisition workflow, or
-fetch from the `license_page` URLs in those files.
+licence, licence text, download URL and the date the licence was verified. To
+rebuild it, re-run the acquisition workflow, or fetch from the `license_page`
+URLs in those files.
+
+Twenty of the subjects are characters, creatures and props. Six are **not
+characters at all**, and were added for the generalisation work:
+
+| Slug | Subject | Why it is in the corpus |
+|---|---|---|
+| `subject-windmill-drjamgo` | windmill | A building with a moving part, and the pack ships the artist's own four sail-rotation frames as `reference-cycle/` ground truth |
+| `subject-cottage-drjamgo` | cottage | A building with nothing that moves — the honest answer for it is chimney smoke, which is not a rigid part |
+| `subject-farmhouse-drjamgo` | farmhouse | A second building, so a rule found on the cottage has somewhere to be wrong |
+| `subject-tree-drjamgo` | tree | Sways from the base; the canopy should lag the trunk |
+| `subject-wheatfield-drjamgo` | wheat field | A *field* of things, where the motion is a travelling wave and no single part owns it |
+| `subject-mine-drjamgo` | mine entrance | Mostly static with one small feature; the case for "animate almost nothing" |
+
+All six are from Dr. Jamgo's *Basic Hex Tile Set - 16x16*
+(https://opengameart.org/content/basic-hex-tile-set-16x16), CC0, licence text
+verified on 2026-09-01: "No Copyright Notice required. A note of tribute is
+appreciated though." The tiles are cut from the pack's single sheet by
+`/tmp/nc/tiles/`, and each subject directory records the cell it came from.
 
 Harnesses used during this work live in `/tmp` and are not part of the plugin:
 `batch.py` (run the corpus), `wall.py` (montages and GIFs), `sheets.py`
