@@ -275,11 +275,24 @@ Honest and short. The easy things are gone.
    already said out loud; this is on the list only so nobody mistakes it for an
    oversight.
 
-## One thing that is broken and needs a better rig, not a better renderer
+## What is broken, and needs a better rig rather than a better renderer
+
+Both are the same shape of problem: a character too small for a rigid-limb rig
+at the amplitudes the library uses.
 
 - **`platformer-grass-prowne`'s jump on the silhouette backend, 15.4%.** An
   8-pixel-wide character whose limbs are 2 pixels across. Its VISION rig holds
   together completely, which is the honest answer for a sprite this small.
+  Measured, the pieces separate by 2.0 to 3.6 pixels -- a quarter to a half of
+  the character's whole width -- so the composite-level version of `_reconnect`
+  would draw a visible thread across it rather than closing a seam. That was
+  checked and not built.
+- **`grafxkid-oldhero`, 3 to 4% on the faster clips.** The corpus's smallest
+  character at 10x17, and what comes away is a boot, next to the baked shadow.
+  Worth knowing before chasing it: the shadow's colour is the character's
+  OUTLINE colour too, so measuring "the shadow" by colour finds 57 pixels
+  spread over the whole figure. That mistake has now been made twice in this
+  work; measure detached COMPONENTS, not colours.
 
 The potion's spin used to sit here too, at 23.8%, described as needing "the
 reducer to preserve connectivity, which has not been attempted". It has now
