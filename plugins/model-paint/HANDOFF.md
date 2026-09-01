@@ -32,6 +32,34 @@ recessed lines; slate acts as the shadow"; ribs -> bone, same as the body,
 "the deep ribbing already reads". That is a painter using four colours, and no
 Lab-distance solver produces it.
 
+## The 20-part run, and what it settles
+
+    102 calls, $45.95, 3.9 hours, 3MF geometry IDENTICAL
+    rocky base 24.9% | shell body 29.3% | silt 19.1% | crack lines 8.0%
+    the other sixteen parts between 0.0% and 3.4%
+
+Asked with no colour limit, SEE names 36 parts on this model and finds real
+levels: ribs -> rib crests -> rib troughs; barnacle clusters -> individual
+cones -> mouth openings; kelp stipes -> tips -> holdfasts; plus growth lines,
+nacre patches, a mineral waterline and algae film. The identification has
+never been the weak part.
+
+Half the views of the continuous render look like a painted model: the shell
+one ochre material across body, coils and ribs, dark wet rock below, pale silt
+in the low pockets, the junction on the real boundary.
+
+## What is still wrong: a thin feature in a CRAZED FIELD
+
+Crack lines took 8.0% of the surface and flood the plated area of the upper
+coil in half the views. The fine brush stops a line from filling a loop, but
+a crazed field is dozens of fissures criss-crossing a plated surface, and
+seventy one-pixel strokes across it sweep up most of the plates between them.
+Silt is the same shape of error at 19.1%.
+
+This is the open problem. It is NOT the rib/body boundary, which the filament
+stage dissolves, and it is not resolution -- the panels are large and the
+camera goes in close now.
+
 ## Judge the FILAMENT render, not the part render
 
 The part render shows ten colours and its upper coil looks patchy, because
