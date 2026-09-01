@@ -173,31 +173,42 @@ def body_mask(mask, keep=0.15):
     return kept if kept.any() else mask
 
 
-def find_split(mask, floor=0.35):
+def find_split(mask, floor=0.35, slack=2):
     """The row where the legs part, found by scanning up from the feet.
 
     Scanning down from the middle finds the first row with two spans, and on any
     character whose arms hang clear of the body that row is the armpit, not the
     crotch -- the rig then puts the hips at chest height and the character walks
     on its elbows. The legs are different from the arms in one reliable way:
-    once they part they STAY parted all the way to the floor. So the crotch is
-    the highest row from which every row down to the bottom has at least two
-    spans.
+    once they part they STAY parted, down to the floor.
 
-    None when the bottom row is a single span -- a robe, a slime, a prop. The
+    Down to the floor, but not always THROUGH it. A horse's hooves, a pair of
+    boots on a ground line, a baked contact shadow -- any of them merges the last
+    row or two back into one span, and requiring the very bottom row to be
+    parted threw the whole signal away: a winged pony with six clearly parted
+    rows of legs was demoted to a one-piece prop because its hooves met on the
+    final row. `slack` is how many merged rows at the bottom to look past.
+
+    None when the character genuinely never parts -- a robe, a slime, a prop. The
     caller falls back to a proportion, and records that it did.
     """
     height = mask.shape[0]
     mask = body_mask(mask)
-    bottom = None
-    for y in range(height - 1, -1, -1):
-        if mask[y].any():
-            bottom = y
-            break
-    if bottom is None or row_runs(mask[bottom]) < 2:
+    rows = [y for y in range(height) if mask[y].any()]
+    if not rows:
         return None
+    bottom = rows[-1]
+
+    parted = None
+    for y in range(bottom, max(-1, bottom - int(slack) - 1), -1):
+        if y >= 0 and mask[y].any() and row_runs(mask[y]) >= 2:
+            parted = y
+            break
+    if parted is None:
+        return None
+
     limit = max(1, int(height * floor))
-    y = bottom
+    y = parted
     while y - 1 >= limit and row_runs(mask[y - 1]) >= 2:
         y -= 1
     return int(y)

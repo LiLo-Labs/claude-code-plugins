@@ -50,10 +50,31 @@ That gap is what backlog item 1 exists to close.
    simply re-derives the same "open the legs" advice for everything. If the
    latter, the fix is probably to feed it the animation's current keyframe table
    alongside the picture so it can see what it is adjusting.
-2. **Bring `_creature` up to `_humanoid`.** The humanoid builder got the neck,
-   shadow and mirror work; the creature builder did not, and it shows — a winged
-   pegasus falls through to `prop`. It needs the same treatment: find the spine,
-   the head end and the leg pairs from measurements rather than proportions.
+2. **Bring `_creature` up to `_humanoid`.** Half done.
+
+   The classification half is fixed: `find_split` now looks past up to two
+   merged rows at the floor, because hooves, boots on a ground line and baked
+   contact shadows all merge the last row back into one span. A winged pony with
+   six clearly parted rows of legs was being demoted to a one-piece prop by its
+   hooves meeting on the final row. Pegasus and dragon now rig as creatures.
+
+   **The builder half is not**, and the numbers say so plainly. `_creature`
+   still places the head, tail and belly by proportion rather than measurement,
+   and the result is that a correctly-classified pegasus animates WORSE than the
+   static prop it used to be:
+
+   | | as a prop (before) | as a creature (now) |
+   |---|---|---|
+   | dragon walk | 0.0% (static) | **0.0%**, and it moves |
+   | pegasus walk | 0.0% (static) | **9.8%** |
+
+   The dragon is a clear win. The pegasus trades "static but clean" for
+   "animated but shedding a tenth of itself", which is not obviously better. The
+   classification is still right — a pegasus is a creature — so the fix belongs
+   in `_creature`: find the spine, the head end and the leg pairs from the
+   silhouette the way `_humanoid` now finds the neck and the hips. Start by
+   finding which part of the pegasus rig sheds; the wings are the obvious
+   suspect, since they are currently swallowed into `body`.
 3. **Per-animation exports.** One PNG + atlas per animation, and the
    folder-per-animation ZIP (`<anim>/spritesheet.png`, `atlas.json`,
    `frames/01.png…`). Concrete parity, entirely deterministic.

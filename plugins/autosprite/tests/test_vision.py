@@ -346,3 +346,36 @@ def test_the_shadow_is_still_owned_by_some_part():
     built = rig_of(art)
     from spritepipe import cutout
     assert image.equal(cutout.cut(built, art).rest(), art)
+
+
+def test_the_leg_split_looks_past_merged_hooves():
+    """A horse's hooves, boots on a ground line, or a baked contact shadow merge
+    the last row back into one span. Requiring the very bottom row to be parted
+    threw the whole signal away and demoted a winged pony to a one-piece prop."""
+    art = image.trim(make_fixture.humanoid())[0]
+    grounded = image.blank(art.shape[0] + 1, art.shape[1])
+    image.paste(grounded, art, 0, 0)
+    box = image.content_box(art)
+    grounded[art.shape[0], box[0]:box[2]] = [60, 60, 90, 255]   # one merged row
+
+    plain = vision.find_split(image.alpha_mask(art))
+    merged = vision.find_split(image.alpha_mask(grounded))
+    assert plain is not None
+    assert merged == plain, "one merged row at the floor must not hide the legs"
+
+
+def test_a_character_that_never_parts_still_reports_none():
+    """The slack must not invent legs on a robe."""
+    robed = image.trim(make_fixture.humanoid(legs_parted=False))[0]
+    assert vision.find_split(image.alpha_mask(robed)) is None
+
+
+def test_the_slack_does_not_reach_arbitrarily_far_up():
+    """Two merged rows is a ground line; ten is a character with no legs."""
+    art = image.trim(make_fixture.humanoid())[0]
+    box = image.content_box(art)
+    padded = image.blank(art.shape[0] + 8, art.shape[1])
+    image.paste(padded, art, 0, 0)
+    for row in range(art.shape[0], art.shape[0] + 8):
+        padded[row, box[0]:box[2]] = [60, 60, 90, 255]
+    assert vision.find_split(image.alpha_mask(padded)) is None
