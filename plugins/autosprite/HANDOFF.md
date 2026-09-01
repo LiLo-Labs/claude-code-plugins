@@ -9,7 +9,7 @@ again.
 The pipeline is sound and proven on real art. **20 CC0 sprites** (16×16 to
 76×81; humanoids, creatures, props, and four cases chosen to break a silhouette
 rigger) all build, with all seven verification checks passing on both backends.
-386 tests, no network or model in any of them.
+396 tests, no network or model in any of them.
 
 Quality, measured as **debris** — the share of a frame's pixels not connected to
 its main blob, against the source's own figure:
@@ -78,11 +78,33 @@ worth fixing:
    arms carved out of a body that has none: "rotating them punches holes in the
    body and leaves floating fragments". The slime is the corpus's worst
    remaining shed at 18.0%.
-3. **Boxes that swallow their neighbours.** The shieldmaiden's head box spans
-   the full width and the top 57%, taking the staff and the top of both arms
-   with it; the dragon's head box runs almost to the sprite's bottom and drags
-   a foreleg. This is a real class, and it may be checkable offline: a box far
-   larger than the pixels it ends up owning is a box that stole from someone.
+3. ~~**Boxes that swallow their neighbours.**~~ **Two of three done.**
+
+   - **What a character holds up is not its head.** A raised sword, a musket
+     barrel, a staff, a plume, a pair of horns: all stand above the head as a
+     column a few pixels across, and all of them ARE the narrowest rows, so the
+     neck search walked straight into them. The shieldmaiden's neck landed at
+     row 4 of 23, inside her horns, and the rig called her sword tip a head and
+     animated her helmet as torso. `find_crown` now finds where the character
+     starts -- the topmost row reaching 35% of its widest -- and the neck is
+     searched below that. Rows above still belong to the head box; horns are
+     part of a helmet.
+   - **A silhouette that only widens downwards has no neck to find.** A hood, a
+     helmet worn over the shoulders, a slime: the narrowest row is just the top
+     of the search band, and taking it made the head three rows of an
+     eighteen-row character. `find_neck` now checks that its answer is a local
+     minimum and falls back to a proportion when it is not. Head boxes: musket
+     officer 3 rows -> 7, necromancer 3 -> 6, slime 3 -> 9, shieldmaiden from
+     her sword tip to her whole horned helmet.
+   - **A gap between two boots is not a hip.** The shieldmaiden's silhouette
+     parts on its last row alone, so her "legs" were one row of boot swung about
+     a joint fifteen rows above them. A parting is now believed only if it
+     leaves more than three rows AND more than 15% of the character below it.
+     Three characters gained real leg boxes with no change in shed.
+
+   Still open in this theme: the head box that reaches the image edge because a
+   raised weapon is inside it. The weapon wants its own `prop` part parented to
+   an arm, which the silhouette cannot find and the vision backend can.
 4. **Props rigged as bodies.** The sword's `hilt` is tagged `body` while
    `blade`, the bulk of the sprite, is tagged `prop` -- the split is inverted.
    The potion's `flask` box fully contains `bowl` and `neck`. These come from
@@ -259,6 +281,16 @@ reverted.
   not: at `sx=0.14` a 10px potion is a clean sliver; it comes apart in the
   MIDDLE of the range, where its 2px cork lands on the reducer's coverage
   boundary. The first version also let a single 1px highlight veto all squash.
+- **Rejecting an "arm" too thin to be an arm.** The same reasoning that fixed
+  the boot gap, applied one limb up, and it does not survive contact: measured
+  across the corpus at every threshold that fires, it makes things WORSE (total
+  worst-frame shed 36% at 0.09, 54% at 0.15, 87% at 0.25, 117% at 0.35). A
+  46px platformer hero whose arms show as a 10%-tall sliver goes from 0% to
+  17.8% on its walk when that sliver is replaced by the outer third of the
+  torso. The critic is right that a two-row pauldron is not an arm; it is still
+  a better thing to swing than an invented one, because it barely moves. Only
+  the LEG half of this idea pays.
+
 - **Telling front-facing from side-facing by symmetry.** A front-on character
   is bilaterally symmetric and a profile is not, so this looks like a free
   measurement. It is not: measured over the corpus, silhouette symmetry puts a

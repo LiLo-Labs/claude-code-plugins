@@ -5,15 +5,40 @@ import pytest
 
 import make_fixture
 from spritepipe import (cutout, image, ingest, motion, quality, render, repair,
-                        vision)
+                        rig as R, vision)
+
+
+def flailing():
+    """A character, a rig, and a clip that measurably throws an arm off.
+
+    Built by hand rather than taken from the silhouette rigger, because the
+    rigger is meant to keep getting better at not doing this -- and every time
+    it does, a test that leaned on one of its mistakes goes green for the wrong
+    reason and then red for the wrong reason. The defect here is stated
+    outright: `arm_near`'s pivot is at the character's opposite corner, so the arm
+    is on a lever as long as the character is tall, and sixteen degrees of swing
+    carries it clear of the body where eight does not.
+
+    Returns (pixels, rig, cutout, animation).
+    """
+    art = np.zeros((16, 10, 4), dtype=np.uint8)
+    art[0:12, 2:8] = (80, 110, 160, 255)        # body
+    art[4:14, 8:10] = (200, 150, 110, 255)      # a long thin arm down one side
+    parts = [R.Part("torso", "torso", (0, 0, 8, 16), None, (4, 12), z=1),
+             R.Part("arm_near", "arm_near", (8, 4, 10, 14), "torso", (2, 15), z=2),
+             R.Part("arm_far", "arm_far", (8, 4, 10, 14), "torso", (2, 15), z=0)]
+    built = R.Rig((10, 16), parts, "humanoid", "right", anchor=(5, 16))
+    swing = motion.Animation(
+        "swing", frames=4,
+        tracks={"arm_near": [{"t": 0.0, "angle": 0.0}, {"t": 0.5, "angle": 40.0},
+                             {"t": 1.0, "angle": 0.0}],
+                "leg_near": [{"t": 0.0, "angle": 0.0}, {"t": 0.5, "angle": 5.0},
+                             {"t": 1.0, "angle": 0.0}]})
+    return art, built, cutout.cut(built, art), swing
 
 
 def whole_character():
-    """One connected blob, so a loose pixel in a frame is this code's doing.
-
-    The default fixture draws its arms clear of the body, which is a perfectly
-    good sprite and a useless subject here: its source art is already three
-    blobs, so `shed` starts forgiving and nothing can be attributed."""
+    """One connected blob that holds together, for the cases about doing nothing."""
     return make_fixture.humanoid(arms_clear=False)
 
 
@@ -61,17 +86,13 @@ def test_damp_ignores_a_role_the_clip_does_not_drive():
 
 
 def test_blame_names_the_part_whose_pixels_came_away():
-    """This fixture's arms are carved out of a solid body rather than drawn
-    clear of it, so an ordinary walk swings one of them off. That is the case
-    this exists for, and it is worth having as a fixture: it is exactly what
-    the silhouette rigger does to a character whose arms never separate."""
-    built, cut = rigged(whole_character())
-    walk = motion.get("walk")
-    frames, margin = rendered(cut, built, walk)
-    shed, index = quality.shed(frames, whole_character())
-    assert shed > repair.TOLERANCE
-    blamed = repair.blame(cut, built, walk.poses(built)[index], margin, render)
-    assert blamed and any(role.startswith("arm_") for role in blamed)
+    art, built, cut, swing = flailing()
+    margin = render.suggest_margin(built)
+    frames = render.render_sequence(cut, swing.poses(built), margin=margin)
+    shed, index = quality.shed(frames, art)
+    assert shed > repair.TOLERANCE, "the fixture is meant to come apart here"
+    assert repair.blame(cut, built, swing.poses(built)[index], margin, render) \
+        == ["arm_near"]
 
 
 def test_blame_is_empty_when_the_character_is_whole():
@@ -94,41 +115,39 @@ def test_a_whole_clip_is_handed_back_untouched():
 
 
 def test_a_broken_clip_is_damped_until_it_holds_together():
-    built, cut = rigged(whole_character())
-    source = whole_character()
-    thrown = repair.damp(motion.get("attack"), ["arm_near", "arm_far"], 6.0)
-    frames, margin = rendered(cut, built, thrown)
-    before, _ = quality.shed(frames, source)
-    assert before > repair.TOLERANCE, "the fixture is meant to be broken here"
+    art, built, cut, swing = flailing()
+    margin = render.suggest_margin(built)
+    frames = render.render_sequence(cut, swing.poses(built), margin=margin)
+    before, _ = quality.shed(frames, art)
+    assert before > repair.TOLERANCE
 
-    fixed, after_frames, note = repair.repair(cut, built, thrown, frames, source,
+    fixed, after_frames, note = repair.repair(cut, built, swing, frames, art,
                                               margin, render)
-    after, _ = quality.shed(after_frames, source)
+    after, _ = quality.shed(after_frames, art)
     assert after <= repair.TOLERANCE and after < before
-    assert note and "reduced to" in note
+    assert note and "reduced to" in note and "arm_near" in note
     assert len(after_frames) == len(frames)
 
 
 def test_the_repair_only_damps_what_it_blamed():
-    built, cut = rigged(whole_character())
-    source = whole_character()
-    thrown = repair.damp(motion.get("attack"), ["arm_near", "arm_far"], 6.0)
-    frames, margin = rendered(cut, built, thrown)
-    fixed, _, _ = repair.repair(cut, built, thrown, frames, source, margin, render)
-    assert fixed.tracks["leg_near"].to_list() == thrown.tracks["leg_near"].to_list()
+    art, built, cut, swing = flailing()
+    margin = render.suggest_margin(built)
+    frames = render.render_sequence(cut, swing.poses(built), margin=margin)
+    fixed, _, _ = repair.repair(cut, built, swing, frames, art, margin, render)
+    assert fixed.tracks["leg_near"].to_list() == swing.tracks["leg_near"].to_list()
+    assert fixed.tracks["arm_near"].keys[1]["angle"] < 40.0
 
 
 def test_a_clip_that_damping_cannot_save_says_so_and_changes_nothing():
     """A rig this far out needs a better rig, not less motion, and shipping a
     quieter version of a broken clip would hide that."""
-    built, cut = rigged(whole_character())
-    source = whole_character()
-    walk = motion.get("walk")
-    frames, margin = rendered(cut, built, walk)
-    again, back, note = repair.repair(cut, built, walk, frames, source, margin,
+    art, built, cut, swing = flailing()
+    margin = render.suggest_margin(built)
+    frames = render.render_sequence(cut, swing.poses(built), margin=margin)
+    again, back, note = repair.repair(cut, built, swing, frames, art, margin,
                                       render, steps=())
     assert note and "does not put it back together" in note
-    assert again is walk and back is frames
+    assert again is swing and back is frames
 
 
 def test_a_clip_pulled_apart_by_a_squash_says_that_instead():

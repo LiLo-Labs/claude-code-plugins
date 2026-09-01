@@ -36,6 +36,25 @@ Z_BY_ROLE = {
 }
 
 
+# What share of a character is its head when the silhouette offers no neck
+# to measure. A hood, a helmet worn over the shoulders or a blob has none.
+HEADLESS_HEAD = 0.30
+
+# A parting that leaves only a couple of rows below it is not a pair of legs, it
+# is a pair of boots. The shieldmaiden's silhouette parts on its last row alone
+# -- 4% of her -- and the rig then swings her feet about a hip joint fifteen
+# rows above them while her actual legs stay welded to the torso.
+#
+# Both conditions are needed. Rows alone would reject three rows of leg on a
+# twelve-pixel character, where three rows is a quarter of the whole figure; a
+# share alone would reject a slime's four-pixel nubs, which are the only legs it
+# has. Measured over the corpus, a foot gap is one to two rows and under 11% of
+# the character, and the smallest thing that is genuinely a leg is four rows and
+# 14%.
+LEG_ROWS = 3
+LEG_BAND = 0.15
+
+
 FACE_ON = ("front", "back")
 
 # Drawn face-on there is no far side, so a "far" limb is not behind anything and
@@ -117,6 +136,51 @@ def _bbox(spans):
             max(span[2] for span in spans), max(ys) + 1)
 
 
+def find_crown(mask, share=0.35):
+    """The first row where the CHARACTER starts, past anything it is holding up.
+
+    A raised sword, a musket barrel, a staff, a plume, a pair of horns: all of
+    them stand above the head as a column a few pixels across, and all of them
+    ruin a search for the narrowest row, because they ARE the narrowest rows.
+    The shieldmaiden's neck landed at row 4 of 23, inside her horns, so the rig
+    called her sword tip a head and animated her actual helmet as torso.
+
+    A protrusion is thin and a head is not, so the crown is simply the topmost
+    row reaching a share of the character's widest. Rows above it still belong
+    to the head box -- horns are part of a helmet -- they just do not get to
+    claim the neck.
+    """
+    widths = row_widths(mask)
+    peak = float(widths.max()) if widths.size else 0.0
+    if peak <= 0:
+        return 0
+    reaching = np.flatnonzero(widths >= peak * float(share))
+    return int(reaching[0]) if reaching.size else 0
+
+
+def narrowest_upper_row(mask, low=0.10, high=0.55):
+    """The narrowest row of the upper body, and the band it was searched in.
+
+    Two different questions are asked of this. `find_neck` asks WHERE the neck
+    is and has to refuse to answer when there is no neck; `classify` asks
+    WHETHER there is one at all, and needs the narrowest row either way to
+    decide. Sharing the measurement keeps them from drifting apart -- they did
+    once, and a robed figure with no neck was demoted to a one-piece prop.
+
+    Returns (row, y0, y1). The LAST row achieving the minimum is taken, so a
+    head of uniform width resolves to its bottom row rather than its top one.
+    """
+    height = mask.shape[0]
+    y0 = max(1, int(height * low), find_crown(mask))
+    y1 = max(y0 + 1, min(int(height * high), height - 1))
+    widths = row_widths(mask)[y0:y1].astype(float)
+    if widths.size == 0 or not widths.any():
+        return None, y0, y1
+    widths[widths == 0] = np.inf
+    last = int(np.flatnonzero(widths <= float(widths.min()))[-1])
+    return int(y0 + last), y0, y1
+
+
 def find_neck(mask, low=0.10, high=0.55):
     """The narrowest row in the upper body. That is the neck.
 
@@ -129,19 +193,30 @@ def find_neck(mask, low=0.10, high=0.55):
     face animates as part of the torso.
 
     A neck is narrow whether the head above it is bigger or smaller than the
-    body below it, so search for narrowness and nothing else. The LAST row
-    achieving the minimum is taken, so a head of uniform width resolves to its
-    bottom row rather than its top one.
+    body below it, so search for narrowness and nothing else -- but only below
+    the crown, or a raised sword wins, and only where the narrowness is a local
+    minimum, or a hood wins.
     """
     height = mask.shape[0]
-    y0 = max(1, int(height * low))
-    y1 = max(y0 + 1, min(int(height * high), height - 1))
-    widths = row_widths(mask)[y0:y1].astype(float)
-    if widths.size == 0 or not widths.any():
-        return max(0, int(height * 0.3))
-    widths[widths == 0] = np.inf
-    last = int(np.flatnonzero(widths <= float(widths.min()))[-1])
-    return int(y0 + last)
+    neck, y0, y1 = narrowest_upper_row(mask, low, high)
+    if neck is None:
+        return int(height * HEADLESS_HEAD)
+
+    # A neck is a row narrower than the character both above and below it. On a
+    # hooded figure, a slime, or anything else that only widens downwards there
+    # is no such row, and the minimum is simply the top of the search band --
+    # which would make the head three rows of an eighteen-row character and
+    # animate its face as torso. Say so, and take a proportion instead.
+    widths = row_widths(mask)
+    # Everything below the neck, not just the rest of the search band: a neck
+    # found on the band's last row has nothing under it inside the band, and a
+    # chibi's neck -- immediately under a head that is the widest thing on the
+    # character -- lands exactly there.
+    above, below = widths[y0:neck], widths[neck + 1:]
+    if not (above.size and above.max() > widths[neck]
+            and below.size and below.max() > widths[neck]):
+        return int(height * HEADLESS_HEAD)
+    return neck
 
 
 def find_shoulder(mask, neck=None):
@@ -486,8 +561,17 @@ class TemplateBackend(Backend):
         return "prop"
 
     def _has_neck(self, mask, ratio=0.8):
-        """Is there a row narrow enough, with enough mass below it, to be a neck?"""
-        neck = find_neck(mask)
+        """Is there a row narrow enough, with enough mass below it, to be a neck?
+
+        Asks the narrowest row directly rather than going through `find_neck`,
+        which refuses to name a neck it cannot find and answers with a
+        proportion instead. Routing this through that refusal turned a robed
+        necromancer -- narrow hood, wide skirt, no neck to speak of -- into a
+        one-piece prop.
+        """
+        neck, _, _ = narrowest_upper_row(mask)
+        if neck is None:
+            return False
         widths = row_widths(mask)
         below = widths[neck + 1:]
         if below.size == 0 or not below.any():
@@ -507,10 +591,19 @@ class TemplateBackend(Backend):
         neck = find_neck(mask)
         shoulder = find_shoulder(mask, neck)
         split = find_split(mask)
+        if split is not None and (height - split <= LEG_ROWS
+                                  and height - split < height * LEG_BAND):
+            notes.append("the silhouette parts only %d row(s) from the bottom, "
+                         "which is a gap between two boots rather than a hip; "
+                         "the legs are inside a skirt or a coat, so the hip "
+                         "line is a proportion (62%% of height) instead"
+                         % (height - split))
+            split = None
         if split is None:
             split = int(height * 0.62)
-            notes.append("the silhouette never parts, so the hip line is a "
-                         "proportion (62% of height) rather than a measurement")
+            if not notes:
+                notes.append("the silhouette never parts, so the hip line is a "
+                             "proportion (62% of height) rather than a measurement")
         hip = max(neck + 2, min(int(split), height - 1))
         arm_top = max(neck + 1, min(shoulder, hip - 1))
 

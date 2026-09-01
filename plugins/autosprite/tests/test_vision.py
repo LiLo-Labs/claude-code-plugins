@@ -512,3 +512,113 @@ def test_a_face_on_character_is_never_rigged_as_a_side_on_animal():
 def test_a_side_on_animal_is_still_a_creature():
     assert rig_of(make_fixture.creature(), facing="right").character_class == "creature"
     assert rig_of(make_fixture.creature(), facing="left").character_class == "creature"
+
+
+# -- what a character is holding up is not its head -----------------------
+
+def test_the_crown_is_below_a_raised_weapon():
+    """A raised sword, a musket barrel, a staff, a plume, a pair of horns: all
+    stand above the head as a column a few pixels across, and all of them ARE
+    the narrowest rows, so a neck search walks straight into them."""
+    mask = np.zeros((20, 12), dtype=bool)
+    mask[0:6, 5:7] = True        # a raised sword
+    mask[6:11, 3:9] = True       # the head
+    mask[11:20, 2:10] = True     # the body
+    assert vision.find_crown(mask) == 6
+    assert vision.find_neck(mask) >= 6
+
+
+def test_a_character_holding_nothing_up_has_its_crown_at_the_top():
+    mask = np.zeros((20, 12), dtype=bool)
+    mask[0:8, 3:9] = True
+    mask[8:20, 2:10] = True
+    assert vision.find_crown(mask) == 0
+
+
+def test_the_raised_weapon_still_belongs_to_the_head_box():
+    """Horns are part of a helmet. The crown decides where the neck may be
+    found, not where the character starts."""
+    mask = np.zeros((20, 12), dtype=bool)
+    mask[0:6, 5:7] = True
+    mask[6:11, 3:9] = True
+    mask[11:20, 2:10] = True
+    art = np.zeros(mask.shape + (4,), dtype=np.uint8)
+    art[mask] = (200, 200, 200, 255)
+    built = rig_of(art)
+    head = built.first_role("head")
+    assert head is not None and head.box[1] == 0
+
+
+def test_a_silhouette_that_only_widens_downwards_has_no_neck_to_find():
+    """A hood, a helmet worn over the shoulders, a slime. The narrowest row is
+    just the top of the search band, and taking it makes the head three rows of
+    an eighteen-row character with its face animating as torso."""
+    mask = np.zeros((20, 14), dtype=bool)
+    for y in range(20):
+        half = 2 + y // 2
+        mask[y, 7 - half:7 + half] = True
+    assert vision.find_neck(mask) == int(20 * vision.HEADLESS_HEAD)
+
+
+def test_a_real_neck_is_still_preferred_to_the_proportion():
+    mask = np.zeros((20, 12), dtype=bool)
+    mask[0:7, 3:9] = True        # head
+    mask[7:8, 5:7] = True        # neck
+    mask[8:20, 2:10] = True      # body
+    assert vision.find_neck(mask) == 7
+
+
+def test_a_hooded_figure_is_still_a_humanoid_not_a_prop():
+    """`classify` asks whether there IS a neck; `find_neck` asks where it is and
+    refuses when there is none. Routing the first through the second turned a
+    robed necromancer into a one-piece prop."""
+    mask = np.zeros((20, 14), dtype=bool)
+    for y in range(20):
+        half = 2 + y // 3
+        mask[y, 7 - half:7 + half] = True
+    art = np.zeros(mask.shape + (4,), dtype=np.uint8)
+    art[mask] = (120, 40, 160, 255)
+    assert vision.TemplateBackend().classify(mask) == "humanoid"
+    assert rig_of(art).first_role("head") is not None
+
+
+# -- a gap between two boots is not a hip ---------------------------------
+
+def _humanoid_with_leg_band(height, width, split_rows):
+    """A figure whose silhouette parts only `split_rows` rows from the bottom."""
+    mask = np.zeros((height, width), dtype=bool)
+    mask[0:height // 3, width // 4:width - width // 4] = True     # head
+    mask[height // 3:height - split_rows, 1:width - 1] = True     # body and skirt
+    mask[height - split_rows:, 2:width // 2 - 1] = True           # one foot
+    mask[height - split_rows:, width // 2 + 1:width - 2] = True   # the other
+    art = np.zeros(mask.shape + (4,), dtype=np.uint8)
+    art[mask] = (150, 120, 90, 255)
+    return art
+
+
+def test_a_one_row_gap_between_boots_is_not_a_hip():
+    """The shieldmaiden parts on her last row alone. Believing that puts the hip
+    fifteen rows below her waist and swings her feet about it while her actual
+    legs stay welded to the torso."""
+    built = rig_of(_humanoid_with_leg_band(24, 14, 1))
+    leg = built.first_role("leg_near")
+    assert leg.height > 1
+    assert any("boots" in note for note in built.notes)
+
+
+def test_a_real_pair_of_legs_is_believed():
+    built = rig_of(_humanoid_with_leg_band(24, 14, 8))
+    assert built.first_role("leg_near").box[1] == 24 - 8
+    assert not any("boots" in note for note in built.notes)
+
+
+def test_a_few_rows_of_leg_on_a_tiny_character_are_still_legs():
+    """Rows alone would reject three rows on a twelve-pixel character, where
+    three rows is a quarter of the whole figure."""
+    built = rig_of(_humanoid_with_leg_band(12, 8, 3))
+    assert not any("boots" in note for note in built.notes)
+
+
+def test_a_few_rows_of_leg_on_a_large_character_are_boots():
+    built = rig_of(_humanoid_with_leg_band(48, 20, 3))
+    assert any("boots" in note for note in built.notes)
