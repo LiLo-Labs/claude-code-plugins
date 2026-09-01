@@ -392,3 +392,18 @@ def test_a_breathing_hold_peaks_off_centre(hero_rig):
         three = animation.pose_at(hero_rig, 0.75)
         assert (quarter.dy, quarter.get(hero_rig.root.name).angle) \
             != (three.dy, three.get(hero_rig.root.name).angle), name
+
+
+def test_only_the_clips_that_keep_a_foot_down_are_planted():
+    """Measured per clip, not chosen. Planting attack, hurt, cast and throw puts
+    their feet on the floor AND gives them more body travel, because the drop
+    their legs produce was previously cancelled by the root. Planting crouch or
+    block takes their head travel from 31 and 32 down to 8 and 12 -- the hold
+    that defines them lives in the root, so holding the feet flattens it."""
+    grounded = {name for name, animation in motion.LIBRARY.items() if animation.planted}
+    assert grounded == {"walk", "attack", "hurt", "cast", "throw"}
+
+
+def test_a_clip_that_leaves_the_ground_is_never_planted():
+    for name in ("jump", "land", "run", "dash", "die", "sleep", "climb"):
+        assert not motion.get(name).planted, name

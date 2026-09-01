@@ -9,7 +9,7 @@ again.
 The pipeline is sound and proven on real art. **20 CC0 sprites** (16×16 to
 76×81; humanoids, creatures, props, and four cases chosen to break a silhouette
 rigger) all build, with all eight verification checks passing on both backends.
-448 tests, no network or model in any of them.
+450 tests, no network or model in any of them.
 
 Quality, measured as **debris** — the share of a frame's pixels not connected to
 its main blob, against the source's own figure:
@@ -395,13 +395,19 @@ two arms because it can see COLOUR. That is the vision backend's job.
    underneath, which is the bob a walk is supposed to have, correctly phased and
    scaled to the character rather than a fixed pixel count.
 
-   `planted` is per-animation and false by default. A run has a flight phase and
-   a jump is nothing but one, so holding either down would delete the animation;
-   an idle's bob IS the animation and there are no legs moving to correct for.
-   Whether the standing clips (attack, hurt, block, cast, throw) should be
-   planted is the open question -- the same measurement says it would take their
-   combined foot lift from 33px to 5, but it would also flatten the deliberate
-   weight shift in their root tracks, and that trade has not been looked at.
+   `planted` is per-animation and false by default, and which clips get it was
+   measured rather than chosen. Planting **attack, hurt, cast and throw** puts
+   their feet on the floor AND gives them MORE body travel -- attack's head
+   travel goes 12 -> 27 and hurt's 10 -> 24 -- because the drop their legs
+   produce was previously being cancelled by the root. Planting **crouch** or
+   **block** takes their head travel from 31 and 32 down to 8 and 12: the hold
+   that defines those two lives in the root, so holding the feet flattens them.
+   A **run** has a flight phase, a **jump** is nothing but one, a **climb** is
+   not on a floor, and an **idle**'s bob IS the animation with no leg motion to
+   correct for.
+
+   Five clips now plant exactly. Combined foot lift across the corpus:
+   **183px -> 0**.
 
 
 ## Dead ends — measured, not guessed

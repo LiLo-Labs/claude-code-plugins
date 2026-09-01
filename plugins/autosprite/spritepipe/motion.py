@@ -493,7 +493,7 @@ def _library():
         })
 
     attack = Animation(
-        "attack", frames=6, fps=14, loop=False,
+        "attack", frames=6, fps=14, loop=False, planted=True,
         note="wind up away from the target, strike through it, follow through; the "
              "contact frame is held one extra beat because that is where the hit lands",
         root=[{"t": 0.0, "dx": 0.0}, {"t": 0.2, "dx": -2.0}, {"t": 0.45, "dx": 3.0,
@@ -518,7 +518,7 @@ def _library():
         })
 
     hurt = Animation(
-        "hurt", frames=4, fps=12, loop=False,
+        "hurt", frames=4, fps=12, loop=False, planted=True,
         note="knocked back and off balance, then recovering",
         root=[{"t": 0.0, "dx": 0.0}, {"t": 0.35, "dx": -3.0, "easing": "ease_in"},
               {"t": 1.0, "dx": 0.0}],
@@ -683,7 +683,7 @@ def _library():
         })
 
     cast = Animation(
-        "cast", frames=7, fps=12, loop=False,
+        "cast", frames=7, fps=12, loop=False, planted=True,
         note="gather, hold, release: the hold is what makes it read as a spell "
              "rather than a swipe, so it gets two frames of its own",
         root=[{"t": 0.0, "dy": 0.0}, {"t": 0.3, "dy": 1.0}, {"t": 0.55, "dy": -1.0},
@@ -707,7 +707,7 @@ def _library():
         })
 
     throw = Animation(
-        "throw", frames=6, fps=14, loop=False,
+        "throw", frames=6, fps=14, loop=False, planted=True,
         note="the arm goes back further than it comes forward, and the body "
              "steps into it -- an overarm throw is a whole-body move",
         root=[{"t": 0.0, "dy": 0.0}, {"t": 0.3, "dy": 1.0}, {"t": 0.5, "dy": -1.0},
