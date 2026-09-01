@@ -100,6 +100,35 @@ def look_from(mesh, tree, up, views=3, pixels=520, log=None):
     return list(directions)
 
 
+def views_that_see(mesh, up, directions, faces, pixels=256, keep=4,
+                   centre=None, radius=None):
+    """The few directions that actually show these faces, best first.
+
+    Asking about a part from eight directions when three of them show it
+    spends most of the picture on surface the question is not about -- and
+    because the sheet is normalised, it shrinks the panels that DO show it. A
+    coverage set is for finding everything; a working set is for looking at
+    one thing.
+    """
+    faces = np.asarray(faces, dtype=np.int64)
+    if not len(faces):
+        return list(directions)
+    wanted = np.zeros(len(mesh.faces), dtype=bool)
+    wanted[faces] = True
+    scored = []
+    for index, direction in enumerate(directions):
+        pose = rig_module.poses_from(mesh, [direction], up, pixels=pixels,
+                                     centre=centre, radius=radius)[0]
+        visible = pose.visible
+        seen = int(wanted[pose.hit_id[visible]].sum()) if visible.any() else 0
+        scored.append((seen, index))
+    scored.sort(reverse=True)
+    chosen = [index for seen, index in scored if seen > 0][:max(1, int(keep))]
+    if not chosen:
+        return list(directions)[:max(1, int(keep))]
+    return [directions[index] for index in sorted(chosen)]
+
+
 def show(mesh, up, field, labels, out_dir, tag, views=3, pixels=520,
          directions=None, colours=None, focus=None):
     """Plain beside painted, same views, numbered. The only picture ever asked about.
@@ -137,13 +166,16 @@ def show(mesh, up, field, labels, out_dir, tag, views=3, pixels=520,
             painted[mask] = np.clip(colours[slot] * (0.42 + 0.72 * shade), 0, 1)
         panels.append((plain, painted))
 
-    # WRAP INTO ROWS. Six views in a line is a 6296 x 554 strip, and a picture
-    # with an aspect ratio of eleven to one is not a picture anyone can read --
-    # every panel arrives a few dozen pixels tall once it is fitted to a page.
-    # Covering the model properly needs six looks, so the sheet has to be a
-    # sheet.
+    # TWO COLUMNS, NOT THREE, and as few panels as the question needs.
+    #
+    # The sheet is normalised to a fixed width before it is read, so panel
+    # resolution is (that width / columns / 2) and nothing else. Six views at
+    # 520px and eight views at 900px both arrive at about 260 pixels a panel:
+    # rendering bigger is inert, and adding views actively shrinks every one
+    # of them. The only levers that exist are fewer panels per sheet, and
+    # putting more of the object inside a panel by moving the camera in.
     gap, caption = 8, 18
-    columns = max(1, min(len(panels), 3))
+    columns = max(1, min(len(panels), 2))
     rows = (len(panels) + columns - 1) // columns
     cell = 2 * pixels + gap
     sheet = Image.new("RGB", (columns * cell + gap,
@@ -650,10 +682,14 @@ def add_part(backend, mesh, tree, up, seeds, labels, part, intent, out_dir,
         # so far, with room around it for the neighbours a boundary is drawn
         # against -- so a barnacle stops being ten pixels wide and its edge
         # becomes something that can be drawn rather than guessed at.
-        focus = None
-        if seeds.get(slot):
-            focus = rig_module.face_mask(tree, seeds[slot])
-            focus = np.flatnonzero(focus)
+        focus, working = None, directions
+        if seeds.get(slot) and directions:
+            focus = np.flatnonzero(rig_module.face_mask(tree, seeds[slot]))
+            centre, radius = rig_module.frame_on(mesh, focus)
+            # Only the views that show it, and few of them, so each panel is
+            # as large as a normalised sheet allows.
+            working = views_that_see(mesh, up, directions, focus,
+                                     centre=centre, radius=radius)
         # NO BASE COAT WHILE WORKING. Filling the unclaimed surface with the
         # first colour makes that colour cover the whole model from the very
         # first look, so the agent cannot tell what it has actually painted
@@ -664,8 +700,9 @@ def add_part(backend, mesh, tree, up, seeds, labels, part, intent, out_dir,
         owner = settle(tree, seeds, count, fallback=None)
         field = field_of(tree, owner, len(mesh.faces))
         path, poses, geometry = show(mesh, up, field, labels, out_dir,
-                                     "%s-%d" % (tag, step), views=views,
-                                     directions=directions, pixels=pixels,
+                                     "%s-%d" % (tag, step),
+                                     views=len(working) if working else views,
+                                     directions=working, pixels=pixels,
                                      focus=focus)
         state = ("Nothing has that colour yet." if not seeds[slot] else
                  "What has it so far is shown in that colour.")

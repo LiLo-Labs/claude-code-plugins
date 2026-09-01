@@ -695,3 +695,49 @@ class TestCacheIdentity(unittest.TestCase):
             with self.subTest(key=name):
                 self.assertIn("prompt", rest,
                               "%s keys on the image but not the question" % name)
+
+
+class TestWorkingViews(unittest.TestCase):
+    """A coverage set finds everything; a working set looks at one thing.
+
+    The sheet is normalised to a fixed width before it is read, so panel
+    resolution is (width / columns / 2) and nothing else: six views at 520px
+    and eight at 900px both arrive at about 260 pixels a panel. Rendering
+    bigger is inert. Showing FEWER panels is not.
+    """
+
+    def setUp(self):
+        import trimesh
+        self.mesh = trimesh.creation.icosphere(subdivisions=3, radius=50.0)
+        from paintpipe import preview
+        self.up = (0.0, 0.0, 1.0)
+        self.directions = preview.orbit(6, 25.0, up=self.up)
+
+    def test_it_keeps_only_views_that_show_the_faces(self):
+        """A patch on one side of a sphere is invisible from the other."""
+        centres = self.mesh.triangles_center
+        front = np.flatnonzero(centres[:, 0] > 40.0)
+        self.assertTrue(len(front), "fixture should have a +x cap")
+        kept = loop.views_that_see(self.mesh, self.up, self.directions, front,
+                                   keep=6)
+        self.assertLess(len(kept), len(self.directions),
+                        "some view must fail to see a one-sided patch")
+
+    def test_it_never_returns_more_than_asked(self):
+        centres = self.mesh.triangles_center
+        front = np.flatnonzero(centres[:, 0] > 0.0)
+        kept = loop.views_that_see(self.mesh, self.up, self.directions, front,
+                                   keep=2)
+        self.assertEqual(len(kept), 2)
+
+    def test_nothing_to_look_at_falls_back_to_the_coverage_set(self):
+        kept = loop.views_that_see(self.mesh, self.up, self.directions, [])
+        self.assertEqual(len(kept), len(self.directions))
+
+    def test_a_part_no_view_can_see_still_gets_a_picture(self):
+        """Better a view that cannot see it than no question at all -- the
+        loop reports 'never found' and gives the colour up, which needs a
+        render to have happened."""
+        kept = loop.views_that_see(self.mesh, self.up, self.directions,
+                                   [0], keep=3)
+        self.assertGreaterEqual(len(kept), 1)
