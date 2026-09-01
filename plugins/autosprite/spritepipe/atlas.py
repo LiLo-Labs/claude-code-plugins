@@ -39,7 +39,7 @@ def _duration_ms(fps):
     return int(round(1000.0 / max(0.001, float(fps))))
 
 
-def native(sheet, name, reference_report=None, extra=None):
+def native(sheet, name, reference_report=None, extra=None, sources=None):
     """This pipeline's own atlas: the complete record, and the one `verify` reads."""
     clips = []
     for clip_key, placements in sorted(sheet.by_clip().items()):
@@ -73,6 +73,14 @@ def native(sheet, name, reference_report=None, extra=None):
     }
     if reference_report:
         document["source"] = reference_report
+    if sources:
+        # Every image a pixel of this sheet is allowed to have come from, with
+        # the ingest parameters it was read at and a digest of the file. The
+        # PALETTE check rebuilds its allowed set from this rather than from one
+        # `--reference`, which is what a build with a front view or an attached
+        # item needs -- and it is a digest rather than a bare path so the check
+        # can tell "this file changed" from "this sheet is wrong".
+        document["sources"] = sources
     if extra:
         document.update(extra)
     return document
@@ -547,8 +555,18 @@ ENGINE_SETS = {
 }
 
 
+def digest(path):
+    """A file's sha256, or None if it cannot be read."""
+    import hashlib
+    try:
+        with open(path, "rb") as handle:
+            return hashlib.sha256(handle.read()).hexdigest()
+    except OSError:
+        return None
+
+
 def write(sheet, outdir, name, engines=("all",), clips=None, reference_report=None,
-          compress=False):
+          compress=False, sources=None):
     """Write the sheet, the native atlas, and every requested engine format."""
     os.makedirs(outdir, exist_ok=True)
     written = {}
@@ -561,7 +579,8 @@ def write(sheet, outdir, name, engines=("all",), clips=None, reference_report=No
 
     atlas_path = os.path.join(outdir, "%s.autosprite.json" % name)
     with open(atlas_path, "w") as handle:
-        json.dump(native(sheet, name, reference_report), handle, indent=2)
+        json.dump(native(sheet, name, reference_report, sources=sources),
+                  handle, indent=2)
         handle.write("\n")
     written["atlas"] = atlas_path
 

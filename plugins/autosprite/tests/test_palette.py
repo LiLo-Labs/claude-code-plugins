@@ -270,3 +270,26 @@ def test_a_deep_ramp_steps_both_ways_by_the_same_amount():
     up = palette._shade_count(palette.step_ramp(pixels, table, 1, keep_shading=False))
     down = palette._shade_count(palette.step_ramp(pixels, table, -1, keep_shading=False))
     assert up == down
+
+
+def test_enforce_says_what_it_had_to_snap():
+    """Without this it is a laundry: it makes the PALETTE check pass whether or
+    not the pipeline kept its promise, and the count of what it fixed is the one
+    thing standing between a future blending operation and a green verifier."""
+    locked = np.array([[10, 10, 10, 255], [200, 200, 200, 255]], dtype=np.uint8)
+    pixels = image.blank(2, 2)
+    pixels[0, 0] = [10, 10, 10, 255]
+    pixels[0, 1] = [198, 201, 199, 255]        # a colour no transform should make
+    moved = []
+    out = palette.enforce(pixels, locked, moved)
+    assert moved == [(198, 201, 199, 255)]
+    assert tuple(int(v) for v in out[0, 1]) == (200, 200, 200, 255)
+
+
+def test_enforce_reports_nothing_when_there_is_nothing_to_report():
+    locked = np.array([[10, 10, 10, 255]], dtype=np.uint8)
+    pixels = image.blank(1, 1)
+    pixels[0, 0] = [10, 10, 10, 255]
+    moved = []
+    palette.enforce(pixels, locked, moved)
+    assert moved == []

@@ -98,7 +98,7 @@ def verify_directory(outdir, name=None, reference_path=None, rig_path=None):
     _check_rects(result, atlas, sheet)
     _check_zip(result, outdir, name, atlas, sheet)
     _check_animation_zip(result, outdir, name, atlas, sheet)
-    _check_palette(result, sheet, reference_path)
+    _check_palette(result, sheet, reference_path, atlas)
     _check_engines(result, outdir, name, atlas, sheet)
     _check_anchors(result, atlas)
     _check_rest(result, rig_path, reference_path)
@@ -221,22 +221,64 @@ def _check_animation_zip(result, outdir, name, atlas, sheet):
                       % (checked, len(atlas["clips"])))
 
 
-def _check_palette(result, sheet, reference_path):
-    if not reference_path or not os.path.exists(reference_path):
-        return result.add("PALETTE", True, "no reference given", skipped=True)
+def _check_palette(result, sheet, reference_path, atlas=None):
+    """Every colour in the sheet came from an image the build declared.
+
+    The invariant was always "from the source art", and for one drawing that is
+    one file read with the defaults. It stops being one file the moment a build
+    has more than one: a `--front` reference is source art too, and so is an
+    attached item, and so is the composed image an outfitted build actually
+    rigged. Re-ingesting a single `--reference` at default parameters then fails
+    a build that is entirely correct -- reproduced on a front view carrying one
+    colour the side view does not have, which is what a front view is FOR.
+
+    So the atlas records every source with the tolerance and native-resolution
+    settings it was read at, and the allowed set is their union rebuilt at those
+    settings. `--tolerance 2` keys a different set of pixels and therefore locks
+    a different palette; checking it at the default is checking a palette the
+    build never used. A digest is recorded with each, so a source that has
+    changed on disk since the build is reported as changed rather than being
+    quietly treated as the truth.
+    """
     from . import ingest as ingest_module
-    reference = ingest_module.ingest(reference_path)
-    allowed = {tuple(int(v) for v in colour) for colour in reference.palette}
+
+    declared = (atlas or {}).get("sources") or []
+    paths, notes = [], []
+    for entry in declared:
+        path = entry.get("path")
+        if not path or not os.path.exists(path):
+            notes.append("%s is missing" % (path or entry.get("view")))
+            continue
+        recorded = entry.get("sha256")
+        if recorded and _digest(path) != recorded:
+            notes.append("%s has changed on disk since the build" % path)
+        paths.append((path, int(entry.get("tolerance", 12)),
+                      bool(entry.get("native", True))))
+    if not paths:
+        if not reference_path or not os.path.exists(reference_path):
+            return result.add("PALETTE", True, "no reference given", skipped=True)
+        paths = [(reference_path, 12, True)]
+
+    allowed = set()
+    for path, tolerance, native in paths:
+        reference = ingest_module.ingest(path, tolerance=tolerance, native=native)
+        allowed |= {tuple(int(v) for v in colour) for colour in reference.palette}
     present = img.unique_colors(sheet)
     escaped = [tuple(int(v) for v in colour) for colour in present
                if tuple(int(v) for v in colour) not in allowed]
+    trailer = ("; " + "; ".join(notes)) if notes else ""
     if escaped:
         return result.add("PALETTE", False,
-                          "%d colours in the sheet are not in the source art: %s"
-                          % (len(escaped), escaped[:4]))
+                          "%d colours in the sheet are not in the source art: %s%s"
+                          % (len(escaped), escaped[:4], trailer))
+    if notes:
+        return result.add("PALETTE", False,
+                          "every sheet colour is accounted for, but the sources "
+                          "cannot be trusted%s" % trailer)
     return result.add("PALETTE", True,
-                      "all %d sheet colours are drawn from the source's %d"
-                      % (len(present), len(allowed)))
+                      "all %d sheet colours are drawn from %d source image%s' %d"
+                      % (len(present), len(paths), "" if len(paths) == 1 else "s",
+                         len(allowed)))
 
 
 _UNITY_SPRITE = re.compile(
@@ -247,6 +289,15 @@ _GODOT_REGION = re.compile(r'id="AtlasTexture_(?P<id>[^"]+)"\]\s*\n'
                            r'atlas = ExtResource\("1_sheet"\)\s*\n'
                            r'region = Rect2\((?P<x>\d+), (?P<y>\d+), '
                            r'(?P<w>\d+), (?P<h>\d+)\)')
+
+
+def _digest(path):
+    import hashlib
+    try:
+        with open(path, "rb") as handle:
+            return hashlib.sha256(handle.read()).hexdigest()
+    except OSError:
+        return None
 
 
 def _check_engines(result, outdir, name, atlas, sheet):

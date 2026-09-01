@@ -92,9 +92,59 @@ def test_a_colour_that_was_never_in_the_art_is_caught(built):
     assert "not in the source art" in check(result, "PALETTE")["detail"]
 
 
-def test_the_palette_check_is_skipped_rather_than_faked_without_a_reference(built):
+def test_the_palette_check_no_longer_needs_to_be_told_the_reference(built):
+    """The atlas records every image a pixel is allowed to have come from, so
+    the check can run on an output directory alone."""
+    result = verify.verify_directory(built["dir"], built["name"], None, built["rig"])
+    palette_check = check(result, "PALETTE")
+    assert palette_check["ok"] and not palette_check["skipped"]
+
+
+def test_the_palette_check_is_skipped_rather_than_faked_when_nothing_is_known(built):
+    """An atlas from before sources were recorded, and no --reference: there is
+    no allowed set to check against, and saying so beats inventing one."""
+    path = os.path.join(built["dir"], "hero.autosprite.json")
+    document = json.load(open(path))
+    document.pop("sources", None)
+    json.dump(document, open(path, "w"))
     result = verify.verify_directory(built["dir"], built["name"], None, built["rig"])
     assert check(result, "PALETTE")["skipped"]
+
+
+def test_a_source_that_has_changed_on_disk_is_reported_not_trusted(built):
+    """A source file is the authority for what colours are allowed, so a
+    verifier that silently accepts a swapped one proves nothing at all."""
+    reference = image.load(built["reference"])
+    reference[0, 0] = [7, 254, 13, 255]
+    image.save(reference, built["reference"])
+    result = run(built)
+    assert not check(result, "PALETTE")["ok"]
+    assert "changed on disk" in check(result, "PALETTE")["detail"]
+
+
+def test_a_missing_source_is_reported_rather_than_ignored(built):
+    path = os.path.join(built["dir"], "hero.autosprite.json")
+    document = json.load(open(path))
+    document["sources"] = [dict(document["sources"][0], path="/nowhere/gone.png")]
+    json.dump(document, open(path, "w"))
+    result = verify.verify_directory(built["dir"], built["name"], None, built["rig"])
+    assert check(result, "PALETTE")["skipped"] or not check(result, "PALETTE")["ok"]
+
+
+def test_a_front_view_may_carry_a_colour_the_side_view_does_not(hero_path, tmp_path):
+    """The bug this was built for. A front reference exists to show what the
+    side cannot; a check that allows only the side view's colours fails a build
+    that is entirely correct."""
+    import make_fixture
+
+    front_path = str(tmp_path / "front.png")
+    art = make_fixture.humanoid()
+    art[2, 2] = [200, 20, 200, 255]
+    make_fixture.write(front_path, make_fixture.on_background(art))
+    result = pipeline.build_sheet(hero_path, str(tmp_path / "out"),
+                                  animations=["idle"], direction_set="4",
+                                  front=front_path, engines=())
+    assert result.verification.ok, result.verification.report()
 
 
 def test_an_engine_file_that_disagrees_with_the_atlas_is_caught(built):

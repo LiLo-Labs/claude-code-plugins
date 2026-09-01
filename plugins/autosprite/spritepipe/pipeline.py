@@ -43,6 +43,7 @@ class Build:
         self.clips = []
         self.sheet = None
         self.written = {}
+        self.sources = []
         self.previews = {}
         self.verification = None
         self.report = {"warnings": []}
@@ -202,8 +203,21 @@ def make_clips(references, rigs, cutouts, animations, direction_plans, locked,
                 if note:
                     build and build.warn(note)
                     repairs.append(note)
-            frames = [palette_module.enforce(plan.apply(frame), locked)
+            # Anything this has to snap is a pixel the pipeline invented, so it
+            # is reported rather than quietly corrected: silently fixing it is
+            # what would let a future operation break the guarantee and still
+            # show a green PALETTE.
+            escaped = []
+            frames = [palette_module.enforce(plan.apply(frame), locked, escaped)
                       for frame in drawn]
+            if escaped:
+                build and build.warn(
+                    "%s %s: %d colour%s were not in the source art and were "
+                    "snapped to the nearest that is (%s) -- every transform "
+                    "here is nearest-neighbour, so this should be impossible "
+                    "and is a bug in this plugin"
+                    % (view, animation.name, len(escaped),
+                       "" if len(escaped) == 1 else "s", escaped[:3]))
             anchor = rig_module.anchor_of(rig)
             clip = pack_module.Clip(
                 animation.name, frames, animation.fps, animation.loop,
@@ -267,6 +281,17 @@ def build_sheet(reference_path, outdir, animations=("full",), direction_set="1",
     build.references = load_references(
         {"side": reference_path, "front": front, "back": back},
         tolerance=tolerance, native=native)
+    # Every image a pixel of this sheet is allowed to have come from, recorded
+    # with the parameters it was actually read at. `--tolerance 2` keys a
+    # different set of pixels than the default and therefore locks a different
+    # palette, so a verifier that re-ingests at the default is checking against
+    # a palette this build never used.
+    build.sources = [
+        {"view": view, "path": os.path.abspath(path),
+         "sha256": atlas_module.digest(path),
+         "tolerance": int(tolerance), "native": bool(native)}
+        for view, path in (("side", reference_path), ("front", front),
+                           ("back", back)) if path]
     build.report["references"] = {view: reference.summary()
                                   for view, reference in build.references.items()}
 
@@ -285,8 +310,19 @@ def build_sheet(reference_path, outdir, animations=("full",), direction_set="1",
         build.written["source"] = outfit_source
         # Everything downstream -- the palette lock, the REST check, the
         # verifier's reference -- now means the composed art, which is the
-        # art that was actually rigged and is the honest thing to check.
+        # art that was actually rigged and is the honest thing to check. The
+        # items keep their own entries: the composed image contains their
+        # colours, but naming them says where those colours came from.
         reference_path = outfit_source
+        build.sources = [entry for entry in build.sources if entry["view"] != "side"]
+        build.sources.insert(0, {"view": "side", "path": os.path.abspath(outfit_source),
+                                 "sha256": atlas_module.digest(outfit_source),
+                                 "tolerance": int(tolerance), "native": False})
+        for entry in attach:
+            build.sources.append(
+                {"view": "item", "path": os.path.abspath(entry["path"]),
+                 "sha256": atlas_module.digest(entry["path"]),
+                 "tolerance": int(tolerance), "native": bool(native)})
     build.report["rig"] = {view: rig.to_dict() for view, rig in build.rigs.items()}
     build.report["rig_actor"] = engine.actor
 
@@ -391,7 +427,8 @@ def build_sheet(reference_path, outdir, animations=("full",), direction_set="1",
                                    scale=scale)
     build.written = atlas_module.write(
         build.sheet, outdir, name, engines=engines, clips=build.sheet.clips,
-        reference_report=build.report["references"]["side"], compress=compress)
+        reference_report=build.report["references"]["side"], compress=compress,
+        sources=build.sources)
 
     rig_path = os.path.join(outdir, "%s.rig.json" % name)
     build.rigs["side"].save(rig_path)

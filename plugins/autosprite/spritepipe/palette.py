@@ -33,13 +33,20 @@ def escapes(pixels, palette):
                     dtype=np.uint8).reshape(-1, 4)
 
 
-def enforce(pixels, palette):
+def enforce(pixels, palette, report=None):
     """Snap every opaque pixel to its nearest palette entry. Usually a no-op.
 
     Distance is plain squared RGB. Sprite palettes are small and well separated,
     and a perceptual metric here would buy nothing except a dependency: the only
     pixels this ever moves are ones a resampler nudged by a few units, and every
     metric agrees about where those belong.
+
+    Pass a list as `report` to be told what it moved. Without it this is a
+    laundry: it silently makes the PALETTE check pass whether or not the
+    pipeline actually kept its promise, so the one measurement standing between
+    a future blending operation and a green verifier is the count of what this
+    had to fix. Instrumented across the corpus it is zero, which is the answer
+    it should keep giving.
     """
     if palette.size == 0:
         return pixels
@@ -52,6 +59,8 @@ def enforce(pixels, palette):
     unknown = np.array([tuple(int(v) for v in row) not in known for row in flat])
     if not unknown.any():
         return out
+    if report is not None:
+        report.extend(sorted({tuple(int(v) for v in row) for row in flat[unknown]}))
     targets = flat[unknown][:, :3].astype(np.int32)
     reference = palette[:, :3].astype(np.int32)
     distance = ((targets[:, None, :] - reference[None, :, :]) ** 2).sum(axis=2)

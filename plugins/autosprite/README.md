@@ -74,8 +74,19 @@ Three mechanisms hold it:
    into existence.
 2. **Every composite is an alpha test, not a blend.** Two overlapping parts
    never average into a third colour.
-3. **`verify.py` checks it and reports.** The `PALETTE` check compares the
-   finished sheet's colours against the source's and fails on any escape.
+3. **`verify.py` checks it and reports.** The atlas records every image a
+   pixel is allowed to have come from — each with the ingest settings it was
+   read at and a digest of the file — and `PALETTE` rebuilds the allowed set
+   from those and fails on any escape. That is what a build with a `--front`
+   reference or an attached item needs: a front view exists to show what the
+   side cannot, and checking it against the side view's colours alone failed
+   builds that were entirely correct.
+4. **The snapping pass is no longer silent.** A final enforcement snaps any
+   escapee to the nearest allowed colour, which would make `PALETTE` pass
+   whether or not the pipeline kept its promise. It now reports what it moved,
+   and the build warns — every transform here is nearest-neighbour, so anything
+   it has to fix is a bug. Measured across the corpus, all sixteen animations
+   on six sprites: **zero**.
 
 The corollary is a real constraint, stated plainly: this plugin cannot draw a
 view your reference does not contain. A back view needs a back drawing. It will
@@ -313,7 +324,7 @@ independently, and the exit status is the answer:
 | `RECT` | Every atlas rect lies inside the sheet and has content in it |
 | `ZIP` | Every frame in the ZIP is byte-identical to its crop from the sheet |
 | `ANIMZIP` | Every frame in the per-animation ZIP is byte-identical to its master crop and to its own strip |
-| `PALETTE` | Every colour in the sheet came from the source art |
+| `PALETTE` | Every colour in the sheet came from an image the build declared |
 | `ENGINES` | Every engine file's rects, counts and animation names match the atlas |
 | `ANCHOR` | Every frame of a clip shares one anchor |
 | `REST` | The rig's parts reassemble into the source image **exactly** |
@@ -361,7 +372,7 @@ pip install -r requirements-test.txt
 python3 -m pytest tests -q
 ```
 
-559 tests, no network, no model, well under a minute. Fixtures are generated rather
+565 tests, no network, no model, well under a minute. Fixtures are generated rather
 than checked in — `tests/make_fixture.py` builds parametric sprites so a test can
 have the exact property it is about (arms clear of the body or touching, legs
 parted or robed) instead of one PNG having to serve every case.
