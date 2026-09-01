@@ -660,3 +660,15 @@ def test_the_shadow_is_rigged_behind_everything_and_says_so():
     assert shadow is not None
     assert built.draw_order()[0] is shadow
     assert any("contact shadow" in note for note in built.notes)
+
+
+def test_renaming_a_limb_face_on_takes_its_children_with_it():
+    """A vision rig called the arm `arm_near` and hung a `musket` off it. Renaming
+    the arm to `arm_right` and leaving the musket pointing at the old name
+    orphaned it, and the whole build was refused as unreachable from the root."""
+    parts = [R.Part("torso", "torso", (0, 0, 10, 20), None, (5, 20)),
+             R.Part("arm_near", "arm_near", (7, 5, 10, 15), "torso", (8, 5)),
+             R.Part("musket", "prop", (8, 0, 10, 12), "arm_near", (9, 10))]
+    vision.face_on(parts, [])
+    assert parts[1].name == "arm_right"
+    assert parts[2].parent == "arm_right"

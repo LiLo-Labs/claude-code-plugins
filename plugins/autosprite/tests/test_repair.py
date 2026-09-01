@@ -175,3 +175,31 @@ def test_a_clip_pulled_apart_by_a_squash_says_that_instead():
     again, back, note = repair.repair(cut, built, spin, frames, flask, margin, render)
     assert note and "which damping cannot fix" in note
     assert again is spin and back is frames
+
+
+def test_every_failure_message_names_the_parts_it_is_talking_about():
+    """Both messages tell the user where to look, and it is a different list in
+    each: the squash message names what came away, the damping one names what
+    was swung."""
+    art, built, cut, swing = flailing()
+    margin = render.suggest_margin(built)
+    frames = render.render_sequence(cut, swing.poses(built), margin=margin)
+    _, _, gave_up = repair.repair(cut, built, swing, frames, art, margin, render,
+                                  steps=())
+    assert "arm_near" in gave_up
+
+    flask = np.zeros((12, 9, 4), dtype=np.uint8)
+    flask[6:12, 1:8] = (200, 60, 60, 255)
+    flask[3:6, 4:5] = (180, 180, 190, 255)
+    flask[1:3, 2:7] = (180, 180, 190, 255)
+    prop_rig, prop_cut = rigged(flask, character_class="prop")
+    prop_margin = render.suggest_margin(prop_rig)
+    spin = motion.Animation(
+        "spin", frames=8,
+        root=[{"t": 0.0, "sx": 1.0}, {"t": 0.25, "sx": 0.4},
+              {"t": 0.5, "sx": 1.0}, {"t": 0.75, "sx": 0.4}, {"t": 1.0, "sx": 1.0}])
+    prop_frames = render.render_sequence(prop_cut, spin.poses(prop_rig),
+                                         margin=prop_margin)
+    _, _, squashed = repair.repair(prop_cut, prop_rig, spin, prop_frames, flask,
+                                   prop_margin, render)
+    assert "body" in squashed

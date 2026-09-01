@@ -76,13 +76,20 @@ def face_on(parts, notes):
     drawn. Renaming them left and right is not cosmetic either -- a user reading
     `arm_far` on a front-facing sprite has to guess which arm the rigger meant.
     """
-    renamed = False
+    renamed = {}
     for part in parts:
         if part.role in FACE_ON_Z:
             part.z = FACE_ON_Z[part.role]
         if part.role in FACE_ON_NAMES and part.name == part.role:
-            part.name = FACE_ON_NAMES[part.role]
-            renamed = True
+            renamed[part.name] = FACE_ON_NAMES[part.role]
+            part.name = renamed[part.name]
+    # A part that named one of these as its parent -- a sword riding an arm --
+    # has to follow the rename, or it is orphaned and the rig is refused as
+    # unreachable from the root. A vision rig hit exactly that: the model called
+    # the arm `arm_near` and hung a `musket` off it.
+    for part in parts:
+        if part.parent in renamed:
+            part.parent = renamed[part.parent]
     if renamed:
         notes.append("drawn face-on: the paired limbs are the character's left "
                      "and right, both in front of the torso, and the animations "
@@ -832,6 +839,11 @@ Rules that decide whether this rig works or produces a broken character:
   one box, or it will be dropped from every frame. Overlap is fine and expected;
   the smallest box containing a pixel is the one that owns it, so a head box
   inside a torso box does the right thing.
+- **A contact shadow under the feet is role "shadow".** Plenty of sprites are
+  drawn standing on a dark ellipse or bar. It is the floor, not the character:
+  given that role it stays on the ground while the character jumps off it.
+  Only what lies UNDER the feet -- a floating orb or a held-out lantern is part
+  of the character and moves with it.
 - **Do not invent parts you cannot see.** A character with no tail gets no tail.
   Confidence below 0.5 on a part means "I think this is here"; the pipeline
   weights it and shows it to the user for confirmation.
@@ -960,9 +972,12 @@ class HeadlessBackend(Backend):
                              "to the root" % (part.name, part.parent))
                 part.parent = root_name
 
+        resolved = data.get("facing", facing)
+        if resolved in FACE_ON:
+            face_on(parts, notes)
+
         built = rig_module.Rig((width, height), parts,
-                               data.get("class", "humanoid"),
-                               data.get("facing", facing),
+                               data.get("class", "humanoid"), resolved,
                                anchor=(width // 2, height),
                                actor=self.actor, notes=notes)
         _break_cycles(built)

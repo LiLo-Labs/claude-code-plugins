@@ -126,7 +126,7 @@ def repair(cutout, rig, animation, frames, reference_pixels, margin,
             "%s: %.1f%% of the character comes away on frame %d, drawn by %s, "
             "and nothing in this clip swings it there -- a squash or a "
             "translation is pulling it apart, which damping cannot fix"
-            % (animation.name, shed * 100, index, " and ".join(swings)))
+            % (animation.name, shed * 100, index, " and ".join(roles)))
 
     for scale in steps:
         trial = damp(animation, swings, scale)
@@ -146,4 +146,4 @@ def repair(cutout, rig, animation, frames, reference_pixels, margin,
         "%s: %.1f%% of the character comes away on frame %d, drawn by %s, and "
         "damping that swing does not put it back together -- the rig is likely "
         "wrong for this character rather than the motion being too large"
-        % (animation.name, shed * 100, index, " and ".join(roles)))
+        % (animation.name, shed * 100, index, " and ".join(swings)))
