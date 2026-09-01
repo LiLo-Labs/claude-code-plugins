@@ -45,11 +45,39 @@ That gap is what backlog item 1 exists to close.
    arms and opened the leg swing from ±26° to ±39°, and the visible result is a
    modest improvement with shed unchanged at 0%.
 
-   **Still to do here:** it has only been run on one character. Run it across
-   the corpus, and find out whether its adjustments generalise or whether it
-   simply re-derives the same "open the legs" advice for everything. If the
-   latter, the fix is probably to feed it the animation's current keyframe table
-   alongside the picture so it can see what it is adjusting.
+   **Run across six characters' walk cycles, and the answer is mixed.** It does
+   discriminate — the SIGNS differ, correctly:
+
+   | character | legs | what it said |
+   |---|---|---|
+   | grafxkid-oldhero | **-10** | "stride too wide, the legs splay and read as loose blobs" |
+   | platformer-mv-male | **-7** | "the legs splay so wide they merge into one blob" |
+   | fry-caped | **+7** | "leg swing too small, several frames read nearly identical" |
+   | creature-horse | **+5** | "stride amplitude too small for a body this size" |
+   | awkward-shieldmaiden | +6 | but arms **-8**: "the shield arm reads as a detached blob" |
+   | creature-slime | **+7** | "leg swing too small" |
+
+   It closes down the two characters whose legs splay and opens up the ones whose
+   legs barely move. That is not a canned response. It also independently
+   corroborated a measurement: it called the shieldmaiden's shield arm a
+   detached blob, and shed measures 5.6% on her attack.
+
+   Three biases to know about, all visible in that table:
+
+   - **It never says "good".** Six of six came back "loose". It will always find
+     something, so a round is not evidence that anything was wrong.
+   - **It always reaches for the same four roles** (both arms, both legs), and
+     touched `torso` in four and `root` in two. It has not once proposed a
+     change to `head`, `tail` or a scale channel.
+   - **It judges the motion, not the rig, and so accepts a wrong rig's premise.**
+     It advised opening the slime's LEG swing. The slime has no legs; the
+     silhouette rigger mis-classified it as a humanoid and invented some. The
+     critic cannot see that, because it is only shown the frames.
+
+   The obvious next move for this item: show the critic the RIG alongside the
+   picture — which parts exist, where their boxes are — so it can answer "this
+   rig is wrong" as well as "this motion is wrong". That is likely worth more
+   than any further tuning of the adjustment deltas.
 2. **Bring `_creature` up to `_humanoid`.** Half done.
 
    The classification half is fixed: `find_split` now looks past up to two
