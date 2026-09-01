@@ -28,6 +28,7 @@ Conventions, all of which are load-bearing:
 
 import copy
 import json
+import math
 
 from .skeleton import PartPose, Pose
 
@@ -53,7 +54,33 @@ EASINGS = {
     "ease_in": lambda u: u * u,
     "ease_out": lambda u: 1.0 - (1.0 - u) ** 2,
     "hold": lambda u: 0.0,     # step: keep the previous key until the next one
+    # The five above are all monotone in 0..1, which means none of them can go
+    # the wrong way first or past the target and come back -- so every wind-up
+    # and every overshoot in this library had to be typed out as extra
+    # keyframes, slightly differently each time. These three can.
+    "back": lambda u: u * u * (2.70158 * u - 1.70158),
+    "elastic": lambda u: (u if u in (0.0, 1.0) else
+                          -(2 ** (10 * u - 10))
+                          * math.sin((u * 10 - 10.75) * (2 * math.pi / 3))),
+    "bounce": lambda u: _bounce(u),
+    # A quarter sine rather than a line, so a dx and a dy keyed together bow
+    # into an arc instead of chording straight across it. A hand travelling
+    # from over the shoulder to the hip does not move in a straight line.
+    "arc": lambda u: math.sin(u * math.pi / 2.0),
 }
+
+
+def _bounce(u):
+    if u < 1 / 2.75:
+        return 7.5625 * u * u
+    if u < 2 / 2.75:
+        u -= 1.5 / 2.75
+        return 7.5625 * u * u + 0.75
+    if u < 2.5 / 2.75:
+        u -= 2.25 / 2.75
+        return 7.5625 * u * u + 0.9375
+    u -= 2.625 / 2.75
+    return 7.5625 * u * u + 0.984375
 
 
 class Lane:
@@ -327,7 +354,7 @@ def _key_pose(key):
 class Animation:
     def __init__(self, name, frames, fps=10, loop=True, tracks=None, root=None,
                  easing="smooth", note="", flip_from=None, planted=False,
-                 loop_start=None, loop_end=None):
+                 loop_start=None, loop_end=None, ops=None):
         self.name = name
         # Whether a foot is on the floor throughout. A rigid leg rotated about
         # the hip lifts its own foot, so a clip that claims to be grounded has
@@ -349,6 +376,10 @@ class Animation:
         self.loop = bool(loop)
         self.easing = easing
         self.note = note
+        # Named rewrites of this table, run against a rig by `applied`. See
+        # `operators.py`: a principle written once instead of typed out again in
+        # every clip that wants it.
+        self.ops = list(ops or ())
         self.tracks = {role: Track.of(track, easing)
                        for role, track in (tracks or {}).items()}
         self.root = Track.of(root, easing) if root is not None else None
@@ -432,6 +463,20 @@ class Animation:
             return t
         moment = t - index * spread
         return moment % 1.0 if self.loop else max(0.0, min(1.0, moment))
+
+    def applied(self, rig):
+        """This clip with its operators run against this rig.
+
+        Operators are rig-aware -- their addresses are selectors -- so they
+        cannot run when the clip is written, only when it meets a subject. The
+        result is an ordinary keyframe table: what ships is still something a
+        user can open and argue with, and the ops that produced it sit next to
+        it saying why the numbers are what they are.
+        """
+        if not self.ops:
+            return self
+        from . import operators as operators_module
+        return operators_module.apply_all(self, rig, self.ops)
 
     def poses(self, rig):
         return [self.pose_at(rig, t) for t in self.times()]
@@ -607,6 +652,7 @@ class Animation:
                 "loop": self.loop, "easing": self.easing, "note": self.note,
                 "flip_from": self.flip_from, "planted": self.planted,
                 "loop_start": self.loop_start, "loop_end": self.loop_end,
+                "ops": [dict(entry) for entry in self.ops],
                 "root": self.root.to_dict() if self.root else None,
                 "tracks": {role: track.to_dict() for role, track in self.tracks.items()}}
 
@@ -616,7 +662,8 @@ class Animation:
                    data.get("loop", True), data.get("tracks"), data.get("root"),
                    data.get("easing", "smooth"), data.get("note", ""),
                    data.get("flip_from"), data.get("planted", False),
-                   data.get("loop_start"), data.get("loop_end"))
+                   data.get("loop_start"), data.get("loop_end"),
+                   data.get("ops"))
 
 
 def validate_animation(data):
@@ -651,6 +698,10 @@ def validate_animation(data):
     fps = data.get("fps", 10)
     if not isinstance(fps, (int, float)) or not 0 < fps <= 120:
         problems.append("fps must be between 0 and 120, got %r" % (fps,))
+
+    if data.get("ops"):
+        from . import operators as operators_module
+        problems.extend(operators_module.problems(data["ops"]))
 
     tracks = data.get("tracks") or {}
     if not tracks and not data.get("root"):
@@ -1185,9 +1236,48 @@ def _library():
             "tail": _swing(-14.0, 14.0, phase=0.2),
         })
 
-    return {anim.name: anim for anim in (idle, walk, run, jump, attack, hurt, die, fly,
-                                         crouch, land, dash, climb, block, cast,
-                                         throw, sleep)}
+    built = {anim.name: anim for anim in (idle, walk, run, jump, attack, hurt, die, fly,
+                                          crouch, land, dash, climb, block, cast,
+                                          throw, sleep)}
+    return _with_follow_through(built)
+
+
+# A trailing thing does later what the thing it hangs off did: a cape after a
+# torso, a scarf after a neck, a tail after a body. It is the largest single
+# difference between motion that reads as animation and motion that reads as
+# parts moving, and until operators existed it had to be typed into every clip
+# by hand -- so it was typed into none of them, and a cape hung rigid through
+# all sixteen.
+#
+# Written once here instead. A rig with nothing that trails is untouched,
+# because the selector matches nothing.
+FOLLOW = {"op": "lag", "on": "trait:stalk", "frames": 1.5, "damp": 1.15,
+          "channels": ["angle", "dx", "dy"]}
+
+
+def _with_follow_through(library):
+    """Give every clip a cape that follows whatever the body is doing.
+
+    Off the torso where there is a torso track, and off the head otherwise --
+    `idle` and `die` move the head and nothing else above the waist, and a
+    breathing idle and a collapsing death are both things a cape should answer.
+
+    Translation as well as rotation, because `idle` and `sleep` do not rotate
+    anything at all -- they breathe, on `dy`. With rotation alone the cape was
+    the only thing in the whole library that still held perfectly still while
+    the character breathed.
+
+    `tail` keeps its own authored swing and gains the lag on top, because `lag`
+    adds to a track rather than replacing it: a tail both wags and trails, which
+    is what a tail does.
+    """
+    for animation in library.values():
+        source = ("torso" if "torso" in animation.tracks
+                  else "head" if "head" in animation.tracks else None)
+        if source is None:
+            continue
+        animation.ops = list(animation.ops) + [dict(FOLLOW, of=source)]
+    return library
 
 
 LIBRARY = _library()

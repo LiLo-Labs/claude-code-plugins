@@ -174,6 +174,46 @@ measurement in this plugin can. Every round is re-measured, and one that makes
 the character come apart is thrown away — so the model can improve how the
 motion looks and can never break the character to do it.
 
+**Operators** — a named rewrite of a keyframe table, so a principle is written
+once instead of typed into every clip. An operator takes an animation and a rig
+and returns another animation, and the only thing it ever touches is keyframe
+numbers — so what ships is still a table you can read and argue with, and the
+palette guarantee is untouched by construction, because an operator reaches a
+pixel only through the same matrix every number in the library already reaches
+it through.
+
+| op | what it is |
+|---|---|
+| `lag` | **follow-through** — what a part does, done later by the thing hanging off it |
+| `envelope` | amplitude as a function of *t*: a gust that arrives and dies, a flare that builds |
+| `taper` | a chain whose far end moves more than its near end |
+| `anticipate` | the wind-up — and it *makes the room*, by compressing the action |
+| `settle` | a one-shot that rings down instead of stopping dead |
+| `damp` | the whole of one track, quieter |
+| `volume` | squash that keeps its area, as a constructor rather than a discipline |
+
+Addresses are the same selectors as everything else — a role, `name:X`,
+`trait:X` — and deliberately nothing more.
+
+```json
+"ops": [{"op": "lag", "on": "trait:stalk", "of": "torso", "frames": 1.5},
+        {"op": "taper", "on": "trait:stalk", "gain": [1.0, 1.6]}]
+```
+
+Three easings were added with them — `back`, `elastic` and `bounce` — because
+the five original ones are all *monotone*, so none of them can go the wrong way
+first or past the target and come back, and every wind-up and overshoot in the
+library had been typed out as extra keyframes. A fourth, `arc`, is a quarter
+sine, so a `dx` and `dy` keyed together bow into an arc instead of chording
+across it.
+
+**Every clip already uses one.** All sixteen give a trailing part follow-through
+off the torso — off the head in `idle` and `die`, which move nothing else above
+the waist. Until operators existed that had to be typed into sixteen clips by
+hand, so it was typed into none, and a cape hung perfectly rigid through every
+animation in the library. Measured on a real caped hero: fifteen of sixteen
+clips now move the cape, at 0.00% shed, with every frame distinct.
+
 **Custom animations** — a JSON keyframe table, validated and rendered by the
 same path as the built-ins. This is how a plain-language request ("make the walk
 look tired") becomes motion: write the keyframes, render, watch, adjust.
@@ -372,7 +412,7 @@ pip install -r requirements-test.txt
 python3 -m pytest tests -q
 ```
 
-565 tests, no network, no model, well under a minute. Fixtures are generated rather
+592 tests, no network, no model, well under a minute. Fixtures are generated rather
 than checked in — `tests/make_fixture.py` builds parametric sprites so a test can
 have the exact property it is about (arms clear of the body or touching, legs
 parted or robed) instead of one PNG having to serve every case.

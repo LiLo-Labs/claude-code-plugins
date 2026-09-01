@@ -55,7 +55,7 @@ def _loose_by_part(cutout, rig, pose, margin, render_module):
 
 
 def blame(cutout, rig, pose, margin, render_module):
-    """Which roles drew pixels that came away, and were not already away.
+    """Which PARTS drew pixels that came away, and were not already away.
 
     Renders each part on its own into the same pose and asks whether any of its
     pixels landed in a blob that is not the main one -- then asks the same
@@ -69,32 +69,51 @@ def blame(cutout, rig, pose, margin, render_module):
     A part can be blamed without having moved -- a torso can be left behind by a
     limb that took the connection with it -- so this names everything newly IN
     the debris, and the damping steps below decide what actually helps.
+
+    Parts rather than roles, because a track is no longer necessarily addressed
+    by a role: a clip may drive `trait:stalk` or `name:sails`, and a repair that
+    can only look up `accessory` would report a break it is unable to touch.
     """
     now = _loose_by_part(cutout, rig, pose, margin, render_module)
     if not any(now.values()):
         return []
     rest = _loose_by_part(cutout, rig, Pose(), margin, render_module)
-    blamed = []
-    for part in rig.parts:
-        if now[part.name] > rest[part.name] and part.role not in blamed:
-            blamed.append(part.role)
-    return blamed
+    return [part.name for part in rig.parts
+            if now[part.name] > rest[part.name]]
 
 
-def damp(animation, roles, scale):
-    """The same clip with those roles' rotation scaled down.
+def damp(animation, selectors, scale):
+    """The same clip with those tracks' rotation scaled down.
 
     Rotation only. A translation moves a part without changing its shape and
     cannot shear it off; a squash is a ratio the whole pipeline already floors
     elsewhere. It is the swing that throws a limb clear of the body.
     """
     clone = copy.deepcopy(animation)
-    for role in roles:
-        track = clone.tracks.get(role)
+    for selector in selectors:
+        track = clone.tracks.get(selector)
         if track is None:
             continue
         track.adjust("angle", lambda value: value * float(scale))
     return clone
+
+
+def swinging(animation, rig, names):
+    """Every track that rotates a part in `names`, by whatever selector.
+
+    A part may be driven by a role track, a trait track and a name track at
+    once, and any of them could be the one throwing it clear.
+    """
+    from .motion import select
+
+    found = []
+    wanted = set(names)
+    for selector, track in sorted(animation.tracks.items()):
+        if not track.has("angle"):
+            continue
+        if any(part.name in wanted for part in select(rig, selector)):
+            found.append(selector)
+    return found
 
 
 def repair(cutout, rig, animation, frames, reference_pixels, margin,
@@ -110,13 +129,17 @@ def repair(cutout, rig, animation, frames, reference_pixels, margin,
         return animation, frames, None
 
     ground = cutout.ground_points()
-    roles = blame(cutout, rig, posed(rig, animation, ground)[index],
+    names = blame(cutout, rig, posed(rig, animation, ground)[index],
                   margin, render_module)
-    if not roles:
+    if not names:
         return animation, frames, None
+    roles = []
+    for name in names:
+        part = rig.by_name(name)
+        if part is not None and part.role not in roles:
+            roles.append(part.role)
 
-    swings = [role for role in roles if role in animation.tracks
-              and animation.tracks[role].has("angle")]
+    swings = swinging(animation, rig, names)
     if not swings:
         # The potion's spin is the case: its squash lives on the root track, and
         # a squash is not what this repairs. Flooring one was measured twice and

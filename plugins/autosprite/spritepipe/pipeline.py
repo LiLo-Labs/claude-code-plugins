@@ -185,10 +185,18 @@ def make_clips(references, rigs, cutouts, animations, direction_plans, locked,
         cut = cutouts[view]
         height = rig.size[1]
 
+        # Operators run here and nowhere else, and the position is load-bearing.
+        # AFTER --frames, because most of them bake an explicit key at every
+        # frame time -- exact at the count they were baked at, and only that
+        # count, so a baked table must never then be resampled. BEFORE
+        # `fronted`, because a face-on rewrite trades a swing for a lift and an
+        # operator should be reasoning about the swing the author wrote.
+        prepared = [clip.applied(rig) for clip in animations]
+
         # A character drawn face-on has no depth axis to swing limbs across, so
         # the clips trade their swing for a lift before they are scaled.
-        chosen = ([clip.fronted() for clip in animations]
-                  if rig.facing in vision_module.FACE_ON else animations)
+        chosen = ([clip.fronted() for clip in prepared]
+                  if rig.facing in vision_module.FACE_ON else prepared)
         ground = cut.ground_points()
         for animation in motion_module.scale_motion(chosen, height):
             poses = skeleton_module.posed(rig, animation, ground)

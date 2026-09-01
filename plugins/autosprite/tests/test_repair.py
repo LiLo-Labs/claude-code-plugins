@@ -210,3 +210,33 @@ def test_every_failure_message_names_the_parts_it_is_talking_about():
     _, _, gave_up = repair.repair(cut, built, swing, frames, art, margin, render,
                                   steps=())
     assert "arm_near" in gave_up
+
+
+def test_blame_names_parts_so_a_trait_track_can_be_damped(hero_rig):
+    """A clip may drive `trait:stalk` or `name:sails` rather than a role. A
+    repair that could only look up `accessory` would report a break it has no
+    way to touch."""
+    from spritepipe import motion, repair
+
+    animation = motion.Animation("flail", 4, tracks={
+        "trait:limb": [{"t": 0.0, "angle": 0.0}, {"t": 0.5, "angle": 80.0}]})
+    limbs = {part.name for part in motion.select(hero_rig, "trait:limb")}
+    assert limbs
+    assert repair.swinging(animation, hero_rig, limbs) == ["trait:limb"]
+
+
+def test_swinging_ignores_a_track_that_does_not_rotate(hero_rig):
+    from spritepipe import motion, repair
+
+    animation = motion.Animation("shift", 4, tracks={
+        "trait:limb": [{"t": 0.0, "dx": 0.0}, {"t": 0.5, "dx": 3.0}]})
+    limbs = {part.name for part in motion.select(hero_rig, "trait:limb")}
+    assert repair.swinging(animation, hero_rig, limbs) == []
+
+
+def test_swinging_ignores_a_track_addressing_other_parts(hero_rig):
+    from spritepipe import motion, repair
+
+    animation = motion.Animation("nod", 4, tracks={
+        "head": [{"t": 0.0, "angle": 0.0}, {"t": 0.5, "angle": 20.0}]})
+    assert repair.swinging(animation, hero_rig, {"arm_near"}) == []
