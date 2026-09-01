@@ -101,7 +101,7 @@ def look_from(mesh, tree, up, views=3, pixels=520, log=None):
 
 
 def show(mesh, up, field, labels, out_dir, tag, views=3, pixels=520,
-         directions=None):
+         directions=None, colours=None):
     """Plain beside painted, same views, numbered. The only picture ever asked about.
 
     `directions` must be the SAME on every call of a run: the agent points at
@@ -114,7 +114,8 @@ def show(mesh, up, field, labels, out_dir, tag, views=3, pixels=520,
     if directions is None:
         directions = preview.orbit(views, 26.0, up=up)
     poses = rig_module.poses_from(mesh, directions, up, pixels=pixels)
-    colours = palette(len(labels))
+    if colours is None:
+        colours = palette(len(labels))
 
     panels = []
     for pose in poses:

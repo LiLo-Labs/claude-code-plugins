@@ -113,10 +113,27 @@ def main(argv=None):
         print("nothing identified; giving up rather than guessing")
         return 1
 
+    # THE CONTINUOUS COLOURING FIRST, and always. Rendered in eleven arbitrary
+    # hues a wrong boundary is one stripe among eleven; rendered in the
+    # colours the object should really be, a rib in rock colour is obviously
+    # wrong. It is the picture to judge the segmentation by, and it costs one
+    # call. Collapsing onto four filaments hides the question, because two
+    # parts sharing a filament cannot disagree.
+    directions = loop.look_from(mesh, tree, up, views=args.views)
+    designed = loop.design_colours(backend, mesh, up, field, labels,
+                                   args.intent, args.out, directions,
+                                   views=len(directions), log=print)
+    loop.show(mesh, up, field, labels, args.out, "continuous",
+              views=len(directions), directions=directions, pixels=760,
+              colours=np.asarray([designed[name] for name in labels]))
+    with open(os.path.join(args.out, "continuous.json"), "w") as handle:
+        json.dump({name: "#%02X%02X%02X"
+                   % tuple(int(round(v * 255)) for v in designed[name])
+                   for name in labels}, handle, indent=2)
+
     filaments = parse_filaments(args.filaments)
     result = {"written": False}
     if filaments:
-        directions = loop.look_from(mesh, tree, up, views=args.views)
         chosen = loop.choose_filaments(
             backend, mesh, up, field, labels, [p.name for p in filaments],
             args.intent, args.out, directions, views=len(directions),
