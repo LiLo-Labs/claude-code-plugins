@@ -186,7 +186,11 @@ of stills. Read them yourself before showing the user.
 What to look for, in order:
 
 1. **Does the character come apart?** A limb detaching means its pivot is not on
-   its joint. The build repairs this by itself where it can: a clip measured to
+   its joint. Note that a *single part* can no longer come apart under a squash
+   or a rotation: if a transform splits something the artist drew in one piece,
+   the renderer threads it back together with the colour that block would have
+   had. So anything still detaching is two parts separating, which is a rig
+   question. The build repairs this by itself where it can: a clip measured to
    be shedding has the responsible swing -- and only that one -- reduced until
    it holds together, and the build report's `repairs` says which part, on which
    frame, and by how much. When it says damping did NOT put the character back

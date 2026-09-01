@@ -28,23 +28,26 @@ def label(mask):
     seen = np.zeros_like(mask)
     labels = np.full(mask.shape, -1, dtype=np.int32)
     count = 0
-    for start_y in range(height):
-        for start_x in range(width):
-            if not mask[start_y, start_x] or seen[start_y, start_x]:
-                continue
-            stack = [(start_y, start_x)]
-            seen[start_y, start_x] = True
-            while stack:
-                y, x = stack.pop()
-                labels[y, x] = count
-                for dy in (-1, 0, 1):
-                    for dx in (-1, 0, 1):
-                        ny, nx = y + dy, x + dx
-                        if (0 <= ny < height and 0 <= nx < width
-                                and mask[ny, nx] and not seen[ny, nx]):
-                            seen[ny, nx] = True
-                            stack.append((ny, nx))
-            count += 1
+    # Walk only the opaque pixels. A frame is mostly empty canvas -- a character
+    # covers maybe a sixth of it -- and scanning every cell to find the few that
+    # matter made this the most expensive thing in a build once three different
+    # callers started asking it the same question.
+    for start_y, start_x in np.argwhere(mask):
+        if seen[start_y, start_x]:
+            continue
+        stack = [(int(start_y), int(start_x))]
+        seen[start_y, start_x] = True
+        while stack:
+            y, x = stack.pop()
+            labels[y, x] = count
+            for dy in (-1, 0, 1):
+                for dx in (-1, 0, 1):
+                    ny, nx = y + dy, x + dx
+                    if (0 <= ny < height and 0 <= nx < width
+                            and mask[ny, nx] and not seen[ny, nx]):
+                        seen[ny, nx] = True
+                        stack.append((ny, nx))
+        count += 1
     return labels, count
 
 

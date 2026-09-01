@@ -52,7 +52,7 @@ COVERAGE = 0.5
 ALPHA_FLOOR_CODE = img.ALPHA_FLOOR
 
 
-def _mode_downscale(pixels, factor):
+def _mode_downscale(pixels, factor, with_outvoted=False):
     """Shrink by `factor`, giving each block the most common colour in it.
 
     This is the half of supersampling that keeps the palette guarantee: the
@@ -100,6 +100,15 @@ def _mode_downscale(pixels, factor):
     out[:, :, 1] = (best >> 16) & 0xFF
     out[:, :, 2] = (best >> 8) & 0xFF
     out[:, :, 3] = best & 0xFF
+    if with_outvoted:
+        # What each block WOULD have been if coverage had not vetoed it. A
+        # two-pixel neck squashed to less than half a pixel loses that vote and
+        # the flask's cork comes off; the colour it lost with is right here, and
+        # `_reconnect` puts a thread of it back rather than inventing one.
+        outvoted = out.copy()
+        outvoted[cover == 0] = 0
+        out[~keep] = 0
+        return out, outvoted
     out[~keep] = 0
     return out
 
@@ -114,6 +123,65 @@ def _affine_coefficients(matrix):
     inverse = np.linalg.inv(matrix)
     return (inverse[0, 0], inverse[0, 1], inverse[0, 2],
             inverse[1, 0], inverse[1, 1], inverse[1, 2])
+
+
+def _one_piece(layer):
+    """Was this layer drawn as a single connected blob?"""
+    from . import quality
+    mask = img.alpha_mask(layer)
+    if not mask.any():
+        return False
+    return len(quality.blob_sizes(mask)) == 1
+
+
+def _reconnect(frame, outvoted, whole=True):
+    """Put back the thinnest thread of a piece the reduction voted away.
+
+    A transform must not break something the artist drew in one piece. The
+    flask is the case: squashed to 40% its two-pixel neck falls below the
+    coverage threshold while its four-pixel rim survives, so the cork comes off
+    and floats. No amount of damping the motion fixes that, because the failure
+    is in the MIDDLE of the squash range rather than at its extreme -- which is
+    why flooring the squash was measured and reverted twice.
+
+    So repair it where it happens. Where the reduction split one piece into
+    several, join each stray back to the main one along the shortest line
+    between them, colouring each pixel with what its own block would have been
+    had coverage not vetoed it. Every colour therefore came from the block it is
+    drawn in, and the palette guarantee is untouched.
+    """
+    from . import quality
+
+    labels, count = quality.label(img.alpha_mask(frame))
+    if count <= 1:
+        return frame
+    if not (whole() if callable(whole) else whole):
+        # Whatever came apart was already apart. A floating orb, a detached
+        # shadow, a character the artist drew in two: none of that is the
+        # renderer's business to weld together.
+        return frame
+    sizes = [int((labels == index).sum()) for index in range(count)]
+    main = int(np.argmax(sizes))
+    main_points = np.argwhere(labels == main)
+    out = frame.copy()
+    for index in range(count):
+        if index == main:
+            continue
+        stray = np.argwhere(labels == index)
+        gaps = ((stray[:, None, :] - main_points[None, :, :]) ** 2).sum(axis=2)
+        here, there = np.unravel_index(int(np.argmin(gaps)), gaps.shape)
+        start, end = stray[here], main_points[there]
+        steps = int(max(abs(start[0] - end[0]), abs(start[1] - end[1])))
+        for step in range(1, steps):
+            y = int(round(start[0] + (end[0] - start[0]) * step / steps))
+            x = int(round(start[1] + (end[1] - start[1]) * step / steps))
+            if out[y, x, 3]:
+                continue
+            colour = outvoted[y, x]
+            if not colour[3]:
+                colour = frame[end[0], end[1]]
+            out[y, x] = colour
+    return out
 
 
 def _transform_layer(layer, matrix, size, supersample=SUPERSAMPLE):
@@ -152,7 +220,12 @@ def _transform_layer(layer, matrix, size, supersample=SUPERSAMPLE):
         moved = PILImage.fromarray(np.ascontiguousarray(big_layer), mode="RGBA").transform(
             (size[0] * factor, size[1] * factor), PILImage.AFFINE,
             _affine_coefficients(big_matrix), resample=PILImage.NEAREST)
-        return _mode_downscale(np.array(moved, dtype=np.uint8), factor)
+        small, outvoted = _mode_downscale(np.array(moved, dtype=np.uint8),
+                                          factor, with_outvoted=True)
+        # The cheap half of the test first: nothing to repair unless the
+        # reduction actually split the layer, and that is one flood fill on the
+        # small image rather than two including the full-size source.
+        return _reconnect(small, outvoted, whole=lambda: _one_piece(layer))
 
     source = PILImage.fromarray(np.ascontiguousarray(layer), mode="RGBA")
     moved = source.transform(size, PILImage.AFFINE, _affine_coefficients(matrix),

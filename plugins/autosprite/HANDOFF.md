@@ -9,7 +9,7 @@ again.
 The pipeline is sound and proven on real art. **20 CC0 sprites** (16×16 to
 76×81; humanoids, creatures, props, and four cases chosen to break a silhouette
 rigger) all build, with all eight verification checks passing on both backends.
-462 tests, no network or model in any of them.
+467 tests, no network or model in any of them.
 
 Quality, measured as **debris** — the share of a frame's pixels not connected to
 its main blob, against the source's own figure:
@@ -198,6 +198,7 @@ each thing was so it is not redone. In the order it landed:
 | the walk | was a pendulum retracing itself: 8 frames, 5 pictures. A bent knee at the passing pose fixes it |
 | planting | **seven** clips keep a foot on the floor; corpus foot lift 265px → 0, and the walk's bob is now emergent |
 | `crouch`, `block` | their sink moved from a root translation into a leg FOLD, so it survives planting: foot lift 45px and 37px → 0 |
+| `_reconnect` | a transform must not break what the artist drew in one piece; the potion's spin 23.8% → 0, corpus 44.4% → **19.5%** |
 | parity | `--frames`, `--frame-size`, `--fps`, loop points, per-animation ZIP, eight more animations |
 | `climb` | its arm reach was cut from 58° to 46° after measurement: 58 threw a hand clear of a 45px character and took the clip to 9.4% shed, 46 takes it to 0.8% for one point of frame-to-frame change |
 
@@ -274,17 +275,20 @@ Honest and short. The easy things are gone.
    already said out loud; this is on the list only so nobody mistakes it for an
    oversight.
 
-## Two things that are broken and will stay broken without new ideas
+## One thing that is broken and needs a better rig, not a better renderer
 
-- **`props-potion-funnydude`'s spin, 23.8%.** The flask's 2px neck vanishes
-  before its wider rim does, so the cork comes away mid-squash. Not a rig
-  problem -- the rig is one part -- and not a damping problem, because the
-  failure is in the MIDDLE of the squash range, which is the twice-measured
-  dead end below. It would need the reducer to preserve connectivity, which is
-  a change to `render._mode_downscale` and has not been attempted.
 - **`platformer-grass-prowne`'s jump on the silhouette backend, 15.4%.** An
   8-pixel-wide character whose limbs are 2 pixels across. Its VISION rig holds
   together completely, which is the honest answer for a sprite this small.
+
+The potion's spin used to sit here too, at 23.8%, described as needing "the
+reducer to preserve connectivity, which has not been attempted". It has now
+been attempted and it worked: see `render._reconnect`. **The lesson is worth
+keeping.** That failure was chased three times as a MOTION problem -- floor the
+squash, damp the squash, damp the swing -- and reverted every time, because a
+sprite comes apart in the middle of a squash rather than at its extreme. It was
+never a motion problem. A transform was breaking something the artist drew in
+one piece, and the fix belonged where the breakage happened.
 
 ## Dead ends — measured, not guessed
 

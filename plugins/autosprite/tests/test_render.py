@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from spritepipe import cutout, image, motion, render, rig as R, skeleton
+from spritepipe import cutout, image, motion, quality, render, rig as R, skeleton
 
 
 def test_the_identity_pose_reproduces_the_reference_exactly(hero, hero_cutout):
@@ -265,3 +265,58 @@ def test_a_shadow_does_not_stand_in_for_the_feet_when_levelling():
     frames = [render.render_pose(cut, pose, margin=margin) for pose in poses]
     levelled = render.level_to_floor(cut, poses, frames, margin)
     assert levelled is not frames, "the shadow masked the lift"
+
+
+# -- a transform must not break what was drawn in one piece ---------------
+
+def _flask():
+    art = image.blank(14, 11)
+    art[7:14, 1:10] = (200, 60, 60, 255)      # bowl
+    art[4:7, 5:6] = (180, 180, 190, 255)      # a one-pixel neck
+    art[1:4, 3:8] = (180, 180, 190, 255)      # rim
+    return art
+
+
+def _squashed(art, sx):
+    built = R.Rig((art.shape[1], art.shape[0]),
+                  [R.Part("body", "body", (0, 0, art.shape[1], art.shape[0]),
+                          None, (art.shape[1] // 2, art.shape[0]))],
+                  "prop", "right", anchor=(art.shape[1] // 2, art.shape[0]))
+    cut = cutout.cut(built, art)
+    pose = skeleton.Pose()
+    pose.set("body", skeleton.PartPose(sx=sx))
+    return render.render_pose(cut, pose, margin=render.suggest_margin(built))
+
+
+def test_a_squash_no_longer_takes_the_cork_off():
+    """The neck is two pixels and the rim is five, so the neck loses the
+    coverage vote first and the cork comes away while nothing has rotated."""
+    art = _flask()
+    for sx in (0.3, 0.4, 0.5, 0.6, 0.7):
+        frame = _squashed(art, sx)
+        assert len(quality.blob_sizes(image.alpha_mask(frame))) == 1, sx
+
+
+def test_reconnecting_only_ever_uses_a_colour_the_block_already_had():
+    art = _flask()
+    allowed = {tuple(int(v) for v in colour) for colour in image.unique_colors(art)}
+    for sx in (0.3, 0.45, 0.6):
+        for colour in image.unique_colors(_squashed(art, sx)):
+            assert tuple(int(v) for v in colour) in allowed
+
+
+def test_a_character_drawn_in_two_pieces_is_left_in_two_pieces():
+    """A floating orb, a detached shadow, a character the artist drew apart:
+    none of that is the renderer's business to weld together."""
+    art = image.blank(14, 11)
+    art[7:14, 1:10] = (200, 60, 60, 255)
+    art[1:4, 3:8] = (180, 180, 190, 255)      # no neck at all
+    assert len(quality.blob_sizes(image.alpha_mask(art))) == 2
+    frame = _squashed(art, 0.4)
+    assert len(quality.blob_sizes(image.alpha_mask(frame))) == 2
+
+
+def test_reconnect_leaves_a_whole_frame_alone():
+    art = _flask()
+    frame = _squashed(art, 1.0)
+    assert image.equal(render._reconnect(frame, np.zeros_like(frame)), frame)

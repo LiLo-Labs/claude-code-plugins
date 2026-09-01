@@ -150,18 +150,20 @@ def test_a_clip_that_damping_cannot_save_says_so_and_changes_nothing():
     assert again is swing and back is frames
 
 
-def test_a_clip_pulled_apart_by_a_squash_says_that_instead():
-    """The potion's spin lives entirely on the root track's sx, and a squash is
-    not what this repairs -- flooring one was measured twice and reverted twice.
-    Saying "damping did not help" would point the reader at the wrong thing.
+def _flask():
+    """A wide bowl joined to a wide cap by a neck one pixel across."""
+    art = np.zeros((12, 9, 4), dtype=np.uint8)
+    art[6:12, 1:8] = (200, 60, 60, 255)
+    art[3:6, 4:5] = (180, 180, 190, 255)
+    art[1:3, 2:7] = (180, 180, 190, 255)
+    return art
 
-    A flask is the shape that shows it: a wide bowl joined to a wide cap by a
-    neck one pixel across. Squash it and the neck is the first thing to go, so
-    the cap comes away while nothing has rotated at all."""
-    flask = np.zeros((12, 9, 4), dtype=np.uint8)
-    flask[6:12, 1:8] = (200, 60, 60, 255)      # bowl
-    flask[3:6, 4:5] = (180, 180, 190, 255)     # a one-pixel neck
-    flask[1:3, 2:7] = (180, 180, 190, 255)     # cap
+
+def test_a_squashed_flask_no_longer_comes_apart_at_all():
+    """It used to: the neck is the first thing to go, so the cap came away while
+    nothing had rotated. `render._reconnect` repairs that where it happens, at
+    the reduction, so there is nothing left here to repair."""
+    flask = _flask()
     built, cut = rigged(flask, character_class="prop")
     margin = render.suggest_margin(built)
     spin = motion.Animation(
@@ -169,37 +171,42 @@ def test_a_clip_pulled_apart_by_a_squash_says_that_instead():
         root=[{"t": 0.0, "sx": 1.0}, {"t": 0.25, "sx": 0.4},
               {"t": 0.5, "sx": 1.0}, {"t": 0.75, "sx": 0.4}, {"t": 1.0, "sx": 1.0}])
     frames = render.render_sequence(cut, spin.poses(built), margin=margin)
-    assert quality.shed(frames, flask)[0] > repair.TOLERANCE, \
-        "the flask is meant to come apart here"
+    assert quality.shed(frames, flask)[0] <= repair.TOLERANCE
 
     again, back, note = repair.repair(cut, built, spin, frames, flask, margin, render)
+    assert note is None and again is spin and back is frames
+
+
+def test_a_clip_pulled_apart_by_something_that_is_not_a_swing_says_so():
+    """Two parts driven apart by a translation. Nothing swings them there, so
+    saying "damping did not help" would point the reader at the wrong thing."""
+    art = np.zeros((14, 10, 4), dtype=np.uint8)
+    art[4:14, 2:8] = (80, 110, 160, 255)     # body
+    art[0:4, 3:7] = (220, 200, 90, 255)      # a cap sitting on it
+    parts = [R.Part("body", "body", (0, 4, 10, 14), None, (5, 14)),
+             R.Part("cap", "accessory", (0, 0, 10, 4), "body", (5, 4))]
+    built = R.Rig((10, 14), parts, "prop", "right", anchor=(5, 14))
+    cut = cutout.cut(built, art)
+    margin = render.suggest_margin(built)
+    lift = motion.Animation("lift", frames=4, tracks={
+        "accessory": [{"t": 0.0, "dy": 0.0}, {"t": 0.5, "dy": -6.0},
+                      {"t": 1.0, "dy": 0.0}]})
+    frames = render.render_sequence(cut, lift.poses(built), margin=margin)
+    assert quality.shed(frames, art)[0] > repair.TOLERANCE
+
+    _, back, note = repair.repair(cut, built, lift, frames, art, margin, render)
     assert note and "which damping cannot fix" in note
-    assert again is spin and back is frames
+    assert "accessory" in note
+    assert back is frames
 
 
 def test_every_failure_message_names_the_parts_it_is_talking_about():
     """Both messages tell the user where to look, and it is a different list in
-    each: the squash message names what came away, the damping one names what
-    was swung."""
+    each: the not-a-swing message names what came away, the damping one names
+    what was swung."""
     art, built, cut, swing = flailing()
     margin = render.suggest_margin(built)
     frames = render.render_sequence(cut, swing.poses(built), margin=margin)
     _, _, gave_up = repair.repair(cut, built, swing, frames, art, margin, render,
                                   steps=())
     assert "arm_near" in gave_up
-
-    flask = np.zeros((12, 9, 4), dtype=np.uint8)
-    flask[6:12, 1:8] = (200, 60, 60, 255)
-    flask[3:6, 4:5] = (180, 180, 190, 255)
-    flask[1:3, 2:7] = (180, 180, 190, 255)
-    prop_rig, prop_cut = rigged(flask, character_class="prop")
-    prop_margin = render.suggest_margin(prop_rig)
-    spin = motion.Animation(
-        "spin", frames=8,
-        root=[{"t": 0.0, "sx": 1.0}, {"t": 0.25, "sx": 0.4},
-              {"t": 0.5, "sx": 1.0}, {"t": 0.75, "sx": 0.4}, {"t": 1.0, "sx": 1.0}])
-    prop_frames = render.render_sequence(prop_cut, spin.poses(prop_rig),
-                                         margin=prop_margin)
-    _, _, squashed = repair.repair(prop_cut, prop_rig, spin, prop_frames, flask,
-                                   prop_margin, render)
-    assert "body" in squashed
