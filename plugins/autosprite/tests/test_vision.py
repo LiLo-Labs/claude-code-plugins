@@ -735,3 +735,24 @@ def test_the_prompt_no_longer_assumes_the_subject_is_a_character():
                                        "intent": ""}
     assert "It may not be a character" in prompt
     assert "tight to the thing that moves" in prompt
+
+
+def test_an_arm_found_on_almost_no_rows_is_reported_as_unreliable():
+    """`core_and_limbs` collects only the rows where the silhouette parts into
+    three spans, which is right about the pixels and produces a BOX as tall as
+    however many rows happened to part. On a real shieldmaiden that was one row
+    of a six-row band: a sliver the walk then swings while the actual arm sits
+    frozen inside the torso. The rig cannot fix it -- see HANDOFF for the
+    measurement that says replacing the box is worse -- so it says so."""
+    art = make_fixture.humanoid(arms_clear=False)
+    built = rig_of(art)
+    arm = built.first_role("arm_near")
+    band = built.first_role("torso").box[3] - arm.box[1]
+    if (arm.box[3] - arm.box[1]) < band * vision.ARM_BAND:
+        assert any("barely separate" in note for note in built.notes)
+
+
+def test_an_arm_that_separates_properly_draws_no_complaint():
+    art = make_fixture.humanoid(arms_clear=True)
+    built = rig_of(art)
+    assert not any("barely separate" in note for note in built.notes)

@@ -51,6 +51,11 @@ HEADLESS_HEAD = 0.30
 # has. Measured over the corpus, a foot gap is one to two rows and under 11% of
 # the character, and the smallest thing that is genuinely a leg is four rows and
 # 14%.
+# The share of the shoulder-to-hip band an arm has to cover to be believed.
+# Below it the silhouette found a couple of rows that happened to part, not a
+# limb -- and the rig says so rather than pretending. See `_humanoid`.
+ARM_BAND = 0.4
+
 LEG_ROWS = 3
 LEG_BAND = 0.15
 
@@ -660,6 +665,32 @@ class TemplateBackend(Backend):
         # leave the collarbone rows unowned.
         torso_box = (torso_box[0], neck + 1, torso_box[2], hip)
         left_leg, right_leg = pair_boxes(mask, hip, height)
+
+        # An arm found on two rows out of fourteen is not an arm, and the rig
+        # should say so. `core_and_limbs` collects only the rows where the
+        # silhouette actually parts into three spans -- right about the PIXELS,
+        # since an arm touching the body there belongs to the torso -- and
+        # produces a BOX as tall as however many rows happened to part. On a
+        # shieldmaiden that is one row: a 4x1 sliver that the walk then swings
+        # while the real arm sits frozen inside the torso. The vision critic
+        # reported it, unprompted, on four of the eight characters it was shown.
+        #
+        # Replacing such a box with the outer-strip fallback was built and
+        # MEASURED and is a dead end -- see HANDOFF: it makes two clean corpus
+        # characters come apart to buy one broken one back. A guess that is
+        # bigger is a worse guess when it is wrong, and on a character whose
+        # arms never leave the body there is nothing in the silhouette to find.
+        # So the box is left alone and the user is told, which is the same
+        # answer the "never separate" case below already gives.
+        band = max(1, hip - arm_top)
+        thin = [box for box in (left_arm, right_arm)
+                if box is not None and (box[3] - box[1]) < band * ARM_BAND]
+        if thin:
+            notes.append("the arms barely separate from the body in the "
+                         "silhouette, so each arm box is only %d row(s) of a "
+                         "%d-row shoulder-to-hip band and the arm swing will "
+                         "hardly read; a vision rig will do better here"
+                         % (min(box[3] - box[1] for box in thin), band))
 
         if left_arm is None and right_arm is None:
             # Arms never separate from the body. Give each side the outer third

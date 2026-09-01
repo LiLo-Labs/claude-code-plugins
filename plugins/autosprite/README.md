@@ -443,7 +443,7 @@ pip install -r requirements-test.txt
 python3 -m pytest tests -q
 ```
 
-634 tests, no network, no model, well under a minute. Fixtures are generated rather
+630 tests, no network, no model, well under a minute. Fixtures are generated rather
 than checked in — `tests/make_fixture.py` builds parametric sprites so a test can
 have the exact property it is about (arms clear of the body or touching, legs
 parted or robed) instead of one PNG having to serve every case.

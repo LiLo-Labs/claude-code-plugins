@@ -651,6 +651,48 @@ problems.
 
 ## Dead ends — measured, not guessed
 
+### Giving a sliver arm the outer-strip fallback instead
+
+**Found by the vision critic, and the measurement said no.** The first case
+where the two disagree, and it is worth knowing which wins.
+
+Run on eight corpus characters, the critic returned verdict `rig` on four of
+them, and the same complaint each time: *"arm_far and arm_near boxes are ~1px
+tall slivers that contain no arm pixels, so the driven arm swing cannot read at
+all"*, and *"the character's actual arms fall inside the torso box, so they
+rotate rigidly with the chest instead of swinging"*.
+
+It is exactly right about the cause. `core_and_limbs` collects only the rows
+where the silhouette parts into three spans -- correct about the PIXELS, since
+an arm touching the body there belongs to the torso -- and hands back a BOX as
+tall as however many rows happened to part. Measured across the corpus, arms
+that genuinely separate cover 40-95% of the shoulder-to-hip band and the slivers
+cover 7-33%: a shieldmaiden's arm box is **4x1**.
+
+Treating a sliver as "not found" and using the existing outer-strip fallback
+gives boxes that look right -- 4x1 becomes 4x6, 3x2 becomes 4x21 -- and makes
+the animation worse:
+
+| shipped, whole corpus | before | sliver fix, outer third | sliver fix, outer sixth |
+|---|---|---|---|
+| `platformer-grass-prowne` | 15.38% | 15.38% | **3.65%** |
+| `platformer-mv-male` | **0.00%** | 18.66% | 11.42% |
+| `fry-caped` | **0.00%** | 0.00% | 6.45% |
+| worst overall | 15.38% | 18.66% | 11.42% |
+| assets with a problem | **1** | 2 | 2 |
+
+It trades one broken character for two. The narrower strip is monotonically
+better (summed pre-repair shed 144.6% at a third, 125.7% at a sixth) and still
+does not get there: on a 16px-wide sprite, two outer strips leave six of
+fourteen torso columns and swinging both arms apart splits the body.
+
+**The rule underneath is the same one the hip lift found:** a guess that is
+bigger is a worse guess when it is wrong, and on a character whose arms never
+leave the body there is nothing in the silhouette to find. So the box is left as
+it is and the RIG NOW SAYS SO -- a note naming how many rows of the band the arm
+actually covers, alongside the note the "never separate" case already emitted.
+The user is told to reach for a vision rig, which finds the real arms.
+
 ### Lifting the hip above where the silhouette parts
 
 Anatomically true, looks obviously right, and it was **built, measured and
