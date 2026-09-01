@@ -1,6 +1,6 @@
 ---
 name: autosprite
-description: Use when the user wants animated sprite sheets from character art - turning one character image into idle/walk/run/jump/attack cycles, 8-direction movement, prop animations, or outfit and skin variants, and exporting them for Unity, Godot, Phaser, GameMaker, RPG Maker or Unreal. Triggers on "make a sprite sheet", "animate this character", "walk cycle from this image", "8-direction sprites", "spritesheet for Godot/Unity", "recolour this sprite".
+description: Use when the user wants animated sprite sheets from character art - turning one character image into idle, walk, run, dash, climb, crouch, jump, land, attack, block, cast, throw, hurt, die or sleep cycles, front-facing or top-down as well as side-on, 8-direction movement, prop animations, or outfit and skin variants, and exporting them for Unity, Godot, Phaser, GameMaker, RPG Maker or Unreal. Triggers on "make a sprite sheet", "animate this character", "walk cycle from this image", "8-direction sprites", "top-down RPG sprites", "spritesheet for Godot/Unity", "recolour this sprite".
 ---
 
 # AutoSprite
