@@ -1,0 +1,182 @@
+"""A verifier that cannot fail is worth nothing. These are the failures.
+
+Every test here breaks exactly one artefact of a known-good build and asserts
+that the corresponding check goes red -- because every one of these corruptions
+produces a sheet that still opens, still looks right, and is still wrong.
+"""
+
+import json
+import os
+import zipfile
+
+import pytest
+
+from spritepipe import image, pipeline, verify
+
+
+@pytest.fixture
+def built(hero_path, tmp_path):
+    out = str(tmp_path / "out")
+    result = pipeline.build_sheet(hero_path, out, animations=["idle", "walk"],
+                                  engines=("all",))
+    assert result.verification.ok, result.verification.report()
+    return {"dir": out, "name": "hero", "reference": hero_path,
+            "rig": result.written["rig"], "result": result}
+
+
+def run(built, **kwargs):
+    return verify.verify_directory(built["dir"], built["name"],
+                                   kwargs.get("reference", built["reference"]),
+                                   kwargs.get("rig", built["rig"]))
+
+
+def check(result, name):
+    return next(c for c in result.checks if c["check"] == name)
+
+
+def test_a_clean_build_passes_every_check(built):
+    result = run(built)
+    assert result.ok, result.report()
+    assert not any(c["skipped"] for c in result.checks)
+
+
+def test_a_rect_pushed_off_the_sheet_is_caught(built):
+    path = os.path.join(built["dir"], "hero.autosprite.json")
+    document = json.load(open(path))
+    document["clips"][0]["frames"][0]["x"] += 10000
+    json.dump(document, open(path, "w"))
+    assert not check(run(built), "RECT")["ok"]
+
+
+def test_a_rect_moved_onto_empty_texture_is_caught(built):
+    """One row off looks perfect and animates with a one-pixel jitter."""
+    path = os.path.join(built["dir"], "hero.autosprite.json")
+    document = json.load(open(path))
+    frame = document["clips"][0]["frames"][0]
+    frame["x"], frame["y"], frame["w"], frame["h"] = 0, 0, 1, 1
+    json.dump(document, open(path, "w"))
+    assert not check(run(built), "RECT")["ok"]
+
+
+def test_a_zip_frame_that_no_longer_matches_the_sheet_is_caught(built):
+    path = os.path.join(built["dir"], "hero-frames.zip")
+    with zipfile.ZipFile(path) as archive:
+        names = archive.namelist()
+        contents = {name: archive.read(name) for name in names}
+    contents[names[0]] = contents[names[1]]
+    with zipfile.ZipFile(path, "w") as archive:
+        for name, data in contents.items():
+            archive.writestr(name, data)
+    assert not check(run(built), "ZIP")["ok"]
+
+
+def test_a_missing_zip_frame_is_caught(built):
+    path = os.path.join(built["dir"], "hero-frames.zip")
+    with zipfile.ZipFile(path) as archive:
+        names = archive.namelist()
+        contents = {name: archive.read(name) for name in names[1:]}
+    with zipfile.ZipFile(path, "w") as archive:
+        for name, data in contents.items():
+            archive.writestr(name, data)
+    assert not check(run(built), "ZIP")["ok"]
+
+
+def test_a_colour_that_was_never_in_the_art_is_caught(built):
+    sheet_path = os.path.join(built["dir"], "hero.png")
+    sheet = image.load(sheet_path)
+    box = image.content_box(sheet)
+    sheet[box[1], box[0]] = [7, 254, 13, 255]
+    image.save(sheet, sheet_path)
+    result = run(built)
+    assert not check(result, "PALETTE")["ok"]
+    assert "not in the source art" in check(result, "PALETTE")["detail"]
+
+
+def test_the_palette_check_is_skipped_rather_than_faked_without_a_reference(built):
+    result = verify.verify_directory(built["dir"], built["name"], None, built["rig"])
+    assert check(result, "PALETTE")["skipped"]
+
+
+def test_an_engine_file_that_disagrees_with_the_atlas_is_caught(built):
+    """This is the bug that works in Phaser and not in Godot."""
+    path = os.path.join(built["dir"], "hero.phaser.json")
+    document = json.load(open(path))
+    key = sorted(document["frames"])[0]
+    document["frames"][key]["frame"]["x"] += 3
+    json.dump(document, open(path, "w"))
+    result = run(built)
+    assert not check(result, "ENGINES")["ok"]
+    assert "phaser" in check(result, "ENGINES")["detail"]
+
+
+def test_a_unity_meta_with_unflipped_y_is_caught(built):
+    path = os.path.join(built["dir"], "hero.png.meta")
+    text = open(path).read().replace("      y: ", "      y: 1", 1)
+    open(path, "w").write(text)
+    assert not check(run(built), "ENGINES")["ok"]
+
+
+def test_a_godot_resource_missing_an_animation_is_caught(built):
+    path = os.path.join(built["dir"], "hero.tres")
+    text = open(path).read().replace('&"walk"', '&"stroll"')
+    open(path, "w").write(text)
+    result = run(built)
+    assert not check(result, "ENGINES")["ok"]
+    assert "walk" in check(result, "ENGINES")["detail"]
+
+
+def test_a_clip_whose_frames_disagree_about_the_anchor_is_caught(built):
+    path = os.path.join(built["dir"], "hero.autosprite.json")
+    document = json.load(open(path))
+    document["clips"][0]["frames"][1]["anchor"][1] += 2
+    json.dump(document, open(path, "w"))
+    assert not check(run(built), "ANCHOR")["ok"]
+
+
+def test_a_rig_that_does_not_reassemble_into_the_source_is_caught(built):
+    """The strongest check: a pixel in the wrong part makes every frame wrong."""
+    document = json.load(open(built["rig"]))
+    for part in document["parts"]:
+        if part["role"] == "head":
+            part["box"][3] = max(part["box"][1] + 1, part["box"][3] - 2)
+    json.dump(document, open(built["rig"], "w"))
+    result = run(built)
+    assert not check(result, "REST")["ok"]
+
+
+def test_a_structurally_invalid_rig_is_caught_before_the_rest_check(built):
+    document = json.load(open(built["rig"]))
+    for part in document["parts"]:
+        part["parent"] = None
+    json.dump(document, open(built["rig"], "w"))
+    assert "invalid" in check(run(built), "REST")["detail"]
+
+
+def test_a_rig_for_a_different_character_is_caught(built):
+    document = json.load(open(built["rig"]))
+    document["size"] = [document["size"][0] + 5, document["size"][1]]
+    json.dump(document, open(built["rig"], "w"))
+    assert not check(run(built), "REST")["ok"]
+
+
+def test_a_directory_with_no_atlas_says_so(tmp_path):
+    result = verify.verify_directory(str(tmp_path))
+    assert not result.ok
+    assert "autosprite.json" in result.checks[0]["detail"]
+
+
+def test_a_missing_sheet_is_caught(built):
+    os.remove(os.path.join(built["dir"], "hero.png"))
+    assert not run(built).ok
+
+
+def test_the_name_is_found_without_being_told(built):
+    result = verify.verify_directory(built["dir"], None, built["reference"], built["rig"])
+    assert result.ok, result.report()
+
+
+def test_the_report_names_every_check_and_its_verdict(built):
+    text = run(built).report()
+    for name in ("ATLAS", "RECT", "ZIP", "PALETTE", "ENGINES", "ANCHOR", "REST"):
+        assert name in text
+    assert "passed" in text

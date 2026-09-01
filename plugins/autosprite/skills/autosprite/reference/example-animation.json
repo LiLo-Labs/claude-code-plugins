@@ -1,0 +1,57 @@
+[
+  {
+    "name": "cast",
+    "frames": 8,
+    "fps": 12,
+    "loop": false,
+    "easing": "smooth",
+    "note": "A spell cast: gather low, raise both arms, release, recover. The gather is the anticipation frame and the release holds for one key so the effect has somewhere to land.",
+    "root": [
+      {"t": 0.0, "dy": 0.0},
+      {"t": 0.25, "dy": 2.0},
+      {"t": 0.55, "dy": -2.0, "easing": "ease_in"},
+      {"t": 0.7, "dy": -2.0},
+      {"t": 1.0, "dy": 0.0}
+    ],
+    "tracks": {
+      "arm_near": [
+        {"t": 0.0, "angle": 0.0},
+        {"t": 0.25, "angle": 40.0},
+        {"t": 0.55, "angle": -105.0, "easing": "ease_in"},
+        {"t": 0.7, "angle": -110.0},
+        {"t": 1.0, "angle": 0.0}
+      ],
+      "arm_far": [
+        {"t": 0.0, "angle": 0.0},
+        {"t": 0.25, "angle": 34.0},
+        {"t": 0.55, "angle": -98.0, "easing": "ease_in"},
+        {"t": 0.7, "angle": -103.0},
+        {"t": 1.0, "angle": 0.0}
+      ],
+      "torso": [
+        {"t": 0.0, "angle": 0.0},
+        {"t": 0.25, "angle": 8.0},
+        {"t": 0.55, "angle": -6.0},
+        {"t": 1.0, "angle": 0.0}
+      ],
+      "head": [
+        {"t": 0.0, "angle": 0.0},
+        {"t": 0.25, "angle": 6.0},
+        {"t": 0.6, "angle": -8.0},
+        {"t": 1.0, "angle": 0.0}
+      ],
+      "leg_near": [
+        {"t": 0.0, "angle": 0.0},
+        {"t": 0.25, "angle": 0.0, "sy": 0.9},
+        {"t": 0.55, "angle": 0.0, "sy": 1.0},
+        {"t": 1.0, "angle": 0.0}
+      ],
+      "leg_far": [
+        {"t": 0.0, "angle": 0.0},
+        {"t": 0.25, "angle": 0.0, "sy": 0.9},
+        {"t": 0.55, "angle": 0.0, "sy": 1.0},
+        {"t": 1.0, "angle": 0.0}
+      ]
+    }
+  }
+]

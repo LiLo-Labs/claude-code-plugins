@@ -1,0 +1,10 @@
+# What the pipeline and its test suite need. Both are pure CPU; there is no GPU
+# path and no image-generation model anywhere in this plugin.
+#
+# The rigging agent shells out to `claude -p` (HeadlessBackend), so it needs a
+# `claude` CLI on PATH and no API key. The test suite never calls it: every test
+# runs against TemplateBackend, the deterministic stand-in, so CI needs nothing
+# beyond the three packages below.
+numpy
+pillow
+pytest

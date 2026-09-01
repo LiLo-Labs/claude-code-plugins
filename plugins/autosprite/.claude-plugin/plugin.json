@@ -1,0 +1,22 @@
+{
+  "name": "autosprite",
+  "description": "Turn one character image into a finished, engine-ready sprite sheet. Vision rigs the character into parts and joints, a deterministic skeletal animator draws idle/walk/run/jump/attack and 8-direction movement from those parts, and the sheet exports to Unity, Godot, Phaser, GameMaker, RPG Maker and Unreal with every output frame provably built from the source's own palette.",
+  "version": "0.1.0",
+  "author": {
+    "name": "LiloLabs"
+  },
+  "license": "MIT",
+  "keywords": [
+    "sprites",
+    "spritesheet",
+    "pixel-art",
+    "game-dev",
+    "animation",
+    "atlas",
+    "unity",
+    "godot",
+    "phaser",
+    "gamemaker",
+    "rpg-maker"
+  ]
+}
