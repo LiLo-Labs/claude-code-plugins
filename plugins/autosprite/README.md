@@ -348,6 +348,22 @@ near arm, and every humanoid rig has one whether or not its author thought about
 outfitting. A rig with no far arm has no off-hand and says so, instead of putting
 a shield in the middle of the torso.
 
+The item is **scaled to the character it is meeting** — a hand prop is about
+twice the long axis of the arm holding it, snapped to a ratio pixel art survives
+(pixel art does not scale by 0.37) and resampled nearest-neighbour, so no colour
+is invented. The 30px CC0 sword landed anywhere from **1.4× to 30×** the arm it
+hung on across seventeen corpus characters; it now lands between 1.9× and 2.2×,
+and the build says *"scaled 0.25x: 30 px drawn against a 4 px arm_near"* rather
+than resizing silently. `--attach hand=dagger.pngx0.5` overrides it, because a
+dagger is a short sword rather than a small character.
+
+The socket itself is measured on the character's **drawn pixels**, not on the
+rectangle around them: the free end of an arm is the drawn pixel furthest from
+that arm's own hinge, which is what a hand *is*. Across every socket of every
+corpus rig, the point landed on a solid pixel of the character 51% of the time
+by the old box rule and **99%** now — and the 49% were items floating clear of
+the hand that was supposed to be holding them.
+
 The item is composited into the source art *before anything else runs*, and the
 composed image is written out as `<name>.source.png`. That is what makes it cost
 nothing: the item is a rig part parented to the arm, so forward kinematics

@@ -365,6 +365,105 @@ invariant, and the fallback hiding the gap was silent.
   what it moved and the build warns. Instrumented across six sprites and all
   sixteen animations: **zero**.
 
+## Outfitting: "one item fits every character" was aspirational
+
+The module's own docstring said an item ends up "in the right hand of a
+character it has never met, at the right size". Both halves were false, and the
+picture showed it before any number did -- a CC0 sword pasted on four corpus
+characters floated beside each of them, at four wildly different sizes.
+
+### It was pasted at whatever size it was drawn
+
+The CC0 sword is 30px long. Across seventeen corpus characters the arm it hangs
+on runs from 1px to 21px, so at its drawn size it landed anywhere from **1.4x to
+30x** the length of that arm. On a 15px character it was a sword twice as tall
+as the character.
+
+An item is now scaled to the part it meets: a hand prop is about twice the long
+axis of the arm holding it, a hat about the width of the head. Those are the
+animator's rules of thumb and they are what makes one sword fit everything --
+`PROPORTIONS` in `outfit.py`, overridable per item.
+
+| | worst miss from the 2.0x target |
+|---|---|
+| pasted at its drawn size | **28.0x** |
+| scaled to the arm | **3.0x** |
+
+Every real character lands between 1.9x and 2.2x. The one outlier is
+`props-potion-funnydude`, whose "arm" the template rigger invented as 1px wide,
+and 1/6 is the smallest ratio on offer -- that is the known "the silhouette
+rigger splits a single mass and calls the halves a pair" defect showing through,
+not a scaling failure.
+
+The scale is **snapped to a simple ratio** (1/6 up to 4, in log space so halving
+and doubling are equally near). Pixel art does not scale by 0.37: a blade
+reduced by an arbitrary fraction comes out two pixels wide in one place and one
+in another. Nearest-neighbour in both directions, so no colour is invented and
+`PALETTE` goes on meaning exactly what it meant.
+
+### It was hung on the corner of a bounding box
+
+A part's box is a rectangle around a limb, and a limb is not a rectangle. Two
+separate errors compounded:
+
+- **An off-by-one.** A box's right and bottom are exclusive, so the last pixel
+  of a part is one before them. `_free_end` returned `y1`, which is one pixel
+  *past* the limb -- and since an item's grip sits at its own content edge,
+  that is a visible gap between a hand and what it is holding. A test asserted
+  the wrong value, so it had encoded the bug.
+- **The box instead of the pixels.** Even corrected, the box rule puts a hand
+  at the middle of the box's far edge, which for a bent or tapering arm is
+  empty space.
+
+`sockets(rig, pixels)` now measures the point on what is actually drawn inside
+the part's box -- the free end being the drawn pixel furthest from the part's
+own hinge, which is what a hand *is*. `pixels` is optional, so a caller holding
+only a rig still gets the box rule.
+
+| socket points landing on a solid pixel of the character | |
+|---|---|
+| before | 41 of 80 (51%) |
+| off-by-one fixed | 53 of 80 (66%) |
+| measured on the pixels | **79 of 80 (99%)** |
+
+Verified end to end on the corpus's smallest character: a 15px sprite with the
+30px sword scaled to 0.25x, all eight checks green, and the build says
+*"scaled 0.25x: 30 px drawn against a 4 px arm_near"* rather than resizing
+silently.
+
+## Three hypotheses tested and refuted, in one sitting
+
+Each was cheap, and each would have been a plausible thing to build.
+
+**A longer or shorter cloth wave.** The flag under-moves the artist by 17%
+(3822 px against 4594), and the misses are 87% concentrated in the top and
+bottom fifths of the cloth. So: more amplitude, or a different wavelength?
+Neither. Sweeping amplitude 4 -> 8 -> 12 -> 18 takes the footprint error from
+21.4% to 67.0% while the *missed* count barely moves (1589 -> 1531): moving more
+does not reach the artist's pixels, it only adds pixels the artist never
+touches. And sweeping the wave from 1 to 3 periods across the part changes the
+error by a fifth of a point at every amplitude -- so a `wave_length` channel
+would have been a dial that provably does nothing. The residual is a change of
+SHAPE at the cloth's edges, which a column permutation cannot express, and that
+limit stands where it was.
+
+**A stillness check, to catch a windmill without ground truth.** The windmill's
+rotating roof was caught only by `footprint` and by the critic. The hypothesis:
+a part the clip does not drive should not move, and checking that needs no
+artist frames. It cannot work, and the reason is worth keeping: the roof moved
+because *ownership gave it to the sails*, and once given, the roof IS a sail. A
+check over owned pixels is vacuously true, because the renderer transforms each
+part's own sprite by that part's own pose. Only something that knows what the
+picture is OF -- artist frames, or the critic -- can tell that the roof was the
+tower's.
+
+**Limb width as a signal for "this rigger is out of its depth".** The one corpus
+asset still failing is an 8x23 character with 2px limbs, whose vision rig
+measures 0.00%. If narrow limbs predicted failure, the silhouette rigger could
+refuse instead of shipping debris. Measured across the whole corpus: the
+narrowest limb is 1px in the worst asset -- and also in three assets at exactly
+0.00%, while the second-worst has 3px limbs. No separation, no threshold.
+
 ## A spread of a whole frame is a copy, and three shipped clips were one
 
 The two-banner test that found it is four lines: put a CC0 flag on the canvas

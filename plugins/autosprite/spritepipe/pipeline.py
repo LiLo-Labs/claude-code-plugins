@@ -127,7 +127,8 @@ def outfit_views(references, rigs, attach, tolerance, native, source_path, build
                       "name": entry.get("name") or "%s_%s" % (
                           entry["socket"],
                           os.path.splitext(os.path.basename(entry["path"]))[0]),
-                      "grip": entry.get("grip"), "tags": entry.get("tags", ())})
+                      "grip": entry.get("grip"), "scale": entry.get("scale"),
+                      "tags": entry.get("tags", ())})
 
     composed, rig = outfit_module.attach(references["side"].pixels, rigs["side"],
                                          items)

@@ -8,6 +8,7 @@
 import argparse
 import json
 import os
+import re
 import sys
 
 import _bootstrap  # noqa: F401
@@ -57,7 +58,12 @@ def main():
                              "from the rig, so one item works on any character "
                              "that has the part. Add @X,Y to say where the item "
                              "is held if its own bottom centre is not the grip: "
-                             "--attach hand=sword.png@27,27. Repeatable")
+                             "--attach hand=sword.png@27,27. The item is scaled "
+                             "to the character it is meeting -- a sword is about "
+                             "twice the arm holding it, snapped to a ratio pixel "
+                             "art survives -- so one item fits a 15px sprite and "
+                             "a 64px one. Add xN to override: "
+                             "--attach hand=dagger.pngx0.5. Repeatable")
 
     parser.add_argument("--layout", default="grid",
                         choices=("grid", "packed", "strip"),
@@ -148,11 +154,11 @@ def main():
 
 
 def _attachment(entry):
-    """SOCKET=FILE, optionally FILE@X,Y for where the item is held."""
+    """SOCKET=FILE, optionally FILE@X,Y for the grip and FILExN for the size."""
     if "=" not in entry:
         raise ValueError("--attach wants SOCKET=FILE, not %r" % entry)
     socket, path = entry.split("=", 1)
-    grip = None
+    grip = scale = None
     if "@" in path:
         path, point = path.rsplit("@", 1)
         try:
@@ -160,9 +166,15 @@ def _attachment(entry):
             grip = (int(x), int(y))
         except ValueError:
             raise ValueError("--attach %r: the grip after @ must be X,Y" % entry)
+    sized = re.search(r"x([0-9]+(?:\.[0-9]+)?)$", path)
+    if sized:
+        scale = float(sized.group(1))
+        if scale <= 0:
+            raise ValueError("--attach %r: a scale must be above zero" % entry)
+        path = path[:sized.start()]
     if not os.path.exists(path):
         raise ValueError("--attach %r: no such file %s" % (entry, path))
-    return {"socket": socket.strip(), "path": path, "grip": grip}
+    return {"socket": socket.strip(), "path": path, "grip": grip, "scale": scale}
 
 
 def _human(build, report):
