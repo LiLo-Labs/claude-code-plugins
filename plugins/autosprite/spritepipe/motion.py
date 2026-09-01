@@ -104,13 +104,21 @@ def _key_pose(key):
 
 class Animation:
     def __init__(self, name, frames, fps=10, loop=True, tracks=None, root=None,
-                 easing="smooth", note="", flip_from=None, planted=False):
+                 easing="smooth", note="", flip_from=None, planted=False,
+                 loop_start=None, loop_end=None):
         self.name = name
         # Whether a foot is on the floor throughout. A rigid leg rotated about
         # the hip lifts its own foot, so a clip that claims to be grounded has
         # to be corrected back down -- see `skeleton.plant`. A run has a flight
         # phase and a jump is nothing but one, so neither is grounded.
         self.planted = bool(planted)
+        # Where the loop actually repeats, as frame indices, when the whole clip
+        # is not the loop. A guard is raised once and then held while the button
+        # is down; a game plays 0..loop_end and then jumps back to loop_start
+        # rather than replaying the raise. autosprite.io carries the same two
+        # fields, and Aseprite's frameTags are what most importers read them from.
+        self.loop_start = None if loop_start is None else int(loop_start)
+        self.loop_end = None if loop_end is None else int(loop_end)
         # A 2D spin has no back face to draw: the object squashes to nothing and
         # comes back mirrored. `flip_from` is the instant it passes edge-on.
         self.flip_from = flip_from
@@ -170,7 +178,14 @@ class Animation:
         if frames == self.frames:
             return self
         clone = copy.deepcopy(self)
-        clone.fps = self.fps * (float(frames) / float(self.frames))
+        ratio = float(frames) / float(self.frames)
+        clone.fps = self.fps * ratio
+        # The loop points name frames, so they have to move with the count or a
+        # sixteen-frame version of a four-frame clip loops the wrong quarter.
+        for field in ("loop_start", "loop_end"):
+            value = getattr(clone, field)
+            if value is not None:
+                setattr(clone, field, max(0, min(frames - 1, int(round(value * ratio)))))
         clone.frames = frames
         return clone
 
@@ -294,6 +309,7 @@ class Animation:
         return {"name": self.name, "frames": self.frames, "fps": self.fps,
                 "loop": self.loop, "easing": self.easing, "note": self.note,
                 "flip_from": self.flip_from, "planted": self.planted,
+                "loop_start": self.loop_start, "loop_end": self.loop_end,
                 "root": self.root.to_list() if self.root else None,
                 "tracks": {role: track.to_list() for role, track in self.tracks.items()}}
 
@@ -302,7 +318,8 @@ class Animation:
         return cls(data["name"], data["frames"], data.get("fps", 10),
                    data.get("loop", True), data.get("tracks"), data.get("root"),
                    data.get("easing", "smooth"), data.get("note", ""),
-                   data.get("flip_from"), data.get("planted", False))
+                   data.get("flip_from"), data.get("planted", False),
+                   data.get("loop_start"), data.get("loop_end"))
 
 
 def validate_animation(data):
@@ -323,6 +340,17 @@ def validate_animation(data):
     elif frames > 64:
         problems.append("frames = %d; a sprite animation above 64 frames is "
                         "almost always a mistake" % frames)
+    else:
+        for field in ("loop_start", "loop_end"):
+            value = data.get(field)
+            if value is None:
+                continue
+            if not isinstance(value, int) or not 0 <= value < frames:
+                problems.append("%s = %r; it names a frame, so it must be an "
+                                "integer from 0 to %d" % (field, value, frames - 1))
+        start, end = data.get("loop_start"), data.get("loop_end")
+        if (isinstance(start, int) and isinstance(end, int) and end < start):
+            problems.append("loop_end (%d) is before loop_start (%d)" % (end, start))
     fps = data.get("fps", 10)
     if not isinstance(fps, (int, float)) or not 0 < fps <= 120:
         problems.append("fps must be between 0 and 120, got %r" % (fps,))
@@ -662,9 +690,10 @@ def _library():
         })
 
     block = Animation(
-        "block", frames=4, fps=12, loop=False,
-        note="up fast, held: the guard frame is the one a player sees, so it "
-             "arrives on frame two and stays",
+        "block", frames=4, fps=12, loop=True, loop_start=2,
+        note="up fast, then held: the guard frame is the one a player sees, so "
+             "it arrives on frame two and the loop repeats from there. A game "
+             "plays the raise once and holds the guard while the button is down",
         root=[{"t": 0.0, "dy": 0.0}, {"t": 0.33, "dy": 2.0, "easing": "ease_in"},
               {"t": 0.66, "dy": 1.0}, {"t": 1.0, "dy": 1.0}],
         tracks={

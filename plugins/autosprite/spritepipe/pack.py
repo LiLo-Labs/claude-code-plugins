@@ -31,11 +31,15 @@ class Clip:
     """One animation, in one direction, with the frames already stabilised."""
 
     def __init__(self, name, frames, fps=10, loop=True, direction=None,
+                 loop_start=None, loop_end=None,
                  anchor=(0, 0), fidelity="drawn", note=""):
         self.name = name
         self.frames = list(frames)
         self.fps = float(fps)
         self.loop = bool(loop)
+        # Where the repeat begins and ends, when the whole clip is not the loop.
+        self.loop_start = None if loop_start is None else int(loop_start)
+        self.loop_end = None if loop_end is None else int(loop_end)
         self.direction = direction
         self.anchor = tuple(int(v) for v in anchor)
         self.fidelity = fidelity
@@ -138,10 +142,12 @@ def pack(clips, layout="grid", padding=1, extrude=1, power_of_two=False,
     if not clips:
         raise ValueError("nothing to pack")
     if scale > 1:
-        clips = [Clip(clip.name, [img.scale_nearest(frame, scale) for frame in clip.frames],
+        clips = [Clip(clip.name,
+                      [img.scale_nearest(frame, scale) for frame in clip.frames],
                       clip.fps, clip.loop, clip.direction,
-                      (clip.anchor[0] * scale, clip.anchor[1] * scale),
-                      clip.fidelity, clip.note)
+                      loop_start=clip.loop_start, loop_end=clip.loop_end,
+                      anchor=(clip.anchor[0] * scale, clip.anchor[1] * scale),
+                      fidelity=clip.fidelity, note=clip.note)
                  for clip in clips]
 
     builder = {"grid": _pack_grid, "packed": _pack_shelf,

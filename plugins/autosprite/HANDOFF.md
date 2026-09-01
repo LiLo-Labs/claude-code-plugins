@@ -9,7 +9,7 @@ again.
 The pipeline is sound and proven on real art. **20 CC0 sprites** (16×16 to
 76×81; humanoids, creatures, props, and four cases chosen to break a silhouette
 rigger) all build, with all eight verification checks passing on both backends.
-450 tests, no network or model in any of them.
+461 tests, no network or model in any of them.
 
 Quality, measured as **debris** — the share of a frame's pixels not connected to
 its main blob, against the source's own figure:
@@ -335,9 +335,17 @@ two arms because it can see COLOUR. That is the vision backend's job.
    centre, so every clip of every character shares one floor and one origin, and
    refuses rather than crops when the art does not fit.
 
-   **Loop points are still open** and are the cheapest remaining parity item:
-   autosprite.io exposes loop start/end, and here it is atlas metadata plus two
-   flags -- no pixels change.
+   ~~**Loop points**~~ **done too.** `--loop-start` / `--loop-end` name the
+   frames a clip repeats between, for a clip that is an intro followed by a
+   hold, and `--fps` overrides the rate without touching the frame count. They
+   move with `--frames`, because they name frames and a sixteen-frame version of
+   a four-frame clip would otherwise loop the wrong quarter. `block` ships with
+   them: the guard is raised once and held while the button is down, which is
+   what a game actually does with it. They land in the native atlas and, because
+   Aseprite has no in/out points on a tag, as a second `<name>_loop` frameTag --
+   two tags being what every importer that reads them already understands.
+
+   **The parity backlog is now empty.**
 5. ~~**A wider motion library.**~~ **Done for the obvious eight.** Fifteen
    character clips now: idle, walk, run, dash, climb, crouch, jump, land,
    attack, block, cast, throw, hurt, die, sleep, plus the `action` and

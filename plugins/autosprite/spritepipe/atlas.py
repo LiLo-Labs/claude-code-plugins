@@ -50,6 +50,9 @@ def native(sheet, name, reference_report=None, extra=None):
             "direction": clip.direction,
             "fps": clip.fps,
             "loop": clip.loop,
+            "loop_start": clip.loop_start if clip.loop_start is not None else 0,
+            "loop_end": (clip.loop_end if clip.loop_end is not None
+                         else len(placements) - 1),
             "duration_ms": _duration_ms(clip.fps),
             "fidelity": clip.fidelity,
             "note": clip.note,
@@ -132,6 +135,16 @@ def aseprite(sheet, name):
                      "to": cursor + len(placements) - 1,
                      "direction": "forward",
                      "repeat": "0" if clip.loop else "1"})
+        # A clip that is raised once and then held is two tags, not one: the
+        # whole thing under its own name, and the part that actually repeats
+        # under "<name>_loop". Aseprite has no in/out points on a tag, and two
+        # tags is what every importer that reads them already understands.
+        if clip.loop and clip.loop_start:
+            tags.append({"name": "%s_loop" % clip_key,
+                         "from": cursor + clip.loop_start,
+                         "to": cursor + (clip.loop_end if clip.loop_end is not None
+                                         else len(placements) - 1),
+                         "direction": "forward", "repeat": "0"})
         cursor += len(placements)
     document["meta"]["app"] = "https://www.aseprite.org/"
     document["meta"]["frameTags"] = tags

@@ -333,3 +333,27 @@ def test_the_strip_is_its_own_frames_laid_side_by_side(sheet, tmp_path):
                     archive.read("%s/frames/%s.png" % (clip_key, entry["name"]))
                 )).convert("RGBA"), dtype=np.uint8)
                 assert image.equal(cut, stored)
+
+
+def test_a_held_clip_gets_a_second_tag_for_the_part_that_repeats(tmp_path):
+    """Aseprite has no in/out points on a tag, and two tags is what every
+    importer that reads them already understands."""
+    held = pack.Clip("block", frames(4, 8, 10, [90, 90, 200, 255]), 12, True,
+                     loop_start=2, anchor=(4, 10))
+    sheet = pack.pack([held], layout="grid", padding=1, extrude=1)
+    tags = atlas.aseprite(sheet, "hero")["meta"]["frameTags"]
+    assert [tag["name"] for tag in tags] == ["block", "block_loop"]
+    assert (tags[1]["from"], tags[1]["to"]) == (2, 3)
+
+
+def test_a_plain_loop_gets_one_tag():
+    plain = pack.Clip("walk", frames(4, 8, 10, [90, 90, 200, 255]), 12, True,
+                      anchor=(4, 10))
+    sheet = pack.pack([plain], layout="grid", padding=1, extrude=1)
+    assert len(atlas.aseprite(sheet, "hero")["meta"]["frameTags"]) == 1
+
+
+def test_the_native_atlas_always_states_the_loop_range(sheet):
+    for clip in atlas.native(sheet, "hero")["clips"]:
+        assert clip["loop_start"] == 0
+        assert clip["loop_end"] == len(clip["frames"]) - 1

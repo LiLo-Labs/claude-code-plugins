@@ -153,6 +153,7 @@ def make_clips(references, rigs, cutouts, animations, direction_plans, locked,
             clip = pack_module.Clip(
                 animation.name, frames, animation.fps, animation.loop,
                 direction=plan.name if len(direction_plans) > 1 else None,
+                loop_start=animation.loop_start, loop_end=animation.loop_end,
                 anchor=(anchor[0] + margin, anchor[1] + margin),
                 fidelity=plan.fidelity, note=animation.note)
             clips.append(clip)
@@ -201,7 +202,7 @@ def build_sheet(reference_path, outdir, animations=("full",), direction_set="1",
                 front=None, back=None, tolerance=12, native=True,
                 custom_animations=None, preview_scale=None, kind="character",
                 compress=False, repair=True, frames=None,
-                frame_size=None):
+                frame_size=None, fps=None, loop_start=None, loop_end=None):
     """The whole pipeline. Returns a Build."""
     build = Build()
     os.makedirs(outdir, exist_ok=True)
@@ -236,6 +237,25 @@ def build_sheet(reference_path, outdir, animations=("full",), direction_set="1",
         if not 2 <= int(frames) <= 64:
             raise ValueError("--frames must be between 2 and 64, not %r" % frames)
         chosen = [animation.resampled(frames) for animation in chosen]
+    if fps or loop_start is not None or loop_end is not None:
+        import copy as _copy
+        retimed = []
+        for animation in chosen:
+            clone = _copy.deepcopy(animation)
+            if fps:
+                if not 0 < float(fps) <= 120:
+                    raise ValueError("--fps must be above 0 and at most 120, "
+                                     "not %r" % fps)
+                clone.fps = float(fps)
+            if loop_start is not None:
+                clone.loop_start = int(loop_start)
+            if loop_end is not None:
+                clone.loop_end = int(loop_end)
+            problems = motion_module.validate_animation(clone.to_dict())
+            if problems:
+                raise ValueError("%s: %s" % (clone.name, "; ".join(problems)))
+            retimed.append(clone)
+        chosen = retimed
 
     plans = directions_module.plan(direction_set, build.references)
     build.report["directions"] = [plan.to_dict() for plan in plans]

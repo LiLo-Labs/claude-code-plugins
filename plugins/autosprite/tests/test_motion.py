@@ -407,3 +407,42 @@ def test_only_the_clips_that_keep_a_foot_down_are_planted():
 def test_a_clip_that_leaves_the_ground_is_never_planted():
     for name in ("jump", "land", "run", "dash", "die", "sleep", "climb"):
         assert not motion.get(name).planted, name
+
+
+# -- an intro followed by a hold ------------------------------------------
+
+def test_block_is_raised_once_and_then_held():
+    """A guard is raised once and held while the button is down. Playing the
+    raise on every repeat is what a whole-clip loop flag gives you."""
+    block = motion.get("block")
+    assert block.loop and block.loop_start == 2
+
+
+def test_a_clip_with_no_loop_points_says_so_rather_than_guessing():
+    assert motion.get("walk").loop_start is None
+    assert motion.get("walk").loop_end is None
+
+
+def test_loop_points_move_with_the_frame_count():
+    """They name frames, so a sixteen-frame version of a four-frame clip would
+    otherwise loop the wrong quarter."""
+    dense = motion.get("block").resampled(16)
+    assert dense.loop_start == 8
+
+
+def test_a_loop_point_outside_the_clip_is_caught():
+    data = motion.get("walk").to_dict()
+    data["loop_start"] = 99
+    assert any("loop_start" in problem for problem in motion.validate_animation(data))
+
+
+def test_a_loop_that_ends_before_it_starts_is_caught():
+    data = motion.get("walk").to_dict()
+    data["loop_start"], data["loop_end"] = 5, 2
+    assert any("before" in problem for problem in motion.validate_animation(data))
+
+
+def test_loop_points_survive_a_round_trip():
+    block = motion.get("block")
+    again = motion.Animation.from_dict(block.to_dict())
+    assert (again.loop_start, again.loop_end) == (block.loop_start, block.loop_end)

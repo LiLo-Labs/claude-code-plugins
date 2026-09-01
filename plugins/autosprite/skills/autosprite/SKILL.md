@@ -139,6 +139,13 @@ When the user does ask, two flags cover it:
   continuous curve, so this samples it more finely rather than interpolating
   finished pictures, and fps moves with the count so the timing is unchanged.
   Useful when an engine or a jam wants a fixed frame count.
+- **`--fps N`** overrides every clip's frame rate without changing the frame
+  count, so the same motion plays faster or slower.
+- **`--loop-start N` / `--loop-end N`** name the frames a clip repeats between,
+  for a clip that is an intro followed by a hold. `block` ships with them: the
+  guard is raised once and then held while the button is down. They land in the
+  native atlas and, because Aseprite has no in/out points on a tag, as a second
+  `<name>_loop` frameTag that every importer already understands.
 - **`--frame-size N`** (8-512) puts every frame in a square N-pixel cell with
   the character standing at the bottom centre, so every clip of every character
   shares one floor and one origin. This is what a tile-based importer and a

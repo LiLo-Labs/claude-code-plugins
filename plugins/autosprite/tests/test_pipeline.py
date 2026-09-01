@@ -306,3 +306,18 @@ def test_a_running_character_is_allowed_to_leave_the_ground(hero_path, tmp_path)
         clip = next(clip for clip in result.clips if clip.name == name)
         floors = {int(image.alpha_mask(frame).nonzero()[0].max()) for frame in clip.frames}
         assert len(floors) > 1, "%s never leaves the ground" % name
+
+
+def test_loop_points_and_fps_can_be_overridden(hero_path, tmp_path):
+    result = build(hero_path, tmp_path / "out", animations=["walk"],
+                   fps=24, loop_start=2, loop_end=5)
+    clip = next(clip for clip in result.clips if clip.name == "walk")
+    assert clip.fps == 24
+    assert (clip.loop_start, clip.loop_end) == (2, 5)
+    assert result.verification.ok, result.verification.report()
+
+
+def test_a_loop_point_past_the_end_is_refused(hero_path, tmp_path):
+    with pytest.raises(ValueError) as caught:
+        build(hero_path, tmp_path / "out", animations=["walk"], loop_start=99)
+    assert "loop_start" in str(caught.value)

@@ -67,6 +67,18 @@ def main():
                              "pixels, 8-512, with the character standing at the "
                              "bottom centre. Refuses rather than crops if the "
                              "art does not fit")
+    parser.add_argument("--loop-start", type=int, default=None,
+                        help="the frame the loop repeats from, when the clip is "
+                             "an intro followed by a hold. Applies to every "
+                             "animation in the build, so it is normally only "
+                             "useful with a single --animations")
+    parser.add_argument("--loop-end", type=int, default=None,
+                        help="the last frame of the repeat; defaults to the "
+                             "clip's last frame")
+    parser.add_argument("--fps", type=float, default=None,
+                        help="override every animation's frame rate. The frame "
+                             "count is unchanged, so this makes the same motion "
+                             "play faster or slower")
     parser.add_argument("--padding", type=int, default=1)
     parser.add_argument("--extrude", type=int, default=1)
     parser.add_argument("--scale", type=int, default=1,
@@ -96,7 +108,9 @@ def main():
             front=args.front, back=args.back, tolerance=args.tolerance,
             native=not args.no_native, custom_animations=custom, kind=args.kind,
             compress=args.compress, repair=not args.no_repair,
-            frames=args.frames, frame_size=args.frame_size)
+            frames=args.frames, frame_size=args.frame_size,
+            fps=args.fps, loop_start=args.loop_start,
+            loop_end=args.loop_end)
     except (ValueError, RuntimeError) as error:
         print("build failed: %s" % error, file=sys.stderr)
         return 2
