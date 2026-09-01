@@ -647,8 +647,12 @@ def add_part(backend, mesh, tree, up, seeds, labels, part, intent, out_dir,
                           "swatch": "colour %d" % (slot + 1),
                           "intent": intent or "a 3D model"}
         with open(path, "rb") as handle:
-            key = "brush-%s" % rig_module.digest(handle.read(),
-                                                 "%s|%d" % (part["name"], step))
+            # THE PROMPT IS PART OF THE QUESTION. Keying on the image alone
+            # replays an answer to a question that has since changed -- the
+            # same fault as keying on a filename, already recorded as failure
+            # circumstance 5, in a second place.
+            key = "brush-%s" % rig_module.digest(
+                handle.read(), "%s|%d|%s" % (part["name"], step, prompt))
         answer = backend._run([path], prompt, key)
         if answer is None:
             break
@@ -728,9 +732,11 @@ painting as a painting -- a colour that has spread across something it should
 not, two things that ought to be different colours and are not, an area that
 belongs to a part but ended up another colour because a later coat took it.
 
-Give the fixes as places, and say which colour each place SHOULD be. Draw
-round an area the same way it was painted: a closed outline for a patch, a
-line along a thin thing, or a single point for a spot.
+Give the fixes as places, and say which colour each place SHOULD be. Mark each
+one THE SAME WAY THAT PART WAS PAINTED, which is noted against each colour
+above: draw a closed outline round a [flat] area, and draw a LINE ALONG a
+[detailed] thing rather than a loop enclosing it. A loop drawn round a crack
+takes the whole shell between its lines.
 
 Take the worst few. You will be asked again after these are applied.
 
@@ -743,7 +749,7 @@ An empty list means the painting is right."""
 
 
 def review(backend, mesh, tree, up, seeds, labels, intent, out_dir,
-           directions, rounds=3, views=3, log=print):
+           directions, parts=None, rounds=3, views=3, log=print):
     """Look at the WHOLE painting and fix it. The question nobody was asked.
 
     Every part is painted on its own, and each of those calls can be perfectly
@@ -762,12 +768,21 @@ def review(backend, mesh, tree, up, seeds, labels, intent, out_dir,
         path, poses, geometry = show(mesh, up, field, labels, out_dir,
                                      "review-%d" % step, views=views,
                                      directions=directions)
-        legend = "\n".join("  %d: %s" % (i + 1, name)
-                            for i, name in enumerate(labels))
+        # WHICH INSTRUMENT EACH PART WANTS, carried into the review. Without
+        # it the review fills an outline for every fix, and a four-corner box
+        # named "cracks" hands the whole shell between the fractures to the
+        # crack colour -- which is the exact failure the fine brush exists to
+        # stop, reintroduced by the one pass that had not been told about it.
+        detail = {p["name"]: str(p.get("detail", "flat")).lower()
+                  for p in (parts or [])}
+        legend = "\n".join(
+            "  %d: %s [%s]" % (i + 1, name, detail.get(name, "flat"))
+            for i, name in enumerate(labels))
         prompt = REVIEW % {"count": len(poses), "legend": legend,
                            "intent": intent or "a 3D model"}
         with open(path, "rb") as handle:
-            key = "review-%s" % rig_module.digest(handle.read(), str(step))
+            key = "review-%s" % rig_module.digest(handle.read(),
+                                                  "%d|%s" % (step, prompt))
         answer = backend._run([path], prompt, key)
         if answer is None:
             break
@@ -781,10 +796,17 @@ def review(backend, mesh, tree, up, seeds, labels, intent, out_dir,
             if not (0 <= slot < len(labels)):
                 continue
             if fix.get("points"):
-                want = set(int(r) for r in
-                           outline_regions(tree, poses, geometry, [fix]))
-                want |= set(int(r) for r in
-                            stroke_regions(tree, poses, geometry, [fix]))
+                fine = detail.get(labels[slot], "flat") == "detailed"
+                if fine:
+                    want = set(int(r) for r in
+                               stroke_regions(tree, poses, geometry, [fix]))
+                else:
+                    want = set(int(r) for r in
+                               outline_regions(tree, poses, geometry, [fix]))
+                    if not want:
+                        want = set(int(r) for r in
+                                   stroke_regions(tree, poses, geometry,
+                                                  [fix]))
             else:
                 want = set(seed_regions(tree, poses, geometry, [fix]))
             if not want:
@@ -856,7 +878,7 @@ def choose_filaments(backend, mesh, up, field, labels, filaments, intent,
     prompt = CHOOSE % {"count": len(poses), "legend": legend,
                        "filaments": listing, "intent": intent or "a 3D model"}
     with open(path, "rb") as handle:
-        key = "choose-%s" % rig_module.digest(handle.read(), listing)
+        key = "choose-%s" % rig_module.digest(handle.read(), prompt)
     answer = backend._run([path], prompt, key) or {}
 
     known = {name.lower(): name for name in filaments}
@@ -913,7 +935,7 @@ def design_colours(backend, mesh, up, field, labels, intent, out_dir,
     prompt = DESIGN % {"count": len(poses), "legend": legend,
                        "intent": intent or "a 3D model"}
     with open(path, "rb") as handle:
-        key = "design-%s" % rig_module.digest(handle.read(), legend)
+        key = "design-%s" % rig_module.digest(handle.read(), prompt)
     answer = backend._run([path], prompt, key) or {}
 
     out = {}
@@ -982,7 +1004,8 @@ def paint(backend, mesh, tree, up, intent, out_dir, views=3, rounds=6,
     # that a later coat took its surface, so this is where that gets said.
     if labels:
         seeds, field = review(backend, mesh, tree, up, seeds, labels, intent,
-                              out_dir, directions, rounds=max(2, rounds // 2),
+                              out_dir, directions, parts=parts,
+                              rounds=max(2, rounds // 2),
                               views=len(directions), log=log)
     # THE BASE COAT LAST. Anything nobody drew round is the first part -- a
     # printer cannot lay "no colour" -- but that is a decision about the

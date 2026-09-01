@@ -644,3 +644,54 @@ class TestReview(unittest.TestCase):
                                     seeds, ["rock"], "test", "/tmp/unused",
                                     None, rounds=1, log=None)
         self.assertEqual(sorted(seeds[0]), [0, 1])
+
+    def test_a_fix_for_a_detailed_part_uses_the_fine_brush(self):
+        """The review filled an outline for every fix, whatever the part. A
+        four-corner box named "cracks" then handed the whole shell between the
+        fractures to the crack colour -- the exact failure the fine brush
+        exists to stop, reintroduced by the one pass not told about it."""
+        seeds = {0: [0, 1], 1: []}
+        parts = [{"name": "rock", "detail": "flat"},
+                 {"name": "cracks", "detail": "detailed"}]
+        backend = self._backend([{"fixes": [{"colour": 2, "view": 0,
+                                             "points": self._box(0, 19)}]}])
+        seeds, _field = loop.review(backend, self.mesh, self.tree, (0, 0, 1),
+                                    seeds, ["rock", "cracks"], "test",
+                                    "/tmp/unused", None, parts=parts,
+                                    rounds=2, log=None)
+        self.assertNotIn(1, seeds.get(1, []),
+                         "a line round the box must not fill its interior")
+
+    def test_a_fix_for_a_flat_part_still_fills(self):
+        seeds = {0: [0, 1], 1: []}
+        parts = [{"name": "rock", "detail": "flat"},
+                 {"name": "shell", "detail": "flat"}]
+        backend = self._backend([{"fixes": [{"colour": 2, "view": 0,
+                                             "points": self._box(0, 19)}]}])
+        seeds, _field = loop.review(backend, self.mesh, self.tree, (0, 0, 1),
+                                    seeds, ["rock", "shell"], "test",
+                                    "/tmp/unused", None, parts=parts,
+                                    rounds=2, log=None)
+        self.assertIn(0, seeds[1], "a flat part's fix fills its outline")
+
+
+class TestCacheIdentity(unittest.TestCase):
+    """A cached answer must belong to the question that was asked.
+
+    Keying on the image alone means editing a prompt silently replays the
+    answer to the previous prompt. That is failure circumstance 5 -- cache
+    identity is not question identity -- which this module reintroduced in
+    two more places after it was fixed once.
+    """
+
+    def test_every_cache_key_includes_its_prompt(self):
+        import re
+        src = open(os.path.join(HERE, "..", "paintpipe", "loop.py")).read()
+        keys = re.findall(r'key = "(\w+)-%s" % rig_module\.digest\(\s*'
+                          r'(?:handle\.read\(\),|handle\.read\(\))([^)]*)\)',
+                          src)
+        self.assertTrue(keys, "no cache keys found; the pattern moved")
+        for name, rest in keys:
+            with self.subTest(key=name):
+                self.assertIn("prompt", rest,
+                              "%s keys on the image but not the question" % name)
