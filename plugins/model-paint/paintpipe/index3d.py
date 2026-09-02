@@ -155,6 +155,124 @@ def node_index(mesh, tree, family):
     return region_node[base], region_node
 
 
+NAME_PROMPT = """This is a %dx%d rendered close view of part of a 3D model.
+
+The piece: %s
+
+ONE shape in this image is tinted blue. Look at the tinted shape itself --
+not the grey things around it.
+
+We believe it is a %s. %s
+
+What is the tinted shape actually part of? Choose honestly. If it is not a
+%s, say so and name what it really is; that is a useful answer, not a
+failure. If the tint covers something you cannot make out at this size, say
+unclear.
+
+Reply with ONLY a JSON object, no prose:
+{"is": "yes"}                       the tinted shape is a %s
+{"is": "no", "actually": "<what it really is, a few words>"}
+{"is": "unclear"}"""
+
+
+def confirm(backend, mesh, frame, up, feature, hint, intent, out_dir, unit,
+            pixels=900, workers=8, log=print):
+    """Ask of each indexed instance what it actually is, without leading it.
+
+    The aimed rounds are a leading question by construction: they put one
+    candidate in the centre of frame and ask what is still unmarked there,
+    which invites a yes. That is the right trade for finding things and the
+    wrong one for keeping them, so recall and precision are separated -- the
+    rounds propose, and this gate disposes.
+
+    It is a gate that exits through SELECTION (circumstance 6): the agent may
+    answer that the tinted shape is something else and say what, which is
+    information, where a yes/no would only have destroyed it. An instance is
+    dropped only when it is named as something else; unclear keeps it, since
+    an unreadable render is evidence about the render (circumstance 2).
+    """
+    import os as os_module
+    from concurrent.futures import ThreadPoolExecutor
+    from PIL import Image
+    from . import entities as entities_module
+    from . import render as render_module
+
+    os_module.makedirs(out_dir, exist_ok=True)
+    areas = np.asarray(mesh.area_faces, dtype=float)
+    centres = np.asarray(mesh.triangles_center, dtype=float)
+    normals = np.asarray(mesh.face_normals, dtype=float)
+    numbers = np.unique(unit[unit >= 0])
+
+    def ask(number):
+        faces = np.flatnonzero(unit == number)
+        if not len(faces):
+            return number, "unclear", ""
+        weight = areas[faces]
+        outward = (normals[faces] * weight[:, None]).sum(axis=0)
+        norm = np.linalg.norm(outward)
+        if norm < 1e-9:
+            return number, "unclear", ""
+        outward = outward / norm
+        target = (centres[faces] * weight[:, None]).sum(axis=0) / weight.sum()
+        # Framed at several instance widths, so the agent sees the thing IN
+        # its surroundings and can tell a cone on a rib from a cone on a
+        # frond -- the distinction a tight crop destroys.
+        reach = float(np.sqrt(weight.sum() / np.pi)) * 7.0
+        side = np.cross(outward, [0.0, 0.0, 1.0])
+        if np.linalg.norm(side) < 1e-6:
+            side = np.cross(outward, [0.0, 1.0, 0.0])
+        spun = np.cross(side / np.linalg.norm(side), outward)
+        camera = render_module.Camera(outward, spun, target, reach, pixels)
+        bundle = render_module.render_bundle(mesh, camera, "zenithal", frame)
+        visible = bundle["visible"]
+        if not visible.any():
+            return number, "unclear", ""
+        lit = np.clip(bundle["rgb_lit"], 0, 1)
+        shade = 0.32 + 0.60 * lit
+        image = np.ones((pixels, pixels, 3))
+        image[visible] = shade[visible, None]
+        member = np.zeros(len(mesh.faces), dtype=bool)
+        member[faces] = True
+        hit = bundle["hit_id"]
+        blue = visible & (hit >= 0) & member[np.maximum(hit, 0)]
+        if blue.sum() < 60:
+            return number, "unclear", ""
+        image[blue] = np.stack([shade[blue] * 0.30, shade[blue] * 0.45,
+                                np.minimum(shade[blue] * 1.25, 1.0)], axis=1)
+        path = os_module.path.join(out_dir, "confirm-%d.png" % number)
+        Image.fromarray((image * 255).astype(np.uint8)).save(path)
+        prompt = NAME_PROMPT % (pixels, pixels, intent or "a model", feature,
+                                hint or "", feature, feature)
+        key = "name-%s" % entities_module.digest_of(
+            open(path, "rb").read() + prompt.encode("utf-8"))[7:19]
+        answer = backend._run([path], prompt, key) or {}
+        verdict = str(answer.get("is", "unclear")).strip().lower()
+        return number, verdict, str(answer.get("actually", "")).strip()
+
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        verdicts = list(pool.map(ask, numbers))
+
+    kept, dropped, unclear, named = [], [], 0, {}
+    for number, verdict, actually in verdicts:
+        if verdict == "no":
+            dropped.append(number)
+            label = actually.lower() or "unnamed"
+            named[label] = named.get(label, 0) + 1
+        else:
+            kept.append(number)
+            if verdict != "yes":
+                unclear += 1
+    log("  confirm: %d kept, %d renamed away, %d unclear (kept)"
+        % (len(kept), len(dropped), unclear))
+    for label, count in sorted(named.items(), key=lambda kv: -kv[1])[:8]:
+        log("    not a %s, actually: %s x%d" % (feature.split(" -- ")[0],
+                                                label, count))
+    out = np.full(len(unit), -1, dtype=np.int64)
+    for fresh, number in enumerate(kept):
+        out[unit == number] = fresh
+    return out, len(kept), dropped
+
+
 def _consensus(votes, shown, min_votes, min_share):
     """Judge a node on the views that could actually have seen it.
 
