@@ -58,6 +58,12 @@ from spritepipe.motion import CHANNELS, REST, Track
 FACTORS = (0.25, 0.35, 0.5, 0.65, 0.8, 1.0, 1.3, 1.7, 2.2, 3.0)
 
 
+def _cleaned(array):
+    """Background removed, nothing trimmed."""
+    pixels, _how = ingest.remove_background(array)
+    return pixels
+
+
 def cells(sheet_path, rows, columns, cell_width, pad=0):
     """Artist frames from a sheet, cropped exactly as the corpus source was.
 
@@ -71,7 +77,8 @@ def cells(sheet_path, rows, columns, cell_width, pad=0):
     top, bottom = rows
     out = []
     for column in columns:
-        cell = sheet[top:bottom, column * cell_width:(column + 1) * cell_width]
+        cell = _cleaned(
+            sheet[top:bottom, column * cell_width:(column + 1) * cell_width])
         if pad:
             canvas = img.blank(cell.shape[0] + 2 * pad, cell.shape[1])
             canvas[pad:pad + cell.shape[0], :] = cell
@@ -108,7 +115,13 @@ def quieter(clip, factor):
 class Subject:
     def __init__(self, source_path, rig_path=None, workdir="/tmp/ground-truth",
                  facing="right", character_class="auto"):
-        self.raw = np.array(Image.open(source_path).convert("RGBA"))
+        # The common space is the source with its background removed but NOT
+        # trimmed. Trimmed is no good: a walking character's content box moves
+        # from frame to frame, so trimming each of the artist's frames puts every
+        # one of them in a different coordinate system. And the file as loaded is
+        # no good either when the background is a solid colour rather than alpha
+        # -- a rendered frame sits on transparency and would never align to it.
+        self.raw = _cleaned(np.array(Image.open(source_path).convert("RGBA")))
         self.reference = ingest.ingest(source_path)
         box = img.content_box(self.raw)
         self.content_height = box[3] - box[1]
@@ -142,7 +155,13 @@ class Subject:
         return img.equal(self.place(rest), self.raw)
 
     def frames(self, clip_name, factor=1.0):
-        clip = list(motion.scale_motion([motion.LIBRARY[clip_name]],
+        # A face-on subject gets the face-on rewrite, exactly as the pipeline
+        # does it -- a side-on walk swings limbs across the screen, and on a
+        # character looking at you that is not what a walk is.
+        clip = motion.LIBRARY[clip_name]
+        if self.rig.facing in vision.FACE_ON:
+            clip = clip.fronted()
+        clip = list(motion.scale_motion([clip],
                                         self.reference.pixels.shape[0]))[0]
         if factor != 1.0:
             clip = quieter(clip, factor)

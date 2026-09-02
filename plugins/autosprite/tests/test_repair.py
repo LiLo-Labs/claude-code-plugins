@@ -16,8 +16,14 @@ def flailing():
     it does, a test that leaned on one of its mistakes goes green for the wrong
     reason and then red for the wrong reason. The defect here is stated
     outright: `arm_near`'s pivot is at the character's opposite corner, so the arm
-    is on a lever as long as the character is tall, and sixteen degrees of swing
-    carries it clear of the body where eight does not.
+    is on a lever as long as the character is tall, and enough swing carries it
+    clear of the body.
+
+    "Enough" moved once, and by a lot. Before parts overlapped at their joints
+    this fixture came apart at sixteen degrees; with a one-pixel collar it holds
+    to forty and tears at fifty-five. That is what the collar is worth, measured
+    -- roughly three times the swing before a part leaves the body -- and it is
+    why the number here is seventy rather than the forty it used to be.
 
     Returns (pixels, rig, cutout, animation).
     """
@@ -30,7 +36,7 @@ def flailing():
     built = R.Rig((10, 16), parts, "humanoid", "right", anchor=(5, 16))
     swing = motion.Animation(
         "swing", frames=4,
-        tracks={"arm_near": [{"t": 0.0, "angle": 0.0}, {"t": 0.5, "angle": 40.0},
+        tracks={"arm_near": [{"t": 0.0, "angle": 0.0}, {"t": 0.5, "angle": 70.0},
                              {"t": 1.0, "angle": 0.0}],
                 "leg_near": [{"t": 0.0, "angle": 0.0}, {"t": 0.5, "angle": 5.0},
                              {"t": 1.0, "angle": 0.0}]})
@@ -135,7 +141,8 @@ def test_the_repair_only_damps_what_it_blamed():
     frames = render.render_sequence(cut, swing.poses(built), margin=margin)
     fixed, _, _ = repair.repair(cut, built, swing, frames, art, margin, render)
     assert fixed.tracks["leg_near"].to_list() == swing.tracks["leg_near"].to_list()
-    assert fixed.tracks["arm_near"].keys[1]["angle"] < 40.0
+    assert (fixed.tracks["arm_near"].keys[1]["angle"]
+            < swing.tracks["arm_near"].keys[1]["angle"])
 
 
 def test_a_clip_that_damping_cannot_save_says_so_and_changes_nothing():
@@ -213,11 +220,15 @@ def test_a_clip_pulled_apart_by_a_translation_has_that_translation_damped():
     found it: its legs are a stub below a torso they barely overlap, and the
     face-on walk's 1.4px lift detached them on five clips at 6%, with the
     rotation entirely innocent.
+
+    The lift here is three pixels and it used to be two: the joint collar makes
+    the parts overlap by one more, so two no longer parts them.
     """
     art, built, cut = _overlapping()
     margin = render.suggest_margin(built)
+    authored = -3.0
     lift = motion.Animation("lift", frames=4, tracks={
-        "accessory": [{"t": 0.0, "dy": 0.0}, {"t": 0.5, "dy": -2.0},
+        "accessory": [{"t": 0.0, "dy": 0.0}, {"t": 0.5, "dy": authored},
                       {"t": 1.0, "dy": 0.0}]})
     frames = render.render_sequence(cut, lift.poses(built), margin=margin)
     assert quality.shed(frames, art)[0] > repair.TOLERANCE
@@ -225,17 +236,21 @@ def test_a_clip_pulled_apart_by_a_translation_has_that_translation_damped():
     fixed, back, note = repair.repair(cut, built, lift, frames, art, margin, render)
     assert quality.shed(back, art)[0] <= repair.TOLERANCE
     assert note and "travel" in note
-    assert min(fixed.tracks["accessory"].values("dy")) > -2.0    # ... and it moved less
+    assert min(fixed.tracks["accessory"].values("dy")) > authored  # and it moved less
 
 
 def test_a_clip_no_amount_of_damping_can_hold_together_says_so():
-    """Two parts that only touch come apart however little either moves, so
-    there is no reduction that helps and pretending otherwise would ship a
-    quieter version of a broken clip."""
+    """Some clips cannot be saved by moving less, and saying so beats shipping a
+    quieter version of a broken one.
+
+    The lift here is fourteen pixels, and it used to be six. Two parts that only
+    ABUT came apart however little either moved; now they overlap by the joint
+    collar, so a two-pixel lift does not part them at all and damping rescues
+    everything up to ten. Fourteen is where no reduction helps again."""
     art, built, cut = _abutting()
     margin = render.suggest_margin(built)
     lift = motion.Animation("lift", frames=4, tracks={
-        "accessory": [{"t": 0.0, "dy": 0.0}, {"t": 0.5, "dy": -6.0},
+        "accessory": [{"t": 0.0, "dy": 0.0}, {"t": 0.5, "dy": -14.0},
                       {"t": 1.0, "dy": 0.0}]})
     frames = render.render_sequence(cut, lift.poses(built), margin=margin)
     assert quality.shed(frames, art)[0] > repair.TOLERANCE

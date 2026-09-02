@@ -113,6 +113,35 @@ Three rules had to be added, and real art found all three:
   already crowded at the top of its ramp — which is the palette guarantee doing
   its job rather than failing at it.
 
+## Parts overlap at their joints
+
+Ownership is a partition — the smallest box containing a pixel wins — so without
+help the parts *tile* the drawing and each part's array is cropped to its own
+box. Rotate one and it drags a slab away from a hard edge: a hole on one side, a
+floating piece on the other. That was the corpus's worst failure mode, and it is
+why a rigged knight came apart into rectangles while `shed` scored it 0.00% (the
+pieces stayed touching).
+
+Every part now carries a one-pixel **collar** — a copy of the art immediately
+beside it, so a joint has material on both sides of the seam. Real cutout rigs
+do this by drawing each limb whole into the shoulder; here it is derived.
+
+**It costs nothing.** Compositing at rest still reproduces the source exactly,
+because the front-most part wins every shared pixel and the collar is a copy of
+what was already there — `REST` is untouched, and a test asserts it at four
+collar widths. A spinner's collar is clipped to its disc so the hub rule stands.
+
+| | before | after |
+|---|---|---|
+| a CC0 knight's front walk | 7.92% shed | **0.00%** |
+| corpus assets with a problem | 2 of 28 | **0 of 28** |
+| worst shed across the corpus | 15.38% | **4.32%** |
+
+The corpus went 89.4% at the start, to 15.4% after all the repair work, to
+**4.32%** once the parts stopped tiling — including the 8×23 character with 2px
+limbs that `repair` had correctly declared unfixable, because the problem was
+never the motion.
+
 ## The palette guarantee
 
 **Nothing in this plugin generates a pixel.** There is no image model anywhere

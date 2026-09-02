@@ -86,8 +86,12 @@ def test_a_part_sprite_knows_where_its_pivot_sits_inside_itself():
     built, pieces = cut_of(trimmed)
     for sprite in pieces.sprites:
         part = built.by_name(sprite.name)
-        assert sprite.pivot_local == (part.pivot[0] - part.box[0],
-                                      part.pivot[1] - part.box[1])
+        # Against the sprite's OWN origin, not the part's box. A sprite is cut
+        # from a window grown to reach the pixels the part owns and then grown
+        # again by the joint collar, so its origin is at or before the box's
+        # corner and the two stopped being the same thing.
+        assert sprite.pivot_local == (part.pivot[0] - sprite.origin[0],
+                                      part.pivot[1] - sprite.origin[1])
 
 
 # -- pixels no box reaches -------------------------------------------------

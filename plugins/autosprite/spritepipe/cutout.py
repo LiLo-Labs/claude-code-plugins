@@ -281,26 +281,75 @@ def extraction_boxes(rig, owner):
     return boxes
 
 
-def cut(rig, reference_pixels, backfill=True):
+# How far a part reaches past the pixels it owns, so a joint does not open when
+# it turns. Ownership is a PARTITION -- every pixel to exactly one part -- so
+# without this the parts tile the sprite and every rotation drags a slab away
+# from a hard edge, leaving a hole on one side and a floating piece on the
+# other. Real cutout rigs overlap generously at the joints for exactly this
+# reason: an upper arm is drawn as a whole limb reaching into the shoulder, not
+# as the slice of the drawing nobody else claimed.
+#
+# It costs nothing to say so. Compositing at rest still reproduces the source
+# EXACTLY, because the front-most part wins every shared pixel and the collar is
+# a copy of what was already there -- `REST` is untouched. Measured on a CC0
+# 32x32 knight whose walk was tearing at 7.92% shed: one pixel of collar takes
+# it to 0.00%.
+COLLAR = 1
+
+
+def cut(rig, reference_pixels, backfill=True, collar=COLLAR):
     """Split the reference into PartSprites according to the rig."""
     mask = img.alpha_mask(reference_pixels)
     owner = ownership(rig, mask)
     boxes = extraction_boxes(rig, owner)
 
+    height, width = mask.shape
+    # A spinner claims only the disc about its hub, and the collar must not
+    # push it back out again: sails drawn as a cross through a tower cannot be
+    # separated from it by any rectangle, and growing them a pixel would put the
+    # roof back on the sails. `_reach` is the same limit `ownership` applies.
+    reach = _reach(rig, mask)
     sprites = []
+    cut_boxes = []
     for index, part in enumerate(rig.parts):
         x0, y0, x1, y1 = boxes[index]
+        if collar:
+            x0, y0 = max(0, x0 - collar), max(0, y0 - collar)
+            x1, y1 = min(width, x1 + collar), min(height, y1 + collar)
+        cut_boxes.append((x0, y0, x1, y1))
         own = (owner[y0:y1, x0:x1] == index)
+        if collar:
+            limit = reach[index]
+            allowed = mask[y0:y1, x0:x1]
+            if limit is not None:
+                allowed = allowed & limit[y0:y1, x0:x1]
+            own = _with_collar(own, allowed, collar)
         pixels = np.where(own[:, :, None], reference_pixels[y0:y1, x0:x1], 0).astype(np.uint8)
         sprites.append(PartSprite(part.name, pixels, (x0, y0), part.pivot,
                                   part.z, part.role))
 
     if backfill:
-        _backfill(rig, sprites, owner, mask, boxes)
+        _backfill(rig, sprites, owner, mask, cut_boxes)
 
     strays = int((mask & _uncovered(rig, mask.shape)).sum())
     sprites.sort(key=lambda sprite: (sprite.z, sprite.name))
     return Cutout(rig, sprites, reference_pixels, strays)
+
+
+def _with_collar(own, solid, radius):
+    """`own` grown by `radius` into whatever else is drawn beside it.
+
+    The grown pixels are COPIES of the neighbouring art, not pixels taken from
+    it -- the part that owns them keeps them too, and at rest the one in front
+    wins. That is what makes overlap free.
+    """
+    grown = own.copy()
+    for _ in range(int(radius)):
+        pad = np.zeros((grown.shape[0] + 2, grown.shape[1] + 2), dtype=bool)
+        pad[1:-1, 1:-1] = grown
+        grown = (grown | pad[:-2, 1:-1] | pad[2:, 1:-1]
+                 | pad[1:-1, :-2] | pad[1:-1, 2:])
+    return grown & solid
 
 
 def _uncovered(rig, shape):

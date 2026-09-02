@@ -365,6 +365,65 @@ invariant, and the fallback hiding the gap was silent.
   what it moved and the build warns. Instrumented across six sprites and all
   sixteen animations: **zero**.
 
+## Parts tile the sprite, and that is why limbs come off
+
+The whole corpus's worst failure mode -- a limb coming away -- was structural,
+and the fix is three lines.
+
+`ownership` is a **partition**: the smallest box containing a pixel wins, ties go
+to the front, strays go to the root. Every pixel belongs to exactly one part, so
+the parts TILE the drawing, and each part's array is cropped to its own box, so
+a part physically cannot hold a pixel outside its rectangle. Rotate one and it
+drags a slab away from a hard edge: a hole on one side, a floating piece on the
+other.
+
+Look at what that cuts a CC0 32x32 knight into:
+
+| part | size | pixels | what it actually is |
+|---|---|---|---|
+| torso | 26x12 | 263 | the whole upper body, **both arms included** |
+| head | 18x14 | 236 | the helmet |
+| leg_left / leg_right | 8x6 / 6x6 | 43 / 32 | **just the boots** -- the thighs are in the torso |
+| arm_left / arm_right | 5x4 / 6x4 | **16 / 18** | corner scraps of pauldron |
+
+So `walk` swings a sixteen-pixel scrap while the real arms sit frozen inside the
+torso slab, and rotating that scrap tears it out of the body.
+
+Real cutout rigs overlap generously at the joints for exactly this reason: an
+upper arm is drawn as a whole limb reaching into the shoulder, not as the slice
+of the drawing nobody else claimed. **Overlap costs nothing here.** Compositing
+at rest still reproduces the source exactly -- the front-most part wins every
+shared pixel and the collar is a copy of what was already there -- so `REST` is
+untouched, and a test asserts it at four collar widths.
+
+`COLLAR = 1`, one pixel, intersected with a spinner's disc so the hub rule is not
+undone.
+
+| | before | after |
+|---|---|---|
+| the knight's front walk | 7.92% shed | **0.00%** |
+| corpus assets with a problem | 2 of 28 | **0 of 28** |
+| worst shed in the corpus | 15.38% | **4.32%** |
+
+That last row is the headline of the whole project: **89.4% at the start, 15.4%
+after a year of repair work, 4.32% once the parts stopped tiling.** Both assets
+that still failed are fixed -- including `platformer-grass-prowne`, the 8x23
+character with 2px limbs that `repair` had correctly declared unfixable, because
+the problem was never the motion.
+
+### What it did to the tests
+
+Three repair fixtures stopped demonstrating what they were written to
+demonstrate, because the collar fixed them. None was relaxed; each was made more
+extreme until the phenomenon returned, and the numbers are now in their
+docstrings because they measure what the collar is worth:
+
+- a lever-armed swing came apart at 16 degrees and now holds to 40, tearing at
+  55 -- **about three times the swing before a limb leaves the body**;
+- two parts that only ABUT survived a 2px lift where any lift used to part them,
+  and damping now rescues everything up to 10px where 6px used to be hopeless;
+- an overlapping pair needs 3px rather than 2px to detach.
+
 ## The ingest was deleting art, and one asset had no art left
 
 `flood_background` seeds from the border and floods inward. It marked **every
