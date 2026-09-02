@@ -478,8 +478,8 @@ def _aim_cameras(mesh, face_node, groups, confirmed, characteristic, features,
 
 
 def _directed(backend, mesh, frame, wide, marked, feature, intent, out_dir,
-              pixels, areas, centres, normals, tilt, phase, workers, places=6,
-              log=print):
+              pixels, areas, centres, normals, tilt, phase, workers, up,
+              occlusion, places=8, log=print):
     """Cameras a global agent asked for, at the scale it asked for.
 
     The geometric aims can only propose what already resembles what is
@@ -495,26 +495,28 @@ def _directed(backend, mesh, frame, wide, marked, feature, intent, out_dir,
     from concurrent.futures import ThreadPoolExecutor
     from PIL import Image
     from . import entities as entities_module
-    from . import render as render_module
+    from . import preview as preview_module
+
+    colour = np.tile(np.array([[0.80, 0.80, 0.78]]), (len(mesh.faces), 1))
+    colour[marked] = [0.13, 0.30, 0.90]
 
     def survey_one(job):
-        index, (camera, _direction, _spun) = job
-        bundle = render_module.render_bundle(mesh, camera, "zenithal", frame)
-        visible = bundle["visible"]
-        if not visible.any():
-            return []
-        lit = np.clip(bundle["rgb_lit"], 0, 1)
-        shade = 0.32 + 0.60 * lit
-        image = np.ones((pixels, pixels, 3))
-        image[visible] = shade[visible, None]
-        hit = bundle["hit_id"]
-        blue = visible & (hit >= 0) & marked[np.maximum(hit, 0)]
-        if blue.any():
-            image[blue] = np.stack([shade[blue] * 0.30, shade[blue] * 0.45,
-                                    np.minimum(shade[blue] * 1.25, 1.0)],
-                                   axis=1)
+        index, (camera, direction, _spun) = job
+        # The PRESENTATION renderer, not the raw lit buffer. At whole-model
+        # scale the lit buffer is a flat silhouette in which a 3mm cone on a
+        # 110mm piece has no readable relief, and an agent asked to point at
+        # cones it cannot see will point anyway -- which is what naming the
+        # same hundred places every round, whatever had already been found,
+        # turned out to be. Key/fill/sky over ambient occlusion resolves the
+        # individual cones at the same scale and the same framing.
+        image = preview_module.render_asset(mesh, colour, direction, size=pixels,
+                                            occlusion=occlusion, up=up)
         path = os_module.path.join(out_dir, "overview-%d.png" % index)
-        Image.fromarray((image * 255).astype(np.uint8)).save(path)
+        Image.fromarray(image).save(path)
+        origins, rays = camera.rays()
+        hit = mesh.ray.intersects_first(ray_origins=origins,
+                                        ray_directions=rays).reshape(pixels,
+                                                                     pixels)
         prompt = DIRECT_PROMPT % (pixels, pixels, intent or "a model", feature,
                                   places, feature, feature, feature)
         key = "direct-%s" % entities_module.digest_of(
@@ -557,7 +559,7 @@ def _directed(backend, mesh, frame, wide, marked, feature, intent, out_dir,
 def survey(backend, mesh, frame, up, feature, hint, intent, out_dir, tree,
            characteristic, views=6, pixels=900, zoom_tiles=3, workers=8,
            min_votes=2, min_share=0.34, aims=64, max_rounds=8, min_new=2,
-           zooms=(1.0,), direct=False, log=print):
+           zooms=(1.0,), direct=True, log=print):
     """Look from many different cameras; let tree nodes collect the votes.
 
     One orbiting pass asks what is there. Then aimed rounds repeat until they
@@ -684,6 +686,10 @@ def survey(backend, mesh, frame, up, feature, hint, intent, out_dir, tree,
     # will reach with. The survey stops when a round stops finding, which is
     # a fact about the model rather than a number chosen in advance.
     groups = _groups(face_node)
+    occlusion = None
+    if direct:
+        from . import preview as preview_module
+        occlusion = preview_module.ambient_occlusion(mesh, samples=24)
     settled = np.zeros(total, dtype=bool)
     settled[winners] = True
     areas_all = areas
@@ -714,7 +720,8 @@ def survey(backend, mesh, frame, up, feature, hint, intent, out_dir, tree,
         if direct:
             aimed += _directed(backend, mesh, frame, wide, marked, feature,
                                intent, out_dir, pixels, areas_all, centres,
-                               normals, tilt, phase, workers, log=log)
+                               normals, tilt, phase, workers, up, occlusion,
+                               log=log)
         if not aimed:
             log("  round %d: nothing left to aim at; the pool is exhausted"
                 % number)
