@@ -471,6 +471,37 @@ world -- more than the torso it sits on. Every angle authored on a child is a
 departure *from* its parent, and this is the clip where that stopped being
 invisible. The head now counter-rotates.
 
+### The silhouette rigger's sliver arms: a second dead end, measured
+
+The critic says the same thing about the silhouette rig of every real character
+it is shown: *"arm_far and arm_near boxes are 1-2 pixel-tall horizontal slivers
+that catch only the shoulder line, not the arms that hang down"*. Measured
+across four corpus humanoids, the arm box is 10% and 17% of the torso's height
+on `mv-male` and `fry-caped`, against 64% and 100% on the other two.
+
+Replacing a sliver with the outer third of the torso is already recorded as a
+dead end -- it tears two clean characters to buy one back. The obvious
+refinement is narrower and looked much better: the parted rows really did
+measure WHERE the arm is, so keep the x range and stretch only the HEIGHT to the
+shoulder-to-hip band. With ground truth now available it could be judged on the
+animation rather than only on debris:
+
+| `mv-male` | walk, matched | attack, matched | shed |
+|---|---|---|---|
+| sliver arms, as shipped | 26.4% | 20.9% | **0.00%** |
+| stretched to the band | **21.7%** | 31.0% | **11.6%** |
+| a vision rig | **19.4%** | 25.5% | 0.00% |
+
+So it does move the walk toward the artist -- and sheds 11.6% doing it, which is
+four frames of a character coming apart, because the stretched column swallows
+torso pixels at the shoulder and hip and rotating them tears the body. Better
+animation of a torn character is not better.
+
+The information simply is not in the silhouette. What the rigger does now --
+leave the measured box, say in the rig notes that the arm swing will hardly read,
+and point at a vision rig -- remains the right answer, and the vision rig gets
+this character's walk to 19.4%, the best humanoid walk measured.
+
 ### The torso lead, recorded rather than fitted
 
 The critic's remaining complaint is the torso: *"the torso tilt is large enough

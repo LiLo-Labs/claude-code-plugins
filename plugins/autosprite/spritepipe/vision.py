@@ -680,6 +680,16 @@ class TemplateBackend(Backend):
         # characters come apart to buy one broken one back. A guess that is
         # bigger is a worse guess when it is wrong, and on a character whose
         # arms never leave the body there is nothing in the silhouette to find.
+        #
+        # The obvious refinement of that -- keep the x range, which the parted
+        # rows really did measure, and stretch only the HEIGHT to the
+        # shoulder-to-hip band -- was then measured too, against an artist's own
+        # walk. It moves the walk from 26.4% to 21.7% at matched coverage and
+        # sheds 11.6% doing it, four frames of a character coming apart, because
+        # the stretched column swallows torso pixels at the shoulder and hip and
+        # rotating them tears the body. Better animation of a torn character is
+        # not better. The information is not in the silhouette; a vision rig
+        # gets this character's walk to 19.4%.
         # So the box is left alone and the user is told, which is the same
         # answer the "never separate" case below already gives.
         band = max(1, hip - arm_top)
