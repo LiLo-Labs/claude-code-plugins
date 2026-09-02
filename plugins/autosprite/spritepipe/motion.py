@@ -729,15 +729,39 @@ class Animation:
         counter-phase stay in counter-phase without this needing to know which
         side of the body each one is on.
 
-        Nothing else is touched. The root bob, the torso lean, the squashes and
-        the frame timing all read the same from any angle.
+        The torso's lean is damped by the same fraction and gets nothing back.
+        It is authored as a lean in the plane the character walks along, which
+        is the plane a profile camera looks across and a head-on camera looks
+        DOWN -- so it foreshortens exactly as the limbs do, and what it
+        foreshortens INTO is a yaw, which a 32px sprite cannot show. Left
+        undamped it is the one thing here that swings the head: two degrees
+        about the hips is a pixel of head travel on a 32px character, and the
+        head is the part a viewer is actually looking at.
+
+        And the clip stops being `planted`, which is the correction this had
+        backwards. `plant` exists to undo the daylight a RIGID leg opens under
+        a character when it swings -- L(1-cos t), six pixels at 26 degrees --
+        by pushing the body down to meet the floor again. Damping the swing to
+        a third leaves under a tenth of a pixel of that to correct, so there is
+        nothing left for it to do; what it finds instead is the deliberate
+        `dy` lift this method just authored, and normalising every pose to a
+        common floor cancels it into a body bob. Measured on a 32px knight,
+        planted: the feet stay on row 31 in seven frames of eight and the head
+        travels two pixels. Not planted: the head holds row 0 in every frame
+        and the feet leave the floor in four. The artist's own three frames
+        hold the head on row 0 and move nothing above the waist at all.
         """
         clone = copy.deepcopy(self)
+        clone.planted = False
         for role, track in clone.tracks.items():
-            if not (role.startswith("arm_") or role.startswith("leg_")):
+            limb = role.startswith("arm_") or role.startswith("leg_")
+            if not (limb or role == "torso"):
                 continue
             peak = max((abs(value) for value in track.values("angle")), default=0.0)
             if peak <= 0.0:
+                continue
+            if not limb:
+                track.adjust("angle", lambda value, k=float(swing): value * k)
                 continue
             channel, amount = (("dy", -float(lift)) if role.startswith("leg_")
                                else ("dx", float(reach)))

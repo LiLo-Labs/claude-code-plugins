@@ -217,11 +217,36 @@ def test_fronted_keeps_the_pair_in_counter_phase():
     assert near.dy * far.dy < 0
 
 
-def test_fronted_leaves_the_body_alone():
+def test_fronted_damps_the_torso_lean_too():
+    """The lean is authored in the plane the character walks ALONG, which is the
+    plane a head-on camera looks down. It foreshortens exactly as a limb's swing
+    does -- and unlike a limb's, what it foreshortens into is a yaw, which a
+    32px sprite cannot draw, so nothing comes back on another channel."""
     walk = motion.get("walk")
     front = walk.fronted()
-    assert front.tracks["torso"].to_list() == walk.tracks["torso"].to_list()
+    assert _peak(front.tracks["torso"], "angle") < _peak(walk.tracks["torso"],
+                                                         "angle")
+    assert _peak(front.tracks["torso"], "dx") == 0
+    assert _peak(front.tracks["torso"], "dy") == 0
+
+
+def test_fronted_is_not_planted():
+    """`plant` corrects the daylight a RIGID leg's swing opens under a
+    character. `fronted` removes most of that swing and replaces it with a
+    deliberate lift -- so what plant finds to correct is the lift itself, and
+    normalising every pose to a common floor cancels it into a body bob. The
+    foot stays down and the head goes up, which is the animation backwards."""
+    walk = motion.get("walk")
+    assert walk.planted
+    assert not walk.fronted().planted
+
+
+def test_fronted_keeps_the_timing_and_the_authored_root():
+    walk = motion.get("walk")
+    front = walk.fronted()
     assert front.frames == walk.frames and front.fps == walk.fps
+    # A run bobs whichever way you look at it; only the mechanical floor
+    # correction goes, never a bob the clip asked for by name.
     run = motion.get("run")
     assert run.fronted().root.to_list() == run.root.to_list()
 
