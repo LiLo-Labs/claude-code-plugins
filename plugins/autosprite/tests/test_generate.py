@@ -159,3 +159,69 @@ def test_a_job_that_never_finishes_is_unavailable(monkeypatch):
     with pytest.raises(generate.Unavailable):
         generate.settled({"status": "starting", "urls": {"get": "https://x/1"}},
                          "tok", patience=0.01, every=0)
+
+
+# -- video, and the window in which a character is still itself -------------
+
+def test_frames_are_sampled_across_the_anchored_window_not_the_whole_video():
+    video = [np.full((4, 4, 3), i, np.uint8) for i in range(100)]
+    picked = generate.sampled(video, 4, until=18)
+    assert len(picked) == 4
+    assert [int(f[0, 0, 0]) for f in picked] == [0, 6, 12, 18]
+
+
+def test_sampling_never_runs_past_a_short_video():
+    video = [np.zeros((4, 4, 3), np.uint8) for _ in range(5)]
+    assert len(generate.sampled(video, 8, until=18)) == 8
+
+
+def test_a_single_frame_video_still_yields_a_frame():
+    assert len(generate.sampled([np.zeros((4, 4, 3), np.uint8)], 4)) == 1
+
+
+def test_drift_is_zero_against_the_source_itself():
+    """The identity metric. Zero means the output IS the user's character, which
+    is the one thing `footprint` cannot tell you about a generated frame."""
+    art = source()
+    assert generate.drift(art, art) == 0
+
+
+def test_drift_counts_a_changed_silhouette():
+    art = source()
+    changed = art.copy()
+    changed[10:12, 4:8] = 0            # four pixels removed from the silhouette
+    assert generate.drift(changed, art) == 8
+
+
+def test_a_video_frame_becomes_a_sprite_on_the_sources_palette():
+    art = source()
+    frame = np.full((64, 64, 3), 255, np.uint8)     # white field
+    frame[8:56, 20:44] = (10, 200, 90)              # a colour the source lacks
+    sprite = generate.to_sprite(frame, art)
+    assert sprite is not None
+    assert sprite.shape[:2] == art.shape[:2]
+    assert conform.conforms(sprite, art)
+
+
+def test_a_uniform_frame_is_kept_rather_than_silently_emptied():
+    """Written the other way round first, and the code was right.
+
+    `ingest.remove_background` refuses to treat a UNIFORM picture as background,
+    because removing the dominant colour from an image that is only that colour
+    deletes the whole frame. So a blank render comes back as a blank-coloured
+    sprite rather than as None -- visible in a sheet, which is what you want,
+    instead of a silent hole.
+    """
+    art = source()
+    sprite = generate.to_sprite(np.full((32, 32, 3), 255, np.uint8), art)
+    assert sprite is not None
+    assert conform.conforms(sprite, art)
+
+
+def test_a_frame_whose_content_all_washes_out_yields_nothing(monkeypatch):
+    """The guard for the other case: if a frame's content box comes back empty,
+    cropping to it makes a fully transparent sprite that would enter a sheet as
+    a missing frame."""
+    art = source()
+    monkeypatch.setattr(generate.img, "content_box", lambda _p: (5, 5, 5, 5))
+    assert generate.to_sprite(np.full((32, 32, 3), 200, np.uint8), art) is None

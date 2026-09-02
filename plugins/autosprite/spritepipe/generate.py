@@ -39,6 +39,7 @@ import numpy as np
 
 from . import conform as conform_module
 from . import image as img
+from . import ingest as ingest_module
 
 REPLICATE = "https://api.replicate.com/v1"
 TIMEOUT = 300
@@ -122,6 +123,75 @@ def settled(answer, api_token, patience=900, every=5):
 
 def _fetch(url):
     return urllib.request.urlopen(url, timeout=TIMEOUT).read()
+
+
+# How far into a generated video a character is still ITSELF.
+#
+# Measured on the corpus knight, silhouette pixels differing from the source, by
+# video frame: 0 at frames 0-7, 11 at frame 10, 74 at 12, 125 at 15, 193 at 18,
+# and 200-270 from frame 20 to the end. The model holds the character exactly for
+# about a third of a second and then replaces it with a generic humanoid.
+#
+# So a clip is the FIRST few frames of a video, not a whole video, and a sheet is
+# several short videos rather than one long one -- every call re-anchors on the
+# true sprite and starts again at zero drift.
+ANCHORED = 18
+
+
+def sampled(video, count, until=ANCHORED):
+    """`count` frames evenly spaced over the anchored window of a video.
+
+    Not the lowest-drift frames. Picking those selects the frames where the
+    character has not moved yet, which scores perfectly and animates nothing --
+    the same one-sided mistake `quality.footprint` makes, and it is worth not
+    making twice.
+    """
+    import numpy as _np
+    end = min(int(until), len(video) - 1)
+    if end <= 0:
+        return [video[0]]
+    return [video[i] for i in _np.linspace(0, end, int(count)).astype(int)]
+
+
+def to_sprite(frame, source, tolerance=30):
+    """One video frame reduced to a sprite on `source`'s grid and palette.
+
+    The character is cropped to its own content and scaled so its HEIGHT matches
+    the source's, because a video model drifts the framing and a fixed crop would
+    read that drift as the character growing.
+    """
+    from PIL import Image
+    if frame.shape[-1] == 3:
+        frame = np.dstack([frame, np.full(frame.shape[:2], 255, np.uint8)])
+    cleaned, _how = ingest_module.remove_background(frame, tolerance=tolerance)
+    box = img.content_box(cleaned)
+    # An empty box, not just a missing one: a frame the model rendered blank --
+    # or one whose whole content the background removal took -- yields a
+    # DEGENERATE box rather than None, and cropping to it returns a fully
+    # transparent sprite that would slip into a sheet as a missing frame.
+    if box is None or box[2] <= box[0] or box[3] <= box[1]:
+        return None
+    crop = cleaned[box[1]:box[3], box[0]:box[2]]
+    inside = img.content_box(source)
+    tall = inside[3] - inside[1]
+    wide = max(1, int(round(crop.shape[1] * tall / float(crop.shape[0]))))
+    small = np.array(Image.fromarray(crop).resize((wide, tall), Image.NEAREST))
+    out = img.blank(source.shape[0], source.shape[1])
+    img.paste(out, small, (source.shape[1] - wide) // 2, inside[1])
+    return conform_module.conform(out, source)[0]
+
+
+def drift(pixels, source):
+    """Silhouette pixels differing from the source. The identity metric.
+
+    `quality.footprint` cannot judge a generated frame -- it asks whether the
+    same pixels moved, and a redrawn character does not occupy the same pixels at
+    all, so it scores every generative result at 85% regardless of quality. This
+    asks the question that actually matters about generation: is this still the
+    user's character?
+    """
+    base = img.alpha_mask(ingest_module.remove_background(source)[0])
+    return int((img.alpha_mask(pixels) ^ base).sum())
 
 
 class ReplicateBackend:
