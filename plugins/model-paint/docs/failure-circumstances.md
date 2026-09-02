@@ -49,14 +49,22 @@ each time.
 *Incident:* the shell's barnacle survey, where 162 looks over 18 orbit
 cameras indexed the same conspicuous cones repeatedly and left a scatter of
 small or edge-on ones untouched.
-*Invariant:* the survey looks twice. The second pass SHOWS what the first
-found -- confirmed instances tinted in the image -- and asks only what is
-missing, so attention moves to the gaps; and it adds cameras that leave the
-bounding sphere, each sitting on the outward normal of an unindexed
-look-alike and looking straight in, so an edge-on instance finally gets a
-face-on look. Aiming those cameras by geometric signature is not labelling:
-what is at the end of the aim still has to be pointed at and still has to
-pass consensus (`index3d.survey`).
+*Invariant:* the survey looks twice, and the second pass LEAVES THE SPHERE --
+each of its cameras sits on the outward normal of an unindexed look-alike and
+looks straight in, so an edge-on instance finally gets a face-on look. Aiming
+by geometric signature is not labelling: what is at the end of the aim still
+has to be pointed at and still has to pass consensus (`index3d.survey`).
+*Measured:* 77 instances from the orbit alone; 102 once the vote bar stopped
+punishing instances the cameras only reached once; 120 with 96 aimed looks.
+
+The half of that fix which did NOT work is the more useful finding. The
+second pass also tints what the first pass found and asks "what did we
+miss", and re-asking the ORBIT looks under that question returned three
+instances for 162 vision calls, against three for 24 aimed looks -- seven
+times the yield per look, at a seventh of the cost. Attention was never the
+binding constraint. A better question cannot recover an answer the viewpoint
+does not contain; only a different viewpoint can. The tint stays, because it
+is free and it sharpens the aimed looks; the re-ask was cut.
 
 The consequence for the gate: a bar of two votes is unreachable for an
 instance the cameras only ever reached once, which rejects it for the
