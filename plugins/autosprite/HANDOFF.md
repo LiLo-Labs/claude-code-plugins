@@ -381,20 +381,86 @@ and every character measured -- `footprint` alone always favours doing less.
 **Shipped** is what a user actually gets, with the coverage beside it so it
 cannot be read alone; **matched** is how clips compare to each other.
 
+Ten clips across four characters, sorted by the comparable column:
+
 | subject | clip | content height | shipped | coverage | matched |
 |---|---|---|---|---|---|
-| `platformer-forest-64` | run | 45 px | **4.8%** | 0.78 | 11.9% |
+| `platformer-forest-64` | run | 45 px | **4.8%** | 0.78 | **11.9%** |
 | `platformer-mv-male` | crouch | 46 px | 18.0% | 1.07 | **14.8%** |
-| `platformer-mv-male` | walk | 46 px | **26.4%** | 1.00 | 26.4% |
-| `platformer-sumohulk-16` | walk | 15 px | 19.2% | 0.60 | **36.6%** |
+| `platformer-mv-male` | walk | 46 px | 26.4% | 1.00 | 26.4% |
+| `creature-horse-scratchio` | walk | 33 px | 24.7% | 0.81 | 26.5% |
+| `creature-horse-scratchio` | run | 33 px | 17.9% | 0.76 | 31.6% |
 | `platformer-sumohulk-16` | jump | 15 px | 47.1% | 1.72 | 34.2% |
+| `platformer-sumohulk-16` | walk | 15 px | 19.2% | 0.60 | 36.6% |
+| `creature-horse-scratchio` | idle | 33 px | 44.5% | 0.70 | **46.1%** |
 | `platformer-sumohulk-16` | attack | 15 px | 48.5% | 1.57 | 48.4% |
-| `platformer-sumohulk-16` | idle | 15 px | 66.0% | 0.49 | **63.7%** |
+| `platformer-sumohulk-16` | idle | 15 px | 58.3% | 0.66 | **63.2%** |
+
+The two walks agreeing to a tenth of a point at different sizes and different
+anatomies -- 26.4% on a 46px biped, 26.5% on a 33px quadruped -- is the best
+evidence available that the method measures the clip rather than the subject.
 
 For scale: the flag's `ripple`, the best-measured subject clip in the plugin, is
 21.4%. The forest run at 4.8% shipped beats it comfortably; the brawler's idle
 is three times worse than it, and moves half as much as it should while being
 two-thirds wrong.
+
+### The idle: measured, fixed, and the fix argued down twice on the way
+
+The clip was a one-pixel bob and nothing else -- no squash at all -- while the
+brawler's own idle redraws 109 of his 156 pixels. Adding a **widen-and-settle**
+to the root track took it from 66.0% at 0.49 coverage to **58.3% at 0.66** on
+the brawler and from 47.1% at 0.47 to **44.5% at 0.70** on the horse: error down
+and coverage up on both, corpus unchanged at 1 of 28, all 694 tests green.
+
+It goes in the ROOT track rather than a `torso` one, because a root track's
+squash already composes onto whatever part is the root -- the torso of a
+humanoid, the body of a creature -- so one entry covers both and `body` stays a
+role that rides its parent rather than one clips address directly. A test
+asserts exactly that list of undriven roles, and it caught the first attempt.
+
+Two things nearly went in and were argued down by looking:
+
+**A deeper, taller breath.** `sx 0.90 / sy 1.15` scored *better still* on the
+brawler. The critic: *"the barrel visibly narrows and stretches tall between
+frames, reading rubbery rather than like breathing."* It is also the shape that
+the mirrored-rig measurement below preferred, and it loses to widening once the
+rig is right.
+
+**A stronger version of the shipped shape.** `sx 1.10 / sy 0.94` scored better
+on the horse than what shipped. The critic returned `rig` on the brawler and
+named the cause: *"this blob has no arms; arm_far and arm_near boxes contain
+only body and face pixels, so driving their angles rotates chunks of the
+head/torso -- visible as the raised right-side nub and shifted notch in the last
+frame."* That is the known silhouette-rigger defect, surfaced by a bigger
+motion. `shed` reported 0.00% on it, because the nub stays connected.
+
+On the shipped version the critic returns `good` on the horse and, on the
+brawler, `rig` with two complaints and **no motion complaint at all**.
+
+### The critic caught a bug in the MEASUREMENT, which no measurement could
+
+Asked to judge an idle variant, it opened with something nobody had asked about:
+
+> *"The horse is drawn facing LEFT, but the rig assumes it faces right, so every
+> part box is mirrored onto the wrong end of the animal ... the head box sits
+> over the rump and tail, so `head dy` bobs the hindquarters instead of the
+> head; the tail box sits over the head/neck/ear, so `tail angle` swings the
+> horse's head around like a tail."*
+
+The corpus meta says `"facing": "left"` and the harness had defaulted to right.
+Every horse number reported before that was measured on a mirrored rig.
+Corrected, the horse's walk moves from 32.8% to 26.5% matched -- and lands within
+a tenth of a point of the mv-male walk, which is what made the correction
+obviously right rather than merely different.
+
+**And the mirrored rig still scored 14.7% on the run.** That is the third and
+sharpest demonstration of what `footprint` actually rewards: a horse rigged
+back-to-front still moves legs and a body, so it still overlaps the artist's
+footprint. The metric is a strong detector of moving pixels the artist never
+moves -- it caught the windmill that way -- and a weak guide to whether the
+right pixels moved for the right reason. Nothing in this plugin could have
+caught a backwards horse. The critic did, unprompted.
 
 ### The leads this opens, recorded rather than acted on
 
@@ -408,12 +474,25 @@ has already killed one conclusion drawn from one character.
   size *law* applied to everything -- it is individual clips coming apart from
   each other once the sprite is small enough for a 1px floor and integer
   rounding to dominate.
-- **The `idle` is the worst clip in the plugin**, and it is the only one that is
-  wrong in both directions at once. The brawler's own idle redraws 109 of his
-  156 pixels; ours moves 53 and puts two-thirds of them where he does not.
+- **The `idle` is the worst clip in the plugin**, now on two characters rather
+  than one. The brawler's own idle redraws 109 of his 156 pixels; ours moves 53
+  and puts two-thirds of them where he does not. See the section below: several
+  fixes improve the number on both characters and none of them survived being
+  looked at.
 
-**The size effect is the headline.** Every clip on the two large characters
-scores better than every clip on the 15px one. That is consistent with everything else
+**Two patterns, and the second is sharper than the first.**
+
+*Matched error tracks size* -- 45px and 46px at 11.9 to 26.4%, 33px at 29.5 to
+32.8%, 15px at 34.2 to 48.4%. That is consistent with everything else the corpus
+says: the two assets `shed` still fails on are 8x23 and 10x17, the smallest
+characters in it.
+
+*Except the idles, which break the pattern completely.* The idle is the worst
+clip in the library at every size, on a biped and on a quadruped alike, and it
+was the only clip failing in both directions at once -- both idles disturbed
+about 0.45 of what their artist disturbs AND put more than half of that in the
+wrong place. The table above is after the fix below; before it, the two read
+66.0% at 0.49 and 47.1% at 0.47. That is consistent with everything else
 the corpus says -- the two assets `shed` still fails on are 8x23 and 10x17, the
 smallest characters in the set -- and it has a plain explanation. At 15px an
 artist is not transforming parts, they are REDRAWING: the brawler's idle

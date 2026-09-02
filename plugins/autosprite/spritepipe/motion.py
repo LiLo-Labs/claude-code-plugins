@@ -1057,8 +1057,25 @@ def _library():
         note="breathing; the frame a player sees more than any other. The breath "
              "peaks off-centre because breathing is quick in and slow out -- and "
              "because a peak exactly halfway makes the two off-beats the same "
-             "picture, which on a small character is half the cycle wasted",
-        root=[{"t": 0.0, "dy": 0.0}, {"t": 0.4, "dy": 1.0}, {"t": 1.0, "dy": 0.0}],
+             "picture, which on a small character is half the cycle wasted. "
+             "The body also WIDENS AND SETTLES, and that is the half this clip "
+             "was missing: measured against two artists' own idles -- a 15px "
+             "brawler's and a 33px horse's -- the version with only a one-pixel "
+             "bob disturbed 0.49 and 0.47 of what they disturb, the lowest "
+             "coverage of any clip in either library, and put more than half of "
+             "it where they never touch. Widening is the direction both agree "
+             "on; a taller, narrower breath scores better on a biped alone and "
+             "loses to this on the quadruped. Gently, because the critic calls "
+             "sx 1.10 / sy 0.94 \"rubbery rather than like breathing\" and this "
+             "\"good\"",
+        # The widening goes in the ROOT track, not in a `torso` one. A root
+        # track's squash already composes onto whatever part is the root -- the
+        # torso of a humanoid, the body of a creature -- so one entry covers
+        # both, and `body` stays a role that rides its parent rather than
+        # becoming a thing clips address directly.
+        root=[{"t": 0.0, "dy": 0.0, "sx": 1.0, "sy": 1.0},
+              {"t": 0.4, "dy": 1.0, "sx": 1.06, "sy": 0.97},
+              {"t": 1.0, "dy": 0.0, "sx": 1.0, "sy": 1.0}],
         tracks={
             "head": [{"t": 0.0, "dy": 0.0}, {"t": 0.55, "dy": 1.0}, {"t": 1.0, "dy": 0.0}],
             "arm_near": [{"t": 0.0, "angle": 0.0}, {"t": 0.4, "angle": 3.0},

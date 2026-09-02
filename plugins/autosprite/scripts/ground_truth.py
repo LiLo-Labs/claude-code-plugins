@@ -58,11 +58,26 @@ from spritepipe.motion import CHANNELS, REST, Track
 FACTORS = (0.25, 0.35, 0.5, 0.65, 0.8, 1.0, 1.3, 1.7, 2.2, 3.0)
 
 
-def cells(sheet_path, rows, columns, cell_width):
+def cells(sheet_path, rows, columns, cell_width, pad=0):
+    """Artist frames from a sheet, cropped exactly as the corpus source was.
+
+    `pad` adds transparent rows above and below, which is how some corpus
+    sources were cut -- a strip whose cells are flush with the character's feet
+    gets padding so the feet are not on the frame edge. Cropping the artist's
+    frames any other way than the source was cropped puts the two in different
+    coordinate spaces, and the alignment check will refuse to report.
+    """
     sheet = np.array(Image.open(sheet_path).convert("RGBA"))
     top, bottom = rows
-    return [sheet[top:bottom, c * cell_width:(c + 1) * cell_width]
-            for c in columns]
+    out = []
+    for column in columns:
+        cell = sheet[top:bottom, column * cell_width:(column + 1) * cell_width]
+        if pad:
+            canvas = img.blank(cell.shape[0] + 2 * pad, cell.shape[1])
+            canvas[pad:pad + cell.shape[0], :] = cell
+            cell = canvas
+        out.append(cell)
+    return out
 
 
 def quieter(clip, factor):
@@ -91,14 +106,27 @@ def quieter(clip, factor):
 
 
 class Subject:
-    def __init__(self, source_path, rig_path=None, workdir="/tmp/ground-truth"):
+    def __init__(self, source_path, rig_path=None, workdir="/tmp/ground-truth",
+                 facing="right", character_class="auto"):
         self.raw = np.array(Image.open(source_path).convert("RGBA"))
         self.reference = ingest.ingest(source_path)
         box = img.content_box(self.raw)
         self.content_height = box[3] - box[1]
+        # The facing is NOT optional and defaulting it silently is how this
+        # harness reported a whole character's numbers off a mirrored rig. The
+        # corpus horse is drawn facing LEFT; rigged as right-facing, its head
+        # box lands on the rump and its tail box on the head, so `head dy`
+        # bobbed the hindquarters and `tail angle` swung the head around like a
+        # tail. It still scored 14.7% on the run, because a mirrored quadruped
+        # still moves legs and a body and so overlaps the artist's footprint --
+        # which is the same lesson `footprint` keeps teaching: it rewards
+        # overlap, not correctness. The critic caught it; no measurement here
+        # could have.
         self.rig = (rig_module.Rig.from_dict(json.load(open(rig_path)))
                     if rig_path else
-                    vision.make_backend("template", workdir).rig(self.reference))
+                    vision.make_backend("template", workdir).rig(
+                        self.reference, character_class=character_class,
+                        facing=facing))
         self.cutout = cutout.cut(self.rig, self.reference.pixels)
         self.margin = render.suggest_margin(self.rig)
         self.offset = (self.margin - box[0], self.margin - box[1])
@@ -153,14 +181,17 @@ def main(path):
              "matched", "at scale", "distinct"))
     failures = 0
     for entry in subjects:
-        subject = Subject(entry["source"], entry.get("rig"))
+        subject = Subject(entry["source"], entry.get("rig"),
+                          facing=entry.get("facing", "right"),
+                          character_class=entry.get("class", "auto"))
         if not subject.aligned():
             print("%-12s ALIGNMENT FAILED -- nothing reported" % entry["name"])
             failures += 1
             continue
         for clip_name, spec in entry["clips"].items():
-            artist = cells(entry["sheet"], spec["rows"], spec["columns"],
-                           entry["cell"])
+            artist = cells(spec.get("sheet", entry.get("sheet")),
+                           spec["rows"], spec["columns"], entry["cell"],
+                           entry.get("pad", 0))
             shipped, matched, _rows = measure(subject, clip_name, artist)
             print("%-12s %-8s %5d | %7.1f%% %8.2f | %7.1f%% %8.2f %6d/%d"
                   % (entry["name"], clip_name, subject.content_height,

@@ -495,18 +495,49 @@ with its coverage beside it; **matched** is how clips compare to each other.
 
 | subject | clip | content height | shipped | coverage | matched |
 |---|---|---|---|---|---|
-| Forest platformer (damarindra) | run | 45 px | **4.8%** | 0.78 | 11.9% |
+| Forest platformer (damarindra) | run | 45 px | **4.8%** | 0.78 | **11.9%** |
 | MV male (MoikMellah) | crouch | 46 px | 18.0% | 1.07 | **14.8%** |
-| MV male | walk | 46 px | **26.4%** | 1.00 | 26.4% |
-| SumoHulk brawler (Eris) | walk | 15 px | 19.2% | 0.60 | **36.6%** |
-| SumoHulk brawler | jump | 15 px | 47.1% | 1.72 | 34.2% |
+| MV male | walk | 46 px | 26.4% | 1.00 | 26.4% |
+| Animated horse (ScratchIO) | walk | 33 px | 24.7% | 0.81 | 26.5% |
+| Animated horse | run | 33 px | 17.9% | 0.76 | 31.6% |
+| SumoHulk brawler (Eris) | jump | 15 px | 47.1% | 1.72 | 34.2% |
+| SumoHulk brawler | walk | 15 px | 19.2% | 0.60 | 36.6% |
+| Animated horse | idle | 33 px | 44.5% | 0.70 | **46.1%** |
 | SumoHulk brawler | attack | 15 px | 48.5% | 1.57 | 48.4% |
-| SumoHulk brawler | idle | 15 px | 66.0% | 0.49 | **63.7%** |
+| SumoHulk brawler | idle | 15 px | 58.3% | 0.66 | **63.2%** |
+
+The two walks agreeing to a tenth of a point across different sizes and
+different anatomies — 26.4% on a 46px biped, 26.5% on a 33px quadruped — is the
+best evidence available that this measures the *clip* rather than the subject.
 
 For scale, the flag's `ripple` — the best-measured subject clip here — is 21.4%.
-The forest run beats it comfortably; the brawler's idle is three times worse,
-and is the only clip wrong in both directions at once: it moves half what the
-artist moves and two-thirds of that is in the wrong place.
+The forest run beats it comfortably.
+
+**Matched error tracks size** — 45–46px at 11.9–26.4%, 33px at 26.5–31.6%, 15px
+at 34.2–48.4% — **except the idles**, which are the worst clip in the library at
+every size, on a biped and a quadruped alike.
+
+> The idle was a one-pixel bob and nothing else, no squash at all, while the
+> brawler's own idle redraws 109 of his 156 pixels. Adding a **widen-and-settle**
+> to the root track took it from 66.0% at 0.49 coverage to 58.3% at 0.66 on the
+> brawler and from 47.1% at 0.47 to 44.5% at 0.70 on the horse — error down and
+> coverage up on both, corpus unchanged. Two stronger versions scored better
+> still and were argued down by the critic: one *"reads rubbery rather than like
+> breathing"*, and the other exposed a rig defect (an armless blob given arms)
+> that `shed` scored at 0.00% because the torn nub stays connected.
+
+**The critic then caught a bug in the measurement itself.** Asked to judge a
+variant, it opened with something nobody asked about: *"the horse is drawn facing
+LEFT, but the rig assumes it faces right… the tail box sits over the head, so
+`tail angle` swings the horse's head around like a tail."* The corpus metadata
+says `"facing": "left"` and the harness had defaulted to right, so every horse
+number before that was measured on a mirrored rig.
+
+**And the mirrored rig still scored 14.7% on the run.** That is what `footprint`
+actually rewards: a horse rigged back-to-front still moves legs and a body, so it
+still overlaps the artist's footprint. The metric is a strong detector of moving
+pixels the artist *never* moves — that is how it caught the windmill — and a weak
+guide to whether the right pixels moved for the right reason.
 
 **Cutout animation has a size floor, and it is somewhere between 15 and 45px.** At
 15px an artist is not transforming parts, they are redrawing: the brawler's idle
