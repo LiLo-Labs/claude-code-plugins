@@ -47,8 +47,15 @@ def main():
     parser.add_argument("--model", default="claude-opus-5")
     parser.add_argument("--class", dest="character_class", default="auto",
                         choices=("auto", "humanoid", "creature", "prop"))
-    parser.add_argument("--facing", default="right",
-                        choices=("right", "left", "front", "back"))
+    parser.add_argument("--facing", default=None,
+                        choices=("right", "left", "front", "back"),
+                        help="which way the subject is drawn facing. Defaults to "
+                             "right, and getting it wrong MIRRORS EVERY PART -- a "
+                             "left-facing horse rigged as right-facing gets its "
+                             "head box on the rump and its tail box on the head. "
+                             "Nothing in the verification gate catches that: the "
+                             "parts still reassemble, the palette still holds and "
+                             "the frames still shed nothing. Only looking does")
     parser.add_argument("--intent", default="",
                         help="what the character is, in a few words; sharpens the rig")
     parser.add_argument("--attach", action="append", default=[], metavar="SOCKET=FILE",
@@ -126,7 +133,8 @@ def main():
             animations=[a.strip() for a in args.animations.split(",") if a.strip()],
             direction_set=args.directions, backend=args.rig or args.backend,
             model=args.model,
-            character_class=args.character_class, facing=args.facing,
+            character_class=args.character_class,
+            facing=args.facing or "right",
             intent=args.intent, name=args.name, layout=args.layout,
             padding=args.padding, extrude=args.extrude, scale=args.scale,
             power_of_two=args.power_of_two,
@@ -140,6 +148,22 @@ def main():
     except (ValueError, RuntimeError) as error:
         print("build failed: %s" % error, file=sys.stderr)
         return 2
+
+    # The one input whose default is catastrophic and silent. A left-facing
+    # subject rigged as right-facing has every part box mirrored -- the head box
+    # over the rump, the tail box over the head -- and the gate stays green:
+    # the parts reassemble, the palette holds, nothing sheds. It happened to
+    # this project's own measurement harness on a CC0 horse and was found by a
+    # vision critic, unprompted, after every deterministic check had passed it.
+    # Facing is also not inferable from the drawing: the obvious silhouette
+    # heuristic (the head end of a side-on animal is the taller end) gets two of
+    # three corpus creatures and neither left-facing subject.
+    if args.facing is None and build.rigs["side"].character_class != "prop":
+        build.warn("no --facing was given, so the rig assumes the subject faces "
+                   "RIGHT. If it faces left, every part is mirrored onto the "
+                   "wrong end of it and no check here can tell -- the parts "
+                   "still reassemble, the palette still holds and nothing "
+                   "sheds. Look at the preview, or pass --critic")
 
     report = dict(build.report)
     report["written"] = build.written
@@ -187,8 +211,9 @@ def _human(build, report):
     if side.get("pixel_scale", 1) > 1:
         lines.append("         %s" % side["pixel_scale_note"])
     rig = build.rigs["side"]
-    lines.append("rig      %s, %d parts, by %s"
-                 % (rig.character_class, len(rig.parts), report["rig_actor"]))
+    lines.append("rig      %s, %d parts, facing %s, by %s"
+                 % (rig.character_class, len(rig.parts), rig.facing,
+                    report["rig_actor"]))
     for note in rig.notes:
         lines.append("         %s" % note)
     lines.append("sheet    %dx%d %s, %d clips, %d frames"

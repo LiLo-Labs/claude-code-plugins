@@ -5,7 +5,7 @@ import os
 
 import pytest
 
-from spritepipe import image, ingest, motion, pipeline
+from spritepipe import image, ingest, motion, pipeline, quality
 
 
 def build(path, out, **kwargs):
@@ -321,3 +321,44 @@ def test_a_loop_point_past_the_end_is_refused(hero_path, tmp_path):
     with pytest.raises(ValueError) as caught:
         build(hero_path, tmp_path / "out", animations=["walk"], loop_start=99)
     assert "loop_start" in str(caught.value)
+
+
+# ---------------------------------------------------------------------------
+# Facing is the one input whose default is catastrophic AND silent.
+# ---------------------------------------------------------------------------
+
+def test_a_mirrored_facing_passes_every_check_in_the_gate(hero_path, tmp_path):
+    """The reason the CLI warns about it. A subject rigged the wrong way round
+    has every part box on the wrong end -- and the parts still reassemble, the
+    palette still holds, and nothing sheds. This test exists to record that the
+    gate cannot catch it, so that nobody later assumes it can."""
+    forwards = pipeline.build_sheet(
+        hero_path, str(tmp_path / "fwd"), animations=["walk"],
+        backend="template", facing="right", name="hero")
+    backwards = pipeline.build_sheet(
+        hero_path, str(tmp_path / "back"), animations=["walk"],
+        backend="template", facing="left", name="hero")
+
+    assert forwards.verification.ok and backwards.verification.ok
+    assert ([check["check"] for check in forwards.verification.checks]
+            == [check["check"] for check in backwards.verification.checks])
+    # Two different animations, both fully verified.
+    assert (forwards.clips[0].frames[0].tobytes()
+            != backwards.clips[0].frames[0].tobytes())
+    # And `shed` does not raise its voice either. On this fixture the mirrored
+    # build sheds 2.3% -- below the 5% the build warns at, so it is not
+    # reported. On the corpus's CC0 horse, which really is drawn facing left,
+    # the mirrored rig sheds 0.00% and appears in the sweep as a clean asset.
+    for build in (forwards, backwards):
+        worst, _index = quality.shed(build.clips[0].frames,
+                                     build.references["side"].pixels)
+        assert worst < 0.05
+
+
+def test_the_rig_records_which_way_it_assumed_the_subject_faces(hero_path, tmp_path):
+    """So the assumption is at least visible in the artefact."""
+    build = pipeline.build_sheet(
+        hero_path, str(tmp_path / "out"), animations=["idle"],
+        backend="template", facing="left", name="hero")
+    assert build.rigs["side"].facing == "left"
+    assert json.load(open(build.written["rig"]))["facing"] == "left"

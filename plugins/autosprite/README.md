@@ -479,6 +479,21 @@ It does not check whether the parts are *named* right. A rig that calls the head
 a leg reassembles perfectly, because reassembly is about which pixels went where,
 not what they were called. Only watching the preview GIF answers that.
 
+**The sharpest case of that is `--facing`.** A subject drawn facing left and
+rigged as right-facing has *every part box mirrored onto the wrong end of it* —
+the head box over the rump, the tail box over the head, so `tail angle` swings
+the head around like a tail. Every check above stays green: the parts still
+reassemble, the palette still holds, and on the corpus's CC0 horse the mirrored
+rig sheds **0.00%** and appears in the sweep as a clean asset. A test records
+that the gate cannot catch it, so nobody later assumes it can.
+
+It is also not inferable from the drawing — the obvious silhouette heuristic (a
+side-on animal's head end is the taller end) gets two of three corpus creatures
+and neither left-facing subject. So the build says out loud when it has assumed
+rather than been told, and the assumption is printed on the rig line and written
+into the rig file. It was a vision critic that caught it, unprompted, in this
+project's own measurement harness.
+
 ## Judged against an artist, where an artist's frames exist
 
 Every check above asks whether a frame is *intact*. None asks whether the right

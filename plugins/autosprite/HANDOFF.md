@@ -438,6 +438,28 @@ motion. `shed` reported 0.00% on it, because the nub stays connected.
 On the shipped version the critic returns `good` on the horse and, on the
 brawler, `rig` with two complaints and **no motion complaint at all**.
 
+### `--facing` is the one default that is both catastrophic and silent
+
+The horse bug is not a harness bug, it is a product bug that the harness
+happened to hit first. A user whose sprite faces left and who does not pass
+`--facing left` gets every part box mirrored onto the wrong end of it, and the
+whole gate stays green: `REST` passes because the parts still reassemble,
+`PALETTE` passes, and on the corpus horse the mirrored rig sheds **0.00%** --
+it sits in the sweep as one of the clean assets. On the synthetic test hero it
+sheds 2.3%, which is below the 5% the build warns at. A test now records that
+the gate cannot catch this, so that nobody later assumes it can.
+
+It is also **not inferable**. The obvious silhouette heuristic -- a side-on
+animal's head end is the taller end -- was measured against the ten corpus
+assets that carry a left/right label and gets two of three creatures and
+neither left-facing subject. No threshold, no detector.
+
+So the answer is to stop it being silent: `--facing` now defaults to nothing at
+the CLI, the build warns when it had to assume rather than be told, the
+assumption is printed on the rig line and written into the rig file, and the
+help text says what getting it wrong does. That is the whole fix, and it is the
+right size of fix for something no measurement can decide.
+
 ### The critic caught a bug in the MEASUREMENT, which no measurement could
 
 Asked to judge an idle variant, it opened with something nobody had asked about:
