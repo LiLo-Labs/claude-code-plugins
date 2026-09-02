@@ -1,6 +1,6 @@
 # The circumstances under which this pipeline fails
 
-Every failure in the validation sweep reduced to one of ten structural
+Every failure in the validation sweep reduced to one of eleven structural
 circumstances. None of them is a model being bad at looking; each is a
 mismatch between where the evidence lives and where the decision is made.
 Each carries the invariant that now guards it, and the incident that paid
@@ -210,3 +210,32 @@ paint stages see is a real edge (`segment3d.snap_to_base`). The single
 exemption is a pattern painted onto smooth geometry, which has no region to
 snap to; it is tracked, capped at pattern size, and its mask is trimmed to a
 painter's silhouette rather than a stencil's teeth.
+
+## 11. A proposer that is also its own judge
+
+A stage that both FINDS a candidate and DECIDES it is real cannot be neutral,
+because the framing that makes a thing findable is the framing that makes it
+look like the answer. An aimed camera puts one candidate in the centre of a
+tight frame and asks what is unmarked there; that is a leading question by
+construction, in a way a wide orbit view asking "find every X" is not. Recall
+bought that way is paid for in precision, silently, because the same stage
+reports both.
+
+*Incident:* the shell's aimed rounds took the barnacle index from 102 to 142,
+and 34 of those were not barnacles -- mostly limpets, which share the family's
+radius, relief sign and response strength exactly, plus a weed frond and a
+patch of the rock's rim. Nothing in the geometry separates a limpet from a
+barnacle; only looking does, and the stage that looked had already decided.
+*Invariant:* proposing and keeping are separate stages with different framing.
+The rounds propose; `index3d.confirm` shows each indexed instance tinted among
+its neighbours -- framed at several instance widths, because a tight crop
+destroys the very context that tells a cone on a rib from a cone on a frond --
+and asks what the tinted shape actually is. The gate exits through selection
+(see 6): the agent may name what the shape really is, and those names are the
+finding, not the rejection. On the shell they named a whole second family the
+index had been quietly mixing in.
+*Watch for:* a stage whose recall number is reported by the stage that
+produced it, and any gate whose "could not tell" and "was never shown" land in
+the same bucket. The first confirm run read "125 kept, 81 unclear" when only 58
+instances had ever been rendered to an agent -- a 21% rename rate among those
+examined, published as 9%.
