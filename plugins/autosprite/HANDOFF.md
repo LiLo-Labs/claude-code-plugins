@@ -365,6 +365,62 @@ invariant, and the fallback hiding the gap was silent.
   what it moved and the build warns. Instrumented across six sprites and all
   sixteen animations: **zero**.
 
+## Weather, and a class of motion that is passage rather than movement
+
+Nothing in the plugin could animate rain. The user named "houses and weather"
+and the vocabulary had no way to say what weather does: a sheet of rain does not
+move, and it does not ripple either -- something travels THROUGH it while it
+stays exactly where it is. `dx` moves the part, and a part that leaves its own
+box comes away from whatever it hangs on.
+
+Two channels, `scroll_x` and `scroll_y`, slide a part's pixels within its own
+box and wrap what falls off the far side back to the near one. Rain, snow, a
+waterfall, a river, a conveyor, a treadmill of ground under a runner, smoke
+leaving a chimney. Two clips drive them, `fall` and `current`, addressed at a
+new trait `flow`, which the vision prompt now offers with the distinction that
+matters: a pond's surface RIPPLES and a river's surface FLOWS.
+
+Three properties, and the first is the reason to prefer this to everything else
+that was considered:
+
+- **A wrap is a bijection.** Stronger than `wave`, which is a permutation that
+  lets pixels slide off the end: here every output pixel is an input pixel AND
+  every input pixel is an output pixel, so every colour keeps exactly the count
+  it started with. It is the only motion in the plugin that structurally cannot
+  detach anything from anything.
+- **The unit is a fraction of the part's own box**, not a count of pixels, which
+  is what lets one clip close its loop on a subject it has never met: "one whole
+  box per cycle" is exact whether the box is 8px or 800. A test asserts the
+  frame after the last IS the first, byte for byte, at three sizes.
+- **It closes for free.** Scroll by a whole box and you are where you started,
+  so there is nothing to stitch and nothing to drift.
+
+Verified end to end: a rain sheet built from one image, `fall` and `current`
+both drawn, all eight checks green, pixel count identical in every frame.
+
+### A sheet of rain broke a measurement, which was the more useful half
+
+`shed` asks how much of the subject came AWAY from it, and that presumes there
+is an "it" -- one connected thing a limb can detach from. Rain is fifty separate
+marks. Moving them changes which ones happen to touch, so `shed` reported
+**10.71%** on frames whose pixel count was **exactly** the source's, 112 for
+112, with zero invented colours. Nothing had gone wrong; the question could not
+be asked.
+
+Every one of the twenty-eight corpus sprites has a largest connected blob of
+**96.2% to 100%** of its pixels, so art that is genuinely in pieces is easy to
+recognise with an enormous margin. Such a subject is now measured for
+CONSERVATION instead -- `quality.conserved`, the largest share of pixels any
+frame gained or lost -- which is a far stricter question, because any drift at
+all is a bug rather than a matter of degree. A test asserts a rotation fails it,
+so the check is not vacuous.
+
+`repair` is skipped for the same reason and stated: it damps whatever `shed`
+blames, so on scattered art it chases a number that cannot mean anything, and it
+had been explaining a sheet of rain in the language of limbs coming off a body
+("a squash is pulling it apart, which damping cannot fix") -- a sentence the
+user then has to disbelieve.
+
 ## Outfitting: "one item fits every character" was aspirational
 
 The module's own docstring said an item ends up "in the right hand of a

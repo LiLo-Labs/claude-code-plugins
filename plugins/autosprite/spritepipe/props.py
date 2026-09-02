@@ -206,9 +206,39 @@ def _library():
         ops=[{"op": "turbulence", "on": "trait:surface", "amount": 0.6,
               "channels": ["cycle"], "rate": 3}])
 
+    # --- passage: the thing stays put and something moves through it -------
+
+    fall = Animation(
+        "fall", frames=8, fps=12, loop=True,
+        note="rain, snow, a waterfall, sand through a glass. The sheet does "
+             "not move -- what is drawn on it travels down it and wraps, so "
+             "the part stays exactly where the artist put it and nothing can "
+             "come away from anything. The number is a FRACTION OF THE PART'S "
+             "OWN BOX rather than a count of pixels, which is what lets one "
+             "clip close its loop on a subject it has never met: one whole box "
+             "per cycle is exact whether the box is eight pixels or eight "
+             "hundred, and the last frame wraps to the first byte for byte. "
+             "Linear, because rain does not ease",
+        tracks={"trait:flow": {"keys": [{"t": 0.0, "scroll_y": 0.0,
+                                         "easing": "linear"},
+                                        {"t": 1.0, "scroll_y": 1.0,
+                                         "easing": "linear"}],
+                               "spread": 0.09, "along": "x"}})
+
+    current = Animation(
+        "current", frames=8, fps=10, loop=True,
+        note="a river, a conveyor, a belt, a treadmill of ground under a "
+             "runner, a marquee. The same wrap as `fall`, sideways. Two of "
+             "them at once is a diagonal, which is what wind-driven snow is",
+        tracks={"trait:flow": {"keys": [{"t": 0.0, "scroll_x": 0.0,
+                                         "easing": "linear"},
+                                        {"t": 1.0, "scroll_x": 1.0,
+                                         "easing": "linear"}],
+                               "spread": 0.11, "along": "y"}})
+
     return {animation.name: animation for animation in
             (bob, spin, tumble, pulse, swing, turn, sway, gust, ripple, creak,
-             flicker, shimmer)}
+             flicker, shimmer, fall, current)}
 
 
 LIBRARY = _library()
@@ -224,11 +254,12 @@ PRESET_SETS = {
     "machine": ["turn", "creak"],
     "plant": ["sway", "gust"],
     "cloth": ["ripple", "sway", "gust"],
-    "water": ["ripple", "shimmer"],
-    "weather": ["ripple", "sway"],
+    "water": ["ripple", "shimmer", "current"],
+    "weather": ["fall", "current", "sway", "ripple"],
     "light": ["flicker"],
     "all": ["bob", "spin", "tumble", "pulse", "swing",
-            "turn", "sway", "gust", "ripple", "creak", "flicker", "shimmer"],
+            "turn", "sway", "gust", "ripple", "creak", "flicker", "shimmer",
+            "fall", "current"],
 }
 
 

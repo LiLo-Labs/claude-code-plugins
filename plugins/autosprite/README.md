@@ -24,10 +24,10 @@ hero.png                                       hero-sprites/
 
 The input file is never written to.
 
-## Three operations that are not a rotation
+## Five operations that are not a rotation
 
-Six of the nine animation channels are an affine transform — `angle`, `dx`,
-`dy`, `sx`, `sy` and `shear`. The other three are not, and each is what some
+Six of the eleven animation channels are an affine transform — `angle`, `dx`,
+`dy`, `sx`, `sy` and `shear`. The other five are not, and each is what some
 subject with no limbs actually does.
 
 **`shear`** leans a part's top away from its base, in degrees, without turning
@@ -49,6 +49,35 @@ number of rows, so there is nothing to sample, average or invent.
 > wave makes it worse again — so cloth is not a thing that leans. Cutting the
 > cloth into strips and travelling a wave across them with `spread` *tears*, at
 > 31–61% shed, however many strips.
+
+**`scroll_x`** and **`scroll_y`** slide a part's pixels *within its own box* and
+wrap what falls off the far side back to the near one. Rain, snow, a waterfall,
+a river, a conveyor, a treadmill of ground under a runner, smoke leaving a
+chimney — a whole class of subject whose motion is not a movement of the thing
+but a movement **through** it, and which nothing else here can say: `dx` moves
+the part, and a part that leaves its own box comes away from whatever it hangs
+on. Wrapping is a **bijection**, so it is a stronger claim than `wave` makes:
+every colour keeps exactly the count it started with, nothing falls off the end,
+and it is the only motion in the plugin that structurally cannot detach anything
+from anything.
+
+The number is a *fraction of the part's own box*, not a count of pixels. That is
+what lets one clip close its loop on a subject it has never met: "one whole box
+per cycle" is exact whether the box is eight pixels or eight hundred, and a test
+asserts the frame after the last is the first, byte for byte, at three different
+sizes.
+
+> A sheet of rain also broke a measurement, which was the more useful half.
+> `shed` asks how much of the subject came **away** from it, and that presumes
+> there is an "it" — one connected thing a limb can detach from. Rain is fifty
+> separate marks, so moving them changes which ones happen to touch and the
+> number wanders while the pixel count stays exactly constant. Every one of the
+> twenty-eight corpus sprites has a largest connected blob of **96.2% to 100%**
+> of its pixels, so art that is genuinely in pieces is easy to recognise: such a
+> subject is now measured for **conservation** instead — a far stricter question,
+> since any drift at all is a bug rather than a matter of degree — and `repair`,
+> which damps whatever `shed` blames, is skipped rather than left explaining a
+> sheet of rain in the language of limbs coming off a body.
 
 **`cycle`** is a whole-numbered step along a part's own shading **ramp**. Nothing moves: every pixel stays exactly where the artist
 put it and changes shade instead, so the light changes and the silhouette does

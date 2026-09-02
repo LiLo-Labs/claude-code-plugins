@@ -249,6 +249,20 @@ def render_pose(cutout, pose, margin=0):
             # has turned on its side waves along its own length rather than
             # along the screen's.
             pixels = img.wave_columns(pixels, part_pose.wave, part_pose.wave_phase)
+        tall, wide = pixels.shape[:2]
+        # A FRACTION of the part's own box, not a count of pixels. That is what
+        # makes one clip close its loop on any subject: "one whole box down per
+        # cycle" is exact whether the box is 8 pixels or 800, and a clip written
+        # in pixels would have to be told the size of a part it has never met.
+        along, down = part_pose.scroll_x * wide, part_pose.scroll_y * tall
+        if abs(along) >= 0.5 or abs(down) >= 0.5:
+            # Also in the part's own space, and BEFORE the wave would have been
+            # a different animation: a wave of scrolled water is water flowing
+            # and then rippling, which is what water does. A wrap moves nothing
+            # out of the part, so this cannot detach anything from anything --
+            # the one deformation here that `shed` is structurally unable to
+            # register.
+            pixels = img.scroll(pixels, along, down)
         step = int(round(part_pose.cycle))
         if step:
             # Before the transform, not after: the supersampled reduction votes

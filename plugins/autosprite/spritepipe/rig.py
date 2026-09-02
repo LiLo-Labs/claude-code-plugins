@@ -66,6 +66,8 @@ TRAITS = (
     "socket",     # attached and swappable; rides its host
     "ground",     # not part of the subject at all; the floor under it
     "glow",       # emits or catches light, so it brightens and dims in place
+    "flow",       # something moves THROUGH it while it stays where it is --
+                  # rain, snow, a waterfall, a river, a conveyor, smoke
 )
 
 TRAITS_BY_ROLE = {

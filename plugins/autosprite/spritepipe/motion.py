@@ -52,9 +52,10 @@ from .skeleton import PartPose, Pose
 # against the artist's own frames, leaning the cloth rigidly moves 70% of pixels
 # the artist never touches and waving it moves 15%.
 CHANNELS = ("angle", "dx", "dy", "sx", "sy", "cycle", "shear",
-            "wave", "wave_phase")
+            "wave", "wave_phase", "scroll_x", "scroll_y")
 REST = {"angle": 0.0, "dx": 0.0, "dy": 0.0, "sx": 1.0, "sy": 1.0, "cycle": 0.0,
-        "shear": 0.0, "wave": 0.0, "wave_phase": 0.0}
+        "shear": 0.0, "wave": 0.0, "wave_phase": 0.0, "scroll_x": 0.0,
+        "scroll_y": 0.0}
 
 # The directions a `spread` can travel in. Four are the compass, and they are
 # separate names rather than one axis and a sign because a clip should be able

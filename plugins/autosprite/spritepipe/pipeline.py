@@ -205,7 +205,11 @@ def make_clips(references, rigs, cutouts, animations, direction_plans, locked,
                      for pose in poses]
             if animation.planted:
                 drawn = render_module.level_to_floor(cut, poses, drawn, margin)
-            if repair:
+            # `repair` damps whatever `shed` blames, so on art that is in
+            # pieces it is chasing a number that cannot mean anything -- and it
+            # says so in the language of limbs coming off a body, which for a
+            # sheet of rain is nonsense the user then has to disbelieve.
+            if repair and not quality_module.scattered(references[view].pixels):
                 animation, drawn, note = repair_module.repair(
                     cut, rig, animation, drawn, references[view].pixels,
                     margin, render_module)
@@ -428,8 +432,27 @@ def build_sheet(reference_path, outdir, animations=("full",), direction_set="1",
                    "share" % (key, total, distinct))
 
     reference_pixels = build.references["side"].pixels
+    # `shed` asks how much of the subject came AWAY from it, which presumes
+    # there is an "it". A sheet of rain is fifty separate marks and moving them
+    # changes which ones happen to touch, so the number wanders without
+    # anything having gone wrong. For art that is inherently in pieces the
+    # honest question is conservation instead, and it is a much stricter one:
+    # any drift at all is a bug rather than a matter of degree.
+    in_pieces = quality_module.scattered(reference_pixels)
     build.report["shed"] = {}
     for clip in build.clips:
+        if in_pieces:
+            worst, index = quality_module.conserved(clip.frames, reference_pixels)
+            build.report["shed"][clip.key] = {"conserved": round(worst, 4),
+                                              "frame": index}
+            if worst > 0.0:
+                build.warn("%s frame %d holds %.1f%% more or fewer pixels than "
+                           "the source. This art is in pieces rather than one "
+                           "connected thing, so it is measured for conservation "
+                           "rather than for shedding -- and conservation is "
+                           "exact, so any drift is a bug"
+                           % (clip.key, index, worst * 100))
+            continue
         worst, index = quality_module.shed(clip.frames, reference_pixels)
         build.report["shed"][clip.key] = {"worst": round(worst, 4), "frame": index}
         if worst >= 0.05:
@@ -437,6 +460,13 @@ def build_sheet(reference_path, outdir, animations=("full",), direction_set="1",
                        "detached from its body; the motion is more than this "
                        "drawing can take at its size"
                        % (clip.key, index, worst * 100))
+    if in_pieces:
+        build.warn("this art is in pieces (its largest connected blob is %.0f%% "
+                   "of its pixels), so `shed` cannot say whether anything came "
+                   "away from it -- there is no single body to come away from. "
+                   "Every clip is measured for pixel conservation instead"
+                   % (quality_module.connected_share(
+                       img.alpha_mask(reference_pixels)) * 100))
 
     build.sheet = pack_module.pack(build.clips, layout=layout, padding=padding,
                                    extrude=extrude, power_of_two=power_of_two,

@@ -212,6 +212,32 @@ def wave_columns(array, amplitude, phase):
     return out
 
 
+def scroll(array, dx, dy):
+    """Slide the pixels within the array and wrap what falls off the far side.
+
+    The motion of rain, snow, a waterfall, a river, a conveyor belt, a treadmill
+    of grass under a running character, smoke leaving a chimney. What these have
+    in common is that the thing does not move -- something moves THROUGH it --
+    and nothing else in this pipeline can say that: `dx` and `dy` move the part,
+    and a part that leaves its own box comes away from whatever it hangs on.
+
+    It is the strongest palette guarantee here, stronger even than `wave_columns`
+    and for a plainer reason: a wrap is a BIJECTION. Every output pixel is an
+    input pixel, every input pixel is an output pixel, the count of each colour
+    is identical, and unlike a slide nothing falls off the end and is lost. It
+    also closes any loop it is put in for free -- scroll a part by its own height
+    and it is exactly where it started, byte for byte, so a keyframe table that
+    ends on a whole multiple of the box cannot pop.
+
+    Whole pixels only, because a fraction of a pixel is not a pixel.
+    """
+    dx, dy = int(round(dx)), int(round(dy))
+    height, width = array.shape[:2]
+    if not height or not width or (not dx % width and not dy % height):
+        return array.copy()
+    return np.roll(np.roll(array, dy % height, axis=0), dx % width, axis=1)
+
+
 def unique_colors(array, include_transparent=False):
     """Every distinct RGBA value present, as an (N, 4) uint8 array."""
     flat = array.reshape(-1, 4)

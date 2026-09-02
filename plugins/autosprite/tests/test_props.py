@@ -1,8 +1,10 @@
 """Props animate as one piece, and the spin is the only interesting one."""
 
+import numpy as np
 import pytest
 
-from spritepipe import motion, props, rig as R
+from spritepipe import (cutout, image, motion, props, quality, render,
+                        rig as R)
 
 
 @pytest.fixture
@@ -198,3 +200,113 @@ def test_an_animation_in_neither_library_names_both_in_the_error():
     with pytest.raises(KeyError) as caught:
         props.resolve(["moonwalk"])
     assert "walk" in str(caught.value) and "sway" in str(caught.value)
+
+
+# ---------------------------------------------------------------------------
+# Passage: rain, a river, a conveyor. The thing stays where it is and something
+# travels through it -- a class of subject nothing else here can animate, and
+# the only motion in the plugin that cannot detach anything from anything.
+# ---------------------------------------------------------------------------
+
+def _sheet(height=32, width=24, seed=11):
+    rng = np.random.RandomState(seed)
+    art = image.blank(height, width)
+    for _ in range(46):
+        y, x = rng.randint(0, height), rng.randint(0, width)
+        for step in range(3):
+            art[(y + step) % height, (x + step // 2) % width] = \
+                [150 + 30 * (step > 0), 190, 235, 255]
+    return art
+
+
+def _flow_rig(height, width):
+    return R.Rig((width, height), [
+        R.Part("sheet", "body", (0, 0, width, height), None,
+               (width // 2, height), 0, tags=("flow",))])
+
+
+def _rendered(clip, art):
+    height, width = art.shape[:2]
+    rig = _flow_rig(height, width)
+    cut = cutout.cut(rig, art)
+    margin = render.suggest_margin(rig)
+    return rig, render.render_sequence(
+        cut, list(clip.applied(rig).poses(rig)), margin=margin), cut, margin
+
+
+def test_fall_conserves_every_pixel_in_every_frame():
+    """A wrap is a bijection, so this is exact rather than a matter of degree.
+    It is a stronger claim than `shed` makes and the right one here: nothing
+    leaves the part, so nothing can come away from anything."""
+    art = _sheet()
+    _rig, frames, _cut, _margin = _rendered(props.get("fall"), art)
+    base = int(image.alpha_mask(art).sum())
+    assert {int(image.alpha_mask(frame).sum()) for frame in frames} == {base}
+    assert quality.conserved(frames, art)[0] == 0.0
+
+
+def test_fall_invents_no_colour():
+    art = _sheet()
+    _rig, frames, _cut, _margin = _rendered(props.get("fall"), art)
+    allowed = {tuple(colour) for colour in image.unique_colors(art)}
+    for frame in frames:
+        assert {tuple(c) for c in image.unique_colors(frame)} <= allowed
+
+
+def test_fall_closes_its_loop_byte_for_byte():
+    """One whole box per cycle, so the frame after the last IS the first."""
+    art = _sheet()
+    rig, frames, cut, margin = _rendered(props.get("fall"), art)
+    wrapped = render.render_pose(
+        cut, props.get("fall").applied(rig).pose_at(rig, 1.0), margin=margin)
+    assert wrapped.tobytes() == frames[0].tobytes()
+
+
+def test_the_scroll_is_a_fraction_of_the_box_so_one_clip_fits_any_size():
+    """A clip written in pixels would have to be told the size of a part it has
+    never met, and would close its loop on exactly one of them."""
+    for height, width in ((16, 12), (32, 24), (96, 70)):
+        art = _sheet(height, width)
+        rig, frames, cut, margin = _rendered(props.get("fall"), art)
+        assert len({frame.tobytes() for frame in frames}) > 1
+        wrapped = render.render_pose(
+            cut, props.get("fall").applied(rig).pose_at(rig, 1.0), margin=margin)
+        assert wrapped.tobytes() == frames[0].tobytes()
+
+
+def test_fall_and_current_move_along_different_axes():
+    art = _sheet()
+    _r, down, _c, _m = _rendered(props.get("fall"), art)
+    _r, across, _c, _m = _rendered(props.get("current"), art)
+    assert [f.tobytes() for f in down] != [f.tobytes() for f in across]
+
+
+def test_a_subject_with_no_flow_part_is_told_rather_than_given_still_frames():
+    rig = R.Rig((16, 16), [R.Part("body", "body", (0, 0, 16, 16), None, (8, 16), 0)])
+    assert not props.get("fall").drives(rig)
+    assert "flow" in props.get("fall").missing(rig)[0]
+
+
+def test_scattered_art_is_measured_for_conservation_not_for_shedding():
+    """`shed` asks how much came AWAY from the subject, which presumes there is
+    one. Every corpus sprite has a largest blob of 96% or more; a sheet of rain
+    is fifty separate marks."""
+    art = _sheet()
+    assert quality.scattered(art)
+    solid = image.blank(16, 16)
+    solid[2:14, 2:14] = [200, 100, 100, 255]
+    assert not quality.scattered(solid)
+    assert quality.connected_share(image.alpha_mask(solid)) == 1.0
+
+
+def test_conservation_catches_what_a_scroll_cannot_do():
+    """The check is only worth having if something fails it. A rotation loses
+    pixels off the corners of the part; a wrap cannot."""
+    art = _sheet()
+    rig = _flow_rig(*art.shape[:2])
+    cut = cutout.cut(rig, art)
+    margin = render.suggest_margin(rig)
+    spun = motion.Animation("spun", 4, tracks={
+        "body": [{"t": 0.0, "angle": 0.0}, {"t": 0.5, "angle": 40.0}]})
+    frames = render.render_sequence(cut, list(spun.poses(rig)), margin=margin)
+    assert quality.conserved(frames, art)[0] > 0.0

@@ -871,9 +871,16 @@ Rules that decide whether this rig works or produces a broken character:
     * `stalk` -- fixed at its base and free at its tip, so it trails and sways:
       a tree's canopy, a flag, a cape, a plume of smoke, a hanging rope.
     * `surface` -- a broad face with no joint, that ripples rather than hinges:
-      water, a banner, a curtain, a field of crops.
+      water, a banner, a curtain, a field of crops. A pond's surface RIPPLES;
+      a river's surface FLOWS -- see the next one.
     * `glow` -- emits or catches light, so it brightens and dims WITHOUT moving:
       a torch flame, a forge, a rune, a lit window, a lantern's glass.
+    * `flow` -- something moves THROUGH it while the thing itself stays exactly
+      where it is: rain, snow, a waterfall's sheet, a river's surface, a
+      conveyor belt, smoke leaving a chimney, a treadmill of ground. Use this
+      rather than `surface` when the motion is passage rather than rippling,
+      and rather than a `dx`/`dy` on the part, which would move the part off
+      whatever it hangs on.
     * `socket` -- hangs off the subject and can swing a little: a shutter, a
       sign, a door, a lantern on a bracket.
     * `crown` -- sits on top of the main mass and counter-moves.

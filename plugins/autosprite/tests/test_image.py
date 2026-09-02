@@ -1,5 +1,6 @@
 """The raster primitives everything else assumes are exact."""
 
+import numpy as np
 import pytest
 
 from spritepipe import image
@@ -158,3 +159,57 @@ def test_what_slides_off_the_end_leaves_transparency_not_a_wrap():
     art = _striped(height=6, width=4)
     waved = image.wave_columns(art, 20.0, 0.0)
     assert not image.alpha_mask(waved).all()
+
+
+# ---------------------------------------------------------------------------
+# scroll: the thing stays put and something moves through it
+# ---------------------------------------------------------------------------
+
+def _speckle(height=16, width=12, seed=3):
+    rng = np.random.RandomState(seed)
+    array = image.blank(height, width)
+    for _ in range(24):
+        y, x = rng.randint(0, height), rng.randint(0, width)
+        array[y, x] = [140 + (x % 3) * 20, 190, 235, 255]
+    return array
+
+
+def test_a_scroll_is_a_bijection_not_a_slide():
+    """The strongest palette claim in the pipeline, and a stronger one than
+    `wave_columns` makes: nothing falls off the end, so every colour keeps
+    exactly the count it started with."""
+    source = _speckle()
+    for dx, dy in ((0, 5), (3, 0), (7, 11), (-4, -9)):
+        moved = image.scroll(source, dx, dy)
+        assert moved.shape == source.shape
+        before = np.unique(source.reshape(-1, 4), axis=0, return_counts=True)
+        after = np.unique(moved.reshape(-1, 4), axis=0, return_counts=True)
+        assert np.array_equal(before[0], after[0])       # the same colours
+        assert np.array_equal(np.sort(before[1]), np.sort(after[1]))
+
+
+def test_a_scroll_of_a_whole_box_is_the_identity():
+    """Which is why a clip that ends on a whole multiple of the box cannot pop."""
+    source = _speckle()
+    height, width = source.shape[:2]
+    assert image.equal(image.scroll(source, 0, height), source)
+    assert image.equal(image.scroll(source, width, 0), source)
+    assert image.equal(image.scroll(source, width * 3, -height * 2), source)
+
+
+def test_a_scroll_moves_whole_pixels_only():
+    """A fraction of a pixel is not a pixel."""
+    source = _speckle()
+    assert image.equal(image.scroll(source, 0, 0.4), source)
+    assert image.equal(image.scroll(source, 0, 1.6), image.scroll(source, 0, 2))
+
+
+def test_a_scroll_wraps_rather_than_dropping():
+    """The row that leaves the bottom arrives at the top, which is what a slide
+    does not do."""
+    source = image.blank(4, 3)
+    source[3, :] = [10, 20, 30, 255]
+    moved = image.scroll(source, 0, 1)
+    assert (moved[0] == [10, 20, 30, 255]).all()
+    assert not (moved[3, :, 3] > 0).any()
+    assert not (moved[1, :, 3] > 0).any()

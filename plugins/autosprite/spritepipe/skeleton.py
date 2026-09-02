@@ -21,21 +21,33 @@ IDENTITY = np.eye(3)
 class PartPose:
     """One part's departure from rest.
 
-    Five of the six channels are an affine transform and are consumed by
-    `local()` below. `cycle` is not: it is a whole-numbered step along the
-    part's own colour ramp, applied to the pixels rather than to their
-    positions, and the renderer handles it separately. It is here because it is
-    keyed, eased, blended and composed exactly like the others -- a torch's
-    flicker is authored in the same table as a torch's sway -- and because
-    keeping it out would have meant a second parallel animation system for
-    everything a subject does that is not a movement.
+    Six of the eleven channels are an affine transform and are consumed by
+    `local()` below. The other five are not, and each is applied to the part's
+    own pixels rather than to their positions:
+
+    - `cycle` is a whole-numbered step along the part's own colour ramp.
+    - `wave` and `wave_phase` slide each COLUMN vertically, sinusoidally in the
+      column's own position, which is what cloth and water do.
+    - `scroll_x` and `scroll_y` slide the part's pixels WITHIN ITS OWN BOX and
+      wrap what falls off the far side back to the near one. Rain, snow, a
+      waterfall, a river, a conveyor, smoke leaving a chimney -- a whole class
+      of subject whose motion is not a movement of the thing but a movement
+      THROUGH it. Wrapping is what makes it a class rather than a trick: the
+      part stays exactly where it is, so nothing can come away from anything.
+
+    They are here rather than in a second system because they are keyed, eased,
+    blended and composed exactly like the others -- a torch's flicker is
+    authored in the same table as a torch's sway -- and keeping them out would
+    have meant a parallel animation system for everything a subject does that
+    is not a movement.
     """
 
     __slots__ = ("angle", "dx", "dy", "sx", "sy", "cycle", "shear",
-                 "wave", "wave_phase")
+                 "wave", "wave_phase", "scroll_x", "scroll_y")
 
     def __init__(self, angle=0.0, dx=0.0, dy=0.0, sx=1.0, sy=1.0, cycle=0.0,
-                 shear=0.0, wave=0.0, wave_phase=0.0):
+                 shear=0.0, wave=0.0, wave_phase=0.0, scroll_x=0.0,
+                 scroll_y=0.0):
         self.angle = float(angle)
         self.dx = float(dx)
         self.dy = float(dy)
@@ -45,6 +57,8 @@ class PartPose:
         self.shear = float(shear)
         self.wave = float(wave)
         self.wave_phase = float(wave_phase)
+        self.scroll_x = float(scroll_x)
+        self.scroll_y = float(scroll_y)
 
     def blend(self, other, amount):
         """Linear blend towards `other`. Used to ease between keyframes."""
@@ -57,7 +71,9 @@ class PartPose:
                         self.cycle * keep + other.cycle * amount,
                         self.shear * keep + other.shear * amount,
                         self.wave * keep + other.wave * amount,
-                        self.wave_phase * keep + other.wave_phase * amount)
+                        self.wave_phase * keep + other.wave_phase * amount,
+                        self.scroll_x * keep + other.scroll_x * amount,
+                        self.scroll_y * keep + other.scroll_y * amount)
 
     def compose(self, other):
         """This pose with `other`'s DEPARTURE FROM REST applied on top.
@@ -74,13 +90,17 @@ class PartPose:
                         self.sx * other.sx, self.sy * other.sy,
                         self.cycle + other.cycle, self.shear + other.shear,
                         self.wave + other.wave,
-                        self.wave_phase + other.wave_phase)
+                        self.wave_phase + other.wave_phase,
+                        self.scroll_x + other.scroll_x,
+                        self.scroll_y + other.scroll_y)
 
     def __repr__(self):
         return ("PartPose(angle=%.1f, d=(%.1f, %.1f), s=(%.2f, %.2f), "
-                "cycle=%+.1f, shear=%.1f, wave=%.1f@%.2f)"
+                "cycle=%+.1f, shear=%.1f, wave=%.1f@%.2f, "
+                "scroll=(%+.1f, %+.1f))"
                 % (self.angle, self.dx, self.dy, self.sx, self.sy, self.cycle,
-                   self.shear, self.wave, self.wave_phase))
+                   self.shear, self.wave, self.wave_phase,
+                   self.scroll_x, self.scroll_y))
 
 
 class Pose:

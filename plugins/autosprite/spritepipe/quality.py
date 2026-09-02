@@ -91,6 +91,49 @@ def shed(frames, reference_pixels):
     return worst, index
 
 
+def connected_share(mask):
+    """The largest blob's share of the pixels. 1.0 is one connected thing."""
+    sizes = blob_sizes(mask)
+    total = sum(sizes)
+    return (max(sizes) / float(total)) if total else 1.0
+
+
+def scattered(pixels, floor=0.6):
+    """Whether this art is inherently in pieces, so `shed` cannot mean anything.
+
+    `shed` asks how much of the subject came AWAY from it, which presumes there
+    is an "it" -- one connected thing that a limb can detach from. A sheet of
+    rain, a flock, a spray of sparks is not that: it is fifty separate marks,
+    and moving them changes which ones happen to touch, so the number wanders
+    without anything having gone wrong.
+
+    Measured on the corpus, every one of twenty-eight real character and prop
+    sprites has a largest blob of 96.2% to 100% of its pixels, so the floor here
+    has a very wide margin and only ever fires on art that really is scattered.
+    """
+    return connected_share(img.alpha_mask(pixels)) < float(floor)
+
+
+def conserved(frames, rest):
+    """(worst, index): the largest share of pixels any frame gained or lost.
+
+    What to ask instead of `shed` when the art is scattered. It is a weaker
+    question about shape and a much stronger one about bookkeeping: a wrap is a
+    bijection, so a scrolling sheet of rain must hold EXACTLY the pixel count it
+    started with in every frame, and any drift at all is a bug rather than a
+    matter of degree.
+    """
+    base = int(img.alpha_mask(rest).sum())
+    if not base:
+        return 0.0, None
+    worst, index = 0.0, None
+    for position, frame in enumerate(frames):
+        drift = abs(int(img.alpha_mask(frame).sum()) - base) / float(base)
+        if drift > worst:
+            worst, index = drift, position
+    return worst, index
+
+
 def disturbed(frames, rest, shape=None):
     """Every pixel any frame of a clip changes from the rest pose.
 
