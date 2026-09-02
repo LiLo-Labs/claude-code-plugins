@@ -866,6 +866,32 @@ the deer puts its head on the ground and lifts it again.
 
 Both are what their artist called `idle`.
 
+### The boar's 99.6% is a RIG defect, and the amplitude reading was wrong
+
+The first version of this section blamed amplitude, and the sweep refutes that.
+Damped until it disturbs 33 pixels against the artist's 59 -- coverage 0.56, the
+closest match available -- the error is **100.0%**. Not 90-something: every
+single pixel the clip moves is one the artist does not touch. An amount cannot
+be wrong in a way that no amount fixes.
+
+Localising the artist's 59 pixels says why. They sit in rows 25-36 and columns
+35-50 of the frame, which is the **tail and the crease where it meets the rump**.
+Our rig's `tail` box is rows 17-24: eight rows too high, a sliver of the upper
+back. Drawn as an ownership map beside the horse and the deer, the boar's actual
+hanging tail is coloured as `leg_near`/`leg_far`, so the one part the artist
+animates is a part our clip does not drive and our rigger does not own.
+
+So the boar posts 99.6% because **the rigger mis-assigns its tail**, not because
+the clip moves too much. That is a rig defect this file could not have found
+before today: it needs an artist's own idle on a quadruped whose tail hangs
+rather than sticks out, and the corpus had no such subject. It is a lead, not a
+fix -- nothing here has changed `vision.py`, and the same check should be run on
+the horse and deer, whose tail boxes look right in the same drawing.
+
+What survives the correction is the finding itself: an artist's idle really does
+range from 8.8% to 94%, and a single clip cannot be right across that. What does
+NOT survive is the idea that a per-subject amplitude would fix it.
+
 **So a single `idle` clip cannot be right, and the error it posts is dominated by
 an amplitude that nothing in a still sprite predicts.** That is the whole reason
 the idle is the worst clip on every character that has one, and it retroactively
@@ -1521,6 +1547,21 @@ unexplored idea.
    subject went nowhere. A twitch, a breath and a behaviour are three
    animations. This is now the highest-value item, it is unblocked, and it is
    the first hard evidence about WHICH clips a wider library should contain.
+
+   Two measured warnings for whoever takes it. An appendage-only `twitch` was
+   built and scores 100% on all three quadrupeds, because of 1c below. And
+   simply dropping the root squash scores far better on five subjects
+   (`deer` 62.2% -> 28.0%, `slime` 30.4% -> 9.1%) at coverages of 0.02 to 0.31
+   -- which is `footprint` paying itself for moving less, not a better clip.
+   Judge any new idle at coverage 1.00, never at `matched`.
+
+1c. **The rigger mis-assigns a hanging tail.** The boar's artist idle moves its
+   tail and the crease at its rump; our `tail` box sits eight rows higher on the
+   upper back, and the pixels the artist actually animates are owned by
+   `leg_near`/`leg_far`. That is why the boar posts 99.6% and why no amplitude
+   fixes it. Cheap to check on the horse and deer, whose boxes look right in the
+   same ownership drawing, and it wants the tail found from the silhouette's
+   rearmost protrusion rather than from a proportion.
 
 2. **`motion.select` addresses parts by ROLE, so a split limb's two segments are
    indistinguishable.** Both halves of a split `leg_far` receive the same track,
