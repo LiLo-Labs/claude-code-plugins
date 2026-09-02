@@ -386,10 +386,59 @@ def _skinned(rig, cut, sprite, pixels, parts_local):
     return parent, part, found
 
 
+def _whole_subject(cutout, pose, margin, width, height):
+    """One frame of a subject that moves AS ONE PIECE, or None.
+
+    A clip that drives the root and nothing else says the subject turns, bobs or
+    tumbles bodily -- a coin, a pickup, a crate. Drawn part by part that is a
+    lie the resampler exposes: `spin` narrows the sprite to 14% of its width, so
+    every part is reduced to under a pixel about its OWN pivot and they land
+    apart. Measured on a 23px character, 45% of it came loose; assembled first
+    and moved once, 0.00% does.
+
+    A GROUNDED part is left exactly where it was, which is the same promise
+    `world_transforms` makes: a baked ground shadow is the floor the subject
+    stands on, not part of the subject, and it must not spin with it.
+    """
+    rig = cutout.rig
+    root = rig.root
+    if root is None:
+        return None
+    body = img.blank(height, width)
+    floor = None
+    for sprite in cutout.sprites:
+        part = rig.by_name(sprite.name)
+        if part is not None and part.role in skeleton.GROUNDED:
+            if floor is None:
+                floor = img.blank(height, width)
+            img.paste(floor, sprite.pixels,
+                      sprite.origin[0] + margin, sprite.origin[1] + margin)
+            continue
+        img.paste(body, sprite.pixels,
+                  sprite.origin[0] + margin, sprite.origin[1] + margin)
+
+    matrix = (skeleton.translate(pose.dx, pose.dy)
+              @ skeleton.local(pose.get(root.name),
+                               (root.pivot[0] + margin, root.pivot[1] + margin)))
+    moved = _transform_layer(body, matrix, (width, height))
+    if pose.flip:
+        moved = moved[:, ::-1]
+    if floor is None:
+        return moved
+    frame = img.blank(height, width)
+    img.paste(frame, floor, 0, 0)
+    img.paste(frame, moved, 0, 0)
+    return frame
+
+
 def render_pose(cutout, pose, margin=0):
     """One frame: every part transformed by its world matrix and composited."""
     rig = cutout.rig
     width, height = canvas_size(rig, margin)
+    if getattr(pose, "whole", False):
+        one = _whole_subject(cutout, pose, margin, width, height)
+        if one is not None:
+            return one
     # WHERE a child attaches to its parent, when the parent is skinned and so
     # does not move as one thing. Off by default until it is measured across the
     # corpus; with it off, `anchors` is None and every transform is what it has

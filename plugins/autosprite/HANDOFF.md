@@ -788,6 +788,118 @@ over-scaled for small sprites". The second character refuted it: at full scale
 the right size, and the brawler at matched coverage wants **more** motion, not
 less. One data point would have shipped a scaling law that was wrong.
 
+## The retargeting proof: 990 pairs, and the two defects it found
+
+The claim this project shares with Mixamo is one sentence -- **a motion written
+once drives a subject it has never met** -- and until now nothing measured it
+across the whole corpus. Every clip in both libraries against every corpus
+subject is 33 x 30 = **990 pairs**, and the matrix is the proof.
+
+| | |
+|---|---|
+| pairs measured | 990, zero errors |
+| the clip drives something | 684 (69%) |
+| **REST byte-exact** | **684 / 684** |
+| **palette a provable subset** | **684 / 684** |
+| shed 0.00% | 671 / 684 (98.1%) |
+| every frame a distinct picture | 424 / 684 (62%) |
+
+The 306 pairs where a clip drives nothing are not failures: a `walk` on a cottage
+addresses parts it does not have, and the build drops it with a reason rather
+than shipping eight copies of the rest pose. **What matters is that of the 684
+that do drive, not one breaks either guarantee.** One walk cycle, written once
+against roles and traits, animates a 15px brawler, a 51px deer, a windmill, a
+flag and a torch, and the parts still reassemble into the source byte for byte.
+
+Two real defects came out of it, and both are now fixed.
+
+### `spin` tore a character into 45% debris
+
+`spin` is a whole-object clip: `root sx` from 1.0 to **0.14**, a 2D object
+turning about its vertical axis until it is edge-on and reappearing mirrored.
+On a coin that is exactly right. On a multi-part rig it was drawn part by part,
+so every part was resampled to under a pixel **about its own pivot** and they
+landed apart -- `platformer-grass-prowne` lost 45.45% of itself, `grafxkid-oldhero`
+22.9%, `platformer-mv-male` 6.9%.
+
+The fix is what the clip already says about itself: **a clip that drives the root
+AND NOTHING ELSE is a statement about the subject rather than its parts**, so the
+subject is assembled first and moved once. `Pose.whole` carries it, `pose_at`
+sets it from `not self.tracks and self.root is not None`, and `render._whole_subject`
+draws it. Five clips qualify: `bob`, `pulse`, `spin`, `swing`, `tumble`.
+
+| | before | after |
+|---|---|---|
+| `grass-prowne` spin | **45.45%** | **0.00%** |
+| `mv-male` spin | 6.94% | 0.00% |
+| corpus worst shed | 45.45% | 22.88% |
+| pairs at 0.00% shed | 668/684 | **671/684** |
+| every frame distinct | 411/684 | **424/684** |
+
+A GROUNDED part is held still on this path, which is the same promise
+`world_transforms` already makes: a baked ground shadow is the floor the subject
+stands on, not part of the subject, and it must not spin with it. Skipping that
+made `grafxkid-oldhero` WORSE (0.46% -> 1.52% on `pulse`), which is how the
+requirement was found rather than assumed.
+
+The 22.88% that remains is that same shadow: a body narrowed to 14% of its width
+no longer touches the shadow drawn under it, and `shed` counts the gap. The body
+does not tear.
+
+## One item, every character: what a mounted accessory is measured against
+
+An item is composited onto the character's own art AT REST and the result becomes
+the source the rest of the pipeline sees, so **REST still proves the parts
+reassemble into the source exactly** (the composed image IS the source) and
+**PALETTE still proves every colour came from the input** (the input now contains
+the sword's). The item then animates for free: it is a rig part parented to the
+arm, and a clip written before the sword existed swings it. Sockets are DERIVED
+from the rig rather than declared -- a hand is the free end of the near arm --
+which is what makes "works with every character" true rather than aspirational.
+
+Measured on one CC0 sword against five characters from 17px to 46px: **REST
+byte-exact on all five, palette held on all twenty clip runs, 0.00% shed
+throughout**, and the sword's tip travels 3.4 to 29.6px, so it is genuinely
+swinging rather than riding along.
+
+### And it was sized against the wrong thing
+
+The rule was a multiple of the ARM's long axis, and an arm box is the smallest
+part the rigger emits and the one most often wrong: three pixels of mitten on a
+46px character, nine pixels on a 17px one whose box had swallowed a chain weapon.
+The same sword therefore came out anywhere from **13% to 118% of the character's
+height** -- a nine-fold spread. At 118% the samurai's sword was taller than the
+samurai; at 13% it vanished inside a character twice his size.
+
+A held item is measured against the **figure** now, which is both the stable
+measure and the one an artist uses: a one-handed sword is a fraction of the
+person holding it, not a multiple of their forearm. 0.45 was chosen by rendering
+six characters from 15px to 46px at 0.45, 0.55 and 0.65 and looking; it is the
+only value proportionate on all six and never too large, and it agrees with the
+figure-drawing proportion.
+
+| | before | after |
+|---|---|---|
+| sword as a share of height, across ten characters 15-64px | **13% - 118%** | **42% - 50%** |
+
+Only the arm was the problem, so `head`, `waist` and `chest` keep the
+part-relative rule: a head and a torso are large, reliably found, and genuinely
+what a hat and a belt are sized by.
+
+**The limitation, stated rather than discovered:** an item goes IN FRONT of the
+part it hangs on. Compositing at rest cannot record pixels hidden at rest, so a
+scabbard behind a body would lose whatever the body covers. A back-mounted item
+needs the item's art to stay separate, which is a different mechanism.
+
+### What the matrix still says is weak
+
+**Only 62% of driving pairs draw a distinct picture in every frame.** The bulk of
+that is a character clip offered to a subject that cannot perform it -- `attack`
+on a potion drives its root and nothing else, so 2 of 6 frames differ -- which is
+an argument for the build refusing more clips, not for changing the clips. But
+`gust` on the 15px brawler draws 1 distinct frame of 10, and that is a real
+failure of a clip on a subject that genuinely has the trait.
+
 ## The ground truth doubled, and the first thing it did was refute this file
 
 Twelve clips across five characters was the evidence base for everything above,

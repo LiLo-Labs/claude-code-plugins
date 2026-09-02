@@ -212,16 +212,47 @@ def _blade(length):
 
 
 def test_one_item_comes_out_proportionate_on_characters_of_any_size():
-    """The measurement that made this necessary: a 30px CC0 sword across
-    seventeen corpus characters landed anywhere from 1.4x to 30x the length of
-    the arm holding it."""
+    """The property that matters is the item against the FIGURE.
+
+    This test used to measure the blade against the arm, which is the rule the
+    code used to apply, and it passed while the real corpus was producing a
+    sword taller than the samurai holding it. An arm box is the smallest part
+    the rigger emits and the one most often wrong; a figure's height is not.
+    """
     blade = _blade(24)
-    ratios = []
+    shares = []
     for height, arm in ((10, 3), (18, 6), (40, 14), (64, 22)):
-        pixels, rig = _figure(height, arm)
+        _pixels, rig = _figure(height, arm)
         factor, _why = outfit.fit(blade, rig, "hand")
-        ratios.append(24 * factor / float(arm))
-    assert all(1.4 < ratio < 2.7 for ratio in ratios), ratios
+        shares.append(24 * factor / float(height))
+    assert all(0.3 < share < 0.7 for share in shares), shares
+
+
+def test_a_mis_measured_arm_does_not_change_the_size_of_what_it_holds():
+    """The actual corpus failure, in one assertion.
+
+    Two characters of the SAME height whose arm boxes differ threefold -- which
+    is what the silhouette rigger really produced, a three-pixel chip of mitten
+    on one 46px character and a nine-pixel box that had swallowed a chain weapon
+    on a 17px one. Sized against the arm, the same sword came out 13% of one
+    character's height and 118% of the other's. Sized against the figure, an arm
+    the rigger got wrong cannot move the answer at all.
+    """
+    blade = _blade(24)
+    _pixels, skinny = _figure(40, 4)
+    _pixels, roomy = _figure(40, 20)
+    assert outfit.fit(blade, skinny, "hand")[0] == outfit.fit(blade, roomy, "hand")[0]
+
+
+def test_a_hat_is_still_sized_by_the_head_under_it():
+    """Only the ARM was unreliable. A head and a torso are large, reliably found,
+    and genuinely what a hat and a belt are sized by, so those sockets keep the
+    part-relative rule -- and a taller character with the same head gets the
+    same hat."""
+    brim = _blade(8)
+    _pixels, short = _figure(20, 6)
+    _pixels, tall = _figure(60, 6)
+    assert outfit.fit(brim, short, "head")[0] == outfit.fit(brim, tall, "head")[0]
 
 
 def test_an_explicit_scale_is_taken_as_given():

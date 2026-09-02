@@ -58,9 +58,33 @@ SOCKETS = {
 # so pasting it at its drawn size put it anywhere from 1.4x to 30x the length of
 # that arm -- a twenty-one-fold spread, and on a 15px character a sword twice as
 # tall as the character.
+#
+# **What it is measured AGAINST matters more than the multiple.** The first
+# version of this table measured every socket against the part it hangs on, and
+# for a HELD item that is the least reliable measure the rigger produces. An arm
+# box is the smallest part on the sprite and the one most often wrong: on a 46px
+# character it came out three pixels -- a chip of mitten -- and on a 17px one it
+# came out nine, because the arm box had swallowed a chain weapon. The same CC0
+# sword therefore landed anywhere from 13% to 118% OF THE CHARACTER'S HEIGHT, a
+# nine-fold spread, and at 118% the sword was taller than the samurai holding it
+# while at 13% it vanished inside the body of a character twice his size.
+#
+# A held item is measured against the FIGURE instead, which is both the stable
+# measure and the one an artist actually uses: a one-handed sword is a fraction
+# of the person holding it, not a multiple of their forearm. 0.45 was chosen by
+# rendering six characters from 15px to 46px against 0.45, 0.55 and 0.65 and
+# looking; it is the only value that is proportionate on all six and never too
+# large, and it agrees with the figure-drawing proportion (a 90cm sword on a
+# 175cm person is about half its height, its blade rather less).
+#
+# The other three sockets keep the part-relative rule, because a head and a
+# torso are large, reliably found, and genuinely what a hat and a belt are sized
+# by. Only the arm was the problem.
+AGAINST_HEIGHT = ("hand", "off_hand")
+
 PROPORTIONS = {
-    "hand": 2.0,
-    "off_hand": 2.0,
+    "hand": 0.45,
+    "off_hand": 0.45,
     "head": 1.1,
     "waist": 1.0,
     "chest": 1.0,
@@ -103,16 +127,21 @@ def fit(item_pixels, host_rig, socket, scale=None):
         return 1.0, "no such socket"
     owner, _point = available[socket]
     part = host_rig.by_name(owner)
-    reach = _long_axis(part.box) * PROPORTIONS.get(socket, 1.0)
+    if socket in AGAINST_HEIGHT:
+        measured, against = host_rig.size[1], "%dpx character" % host_rig.size[1]
+    else:
+        measured, against = _long_axis(part.box), "%dpx %s" % (
+            _long_axis(part.box), owner)
+    reach = measured * PROPORTIONS.get(socket, 1.0)
     box = img.content_box(item_pixels)
     drawn = _long_axis(box) if box is not None else max(item_pixels.shape[:2])
     if not drawn or not reach:
         return 1.0, "nothing drawn to measure"
     snapped = snap_ratio(reach / float(drawn))
     if snapped == 1.0:
-        return 1.0, "already the right size for this %s" % owner
-    return snapped, ("%gx: %d px drawn against a %d px %s"
-                     % (snapped, drawn, _long_axis(part.box), owner))
+        return 1.0, "already the right size for this %s" % against
+    return snapped, ("%gx: %d px drawn against a %s"
+                     % (snapped, drawn, against))
 
 
 def _free_end(part):

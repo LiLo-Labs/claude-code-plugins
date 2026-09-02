@@ -414,3 +414,48 @@ def test_a_leg_attaches_near_its_torso_pivot_and_a_head_at_the_free_end(hero_cut
     assert legs and heads
     assert max(legs) < min(heads), (
         "a leg must ride less of its torso than the head does", found)
+
+
+def test_a_root_only_clip_is_drawn_in_one_piece(hero, hero_cutout):
+    """A clip that drives the root AND NOTHING ELSE is a statement about the
+    subject, not its parts: a coin spins, a crate tumbles.
+
+    Drawn part by part that is a lie the resampler exposes. `spin` narrows a
+    sprite to 14% of its width, so every part is reduced to under a pixel about
+    its OWN pivot and they land apart -- measured on a 23px corpus character,
+    45.45% of it came loose. Assembled first and moved once, 0.00% does.
+    """
+    narrow = skeleton.Pose({hero_cutout.rig.root.name: skeleton.PartPose(sx=0.14)},
+                           whole=True)
+    wide = skeleton.Pose({hero_cutout.rig.root.name: skeleton.PartPose(sx=0.14)})
+    one = render.render_pose(hero_cutout, narrow, margin=8)
+    apart = render.render_pose(hero_cutout, wide, margin=8)
+    assert not image.equal(one, apart), "the one-piece path did not engage"
+    base = quality.debris(hero.pixels)
+    assert quality.debris(one) - base <= quality.debris(apart) - base
+
+
+def test_one_piece_still_reproduces_the_rest_pose_exactly(hero, hero_cutout):
+    """The identity is the identity down either path, or REST means nothing for
+    every root-only clip in the library."""
+    rest = skeleton.Pose(whole=True)
+    assert image.equal(render.render_pose(hero_cutout, rest), hero.pixels)
+
+
+def test_a_grounded_shadow_does_not_spin_with_the_subject():
+    """A baked ground shadow is the FLOOR the subject stands on, drawn into the
+    same sprite -- `world_transforms` pins it to the identity for that reason,
+    and the one-piece path has to keep the same promise."""
+    art = image.blank(12, 10)
+    art[0:8, 3:7] = (200, 60, 60, 255)        # the subject
+    art[9:11, 1:9] = (40, 40, 60, 255)        # its baked shadow
+    built = R.Rig((10, 12), [
+        R.Part("body", "body", (3, 0, 7, 8), None, (5, 8), 1),
+        R.Part("shade", "shadow", (1, 9, 9, 11), None, (5, 10), 0),
+    ])
+    cut = cutout.cut(built, art)
+    turned = render.render_pose(
+        cut, skeleton.Pose({"body": skeleton.PartPose(sx=0.2)}, whole=True))
+    shadow_rows = turned[9:11]
+    assert (shadow_rows[..., 3] > 0).sum() == (art[9:11, ..., 3] > 0).sum(), \
+        "the floor moved with the subject"

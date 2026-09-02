@@ -534,7 +534,12 @@ class Animation:
         Specificity is name, then role, then trait, and ties break on the
         selector text so the result never depends on dictionary order.
         """
-        pose = Pose()
+        # A clip that drives the root AND NOTHING ELSE is a statement about the
+        # subject rather than about its parts: a coin spins, a pickup bobs, a
+        # crate tumbles. Saying so here is what lets the renderer draw it in one
+        # piece, which is the only way a narrowing wide enough to read survives
+        # at sprite scale.
+        pose = Pose(whole=not self.tracks and self.root is not None)
         if self.flip_from is not None:
             pose.flip = t >= float(self.flip_from)
 

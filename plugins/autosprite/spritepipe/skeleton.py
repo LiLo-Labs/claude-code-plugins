@@ -106,11 +106,18 @@ class PartPose:
 class Pose:
     """A whole character at one instant: per-part poses plus a global offset."""
 
-    def __init__(self, parts=None, dx=0.0, dy=0.0, flip=False):
+    def __init__(self, parts=None, dx=0.0, dy=0.0, flip=False, whole=False):
         self.parts = dict(parts or {})
         self.dx = float(dx)      # whole-character translation, in pixels
         self.dy = float(dy)
         self.flip = bool(flip)   # mirror horizontally (west from east)
+        # THIS SUBJECT MOVES AS ONE PIECE, which a clip says by driving the root
+        # and nothing else. It is not a hint: a `spin` narrows the sprite to 14%
+        # of its width, and drawn part by part every part is resampled to under
+        # a pixel about its OWN pivot and they land apart -- measured, 45% of a
+        # 23px character came loose. Assembled first and moved once, there are
+        # no seams to open. See `render.render_pose`.
+        self.whole = bool(whole)
 
     def get(self, name):
         return self.parts.get(name) or PartPose()
