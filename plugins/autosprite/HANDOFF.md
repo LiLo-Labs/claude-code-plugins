@@ -891,14 +891,39 @@ part it hangs on. Compositing at rest cannot record pixels hidden at rest, so a
 scabbard behind a body would lose whatever the body covers. A back-mounted item
 needs the item's art to stay separate, which is a different mechanism.
 
-### What the matrix still says is weak
+### The distinctness number, split into the two things it was conflating
 
-**Only 62% of driving pairs draw a distinct picture in every frame.** The bulk of
-that is a character clip offered to a subject that cannot perform it -- `attack`
-on a potion drives its root and nothing else, so 2 of 6 frames differ -- which is
-an argument for the build refusing more clips, not for changing the clips. But
-`gust` on the 15px brawler draws 1 distinct frame of 10, and that is a real
-failure of a clip on a subject that genuinely has the trait.
+62% of driving pairs draw a distinct picture in every frame, and that figure is
+not worth quoting because it answers two questions at once. Splitting it by
+whether the clip found any REAL ANATOMY on the subject -- any part other than the
+root -- says what is actually happening:
+
+| | fully distinct |
+|---|---|
+| the clip moves real parts of the subject | **284 / 363 = 78%** |
+| the clip can only move it as one piece | 140 / 321 = 44% |
+
+The second row is `attack` offered to a potion: there are no arms to swing, so
+the clip drives the potion's root and draws two pictures out of six. That is not
+a clip failing, it is a clip nobody should be offered for a potion.
+
+**And the 79 that do fail with real anatomy have one cause, not seventy-nine.**
+They are almost all `gust` and `sway`, and almost all of them drive exactly ONE
+part. Both clips are travelling waves written for a FIELD of stalks; given a
+single cape or a single tail there is nothing for the wave to travel across, and
+what remains is a sway small enough that the legibility guard correctly refuses
+to draw it -- so ten frames come out identical.
+
+**Nothing ships silently wrong, and that was checked rather than assumed.** Run
+as a real build, `gust` on the 15px brawler emits both warnings the pipeline has
+for this -- "holds the same frame for 10 frames running" and "is 10 frames but
+only 1 different pictures; either the motion is too small for a character this
+size, or the cycle retraces itself" -- and the boar's `sway` adds a third about
+15% of its pixels falling outside every part box. A `walk` on `mv-male` emits
+none. The gate works; the honest gap is that a travelling-wave clip should
+probably decline a single-part subject outright rather than warning after the
+fact, which is one line of `drives()` and is left as a lead rather than shipped
+untested.
 
 ## The ground truth doubled, and the first thing it did was refute this file
 
