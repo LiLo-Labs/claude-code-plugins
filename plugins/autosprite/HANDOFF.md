@@ -1680,6 +1680,44 @@ Two smaller findings from the same run:
   frames answer this question.** The facing field is the one thing a vision rig
   is measurably WORSE at than a default.
 
+### A knee, added by default — refuted, and the split is by CHARACTER SIZE
+
+**The most compelling win on this branch, and it is a regression in the actual
+product.** Worth reading before anyone adds a joint again.
+
+Fitting an exaggerated generated walk on the corpus knight, giving the legs a
+second segment raises mean silhouette agreement over eight frames from **0.721 to
+0.754**, and EVERY frame improves. The cut point barely matters (0.744 to 0.754
+across 0.4 to 0.6), which is exactly what a real effect looks like -- the gain is
+the joint, not its placement.
+
+Then measured against the artists' own frames, at matched coverage, on all twelve
+ground-truth clips:
+
+    mean, matched coverage     6-part 30.46%     with knees 32.36%   (+1.90)
+    3 clips better, 8 worse, 1 unchanged
+
+The reason is simple once seen and was predictable: **the hand-authored clips
+never author a knee bend.** Nothing in the library drives a lower leg segment, so
+splitting the leg adds a seam that can tear and buys no motion at all. The
+generated fit improves because generated motion HAS knee bend to capture; the
+shipped clips do not.
+
+**But the three that improve are all one character**, and it is the largest:
+
+    mv-male, 46px   walk 27.9 -> 25.6    crouch 15.3 -> 14.1    attack 21.4 -> 20.4
+    everything else, 15-33px             worse, up to 27.1 -> 36.8 on the horse
+
+Same size floor this project keeps rediscovering. A 46px character has room for a
+knee; a 15px brawler does not, and a joint there is a seam with nothing to gain
+by it.
+
+**So a knee is not a rig improvement, it is a motion requirement.** Add one only
+where there is motion that needs it -- the fitted path, where `better_split`
+already asks exactly that question -- or on a character big enough to draw it.
+Never by default. `fit.split_part` and `fit.better_split` stay; nothing calls
+them from `build`, and that is deliberate.
+
 ## Dead ends — measured, not guessed
 
 ### Segmenting a limb by the shading crease the artist drew — the third rig fix, refuted
