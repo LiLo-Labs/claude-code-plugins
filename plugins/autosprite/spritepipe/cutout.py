@@ -54,6 +54,7 @@ class Cutout:
         self.strays = strays
         self._ramps = None
         self._weights = {}
+        self._attachments = None
 
     def ramp_table(self):
         """The shading ramps of the source art, for the `cycle` channel.
@@ -84,6 +85,45 @@ class Cutout:
                     sprite.pixels, sprite.origin, part.pivot,
                     self.parent_mask(name))
         return self._weights[name]
+
+    def attachment_weights(self):
+        """{part name: how much of its PARENT's own transform it rides}.
+
+        A child composes onto its parent's world transform, and for a rigid
+        parent that is the whole story. A SKINNED parent does not move as one
+        thing: its pixels at the joint hardly move at all and its free end moves
+        fully, so "the parent's transform" is a different matrix depending on
+        WHERE you attach to it. A leg meets a torso at the torso's own pivot,
+        where the weight is nearly zero -- so a torso that leans should carry
+        its legs almost not at all, and a head sitting at the free end should
+        ride all of it.
+
+        The weight is the parent's own field sampled at the child's pivot, which
+        is by construction the point where the two meet. Falls back to 1.0 --
+        today's behaviour, the child riding all of its parent -- for a child
+        with no pivot, a parent with no weight field, or a pivot that lands
+        outside the parent's own pixels, because a joint we cannot locate is not
+        a joint we should be damping about.
+        """
+        if self._attachments is not None:
+            return self._attachments
+        out = {}
+        for part in self.rig.parts:
+            if part.parent is None or part.pivot is None:
+                continue
+            weight = self.weights(part.parent)
+            sprite = self.by_name(part.parent)
+            if weight is None or sprite is None:
+                continue
+            column = int(round(part.pivot[0])) - sprite.origin[0]
+            row = int(round(part.pivot[1])) - sprite.origin[1]
+            if not (0 <= row < weight.shape[0] and 0 <= column < weight.shape[1]):
+                continue
+            if not img.alpha_mask(sprite.pixels)[row, column]:
+                continue
+            out[part.name] = float(weight[row, column])
+        self._attachments = out
+        return out
 
     def parent_mask(self, name):
         """The reference pixels owned by this part's PARENT, or None.

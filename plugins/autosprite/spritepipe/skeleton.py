@@ -180,49 +180,77 @@ def local(part_pose, pivot):
 GROUNDED = ("shadow",)
 
 
-def world_transforms(rig, pose):
+def _anchors(rig, pose, anchors, root_shift):
+    """{part name: the matrix its own `local` composes onto}, and the worlds.
+
+    A child rides its parent, and for a RIGID parent the parent's world
+    transform is the whole of what it rides. A skinned parent does not move as
+    one thing: the pixels at its joint hardly move and its free end moves fully,
+    so which matrix a child rides depends on WHERE on the parent it attaches.
+    `anchors` says that, as the parent's own weight at the child's pivot.
+
+    A leg meets a torso at the torso's pivot, where the weight is nearly zero,
+    so a torso that leans carries its legs almost not at all -- which is what a
+    lean over planted feet looks like. Without this the legs swing with the
+    chest and `plant` has to undo it afterwards.
+
+    With no `anchors`, or a weight of 1, this is exactly `transforms[parent]`
+    and every clip renders byte for byte as it always did.
+    """
+    anchor, world = {}, {}
+    for part in rig.descend():
+        if part.role in GROUNDED:
+            anchor[part.name] = np.eye(3)
+            world[part.name] = np.eye(3)
+            continue
+        parent = rig.by_name(part.parent) if part.parent else None
+        share = 1.0 if not anchors else float(anchors.get(part.name, 1.0))
+        if (parent is None or parent.role in GROUNDED or share >= 1.0
+                or parent.name not in anchor):
+            anchor[part.name] = world.get(part.parent, root_shift)
+        else:
+            anchor[part.name] = anchor[parent.name] @ local(
+                damped(pose.get(parent.name), share), parent.pivot)
+        world[part.name] = anchor[part.name] @ local(pose.get(part.name),
+                                                     part.pivot)
+    return anchor, world
+
+
+def world_transforms(rig, pose, anchors=None):
     """{part name: 3x3 matrix} in reference-image coordinates.
 
     Parents are visited before children, so a child simply multiplies onto a
     transform that is already final. `rig.descend()` guarantees that order and
     `rig.validate` guarantees the tree it walks has no cycle to fall into.
+
+    A `shadow` gets the identity and stays exactly where the artist drew it. A
+    baked ground shadow is not part of the character; it is the floor the
+    character stands on, drawn into the same sprite. Riding the root would lift
+    it fifteen rows at the apex of a jump and bob it two pixels per walk step --
+    the ground line pumping with the animation.
+
+    `anchors` is where each part attaches to its parent, as the parent's own
+    skinning weight there. See `_anchors`; without it nothing changes.
     """
-    root_shift = translate(pose.dx, pose.dy)
-    transforms = {}
-    for part in rig.descend():
-        if part.role in GROUNDED:
-            # A baked ground shadow is not part of the character; it is the
-            # floor the character stands on, drawn into the same sprite. Riding
-            # the root would lift it fifteen rows at the apex of a jump and bob
-            # it two pixels per walk step -- the ground line pumping with the
-            # animation. It gets the identity, and stays exactly where the
-            # artist drew it.
-            transforms[part.name] = np.eye(3)
-            continue
-        parent = transforms.get(part.parent, root_shift)
-        transforms[part.name] = parent @ local(pose.get(part.name), part.pivot)
-    return transforms
+    return _anchors(rig, pose, anchors, translate(pose.dx, pose.dy))[1]
 
 
-def world_and_local(rig, pose):
-    """{part name: (parent's world matrix, the part's own pose)}.
+def world_and_local(rig, pose, anchors=None):
+    """{part name: (the matrix it rides, the part's own pose)}.
 
     `world_transforms` multiplies these together, which is right for a part that
     moves rigidly. A SKINNED part needs them apart: its own transform is what
-    gets weighted down to nothing at the joint, and its parent's is what applies
-    to every one of its pixels regardless. See `skin.py`.
+    gets weighted down to nothing at the joint, and what it rides is what
+    applies to every one of its pixels regardless. See `skin.py`.
     """
     root_shift = translate(pose.dx, pose.dy)
-    worlds, out = {}, {}
+    anchor, _world = _anchors(rig, pose, anchors, root_shift)
+    out = {}
     for part in rig.descend():
         if part.role in GROUNDED:
-            worlds[part.name] = np.eye(3)
             out[part.name] = (np.eye(3), None)
             continue
-        parent = worlds.get(part.parent, root_shift)
-        own = pose.get(part.name)
-        worlds[part.name] = parent @ local(own, part.pivot)
-        out[part.name] = (parent, own)
+        out[part.name] = (anchor[part.name], pose.get(part.name))
     return out
 
 

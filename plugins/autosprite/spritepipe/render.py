@@ -362,6 +362,10 @@ def _transform_layer(layer, matrix, size, supersample=SUPERSAMPLE):
 # refutations in HANDOFF that led to it.
 SKIN = True
 
+# Whether a child rides its parent's transform AT THE POINT IT ATTACHES rather
+# than all of it. See `skeleton._anchors` and `cutout.attachment_weights`.
+ANCHORED = False
+
 
 def _skinned(rig, cut, sprite, pixels, parts_local):
     """(parent world, part, bands) for a part that should be skinned, else None."""
@@ -386,8 +390,13 @@ def render_pose(cutout, pose, margin=0):
     """One frame: every part transformed by its world matrix and composited."""
     rig = cutout.rig
     width, height = canvas_size(rig, margin)
-    transforms = skeleton.world_transforms(rig, pose)
-    parts_local = skeleton.world_and_local(rig, pose) if SKIN else {}
+    # WHERE a child attaches to its parent, when the parent is skinned and so
+    # does not move as one thing. Off by default until it is measured across the
+    # corpus; with it off, `anchors` is None and every transform is what it has
+    # always been.
+    anchors = cutout.attachment_weights() if (SKIN and ANCHORED) else None
+    transforms = skeleton.world_transforms(rig, pose, anchors)
+    parts_local = (skeleton.world_and_local(rig, pose, anchors) if SKIN else {})
     shift = skeleton.translate(margin, margin)
 
     frame = img.blank(height, width)

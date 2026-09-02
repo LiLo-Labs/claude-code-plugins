@@ -898,8 +898,64 @@ almost nothing and the feet would stay planted with no counter-track authored at
 all. Every other clip keeps working because at rest, and for any part whose
 attachment sits at weight 0 today, the composition is unchanged. It touches
 `skeleton.world_transforms`, so it is a change to measure across the whole
-corpus rather than to bolt on -- but it is the single named thing standing
-between the library's worst clip and twenty points.
+corpus rather than to bolt on -- and it looked, at the moment it was written
+down, like the single thing standing between the library's worst clip and twenty
+points. It was then built and measured, which is the next section.
+
+### The generalisation that was supposed to fix it, measured and refused
+
+The previous section named one change as "the single named thing standing
+between the library's worst clip and twenty points": **a child should attach at
+its parent's transform evaluated at the child's own attachment weight.** It is
+built -- `cutout.attachment_weights` reads the parent's own weight field at the
+child's pivot, and `skeleton._anchors` composes each part onto that -- and the
+weights it reads are exactly what the argument predicted:
+
+| | head | arms | legs |
+|---|---|---|---|
+| `mv-male` | 1.00 | 0.84, 0.87 | 0.13, 0.32 |
+| `eldiran` | 1.00 | 0.98, 1.00 | 0.26, 0.44 |
+| `sumohulk` | 0.93 | 1.00 | 0.37, 0.73 |
+
+A head sits at the torso's free end and rides all of it; legs meet the torso at
+its own pivot and ride almost none. That is the anatomy the argument claimed,
+read off the art rather than asserted.
+
+**It measures worse, on eleven of twelve clips or unchanged, and the mean goes
+30.22% -> 31.05% at matched coverage.**
+
+| clip | as it ships | anchored |
+|---|---|---|
+| `mv-male` walk | 27.9% | **27.2%** |
+| `horse` walk / run, `sumohulk` jump / attack | unchanged | unchanged |
+| `horse` idle | 46.1% | 46.4% |
+| `forest` run | 12.4% | 12.7% |
+| `sumohulk` walk | 25.8% | 26.5% |
+| `eldiran` walk | 26.0% | 26.9% |
+| `mv-male` crouch | 15.3% | 17.0% |
+| `mv-male` attack | 19.9% | 22.2% |
+| `sumohulk` idle | 61.1% | **65.6%** |
+
+One clip better by 0.7 and the worst clip in the library worse by 4.5.
+
+**Why the argument is wrong, and it is a distinction worth writing down.**
+Skinning weight answers "how much of its OWN transform does this pixel take",
+and it was used here to answer "how much of its PARENT does this child ride".
+Those are different questions. A leg attached at the hip does travel with the
+hips when a character walks -- rigidly, fully, all of it -- and damping that
+removes motion the artist genuinely draws, which is why every locomotion clip
+got worse. The case the damping is right for is narrow: a body leaning over feet
+that stay planted, which is one clip, and `plant` already exists to handle it
+from the other end.
+
+Kept behind `render.ANCHORED = False`, with `world_transforms` and
+`world_and_local` now sharing one implementation rather than two copies of the
+same descend loop, and tested to render byte for byte what it always did when
+off. **So the idle's weight shift has no route left that this branch has found.**
+Both constructions of the clip are refused, the guard bug behind one of them is
+fixed and bought nothing, and the generalisation that was supposed to unlock it
+is refuted with numbers. The clip stays the worst in the library at 59.4% and
+0.63 coverage, and the next person to look at it should start somewhere else.
 
 ## The attack's torso lean, halved, with the third reading it was waiting for
 

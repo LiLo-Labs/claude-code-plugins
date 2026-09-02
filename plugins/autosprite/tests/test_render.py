@@ -386,3 +386,31 @@ def test_the_rest_pose_survives_the_pinned_reading(hero, hero_cutout):
     zero from both readings and REST stays byte-exact -- which is the guarantee
     every other one on this branch is built on."""
     assert image.equal(render.render_pose(hero_cutout, skeleton.Pose()), hero.pixels)
+
+
+def test_anchoring_off_renders_exactly_what_it_always_did(hero_cutout):
+    """`ANCHORED` is a refuted idea kept behind a flag, so its cost when off has
+    to be zero -- not close, byte for byte."""
+    pose = skeleton.Pose({"arm_near": skeleton.PartPose(angle=24.0),
+                          "torso": skeleton.PartPose(dx=3.0, angle=6.0),
+                          "leg_far": skeleton.PartPose(angle=-11.0)}, dy=2.0)
+    was = render.ANCHORED
+    try:
+        render.ANCHORED = False
+        plain = render.render_pose(hero_cutout, pose, margin=8)
+    finally:
+        render.ANCHORED = was
+    assert image.equal(plain, render.render_pose(hero_cutout, pose, margin=8))
+
+
+def test_a_leg_attaches_near_its_torso_pivot_and_a_head_at_the_free_end(hero_cutout):
+    """What `attachment_weights` reads: a leg meets a torso AT the hip, which is
+    the torso's own pivot and so nearly zero weight, while a head sits at the
+    torso's free end and rides all of it."""
+    found = hero_cutout.attachment_weights()
+    assert found, "a humanoid cut should place at least one joint"
+    legs = [w for name, w in found.items() if name.startswith("leg_")]
+    heads = [w for name, w in found.items() if name.startswith("head")]
+    assert legs and heads
+    assert max(legs) < min(heads), (
+        "a leg must ride less of its torso than the head does", found)
