@@ -6,13 +6,28 @@ again.
 
 ## Where it stands
 
-The pipeline is sound and proven on real art. **20 CC0 sprites** (16×16 to
-76×81; humanoids, creatures, props, and four cases chosen to break a silhouette
-rigger) all build, with all eight verification checks passing on both backends.
-470 tests, no network or model in any of them.
+**28 CC0 sprites** -- 16x16 to 190x134, humanoids, creatures, props, buildings,
+plants, cloth and weather -- all build with all eight verification checks
+passing. **700 tests**, no network and no model in any of them.
 
-Quality, measured as **debris** — the share of a frame's pixels not connected to
+Quality, measured as **debris** -- the share of a frame's pixels not connected to
 its main blob, against the source's own figure:
+
+| worst shed across the corpus | |
+|---|---|
+| at the start | 89.4% |
+| after the rig fixes, `_reconnect`, `plant` and automatic repair | 15.4% |
+| **after parts stopped tiling and overlapped at their joints** | **4.32%** |
+
+**Twenty-seven of the twenty-eight assets now shed exactly 0.00% on every clip**,
+and the twenty-eighth is `grafxkid-oldhero` at 4.32%, under the 5% the build
+warns at. Nothing in the corpus is reported as a problem any more. The section
+below on what is broken has been emptied by that change and says what replaced
+it.
+
+The rest of this file is the record of how, including the parts that were wrong.
+
+### The historical figures, kept because the reasoning is in them
 
 | worst-frame shed, all 7 clips | silhouette backend |
 |---|---|
@@ -1157,20 +1172,27 @@ Honest and short. The easy things are gone.
    already said out loud; this is on the list only so nobody mistakes it for an
    oversight.
 
-## What is broken, and needs a better rig rather than a better renderer
+## What was broken, and what a joint collar did to it
 
-Both are the same shape of problem: a character too small for a rigid-limb rig
-at the amplitudes the library uses.
+Both of these were the same shape of problem -- a character too small for a
+rigid-limb rig at the amplitudes the library uses -- and **both are now at
+0.00%**. Kept here because the diagnosis was right and the conclusion drawn from
+it was wrong, which is worth remembering.
 
-- **`platformer-grass-prowne`'s jump on the silhouette backend, 15.4%.** An
-  8-pixel-wide character whose limbs are 2 pixels across. Its VISION rig holds
-  together completely, which is the honest answer for a sprite this small.
-  Measured, the pieces separate by 2.0 to 3.6 pixels -- a quarter to a half of
-  the character's whole width -- so the composite-level version of `_reconnect`
-  would draw a visible thread across it rather than closing a seam. That was
-  checked and not built.
-- **`grafxkid-oldhero`, 3 to 4% on the faster clips.** The corpus's smallest
-  character at 10x17, and what comes away is a boot, next to the baked shadow.
+- **`platformer-grass-prowne`'s jump, 15.4% -> 0.00%.** An 8-pixel-wide
+  character whose limbs are 2 pixels across, and for most of this project's life
+  the corpus's worst asset. `repair` reported, correctly, that damping could not
+  fix it and that *the rig is likely wrong for this character*. It was right
+  that the motion was innocent and wrong about the remedy: the parts were
+  TILING, so a two-pixel limb rotating away from a hard edge had nothing either
+  side of the seam. One pixel of overlap fixed it outright. Everything measured
+  about it below still holds -- the pieces really did separate by 2.0 to 3.6
+  pixels -- it just stopped happening.
+- **`grafxkid-oldhero`, now 4.32% and the only asset above zero.** The corpus's
+  smallest character at 10x17, and what comes away is a boot, next to the baked
+  shadow. It went 3.88% -> 10.10% when the ingest stopped deleting the soles of
+  its boots, then to 4.32% with the collar: more boot to hold on, and something
+  to hold it with.
   Worth knowing before chasing it: the shadow's colour is the character's
   OUTLINE colour too, so measuring "the shadow" by colour finds 57 pixels
   spread over the whole figure. That mistake has now been made twice in this
