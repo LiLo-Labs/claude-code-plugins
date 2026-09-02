@@ -12,3 +12,8 @@ __pycache__/
 
 # pytest
 .pytest_cache/
+
+# never commit credentials
+*.env
+keys.env
+.secrets/
