@@ -19,6 +19,7 @@ from PIL import Image as PILImage
 
 from . import image as img
 from . import skeleton
+from . import skin
 
 
 def canvas_size(rig, margin):
@@ -245,6 +246,9 @@ def _legible(layer, matrix, floor=None):
     floor = LEGIBLE if floor is None else float(floor)
     if floor <= 0.0:
         return matrix
+    # Returning `matrix` ITSELF, not a copy, on every path that decides not to
+    # quantise: `render_pose` tests identity against it to learn whether the
+    # part's transform was legible, and a copy would read as "quantised".
     mask = img.alpha_mask(layer)
     if not mask.any():
         return matrix
@@ -333,11 +337,38 @@ def _transform_layer(layer, matrix, size, supersample=SUPERSAMPLE):
     return np.array(moved, dtype=np.uint8)
 
 
+# Whether a limb's pixels near its joint move less than its pixels at the free
+# end. Off, every pixel of a part gets the same matrix and a limb given the part
+# of the body it attaches to will tear that body -- see `skin.py`, and the three
+# refutations in HANDOFF that led to it.
+SKIN = True
+
+
+def _skinned(rig, cut, sprite, pixels, parts_local):
+    """(parent world, part, bands) for a part that should be skinned, else None."""
+    if not SKIN or sprite.name not in parts_local:
+        return None
+    part = rig.by_name(sprite.name)
+    if part is None:
+        return None
+    parent, part_pose = parts_local[sprite.name]
+    if part_pose is None:
+        return None
+    weight = cut.weights(sprite.name)
+    if weight is None:
+        return None
+    found = skin.bands(part, part_pose, pixels, sprite.origin, weight)
+    if not found:
+        return None
+    return parent, part, found
+
+
 def render_pose(cutout, pose, margin=0):
     """One frame: every part transformed by its world matrix and composited."""
     rig = cutout.rig
     width, height = canvas_size(rig, margin)
     transforms = skeleton.world_transforms(rig, pose)
+    parts_local = skeleton.world_and_local(rig, pose) if SKIN else {}
     shift = skeleton.translate(margin, margin)
 
     frame = img.blank(height, width)
@@ -374,10 +405,35 @@ def render_pose(cutout, pose, margin=0):
         layer = img.blank(height, width)
         img.paste(layer, pixels,
                   sprite.origin[0] + margin, sprite.origin[1] + margin)
-        matrix = _legible(layer,
-                          shift @ transforms[sprite.name] @ np.linalg.inv(shift))
-        moved = _transform_layer(layer, matrix, (width, height))
-        img.paste(frame, moved, 0, 0)
+
+        rigid = shift @ transforms[sprite.name] @ np.linalg.inv(shift)
+        # The legibility guard judges the WHOLE PART, once, before it is cut
+        # into bands. A band is a fraction of a limb and so has a fraction of
+        # its spread; asking the guard about each one separately quantises them
+        # all to whole pixels independently, which both defeats the guard's own
+        # size argument and lets neighbouring bands round apart -- a limb with a
+        # step in it. If the part's own transform is too small to draw, there is
+        # nothing for skinning to protect either, so it takes the rigid path.
+        legible = _legible(layer, rigid)
+        pieces = (None if legible is not rigid
+                  else _skinned(rig, cutout, sprite, pixels, parts_local))
+        if pieces is None:
+            moved = _transform_layer(layer, legible, (width, height))
+            img.paste(frame, moved, 0, 0)
+            continue
+
+        # From the joint outwards, so where two bands disagree by their
+        # sub-pixel step the freer one is on top -- a limb reads by its far end.
+        parent, part = pieces[0], pieces[1]
+        for band, damped in pieces[2]:
+            piece = img.blank(height, width)
+            window = np.zeros(layer.shape[:2], dtype=bool)
+            window[sprite.origin[1] + margin:sprite.origin[1] + margin + band.shape[0],
+                   sprite.origin[0] + margin:sprite.origin[0] + margin + band.shape[1]] = band
+            piece[window] = layer[window]
+            world = parent @ skeleton.local(damped, part.pivot)
+            matrix = shift @ world @ np.linalg.inv(shift)
+            img.paste(frame, _transform_layer(piece, matrix, (width, height)), 0, 0)
 
     if pose.flip:
         frame = frame[:, ::-1].copy()

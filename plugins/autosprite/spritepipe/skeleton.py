@@ -204,6 +204,50 @@ def world_transforms(rig, pose):
     return transforms
 
 
+def world_and_local(rig, pose):
+    """{part name: (parent's world matrix, the part's own pose)}.
+
+    `world_transforms` multiplies these together, which is right for a part that
+    moves rigidly. A SKINNED part needs them apart: its own transform is what
+    gets weighted down to nothing at the joint, and its parent's is what applies
+    to every one of its pixels regardless. See `skin.py`.
+    """
+    root_shift = translate(pose.dx, pose.dy)
+    worlds, out = {}, {}
+    for part in rig.descend():
+        if part.role in GROUNDED:
+            worlds[part.name] = np.eye(3)
+            out[part.name] = (np.eye(3), None)
+            continue
+        parent = worlds.get(part.parent, root_shift)
+        own = pose.get(part.name)
+        worlds[part.name] = parent @ local(own, part.pivot)
+        out[part.name] = (parent, own)
+    return out
+
+
+def damped(part_pose, weight):
+    """`part_pose` with every channel pulled `weight` of the way from rest.
+
+    At 0 it is the rest pose exactly, so `local` returns the identity; at 1 it
+    is the pose unchanged. Interpolating the CHANNELS rather than the matrix is
+    what keeps a half-weighted rotation a rotation -- averaging two matrices
+    gives something that is not a rigid transform at all and collapses a limb
+    towards a line as the angle grows.
+    """
+    import copy as _copy
+    if weight >= 1.0:
+        return part_pose
+    out = _copy.copy(part_pose)
+    for channel in ("angle", "dx", "dy", "shear", "wave", "scroll_x", "scroll_y"):
+        if hasattr(out, channel):
+            setattr(out, channel, getattr(part_pose, channel) * weight)
+    for channel in ("sx", "sy"):
+        if hasattr(out, channel):
+            setattr(out, channel, 1.0 + (getattr(part_pose, channel) - 1.0) * weight)
+    return out
+
+
 def apply_point(matrix, point):
     x, y, w = matrix @ np.array([float(point[0]), float(point[1]), 1.0])
     return (x / w, y / w)

@@ -1437,6 +1437,95 @@ probably wrong:
    `REST` survives (it is about the cut) but frame 0 of every clip stops looking
    like the source art: the character visibly straightens before it walks.
 
+## Skinning: the joint does not move, and that was the ceiling
+
+**The answer to the three refutations below.** A stretched arm box, a luminance
+seam carve and an Opus vision rig all produce anatomically better parts and all
+animate worse, and all three fail identically: give a limb the part of the body
+it genuinely attaches to, transform it rigidly, and the shoulder swings as far as
+the hand. The fault was never the boxes. It is that every pixel of a part gets
+the same matrix.
+
+    world(pixel) = parent's world transform @ local(pose * w(pixel), pivot)
+
+`w` runs 0 at the joint to 1 at the free end. `skeleton.damped` weights the pose's
+CHANNELS, not the matrix -- averaging two matrices is not a rigid transform, and
+a half-weighted 40-degree rotation would collapse the limb towards a line.
+
+**Bands, not per-pixel.** A per-pixel transform needs a forward scatter and a
+forward scatter leaves holes. Each part is cut into bands of equal weight, each
+transformed rigidly through the existing supersampled nearest-neighbour path, and
+composited from the joint outwards. Bands OVERLAP by half a step, so a seam
+between two of them is drawn twice rather than not at all. The band count is
+chosen from the part's own differential travel, so a still limb costs nothing.
+
+Three properties survive and they are the ones that matter. REST stays byte-exact
+(at rest every channel is already at rest, so any weight leaves the identity).
+The palette stays a subset (every band is nearest-neighbour). And skinning can
+only ever move a pixel LESS than the rigid path, so it cannot invent anything.
+
+### Three details that were each wrong once
+
+* **The band's weight is the MAXIMUM in it**, not its midpoint and not its mean.
+  A thin leg's outermost band holds weights 0.8 to 1.0, so its mean is 0.95 and
+  the foot gets 95% of its swing -- a silent global damping of every clip, and on
+  a 14px leg the difference between a foot that clears the floor by a pixel and
+  one that does not. It broke `test_levelling_puts_the_drawn_feet_on_one_row`,
+  which is exactly what that test is for.
+* **The legibility guard judges the PART, once, before banding.** A band is a
+  fraction of a limb and so has a fraction of its spread; asking the guard about
+  each band separately quantises them all independently and puts a step in the
+  middle of the limb. And if a part's own transform is too small to draw, there
+  is nothing for skinning to protect either.
+* **`_legible` returns its argument by identity** on every path that declines to
+  quantise, because `render_pose` tests `is` against it to learn whether the
+  transform was legible.
+
+### The weight field: two goes, and the failure is the interesting half
+
+The first version measured straight-line distance FROM THE PIVOT, and on the
+knight's vision rig the chest strip its arm box wrongly caught scored **0.8 and
+0.9 out of 1** -- because that strip is not near the pivot, it runs down the
+inner edge five or six pixels below it. It took nearly the whole swing and went
+on snapping the belt exactly as it had before skinning existed.
+
+What actually distinguishes those pixels is that they are pressed against the
+torso, which the cut already knows: `cutout.parent_mask` reads it straight off
+the ownership map. Seeding a GEODESIC wavefront from where a part touches its
+parent gives the field the argument asks for -- 0 down the chest strip, 9 at the
+mitten -- and it is `WEIGHT_FIELD = "attachment"` in `skin.py`.
+
+**It is not what ships**, and that is worth stating plainly:
+
+| field | mean, matched coverage | |
+|---|---|---|
+| rigid, no skinning | 30.85% | |
+| **pivot, straight-line** | **30.46%** | **shipped** -- 6 better, 2 worse |
+| pivot, geodesic | 30.91% | |
+| attachment, geodesic | 30.91-31.36% | 2 much better, 7 worse |
+
+The attachment column is not uniformly worse. It splits, cleanly:
+
+| clip | drawn | rigid | attachment |
+|---|---|---|---|
+| sumohulk walk | face-on | 27.7% | **19.8%** |
+| eldiran walk | face-on | 29.1% | **21.3%** |
+| horse walk | profile | 27.2% | 36.5% |
+| horse run | profile | 32.1% | 37.3% |
+| forest run | profile | 12.5% | 16.9% |
+
+Both big wins are FACE-ON characters and all three big losses are PROFILE ones.
+That is not noise. `fronted` rewrites a face-on clip's swings as TRANSLATIONS,
+and a translated limb slides off its socket, so pinning the socket is the whole
+fix; a profile limb already rotates about a pivot AT its joint, so the joint is
+pinned for free and attachment weighting only removes motion that was right.
+
+**So the next thing to try is not a better field. It is choosing between these
+two by whether the part's pose translates it or turns it.** A `JOINT_SHARE`
+threshold -- "a joint is small, a tail lying along a rump is not" -- was built
+and swept (0.0, 0.2, 0.35) and moves the mean by nothing at all: 30.91% at every
+value. Recorded so it is not built twice.
+
 ## The vision rigger was the great hope, and it loses
 
 **Backlog item zero, run, and the answer is no.** Every number in this file was

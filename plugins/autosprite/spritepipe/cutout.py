@@ -40,8 +40,12 @@ class PartSprite:
 
 
 class Cutout:
-    def __init__(self, rig, sprites, reference, strays=0):
+    def __init__(self, rig, sprites, reference, strays=0, owner=None):
         self.rig = rig
+        # Which part owns each reference pixel. Kept because skinning needs to
+        # know where a part TOUCHES ITS PARENT, which is the one thing the part
+        # sprites cannot say once they have been cut apart.
+        self.owner = owner
         self.sprites = sprites      # list, already in draw order
         self.reference = reference
         # How many opaque pixels fell outside every declared box and were
@@ -49,6 +53,7 @@ class Cutout:
         # large number means the rig missed something the user can see.
         self.strays = strays
         self._ramps = None
+        self._weights = {}
 
     def ramp_table(self):
         """The shading ramps of the source art, for the `cycle` channel.
@@ -63,6 +68,38 @@ class Cutout:
             self._ramps = palette_module.ramp_steps(
                 palette_module.lock(self.reference), self.reference)
         return self._ramps
+
+    def weights(self, name):
+        """The skinning weight map for one part: 0 at its joint, 1 at its free
+        end. Cached, because it depends only on the cut and a clip asks for it
+        on every frame. See `skin.weights`."""
+        if name not in self._weights:
+            from . import skin
+            sprite = self.by_name(name)
+            part = self.rig.by_name(name)
+            if sprite is None or part is None or part.pivot is None:
+                self._weights[name] = None
+            else:
+                self._weights[name] = skin.weights(
+                    sprite.pixels, sprite.origin, part.pivot,
+                    self.parent_mask(name))
+        return self._weights[name]
+
+    def parent_mask(self, name):
+        """The reference pixels owned by this part's PARENT, or None.
+
+        Where a part's own pixels sit against these is where it is attached, and
+        an attachment is the one place a limb may not move. See `skin.weights`.
+        """
+        if self.owner is None:
+            return None
+        part = self.rig.by_name(name)
+        if part is None or part.parent is None:
+            return None
+        names = [p.name for p in self.rig.parts]
+        if part.parent not in names:
+            return None
+        return self.owner == names.index(part.parent)
 
     def by_name(self, name):
         for sprite in self.sprites:
@@ -333,7 +370,7 @@ def cut(rig, reference_pixels, backfill=True, collar=COLLAR):
 
     strays = int((mask & _uncovered(rig, mask.shape)).sum())
     sprites.sort(key=lambda sprite: (sprite.z, sprite.name))
-    return Cutout(rig, sprites, reference_pixels, strays)
+    return Cutout(rig, sprites, reference_pixels, strays, owner)
 
 
 def _with_collar(own, solid, radius):
