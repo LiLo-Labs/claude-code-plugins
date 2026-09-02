@@ -183,6 +183,25 @@ def _aligned(frames, offset):
     return [frame[y:, x:] for frame in frames]
 
 
+def coverage(frames, rest, reference_frames, offset=(0, 0)):
+    """How much we move as a share of how much the artist moves.
+
+    The other half of `footprint`, which is one-sided on purpose and therefore
+    gameable by doing less. 1.0 is the same amount of the picture disturbed;
+    below 1.0 is under-moving, which `footprint` does not punish and a viewer
+    reads as a stiffer animation.
+    """
+    if not frames or len(reference_frames) < 2:
+        return 0.0
+    frames = _aligned(frames, offset)
+    reference_rest = reference_frames[0]
+    shape = (max(rest.shape[0], reference_rest.shape[0]),
+             max(rest.shape[1], reference_rest.shape[1]))
+    theirs = int(disturbed(reference_frames[1:], reference_rest, shape).sum())
+    ours = int(disturbed(frames, rest, shape).sum())
+    return (ours / float(theirs)) if theirs else 0.0
+
+
 def footprint(frames, rest, reference_frames, offset=(0, 0)):
     """(share, wrong, total): how much of what we move, the artist never moves.
 
@@ -201,6 +220,24 @@ def footprint(frames, rest, reference_frames, offset=(0, 0)):
     `reference_frames` are the artist's, the first being their rest pose. It is
     deliberately one-sided: under-moving is a quieter failure than moving the
     wrong thing, and is measured by comparing the totals, which are returned.
+
+    **So this number means nothing on its own.** A clip that moves ten pixels,
+    all of them right, scores 0% and is not an animation. Read it with
+    `coverage` below and compare at MATCHED coverage, or the metric rewards
+    doing less: on a flag, damping the wave took the error from 21.4% to 19.7%
+    by moving a third fewer pixels than the artist does, and on a 15px character
+    it reached 0.0% while moving 22 pixels against the artist's 102.
+
+    Two rests, not one, is the other way to get a meaningless answer. Both
+    footprints have to be measured from the SAME pose. Every clip here starts
+    from the source image, and an artist's strips usually do not -- on a CC0
+    16x16 brawler, only the idle strip opens on the standing pose, while the
+    walk, jump and punch strips open 41 to 78 silhouette pixels away from it on
+    a 156-pixel character. Passing such a strip as `reference_frames` measures
+    their motion from their guard and ours from standing, and reported this
+    plugin's `attack` at 78.9% where the parallel figure is 48.4%. When the
+    artist's strip does not open on the source pose, pass the source itself as
+    `reference_frames[0]` and their whole strip after it.
 
     Pass `offset` -- the margin `frames` were rendered with -- or the comparison
     is silently meaningless. Rendered frames carry a margin and the art they are

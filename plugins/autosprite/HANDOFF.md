@@ -365,6 +365,71 @@ invariant, and the fallback hiding the gap was silent.
   what it moved and the build warns. Instrumented across six sprites and all
   sixteen animations: **zero**.
 
+## The character clips had never been measured, and now they have
+
+Sixteen of the thirty clips here are character clips, and until now not one had
+been compared to a real animation. `quality.footprint` existed and worked -- it
+caught the windmill -- but it needs the artist's own frames of the same motion,
+and the corpus had those only for a torch and a flag, both subject clips.
+
+Several corpus characters were cut from **animated** sheets, so the ground truth
+was there the whole time. Two are now measured, at opposite ends of the size
+range, by `scripts/ground_truth.py`:
+
+| subject | clip | content height | we move | they move | of what we move, the artist never touches |
+|---|---|---|---|---|---|
+| `platformer-mv-male` | crouch | 46 px | 588 | 596 | **14.8%** |
+| `platformer-mv-male` | walk | 46 px | 535 | 536 | **26.4%** |
+| `platformer-sumohulk-16` | jump | 15 px | 146 | 121 | 34.2% |
+| `platformer-sumohulk-16` | walk | 15 px | 134 | 131 | **36.6%** |
+| `platformer-sumohulk-16` | attack | 15 px | 126 | 109 | 48.4% |
+| `platformer-sumohulk-16` | idle | 15 px | 102 | 109 | **63.7%** |
+
+For scale: the flag's `ripple`, the best-measured clip in the plugin, is 21.4%.
+A 46px character's crouch beats it. A 15px character's idle is three times
+worse than it.
+
+**The size effect is the headline.** Every clip on the 46px character scores
+better than every clip on the 15px one. That is consistent with everything else
+the corpus says -- the two assets `shed` still fails on are 8x23 and 10x17, the
+smallest characters in the set -- and it has a plain explanation. At 15px an
+artist is not transforming parts, they are REDRAWING: the brawler's idle
+redraws 109 of his 156 pixels, and there is no rotation of a four-pixel arm
+that gets there. Cutout animation has a floor, and it is somewhere between
+these two sizes.
+
+### Three ways this measurement lied before it was trusted
+
+Each was caught by checking rather than by the number looking wrong, and each
+changed an answer.
+
+**The alignment has to be proved.** The script renders the rest pose, places it
+back into the artist's coordinate space, and requires it to be byte-identical to
+the source before reporting anything. This is the third time alignment has
+produced a plausible wrong number in this project.
+
+**Both footprints have to be measured from the same rest.** Our clips all start
+from the source image; an artist's strips usually do not. On the brawler, only
+the *idle* strip opens on the standing pose -- the walk, jump and punch strips
+open 41 to 78 silhouette pixels away from it, on a 156-pixel character.
+Measuring their strip against its own frame 0 and ours against standing
+reported `attack` at **78.9%** where the parallel figure is **48.4%**, and
+`jump` at 71.1% where it is 34.2%.
+
+**The comparison has to be at matched coverage.** `footprint` is one-sided on
+purpose -- it punishes moving the wrong pixels and not moving too few -- so it
+rewards doing less. Damping the brawler's walk took it to **0.0% error while
+moving 22 pixels against the artist's 102**. `quality.coverage` now returns the
+other half of the reading, and the script compares at the scale whose
+disturbed-pixel count comes closest to the artist's.
+
+That last one also killed a conclusion. On the brawler alone, damping the walk
+looked like a clean 32.1% -> 10.8% and the obvious reading was "the clips are
+over-scaled for small sprites". The second character refuted it: at full scale
+`mv-male` disturbs 535 pixels against the artist's 536, so its motion is already
+the right size, and the brawler at matched coverage wants **more** motion, not
+less. One data point would have shipped a scaling law that was wrong.
+
 ## Weather, and a class of motion that is passage rather than movement
 
 Nothing in the plugin could animate rain. The user named "houses and weather"

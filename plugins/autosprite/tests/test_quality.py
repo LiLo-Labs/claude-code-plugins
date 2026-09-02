@@ -190,3 +190,50 @@ def test_a_render_margin_must_be_declared_or_the_answer_is_nonsense():
     assert told == (0.0, 0, 1)                    # exactly right
     untold = quality.footprint([padded], rest, [rest, theirs])
     assert untold[0] > 0.0                        # ... and wrong when not told
+
+
+# ---------------------------------------------------------------------------
+# `footprint` is one-sided by design, so it is gameable by doing less. Both of
+# these were found by pointing it at a real character for the first time.
+# ---------------------------------------------------------------------------
+
+def _strip(shape, boxes):
+    """Frames in which a given box is filled, over a common background."""
+    base = image.blank(*shape)
+    base[2:shape[0] - 2, 2:shape[1] - 2] = [90, 90, 120, 255]
+    frames = []
+    for box in boxes:
+        frame = base.copy()
+        if box is not None:
+            x0, y0, x1, y1 = box
+            frame[y0:y1, x0:x1] = [220, 80, 60, 255]
+        frames.append(frame)
+    return base, frames
+
+
+def test_coverage_is_the_half_footprint_does_not_measure():
+    """A clip that moves ten pixels, all of them right, scores 0% error and is
+    not an animation."""
+    rest, artist = _strip((20, 20), [None, (4, 4, 14, 14), (5, 5, 15, 15)])
+    _rest, timid = _strip((20, 20), [(4, 4, 6, 6)])
+    share, wrong, total = quality.footprint(timid, rest, artist)
+    assert share == 0.0                      # every pixel it moves is right
+    assert quality.coverage(timid, rest, artist) < 0.2   # and it moves almost none
+
+
+def test_coverage_is_one_when_both_disturb_the_same_amount():
+    rest, artist = _strip((20, 20), [None, (4, 4, 14, 14)])
+    _rest, ours = _strip((20, 20), [(4, 4, 14, 14)])
+    assert quality.coverage(ours, rest, artist) == pytest.approx(1.0)
+
+
+def test_measuring_from_two_different_rests_is_not_a_comparison():
+    """Every clip here starts from the source image and an artist's strip
+    usually does not. Passing such a strip straight in measures their motion
+    from their guard and ours from standing."""
+    rest, artist = _strip((20, 20), [(2, 2, 8, 8), (4, 4, 14, 14)])
+    _rest, ours = _strip((20, 20), [(4, 4, 14, 14)])
+    from_their_guard = quality.footprint(ours, rest, artist)[0]
+    from_the_same_rest = quality.footprint(ours, rest, [rest] + artist)[0]
+    assert from_their_guard > from_the_same_rest
+    assert from_the_same_rest == pytest.approx(0.0, abs=0.01)

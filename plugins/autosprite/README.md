@@ -479,6 +479,45 @@ It does not check whether the parts are *named* right. A rig that calls the head
 a leg reassembles perfectly, because reassembly is about which pixels went where,
 not what they were called. Only watching the preview GIF answers that.
 
+## Judged against an artist, where an artist's frames exist
+
+Every check above asks whether a frame is *intact*. None asks whether the right
+pixels moved — and a windmill whose entire roof rotates with its sails is one
+connected blob in every frame, eight different pictures, 0.00% shed.
+
+`quality.footprint` compares our footprint against the artist's own frames of
+the same motion, where an asset ships them. `scripts/ground_truth.py` runs it
+over the character clips, which for a long time nothing had measured at all:
+
+| subject | clip | content height | of what we move, the artist never touches |
+|---|---|---|---|
+| MV male (MoikMellah) | crouch | 46 px | **14.8%** |
+| MV male | walk | 46 px | **26.4%** |
+| SumoHulk brawler (Eris) | jump | 15 px | 34.2% |
+| SumoHulk brawler | walk | 15 px | **36.6%** |
+| SumoHulk brawler | attack | 15 px | 48.4% |
+| SumoHulk brawler | idle | 15 px | **63.7%** |
+
+For scale, the flag's `ripple` — the best-measured clip here — is 21.4%. A 46px
+character's crouch beats it; a 15px character's idle is three times worse.
+
+**Cutout animation has a size floor, and it is somewhere between those two.** At
+15px an artist is not transforming parts, they are redrawing: the brawler's idle
+redraws 109 of his 156 pixels, and no rotation of a four-pixel arm gets there.
+This is the same story the corpus tells elsewhere — the two assets `shed` still
+fails on are 8×23 and 10×17, the smallest characters in it.
+
+> The script insists on three things, each of which changed an answer. The
+> **alignment is proved** — the rest pose, rendered and placed back into the
+> artist's coordinate space, must be byte-identical to the source, or nothing
+> is reported. **Both footprints are measured from the same rest**, because our
+> clips start from the source image and an artist's strips usually do not;
+> getting that wrong reported `attack` at 78.9% where the parallel figure is
+> 48.4%. And the comparison is at **matched coverage**, because `footprint` is
+> one-sided and so rewards doing less — damping the brawler's walk reaches 0.0%
+> error while moving 22 pixels against the artist's 102. `quality.coverage`
+> returns that other half.
+
 ## Input handling
 
 Real files are not clean, and three things go wrong silently:
