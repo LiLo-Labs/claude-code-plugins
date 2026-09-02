@@ -557,7 +557,7 @@ def _directed(backend, mesh, frame, wide, marked, feature, intent, out_dir,
 def survey(backend, mesh, frame, up, feature, hint, intent, out_dir, tree,
            characteristic, views=6, pixels=900, zoom_tiles=3, workers=8,
            min_votes=2, min_share=0.34, aims=64, max_rounds=8, min_new=2,
-           log=print):
+           zooms=(1.0,), direct=False, log=print):
     """Look from many different cameras; let tree nodes collect the votes.
 
     One orbiting pass asks what is there. Then aimed rounds repeat until they
@@ -692,8 +692,13 @@ def survey(backend, mesh, frame, up, feature, hint, intent, out_dir, tree,
     # Every round looks from a different angle and at two framings. A
     # candidate that survived a round is revisited, and revisiting it from
     # the identical camera is not a second look.
-    angles = ((0.0, 0.0), (26.0, 0.0), (26.0, 2.09), (26.0, 4.19),
-              (42.0, 1.05), (42.0, 3.14), (14.0, 5.24), (34.0, 0.52))
+    # Small tilts only. A big tilt off the normal gives back exactly the
+    # foreshortening the aimed camera exists to remove: measured on the shell,
+    # a run whose rounds ran at 26-42 degrees found 5, 5, 5, 3, 2, 2, 3 while
+    # the face-on run found 22, 10, 7, 1. The angle should vary enough that a
+    # revisit is a new look, and no further.
+    angles = ((0.0, 0.0), (12.0, 0.0), (12.0, 2.09), (12.0, 4.19),
+              (18.0, 1.05), (18.0, 3.14), (8.0, 5.24), (18.0, 0.52))
     for number in range(1, max_rounds + 1):
         if not len(winners):
             break
@@ -705,10 +710,11 @@ def survey(backend, mesh, frame, up, feature, hint, intent, out_dir, tree,
         # agent sees the whole piece and says where the index ISN'T.
         aimed = _aim_cameras(mesh, face_node, groups, winners, characteristic,
                              features, areas, pixels, family, limit=aims,
-                             tilt=tilt, phase=phase, zooms=(0.7, 1.6))
-        aimed += _directed(backend, mesh, frame, wide, marked, feature, intent,
-                           out_dir, pixels, areas_all, centres, normals,
-                           tilt, phase, workers, log=log)
+                             tilt=tilt, phase=phase, zooms=zooms)
+        if direct:
+            aimed += _directed(backend, mesh, frame, wide, marked, feature,
+                               intent, out_dir, pixels, areas_all, centres,
+                               normals, tilt, phase, workers, log=log)
         if not aimed:
             log("  round %d: nothing left to aim at; the pool is exhausted"
                 % number)
