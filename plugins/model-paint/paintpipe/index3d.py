@@ -88,6 +88,25 @@ An empty list is a correct answer, and the right one if every %s here is
 already blue."""
 
 
+DIRECT_PROMPT = """This is a %dx%d rendered overview of a 3D model.
+
+The piece: %s
+
+Every %s we have already indexed is tinted blue. Others may still be plain
+grey.
+
+Point at up to %d places in THIS image where you can see grey, unindexed
+%ss. Prefer places holding several of them, and places away from the ones
+already tinted. For each place also say roughly how many pixels across a
+single %s is at that spot in this image -- small for distant or tiny ones,
+larger for near ones. A close camera will be sent to each place you name, at
+the scale you report, so the scale matters as much as the position.
+
+Reply with ONLY a JSON object, no prose:
+{"look": [{"n": 1, "x": <int>, "y": <int>, "across": <int>}, ...]}
+An empty list is a correct answer if every %s here is already blue."""
+
+
 def cameras(mesh, up, pixels, views=6, zoom_tiles=3):
     """Genuinely different looks: azimuth, elevation, roll and zoom all move.
 
@@ -187,9 +206,10 @@ def confirm(backend, mesh, frame, up, feature, hint, intent, out_dir, unit,
 
     It is a gate that exits through SELECTION (circumstance 6): the agent may
     answer that the tinted shape is something else and say what, which is
-    information, where a yes/no would only have destroyed it. An instance is
-    dropped only when it is named as something else; unclear keeps it, since
-    an unreadable render is evidence about the render (circumstance 2).
+    information, where a yes/no would only have destroyed it. Unclear keeps
+    the instance, since an unreadable render is evidence about the render
+    (circumstance 2) -- and so does a single "no", because a drop is a verdict
+    too: it is taken only when a second angle agrees.
     """
     import os as os_module
     from concurrent.futures import ThreadPoolExecutor
@@ -203,30 +223,23 @@ def confirm(backend, mesh, frame, up, feature, hint, intent, out_dir, unit,
     normals = np.asarray(mesh.face_normals, dtype=float)
     numbers = np.unique(unit[unit >= 0])
 
-    def ask(number):
+    def ask(number, tilt, phase):
         faces = np.flatnonzero(unit == number)
         if not len(faces):
-            return number, "unseen", ""
+            return "unseen", ""
         weight = areas[faces]
-        outward = (normals[faces] * weight[:, None]).sum(axis=0)
-        norm = np.linalg.norm(outward)
-        if norm < 1e-9:
-            return number, "unseen", ""
-        inward = -outward / norm   # see _aim_cameras: forward looks INTO the surface
-        target = (centres[faces] * weight[:, None]).sum(axis=0) / weight.sum()
         # Framed at several instance widths, so the agent sees the thing IN
         # its surroundings and can tell a cone on a rib from a cone on a
         # frond -- the distinction a tight crop destroys.
         reach = float(np.sqrt(weight.sum() / np.pi)) * 7.0
-        side = np.cross(inward, [0.0, 0.0, 1.0])
-        if np.linalg.norm(side) < 1e-6:
-            side = np.cross(inward, [0.0, 1.0, 0.0])
-        spun = np.cross(side / np.linalg.norm(side), inward)
-        camera = render_module.Camera(inward, spun, target, reach, pixels)
+        camera = _look_at(mesh, faces, areas, centres, normals, pixels, reach,
+                          tilt=tilt, phase=phase)
+        if camera is None:
+            return "unseen", ""
         bundle = render_module.render_bundle(mesh, camera, "zenithal", frame)
         visible = bundle["visible"]
         if not visible.any():
-            return number, "unseen", ""
+            return "unseen", ""
         lit = np.clip(bundle["rgb_lit"], 0, 1)
         shade = 0.32 + 0.60 * lit
         image = np.ones((pixels, pixels, 3))
@@ -236,23 +249,43 @@ def confirm(backend, mesh, frame, up, feature, hint, intent, out_dir, unit,
         hit = bundle["hit_id"]
         blue = visible & (hit >= 0) & member[np.maximum(hit, 0)]
         if blue.sum() < 60:
-            return number, "unseen", ""
+            return "unseen", ""
         image[blue] = np.stack([shade[blue] * 0.30, shade[blue] * 0.45,
                                 np.minimum(shade[blue] * 1.25, 1.0)], axis=1)
-        path = os_module.path.join(out_dir, "confirm-%d.png" % number)
+        path = os_module.path.join(out_dir, "confirm-%d-t%d.png"
+                                   % (number, int(round(tilt))))
         Image.fromarray((image * 255).astype(np.uint8)).save(path)
         prompt = NAME_PROMPT % (pixels, pixels, intent or "a model", feature,
                                 hint or "", feature, feature)
         key = "name-%s" % entities_module.digest_of(
             open(path, "rb").read() + prompt.encode("utf-8"))[7:19]
         answer = backend._run([path], prompt, key) or {}
-        verdict = str(answer.get("is", "unclear")).strip().lower()
-        return number, verdict, str(answer.get("actually", "")).strip()
+        return (str(answer.get("is", "unclear")).strip().lower(),
+                str(answer.get("actually", "")).strip())
+
+    def judge(number):
+        """Keep on one yes; drop only on two angles agreeing it is not.
+
+        A drop is a verdict like any other, and the two-angle law applies to
+        it (circumstance 2). The first gate dropped on a single look and threw
+        away barnacles that were plainly ridged and cratered from any other
+        angle -- the render had lost them, and the verdict inherited the loss.
+        """
+        first, actually = ask(number, 0.0, 0.0)
+        if first != "no":
+            return number, first, ""
+        second, again = ask(number, 30.0, 1.05)
+        if second != "no":
+            # The angles disagree, so the evidence does not support removing
+            # it. Kept, and flagged, because a contested instance is a fact
+            # worth reporting rather than a coin to flip.
+            return number, "contested", actually
+        return number, "no", again or actually
 
     with ThreadPoolExecutor(max_workers=workers) as pool:
-        verdicts = list(pool.map(ask, numbers))
+        verdicts = list(pool.map(judge, numbers))
 
-    kept, dropped, unclear, unseen, named = [], [], 0, 0, {}
+    kept, dropped, unclear, unseen, contested, named = [], [], 0, 0, 0, {}
     for number, verdict, actually in verdicts:
         if verdict == "no":
             dropped.append(number)
@@ -262,6 +295,8 @@ def confirm(backend, mesh, frame, up, feature, hint, intent, out_dir, unit,
             kept.append(number)
             if verdict == "unseen":
                 unseen += 1
+            elif verdict == "contested":
+                contested += 1
             elif verdict != "yes":
                 unclear += 1
     # "unseen" is counted apart from "unclear" on purpose. Unclear is a
@@ -269,9 +304,10 @@ def confirm(backend, mesh, frame, up, feature, hint, intent, out_dir, unit,
     # picture reached it at all, and a gate that reports those as one number
     # hides its own coverage. A run where most instances were never shown is
     # not a 90%-pass rate, and the log must not be able to say it is.
-    log("  confirm: %d kept, %d renamed away, %d unclear, %d never shown "
+    log("  confirm: %d kept, %d renamed away on two angles, %d contested "
+        "(one angle said no, another did not), %d unclear, %d never shown "
         "(kept, but unexamined)"
-        % (len(kept), len(dropped), unclear, unseen))
+        % (len(kept), len(dropped), contested, unclear, unseen))
     for label, count in sorted(named.items(), key=lambda kv: -kv[1])[:8]:
         log("    not a %s, actually: %s x%d" % (feature.split(" -- ")[0],
                                                 label, count))
@@ -329,8 +365,55 @@ def _signature(groups, characteristic, features, areas, nodes):
     return out
 
 
+def _tilted(direction, angle_deg, phase):
+    """A view direction rotated off `direction` by an angle, in a chosen plane.
+
+    A candidate that survives one round is looked at again in the next, and
+    looking again from the identical angle is not a second look. Rolling the
+    view off the normal changes the foreshortening, the silhouette and what
+    the neighbours occlude -- which is the whole reason moving the camera
+    means anything (circumstance 2).
+    """
+    direction = np.asarray(direction, float)
+    if abs(angle_deg) < 1e-6:
+        return direction
+    reference = np.array([0.0, 0.0, 1.0])
+    if abs(float(direction @ reference)) > 0.98:
+        reference = np.array([0.0, 1.0, 0.0])
+    side = np.cross(direction, reference)
+    side /= max(np.linalg.norm(side), 1e-12)
+    other = np.cross(direction, side)
+    axis = side * np.cos(phase) + other * np.sin(phase)
+    angle = np.radians(angle_deg)
+    spun = direction * np.cos(angle) + np.cross(axis, direction) * np.sin(angle)
+    return spun / max(np.linalg.norm(spun), 1e-12)
+
+
+def _look_at(mesh, faces, areas, centres, normals, pixels, reach,
+             tilt=0.0, phase=0.0):
+    """One camera standing off a patch of surface, looking in."""
+    from . import render as render_module
+    weight = areas[faces]
+    outward = (normals[faces] * weight[:, None]).sum(axis=0)
+    norm = np.linalg.norm(outward)
+    if norm < 1e-9:
+        return None
+    # Camera.rays() puts the ray origin at centre - forward * 4r, so `forward`
+    # is the direction the camera LOOKS: from outside, into the surface. The
+    # outward normal is where the camera stands; the negative is where it
+    # points. Passing the normal itself put the camera inside the model.
+    inward = _tilted(-outward / norm, tilt, phase)
+    target = (centres[faces] * weight[:, None]).sum(axis=0) / weight.sum()
+    side = np.cross(inward, [0.0, 0.0, 1.0])
+    if np.linalg.norm(side) < 1e-6:
+        side = np.cross(inward, [0.0, 1.0, 0.0])
+    spun = np.cross(side / np.linalg.norm(side), inward)
+    return render_module.Camera(inward, spun, target, reach, pixels)
+
+
 def _aim_cameras(mesh, face_node, groups, confirmed, characteristic, features,
-                 areas, pixels, family, limit=24):
+                 areas, pixels, family, limit=24, tilt=0.0, phase=0.0,
+                 zooms=(1.0,)):
     """Cameras pointed straight down at unindexed look-alikes.
 
     Every orbit camera is a compromise: it frames the whole model, so an
@@ -380,29 +463,94 @@ def _aim_cameras(mesh, face_node, groups, confirmed, characteristic, features,
 
     normals = np.asarray(mesh.face_normals, dtype=float)
     centres = np.asarray(mesh.triangles_center, dtype=float)
-    reach = max(4.0 * family, 1e-6)
     out = []
     for _score, node in scored[:limit]:
         faces = groups[int(node)]
-        weight = areas[faces]
-        outward = (normals[faces] * weight[:, None]).sum(axis=0)
-        norm = np.linalg.norm(outward)
-        if norm < 1e-9:
-            continue
-        # Camera.rays() puts the ray origin at centre - forward * 4r, so
-        # `forward` is the direction the camera LOOKS, pointing from outside
-        # into the surface. The outward normal is where the camera stands;
-        # what it looks along is the negative. Passing the normal itself put
-        # the camera inside the model for 58% of candidates on the shell,
-        # which rendered the far side and wasted the look entirely.
-        inward = -outward
-        target = (centres[faces] * weight[:, None]).sum(axis=0) / weight.sum()
-        side = np.cross(inward, [0.0, 0.0, 1.0])
-        if np.linalg.norm(side) < 1e-6:
-            side = np.cross(inward, [0.0, 1.0, 0.0])
-        spun = np.cross(side / np.linalg.norm(side), inward)
-        out.append((render_module.Camera(inward, spun, target, reach, pixels),
-                    "aim%d" % int(node)))
+        for zoom in zooms:
+            reach = max(4.0 * family * zoom, 1e-6)
+            camera = _look_at(mesh, faces, areas, centres, normals, pixels,
+                              reach, tilt=tilt, phase=phase)
+            if camera is not None:
+                out.append((camera, "aim%d-t%dz%d"
+                            % (int(node), int(round(tilt)),
+                               int(round(zoom * 10)))))
+    return out
+
+
+def _directed(backend, mesh, frame, wide, marked, feature, intent, out_dir,
+              pixels, areas, centres, normals, tilt, phase, workers, places=6,
+              log=print):
+    """Cameras a global agent asked for, at the scale it asked for.
+
+    The geometric aims can only propose what already resembles what is
+    confirmed, so they walk outward from the index and cannot cross a gap.
+    An agent looking at the WHOLE piece can: it sees where the tinted
+    instances are not, and says go there. It reports the apparent size of an
+    instance at each place it names, which sets the camera's framing -- so
+    the zoom level is chosen by something that can see the model rather than
+    by a constant, which is the only way one number can suit a colony in the
+    foreground and one on the far rim.
+    """
+    import os as os_module
+    from concurrent.futures import ThreadPoolExecutor
+    from PIL import Image
+    from . import entities as entities_module
+    from . import render as render_module
+
+    def survey_one(job):
+        index, (camera, _direction, _spun) = job
+        bundle = render_module.render_bundle(mesh, camera, "zenithal", frame)
+        visible = bundle["visible"]
+        if not visible.any():
+            return []
+        lit = np.clip(bundle["rgb_lit"], 0, 1)
+        shade = 0.32 + 0.60 * lit
+        image = np.ones((pixels, pixels, 3))
+        image[visible] = shade[visible, None]
+        hit = bundle["hit_id"]
+        blue = visible & (hit >= 0) & marked[np.maximum(hit, 0)]
+        if blue.any():
+            image[blue] = np.stack([shade[blue] * 0.30, shade[blue] * 0.45,
+                                    np.minimum(shade[blue] * 1.25, 1.0)],
+                                   axis=1)
+        path = os_module.path.join(out_dir, "overview-%d.png" % index)
+        Image.fromarray((image * 255).astype(np.uint8)).save(path)
+        prompt = DIRECT_PROMPT % (pixels, pixels, intent or "a model", feature,
+                                  places, feature, feature, feature)
+        key = "direct-%s" % entities_module.digest_of(
+            open(path, "rb").read() + prompt.encode("utf-8"))[7:19]
+        answer = backend._run([path], prompt, key) or {}
+        asked = []
+        for entry in answer.get("look", []) or []:
+            try:
+                x, y = int(entry["x"]), int(entry["y"])
+                across = float(entry.get("across", 0) or 0)
+            except (KeyError, TypeError, ValueError):
+                continue
+            if not (0 <= x < pixels and 0 <= y < pixels):
+                continue
+            face = int(hit[y, x])
+            if face < 0:
+                continue
+            # The agent reports the instance's size in PIXELS of this image;
+            # the camera knows how many millimetres a pixel of it is worth.
+            across_mm = max(across, 4.0) * camera.footprint_mm
+            asked.append((face, across_mm))
+        return asked
+
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        asked = [a for batch in pool.map(survey_one, list(enumerate(wide)))
+                 for a in batch]
+    out = []
+    for face, across_mm in asked:
+        # Framed at about five instance widths, so what the agent pointed at
+        # arrives with its neighbours around it rather than filling the frame.
+        camera = _look_at(mesh, np.array([face]), areas, centres, normals,
+                          pixels, max(across_mm * 2.5, 1e-6),
+                          tilt=tilt, phase=phase)
+        if camera is not None:
+            out.append((camera, "dir%d-t%d" % (face, int(round(tilt)))))
+    log("    directed: %d places named by the overview agent" % len(out))
     return out
 
 
@@ -538,16 +686,33 @@ def survey(backend, mesh, frame, up, feature, hint, intent, out_dir, tree,
     groups = _groups(face_node)
     settled = np.zeros(total, dtype=bool)
     settled[winners] = True
+    areas_all = areas
+    centres = np.asarray(mesh.triangles_center, dtype=float)
+    normals = np.asarray(mesh.face_normals, dtype=float)
+    # Every round looks from a different angle and at two framings. A
+    # candidate that survived a round is revisited, and revisiting it from
+    # the identical camera is not a second look.
+    angles = ((0.0, 0.0), (26.0, 0.0), (26.0, 2.09), (26.0, 4.19),
+              (42.0, 1.05), (42.0, 3.14), (14.0, 5.24), (34.0, 0.52))
     for number in range(1, max_rounds + 1):
         if not len(winners):
             break
-        aimed = _aim_cameras(mesh, face_node, groups, winners, characteristic,
-                             features, areas, pixels, family, limit=aims)
-        if not aimed:
-            log("  round %d: no unindexed candidate looks like the family; "
-                "the pool is exhausted" % number)
-            break
+        tilt, phase = angles[(number - 1) % len(angles)]
         marked = np.isin(face_node, winners)
+        # Two proposers, because they fail differently. The geometric aims
+        # can only offer what already resembles the confirmed set, so they
+        # walk outward from the index and cannot cross a gap; the overview
+        # agent sees the whole piece and says where the index ISN'T.
+        aimed = _aim_cameras(mesh, face_node, groups, winners, characteristic,
+                             features, areas, pixels, family, limit=aims,
+                             tilt=tilt, phase=phase, zooms=(0.7, 1.6))
+        aimed += _directed(backend, mesh, frame, wide, marked, feature, intent,
+                           out_dir, pixels, areas_all, centres, normals,
+                           tilt, phase, workers, log=log)
+        if not aimed:
+            log("  round %d: nothing left to aim at; the pool is exhausted"
+                % number)
+            break
         with ThreadPoolExecutor(max_workers=workers) as pool:
             more = [r for r in pool.map(lambda job: look(job, marked), aimed)
                     if r is not None]
@@ -561,8 +726,9 @@ def survey(backend, mesh, frame, up, feature, hint, intent, out_dir, tree,
         fresh = np.setdiff1d(found, np.flatnonzero(settled))
         winners = np.union1d(winners, found)
         settled[winners] = True
-        log("  round %d: %d aimed looks -> %d pass, %d new (%d indexed)"
-            % (number, len(more), len(found), len(fresh), len(winners)))
+        log("  round %d (tilt %.0f deg): %d looks -> %d pass, %d new "
+            "(%d indexed)" % (number, tilt, len(more), len(found), len(fresh),
+                              len(winners)))
         if len(fresh) < min_new:
             log("  round %d found %d, below the %d that would justify another;"
                 " stopping" % (number, len(fresh), min_new))
