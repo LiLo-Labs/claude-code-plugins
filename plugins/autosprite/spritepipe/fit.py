@@ -46,13 +46,62 @@ from . import skeleton
 # plausible range, then narrow around whatever that found -- a full fine sweep of
 # every channel is four times the renders for the same answer, and the fit is
 # thousands of renders either way.
+# What a part is ALLOWED to do, by role. Without this the solve contorts whatever
+# part buys the most silhouette overlap, which is the biggest one -- fitting an
+# exaggerated walk on the corpus knight, it rotated the HEAD forty degrees and
+# smeared it across the chest, because a head is a large blob and moving a large
+# blob covers more target than moving a leg. The result fits at 0.78 and is not a
+# walk. A neck does not do that, and the rig should not either.
+LIMITS = {
+    "head": 14.0, "torso": 12.0, "body": 12.0,
+    "arm_near": 85.0, "arm_far": 85.0,
+    "leg_near": 50.0, "leg_far": 50.0,
+    "tail": 45.0, "wing_near": 60.0, "wing_far": 60.0,
+    "accessory": 40.0, "prop": 90.0,
+}
+DEFAULT_LIMIT = 40.0
+
+# How much a pose is charged for departing from rest, as a fraction of the
+# agreement it buys. Among poses that fit equally well, prefer the one that moved
+# least -- otherwise the solve spends its freedom wherever it happens to help
+# first, and a still limb picks up motion it never had.
+TIDINESS = 0.06
+
 SWEEPS = (("angle", 38.0), ("dy", 3.0), ("dx", 3.0))
 ROOT_SWEEPS = (("dy", 4.0), ("dx", 4.0))
 PASSES = ((9, 1.0), (7, 0.28))
 
 
-def _span(centre, half, count):
-    return np.linspace(centre - half, centre + half, int(count))
+def _span(centre, half, count, limit=None):
+    values = np.linspace(centre - half, centre + half, int(count))
+    if limit is not None:
+        values = np.clip(values, -abs(limit), abs(limit))
+    return values
+
+
+def limit_for(part):
+    """How far this part's role permits it to turn."""
+    return LIMITS.get(part.role, DEFAULT_LIMIT)
+
+
+def effort(rig, pose):
+    """How far a pose departs from rest, as a share of what each part is allowed.
+
+    Charged against the fit so that among poses which explain the target equally
+    well, the tidiest wins. Scaled per part by its own limit, so a leg swinging
+    40 degrees of its permitted 50 is not judged more extravagant than a head
+    turning 12 of its permitted 14.
+    """
+    total, count = 0.0, 0
+    for part in rig.parts:
+        own = pose.parts.get(part.name)
+        if own is None:
+            continue
+        allowed = limit_for(part)
+        total += abs(own.angle) / allowed if allowed else 0.0
+        total += (abs(own.dx) + abs(own.dy)) / 8.0
+        count += 1
+    return (total / count) if count else 0.0
 
 
 def agreement(ours, target):
@@ -81,7 +130,8 @@ def _mask_of(cutout, pose, margin, shape):
     return out
 
 
-def fit_pose(cutout, target, margin, start=None, passes=PASSES):
+def fit_pose(cutout, target, margin, start=None, passes=PASSES,
+             tidiness=TIDINESS):
     """The rig pose that best explains one target silhouette.
 
     Coordinate descent, parents before children. A child is searched against a
@@ -98,13 +148,17 @@ def fit_pose(cutout, target, margin, start=None, passes=PASSES):
     was = render_module.SKIN
     render_module.SKIN = False
     try:
-        best = agreement(_mask_of(cutout, pose, margin, shape), target)
+        def scored():
+            return (agreement(_mask_of(cutout, pose, margin, shape), target)
+                    - tidiness * effort(rig, pose))
+
+        best = scored()
         for count, width in passes:
             for channel, half in ROOT_SWEEPS:
                 keep = getattr(pose, channel)
                 for value in _span(keep, half * width, count):
                     setattr(pose, channel, float(value))
-                    score = agreement(_mask_of(cutout, pose, margin, shape), target)
+                    score = scored()
                     if score > best:
                         best, keep = score, float(value)
                 setattr(pose, channel, keep)
@@ -116,21 +170,26 @@ def fit_pose(cutout, target, margin, start=None, passes=PASSES):
                 own = skeleton.PartPose(current.angle, current.dx, current.dy,
                                         current.sx, current.sy)
                 pose.set(part.name, own)
+                allowed = limit_for(part)
                 for channel, half in SWEEPS:
                     keep = getattr(own, channel)
-                    for value in _span(keep, half * width, count):
+                    cap = allowed if channel == "angle" else None
+                    for value in _span(keep, half * width, count, cap):
                         setattr(own, channel, float(value))
-                        score = agreement(
-                            _mask_of(cutout, pose, margin, shape), target)
+                        score = scored()
                         if score > best:
                             best, keep = score, float(value)
                     setattr(own, channel, keep)
     finally:
         render_module.SKIN = was
-    return pose, best
+    # The reported score is the AGREEMENT, not the penalised one. Tidiness steers
+    # the search; it is not part of the answer, and a caller reading the fit as a
+    # rig diagnostic needs the raw silhouette number.
+    return pose, agreement(_mask_of(cutout, pose, margin, shape), target)
 
 
-def fit_clip(cutout, targets, margin=None, passes=PASSES, warm=True):
+def fit_clip(cutout, targets, margin=None, passes=PASSES, warm=True,
+             tidiness=TIDINESS):
     """[(pose, agreement)] for a sequence of target silhouettes.
 
     Each frame starts from the previous frame's answer (`warm`), because a walk
@@ -144,7 +203,8 @@ def fit_clip(cutout, targets, margin=None, passes=PASSES, warm=True):
     out, previous = [], None
     for target in targets:
         start = copy.deepcopy(previous) if (warm and previous is not None) else None
-        pose, score = fit_pose(cutout, target, margin, start=start, passes=passes)
+        pose, score = fit_pose(cutout, target, margin, start=start,
+                               passes=passes, tidiness=tidiness)
         out.append((pose, score))
         previous = pose
     return out
@@ -211,3 +271,129 @@ def to_animation(fitted, name, rig=None, fps=10, loop=True, note=""):
         name, frames=frames, fps=fps, loop=loop, root=root, tracks=tracks,
         note=note or ("solved from a generated animation: the motion is the "
                       "model's, every pixel is the artist's"))
+
+
+# Below this, the solve did not find the pose -- it found the best pose the rig
+# is capable of, and that was not close. Measured on the corpus knight's attack:
+# frames scoring 1.00, 1.00, .79, .77, .51, .52, .52, .39. The collapse at frame
+# five is the arm needing to bend through a joint that does not exist.
+REACHED = 0.70
+
+# A split is only worth taking if it buys more than this. A second joint always
+# fits at least as well -- it is strictly more freedom -- so accepting any
+# improvement grows a skeleton of one-pixel bones that fit noise.
+WORTH_SPLITTING = 0.06
+
+
+def unreached(fitted, floor=REACHED):
+    """Indices of the frames the rig could not reach, worst first.
+
+    This is the whole diagnostic. A clip the rig CAN express fits near 1.00
+    throughout; where agreement falls, the rig is missing a joint, and the frame
+    index says which pose exposed it. Guessing which limbs need an elbow is
+    replaced by running a clip that needs one.
+    """
+    return [index for index, (_pose, score)
+            in sorted(enumerate(fitted), key=lambda pair: pair[1][1])
+            if score < float(floor)]
+
+
+def split_part(rig, name, at=0.5):
+    """`rig` with one part cut into two segments end to end, upper parented to
+    the original's parent and lower to the upper.
+
+    The cut is a fraction ALONG the part's own longer axis, because that is the
+    axis a limb bends across; a knee is partway down a leg, not partway across
+    it. Returns None when the part is too short to divide -- a two-pixel mitten
+    has nowhere to put a joint.
+    """
+    from . import rig as rig_module
+    part = rig.by_name(name)
+    if part is None or part.pivot is None:
+        return None
+    x0, y0, x1, y1 = part.box
+    tall = (y1 - y0) >= (x1 - x0)
+    length = (y1 - y0) if tall else (x1 - x0)
+    if length < 4:
+        return None
+    cut = int(round((y0 if tall else x0) + length * float(at)))
+    if cut <= (y0 if tall else x0) or cut >= (y1 if tall else x1):
+        return None
+
+    if tall:
+        upper_box, lower_box = (x0, y0, x1, cut), (x0, cut, x1, y1)
+        lower_pivot = ((x0 + x1) // 2, cut)
+    else:
+        upper_box, lower_box = (x0, y0, cut, y1), (cut, y0, x1, y1)
+        lower_pivot = (cut, (y0 + y1) // 2)
+
+    lower_name = name + "_lower"
+    parts = []
+    for other in rig.parts:
+        if other.name == name:
+            parts.append(rig_module.Part(name, part.role, upper_box, part.parent,
+                                         part.pivot, part.z, part.confidence,
+                                         part.tags))
+            parts.append(rig_module.Part(lower_name, part.role, lower_box, name,
+                                         lower_pivot, part.z, part.confidence,
+                                         part.tags))
+            continue
+        copy = _copy_part(other)
+        if copy.parent == name:
+            # Anything hanging off this limb belongs on the FREE end, not the
+            # anchored one: a sword rides the hand, and leaving it on the upper
+            # segment would pin it to the shoulder while the arm bends away.
+            copy.parent = lower_name
+        parts.append(copy)
+    return rig_module.Rig(rig.size, parts, rig.character_class, rig.facing,
+                          anchor=rig.anchor, actor=rig.actor, notes=list(rig.notes))
+
+
+def better_split(cutout, targets, name, margin=None, cuts=(0.4, 0.5, 0.6),
+                 floor=REACHED, worth=WORTH_SPLITTING, passes=((7, 1.0),)):
+    """(rig, cut, gain) if giving `name` a second joint helps, else None.
+
+    Fits the clip with the rig as it is, then again for each candidate cut, and
+    keeps the best -- but only if it buys more than `worth`. A second joint is
+    strictly more freedom and so always fits at least as well; accepting any
+    improvement at all grows a skeleton of one-pixel bones that fit noise.
+
+    Scored on the frames the rig COULD NOT REACH rather than on the whole clip.
+    A walk that already fits at 0.95 has nothing to teach about elbows, and
+    averaging those frames in would drown the signal from the four that failed.
+    """
+    from . import cutout as cutout_module
+    rig = cutout.rig
+    if margin is None:
+        margin = render_module.suggest_margin(rig)
+    base = fit_clip(cutout, targets, margin=margin, passes=passes)
+    hard = unreached(base, floor)
+    if not hard:
+        return None
+    reference = cutout.reference
+    before = sum(base[i][1] for i in hard) / float(len(hard))
+
+    best = None
+    for cut in cuts:
+        grown = split_part(rig, name, cut)
+        if grown is None:
+            continue
+        try:
+            cut_out = cutout_module.cut(grown, reference)
+        except Exception:
+            continue
+        margin_now = render_module.suggest_margin(grown)
+        scored = fit_clip(cut_out, [targets[i] for i in hard],
+                          margin=margin_now, passes=passes)
+        after = sum(score for _pose, score in scored) / float(len(scored))
+        if best is None or after > best[2]:
+            best = (grown, cut, after)
+    if best is None or best[2] - before < float(worth):
+        return None
+    return best[0], best[1], best[2] - before
+
+
+def _copy_part(part):
+    from . import rig as rig_module
+    return rig_module.Part(part.name, part.role, part.box, part.parent,
+                           part.pivot, part.z, part.confidence, part.tags)
