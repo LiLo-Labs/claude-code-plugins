@@ -736,6 +736,28 @@ class TemplateBackend(Backend):
                             (head_extent[0], 0, head_extent[1], neck + 1), "torso",
                             ((head_extent[0] + head_extent[1]) // 2, neck)),
         ]
+        # A HIP IS NOT THE MIDDLE OF THE LEG. Every limb pivot here was the
+        # centre of its own box, which is where a leg's mass is and not where it
+        # is attached: the joint is where the leg meets the pelvis, so it is the
+        # end of the leg's x range nearest the body's centreline. Pivoting at the
+        # middle instead swings the outer half of the hip away from the torso and
+        # drives the inner half across the crotch, and both halves of that are
+        # wrong in the same frame.
+        #
+        # Only where the leg actually TURNS about the joint. `Animation.fronted`
+        # rewrites a face-on clip's swings as translations -- a leg walking
+        # towards the camera foreshortens, and what reads is the foot leaving the
+        # floor -- and a translation does not care where its pivot is. Measured
+        # against the artists' own frames at their own coverage: the two profile
+        # humanoids improve (mv-male walk 27.6% -> 22.2%, forest run 14.3% ->
+        # 12.7%, mv-male crouch 15.4% -> 15.0%) and applying it to the two
+        # face-on ones as well costs 1.2 and 0.6 points for nothing.
+        #
+        # The same reasoning applied to the ARMS was measured and does not pay --
+        # see HANDOFF. An arm box here is a chip of mitten that barely separates
+        # from the body, so it has no inner edge worth finding.
+        centreline = (torso_box[0] + torso_box[2]) / 2.0
+        turning = facing not in FACE_ON
         for name, role, box in (("arm_far", "arm_far", far_arm),
                                 ("arm_near", "arm_near", near_arm),
                                 ("leg_far", "leg_far", far_leg),
@@ -743,8 +765,28 @@ class TemplateBackend(Backend):
             if box is None or box[2] <= box[0] or box[3] <= box[1]:
                 continue
             pivot_y = box[1] if role.startswith("arm") else hip
+            # And only on a leg that is LONGER THAN IT IS WIDE. A limb extends
+            # away from its joint, and that direction is its length -- the same
+            # thing `fit.split_part` has to know to cut one. A leg box that is
+            # square is not a limb with a hip at one end, it is a chip of the
+            # lower body: `grafxkid-oldhero` is 10x18 and its legs are 5x5, so
+            # the box's inner edge is two pixels from its middle on a character
+            # ten pixels wide, and moving the joint there throws 0.3% of the
+            # sprite loose on its run where the corpus is otherwise at 0.00%.
+            # The same size floor this project keeps rediscovering.
+            long_enough = (box[3] - box[1]) > (box[2] - box[0])
+            if role.startswith("leg") and turning and long_enough:
+                # box[2] - 1, not box[2]: boxes are half-open and the pivot is a
+                # PIXEL. Clamping to box[2] puts the joint one column outside the
+                # leg, and a foot that does not hang under its own joint swings
+                # DOWN as well as up -- which sinks the whole planted clip below
+                # the row the character was drawn standing on, because `plant`
+                # floors a clip at its deepest pose.
+                pivot_x = int(round(min(max(centreline, box[0]), box[2] - 1)))
+            else:
+                pivot_x = (box[0] + box[2]) // 2
             parts.append(rig_module.Part(name, role, box, "torso",
-                                         ((box[0] + box[2]) // 2, pivot_y)))
+                                         (pivot_x, pivot_y)))
 
         notes.append("shoulders at row %d, neck at row %d, hips at row %d"
                      % (shoulder, neck, hip))

@@ -525,13 +525,13 @@ of its rows in it was on a mirrored rig:
 
 | subject | clip | content height | shipped | coverage | matched |
 |---|---|---|---|---|---|
-| `platformer-forest-64` | run | 45 px | **4.5%** | 0.76 | **12.4%** |
-| `platformer-mv-male` | crouch | 46 px | 18.6% | 1.08 | **15.3%** |
-| `platformer-mv-male` | attack | 46 px | 30.8% | 1.38 | 19.9% |
+| `platformer-forest-64` | run | 45 px | **4.6%** | 0.77 | **11.1%** |
+| `platformer-mv-male` | crouch | 46 px | 18.4% | 1.08 | **15.0%** |
+| `platformer-mv-male` | attack | 46 px | 30.7% | 1.38 | 19.9% |
 | `platformer-sumohulk-16` | walk | 15 px | 9.1% | 0.25 | 25.8% |
 | `topdown-eldiran-rpg` | walk | 32 px | 24.1% | 0.75 | 26.0% |
 | `creature-horse-scratchio` | walk | 33 px | 25.4% | 0.80 | 27.1% |
-| `platformer-mv-male` | walk | 46 px | 27.2% | 0.87 | 27.9% |
+| `platformer-mv-male` | walk | 46 px | 25.2% | 0.85 | 23.0% |
 | `platformer-sumohulk-16` | jump | 15 px | 41.5% | 1.45 | 28.7% |
 | `creature-horse-scratchio` | run | 33 px | 18.8% | 0.75 | 31.7% |
 | `platformer-sumohulk-16` | attack | 15 px | 40.6% | 0.97 | 40.6% |
@@ -787,6 +787,92 @@ over-scaled for small sprites". The second character refuted it: at full scale
 `mv-male` disturbs 535 pixels against the artist's 536, so its motion is already
 the right size, and the brawler at matched coverage wants **more** motion, not
 less. One data point would have shipped a scaling law that was wrong.
+
+## The hip was in the middle of the leg, and a hip is not the middle of a leg
+
+Every limb pivot the template rigger emitted was the **centre of the part's own
+box**, which is where a leg's mass is and not where it is attached. The joint is
+where the leg meets the pelvis: the end of the leg's x range nearest the body's
+centreline. Pivoting at the middle swings the outer half of the hip away from the
+torso and drives the inner half across the crotch, and both halves of that are
+wrong in the same frame -- at 5x, `mv-male`'s walk splits her pelvis open high
+and her thighs come away from her body, where the fixed rig keeps the crotch
+solid and the legs emerging below it.
+
+It is the first change in a long while that improves the mean **with nothing
+worse on any reading**:
+
+| | shipped | matched | at coverage 1.00 |
+|---|---|---|---|
+| hip at the box centre | 28.65% | 30.22% | 30.68% |
+| **hip at the inner edge** | **28.48%** | **29.67%** | **30.08%** |
+
+Per clip: `mv-male` walk 27.6% -> **22.2%**, `forest` run 14.3% -> 12.7%,
+`mv-male` crouch 15.4% -> 15.0%, nine clips byte for byte unchanged, none worse.
+
+And it sheds LESS rather than more, which a rig change moving joints had no right
+to do for free: swept over the whole corpus, the worst pre-repair shed goes
+7.58% -> 6.57% (`platformer-grass-prowne`'s block), every one of that asset's
+seven shedding clips falls, one clip stops shedding altogether, and no clip that
+shed nothing starts. A leg rotating about its own middle was itself pulling the
+hip apart.
+
+**The third reading is new and is the honest one.** `matched` picks the nearest
+row of a coarse scale grid, so two rigs get compared at whatever coverage each
+happens to land on -- on `mv-male`'s walk the old rig's nearest row is at 1.11
+and the new rig's at 1.02. Interpolating the error to coverage exactly 1.00
+compares them at the same place, and it is the reading to trust when two rigs are
+being compared rather than two clips.
+
+### Two gates, each of which cost something before it existed
+
+**Only where the leg actually TURNS about the joint.** `Animation.fronted`
+rewrites a face-on clip's swings as translations -- a leg walking towards the
+camera foreshortens, and what reads is the foot leaving the floor -- and a
+translation does not care where its pivot is. Applying the fix to the two
+face-on characters as well costs 1.2 and 0.6 points for nothing.
+
+**And only on a leg longer than it is wide.** A limb extends away from its joint
+and that direction is its length, which is the same thing `fit.split_part` has to
+know to cut one. `grafxkid-oldhero` is 10x18 with 5x5 legs, so the box's inner
+edge is two pixels from its middle on a character ten pixels across, and moving
+the joint there throws 0.3% of the sprite loose on its run where the corpus is
+otherwise at 0.00%. The same size floor this project keeps rediscovering.
+
+A third detail is a one-character bug that would have been invisible: the pivot
+clamps to `box[2] - 1` and not `box[2]`, because boxes are half-open and a pivot
+is a PIXEL. Clamped to `box[2]` the joint sits one column outside the leg, and a
+foot that does not hang under its own joint swings DOWN as well as up -- which
+sinks every planted clip below the row the character was drawn standing on,
+because `plant` floors a clip at its deepest pose.
+
+### What does NOT pay, measured on the same twelve clips
+
+* **The arms, either way.** Moving the arm pivot to the box's inner edge is
+  +0.75 matched; moving it to the shoulder row is +1.29 matched and **0 of the 5
+  clips it touches improve**. An arm box on these rigs is a chip of mitten that
+  barely separates from the body, so it has no inner edge worth finding.
+* **The root pivot**, lifted anywhere from 5% to 50% of the torso: the best
+  setting is worth -0.24 matched and costs the forest run between +2.2 and +4.7
+  at every value. No rule fits both.
+* A per-part sensitivity sweep (every pivot moved +/-1, 2 and 3 in x and y on two
+  characters) says why the arms cannot pay: head and arm joints move the mean by
+  at most 0.20 and 0.35, while the hip and the root move it by 1.2 to 1.4.
+
+### And `fit` cannot judge a pivot at all
+
+Moving EVERY limb pivot five pixels on a 32px character changes the fitted IoU by
+**+0.0002**, and turning the translation channels off does not make it
+discriminating either (0.7600 against 0.7607). Two reasons, both arithmetic: a
+pivot change is exactly a rotation plus a translation the solve already searches
+for -- rotating about p' is rotating about p plus (I-R)(p'-p), which is 1.6px for
+a 3px joint move at 30 degrees, inside the 3.5px the solver is allowed anyway --
+and the torso plus head are 544 of the knight's 676 opaque pixels, so all four
+limbs together have under 0.2 of IoU range to argue over.
+
+So rig geometry is a `ground_truth.py` question, and `fit` has nothing to say
+about it. That is the same conclusion the section above reaches from the other
+direction.
 
 ## The idle weight shift: a twenty-point win that tears the character in half
 
@@ -1662,7 +1748,8 @@ explains each frame, discard the generated pixels. Identity stops being somethin
 measured and becomes something untouched -- byte-exact REST and palette-subset
 hold exactly as they always did, because no generated pixel is ever composited.
 `fit.py`, and it works: solved against a generated walk, per-frame silhouette
-agreement 0.88-1.00.
+agreement 0.88-1.00 -- read that as a diagnostic and not as a score, for the
+reason two sections below.
 
 It also makes a solved clip REUSABLE. Keyed by role, a walk solved once drives
 every other character in the corpus. That is a motion library built by
@@ -1710,6 +1797,53 @@ Every constraint above COSTS silhouette agreement. Worst-frame IoU on the
 exaggerated walk went 0.66 to 0.62 across them, and every one improved the
 frames. Agreement rewards covering the target, and a contorted smeared knight
 covers it perfectly well. **A fit score cannot tell a pose from a contortion.**
+
+### The attack targets were not the character, and the fit score is mostly a
+### restatement of how far the target moved
+
+Two corrections to everything above, both found by looking at the targets rather
+than at the scores.
+
+**Rendered as masks, the `attack` targets are not a knight.** Frame 0 is the
+source silhouette, because that is what frame 0 IS. Frames 1 to 7 are a solid
+diagonal **wedge** with a blob on top -- no arms, no gap between the legs, no
+figure. The generated video had abandoned the sprite and drawn something else,
+`conform` faithfully reduced that something else onto the knight's grid, and the
+solver then contorted the rig to cover a wedge. Every `attack` fit number in
+this file was measured against it.
+
+That also puts a **ceiling** on the score that has nothing to do with the rig.
+Where a target's area differs from the source's, the best possible IoU is the
+ratio of the two, because the rig can only rearrange the pixels it has. On the
+knight, source area 574:
+
+| clip | target areas | best IoU any rig could reach |
+|---|---|---|
+| `clip-walk` | 574..534 | mean 0.957 |
+| `rich-bigattack` | 574..543 | mean 0.967 |
+| `clip-attack` | 574, 382, 337, 299, ... | **mean 0.622** |
+
+The 6-part rig scores .54 .53 .51 .50 .53 .52 .52 on `clip-attack` against a
+ceiling of .67 .59 .52 .54 .57 .58 .52 -- **85 to 100% of what any rig could
+score**. Read as "the rig cannot express a strike", that number was reading the
+target.
+
+**And agreement is one-sided in exactly the way `footprint` is.** Pooled over 40
+frames, `IoU = 0.990 - 0.603 x motion` at **R^2 = 0.93**: the score is very
+nearly a restatement of how far the target moved from the source, so a solver
+that moves less scores better and different generative models are
+indistinguishable once binned at matched motion. End to end this shows up as the
+clip that fits BEST by IoU (0.941) footprinting WORST against the artist's own
+frames (74.1%).
+
+**So `fit`'s numbers judge one thing only: whether a pose explains a frame.**
+They cannot rank rigs, they cannot rank generative models, and they cannot say a
+clip is good. `scripts/ground_truth.py` against an artist's own frames is the
+only judge in this project for any of that, and any figure in this file quoted as
+an IoU should be read as a diagnostic and never as a score. The dead ends this
+closes are recorded in their own sections: a second limb segment, a wider fit
+search, and better video capture were each measured against IoU, and each
+dissolves once the target is measured too.
 
 ### What is still wrong, and it is not the fit
 

@@ -214,7 +214,24 @@ def to_sprite(frame, source, tolerance=30, scale=None, floor=None):
     small = np.array(Image.fromarray(crop).resize((wide, tall), Image.NEAREST))
     out = img.blank(source.shape[0], source.shape[1])
     img.paste(out, small, (source.shape[1] - wide) // 2, int(floor) - tall)
-    return conform_module.conform(out, source)[0]
+    sprite = conform_module.conform(out, source)[0]
+    # And the box guard above is NOT enough on a real video. The moment the
+    # background removal stops working -- which is the moment the model changes
+    # the backdrop, part-way through most clips -- the content box becomes the
+    # whole frame, so `wide` is scaled from 720 pixels of background and the
+    # paste offset goes negative. Measured on a real capture: a 16px-wide sprite
+    # handed a 73px-wide crop pasted at x=-29, and three frames of eight came
+    # back holding ZERO pixels.
+    #
+    # They are not `None`, so they pass every downstream check and become fit
+    # targets no pose can ever match. `fit` then reports agreement 0.00 on them,
+    # which reads as a rig that cannot reach the pose rather than as a frame
+    # that was never there -- and that misreading is exactly what an earlier
+    # revision of HANDOFF drew a conclusion from. A frame that reduced to
+    # nothing is a frame that failed to reduce.
+    if not img.alpha_mask(sprite).any():
+        return None
+    return sprite
 
 
 def drift(pixels, source):

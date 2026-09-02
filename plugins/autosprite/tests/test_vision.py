@@ -756,3 +756,66 @@ def test_an_arm_that_separates_properly_draws_no_complaint():
     art = make_fixture.humanoid(arms_clear=True)
     built = rig_of(art)
     assert not any("barely separate" in note for note in built.notes)
+
+
+def test_a_hip_is_the_end_of_the_leg_nearest_the_body():
+    """A leg turns about where it MEETS THE PELVIS, not about its own middle.
+
+    Pivoting at the middle swings the outer half of the hip away from the torso
+    and drives the inner half across the crotch, and both halves of that are
+    wrong in the same frame -- visible at 5x as a walk whose pelvis splits open
+    high and whose thighs come away from the body.
+    """
+    built = rig_of(_humanoid_with_leg_band(32, 14, 12), facing="right")
+    torso = built.first_role("torso")
+    centre = (torso.box[0] + torso.box[2]) / 2.0
+    for role in ("leg_near", "leg_far"):
+        leg = built.first_role(role)
+        if leg is None or leg.height <= leg.width:
+            continue
+        inner = leg.box[0] if leg.box[0] >= centre else leg.box[2] - 1
+        assert abs(leg.pivot[0] - centre) <= abs(inner - centre) + 0.5, (
+            role, leg.pivot, leg.box, centre)
+        middle = (leg.box[0] + leg.box[2]) // 2
+        if abs(middle - centre) > 1:
+            assert leg.pivot[0] != middle, (role, "still the middle of the box")
+
+
+def test_a_face_on_leg_keeps_the_middle_of_its_box():
+    """`fronted` rewrites a face-on clip's swings as TRANSLATIONS -- a leg
+    walking towards the camera foreshortens, and what reads is the foot leaving
+    the floor -- and a translation does not care where its pivot is. Moving it
+    anyway costs both face-on characters in the ground truth and buys nothing."""
+    built = rig_of(_humanoid_with_leg_band(32, 14, 12), facing="front")
+    for role in ("leg_near", "leg_far", "leg_left", "leg_right"):
+        leg = built.first_role(role)
+        if leg is None:
+            continue
+        assert leg.pivot[0] == (leg.box[0] + leg.box[2]) // 2, (role, leg.pivot)
+
+
+def test_a_square_leg_box_is_not_a_limb_with_a_hip_at_one_end():
+    """`grafxkid-oldhero` is ten wide with 5x5 legs, so the box's inner edge is
+    two pixels from its middle on a character ten pixels across -- and moving the
+    joint there throws 0.3% of the sprite loose on its run, where the corpus is
+    otherwise at 0.00%. The same size floor this project keeps rediscovering."""
+    built = rig_of(_humanoid_with_leg_band(20, 10, 4), facing="right")
+    for role in ("leg_near", "leg_far"):
+        leg = built.first_role(role)
+        if leg is None or leg.height > leg.width:
+            continue
+        assert leg.pivot[0] == (leg.box[0] + leg.box[2]) // 2, (role, leg.pivot)
+
+
+def test_a_hip_stays_inside_its_own_leg():
+    """Boxes are half-open and a pivot is a PIXEL, so clamping to `box[2]` puts
+    the joint one column outside the leg. A foot that does not hang under its own
+    joint swings DOWN as well as up, which sinks a planted clip below the row the
+    character was drawn standing on, because `plant` floors a clip at its
+    deepest pose."""
+    built = rig_of(_humanoid_with_leg_band(32, 14, 12), facing="right")
+    for role in ("leg_near", "leg_far"):
+        leg = built.first_role(role)
+        if leg is None:
+            continue
+        assert leg.box[0] <= leg.pivot[0] <= leg.box[2] - 1, (role, leg.pivot, leg.box)

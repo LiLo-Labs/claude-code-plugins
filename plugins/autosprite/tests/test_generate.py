@@ -282,3 +282,29 @@ def test_frames_are_aligned_by_the_floor_not_by_the_box():
                                                    floor=floor))
         feet.append(int(np.nonzero(mask.any(axis=1))[0].max()))
     assert feet[0] == feet[1]
+
+
+def test_a_frame_that_reduces_to_nothing_is_dropped():
+    """The box guard is not enough on a real video.
+
+    Once the background removal stops working -- which is the moment the model
+    changes the backdrop, part-way through most clips -- the content box becomes
+    the whole frame, so the crop is scaled from hundreds of pixels of background
+    and the paste offset goes negative. The sprite comes back holding nothing.
+    It is not `None`, so it passes every downstream check and becomes a fit
+    target no pose can ever match, and `fit` then reports agreement 0.00 on it,
+    which reads as a rig that cannot reach the pose.
+    """
+    art = source()
+    # A frame the background removal only PARTLY cleared: the character down in
+    # one corner and a single stray survivor far away, which balloons the content
+    # box to most of the frame. Scaled by a factor calibrated on a frame that
+    # cleared properly, the crop is then mostly transparent and the window that
+    # lands on the sprite's own grid catches none of the character.
+    frame = np.zeros((64, 64, 3), np.uint8)
+    frame[40:52, 4:12] = (200, 30, 30)
+    frame[1, 60] = (30, 200, 30)
+    assert generate.to_sprite(frame, art, scale=6.0, floor=14) is None
+    # The same frame measured against itself still comes back: the guard rejects
+    # an empty result, not a difficult frame.
+    assert generate.to_sprite(frame, art) is not None
