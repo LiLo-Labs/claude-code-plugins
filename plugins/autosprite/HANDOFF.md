@@ -1436,6 +1436,75 @@ probably wrong:
 
 ## Dead ends — measured, not guessed
 
+### Segmenting a limb by the shading crease the artist drew — the third rig fix, refuted
+
+**The most promising idea tried here, built end to end, and it does not pay.**
+Recorded in full because it will be thought of again, and because the reason it
+fails is not the reason you would guess.
+
+The complaint it answers is real and is the one a viewer makes: on the corpus
+knight, `torso` contains both pauldrons, both sleeves and the top of each boot,
+while each `arm` is a **5x4 chip of the outer mitten** and each `leg` is a boot
+tip. The walk then swings two chips and rotates the shoulders with the chest.
+`core_and_limbs` is right about the pixels and blind above them — it keeps only
+the rows where the silhouette parts into three spans, and the knight's parts on
+three rows out of twelve.
+
+But the boundary is not missing from the picture, only from its outline. A pixel
+artist separates two overlapping parts with a crease a shade darker than either.
+On the knight it runs unbroken from the shoulder down to the row where the arm
+finally clears the body — two of its eight rows are pure black and one is a hole
+right through the sprite:
+
+```
+     01234567890123456789012345      cols 9-10 and 20-21 are the creases
+ 15  ....abeefdbdaaaaaaaadbdfee      b = luminance  91
+ 17  ...aggdffbdfeeffffeefdbffd      d = luminance 122
+ 19  ...adbbgabdffeeffeeffdbahh      f = luminance 152
+ 21  ...aefffa.abddfddfddba..ad      e = luminance 193
+```
+
+So: cheapest 8-connected path from a column the silhouette PROVED is a boundary,
+climbing to the shoulder, paying each pixel's luminance to pass through it and a
+`drift` to step sideways, forbidden to leave the art (or the black outline —
+the cheapest dark line on any sprite — swallows it), and stopping on the first
+row where its own pixel is no darker than that row's median. Parts became
+`(y, x0, x1)` spans on `Part.region`, honoured through the same `_reach` hook
+the spinner disc already used, so ownership stayed a total function and REST
+stayed byte-exact.
+
+**It works as computer vision.** The seam lands on the artist's crease pixel for
+pixel, symmetrically, over a `drift` plateau from 20 to 60. The parts it cuts
+are visibly arms — a pauldron tapering into a mitten — instead of chips.
+
+**It measures worse, and the artist's own pixels say why.** Against the knight's
+three front-walk frames, at matched coverage:
+
+| rig | best motion | error at matched coverage |
+|---|---|---|
+| shipped (chips) | arm `dx` | **25.5%** |
+| seam arms, run to the shoulder | arm `dx` | 46.7% |
+| seam arms, self-terminating | arm turns, full swing | 27.6% |
+| seam arms + seam legs | arm turns x0.80 | 30.2% |
+
+The artist moves **nothing above row 17**. The pauldron is anatomically part of
+the arm and they animate it as part of the body — armour bolted to a shoulder
+does not swing. A segmentation that is right about anatomy is not automatically
+right about animation, and this is the cleanest example of that in the project.
+
+**And it fires on 1 of 28 corpus assets.** The start column has to be *proved*,
+which needs the silhouette to part into three spans — left arm, torso, right
+arm. That happens on a character drawn face-on and essentially never on one in
+profile, where the near arm hides the far one and the silhouette parts into two.
+The character the seam would help most is the one it cannot start on.
+
+Two things to take from it. The seam finder itself is sound and cheap, and if a
+use is found where the start column comes from somewhere else — a vision model's
+box, a user's click — it is forty lines. And "the arms barely separate from the
+body" is still the honest note to give the user, because the information a rig
+needs here is about how the character is BUILT, not how it is drawn.
+
+
 ### Giving a sliver arm the outer-strip fallback instead
 
 **Found by the vision critic, and the measurement said no.** The first case

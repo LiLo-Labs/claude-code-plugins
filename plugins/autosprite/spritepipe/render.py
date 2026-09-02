@@ -12,6 +12,7 @@ box afterwards, so the margin costs nothing in the output.
 """
 
 import copy
+import math
 
 import numpy as np
 from PIL import Image as PILImage
@@ -184,6 +185,105 @@ def _reconnect(frame, outvoted, whole=True):
     return out
 
 
+# How differently the two ends of a part must move before its transform is worth
+# drawing as a transform. Below this the deformation reshuffles pixels inside
+# the cells they already occupy.
+#
+# One pixel is not a taste. It is the point below which NO TWO PIXELS of the
+# part move differently at all, so whatever the matrix says, the part cannot
+# turn, squash or shear -- it can only be resampled. Larger thresholds were
+# measured and the whole corpus says one:
+#
+#     LEGIBLE   mass error, mean   footprint vs the artist, mean
+#     off               11.46%                  31.08%
+#     1.0               10.11%                  30.89%     <- better on both
+#     1.5                9.92%                  31.08%
+#     2.0                9.14%                  31.22%
+#     3.0                9.28%                  31.49%     and sheds more
+#
+# Past a pixel it starts buying mass with fidelity: a 1.5px squash on a 20px
+# character IS visible, and quantising it away flattens the anticipation out of
+# a jump. One pixel is the only value that is strictly better than doing
+# nothing, which is why it is the one here.
+LEGIBLE = 1.0
+
+
+def _legible(layer, matrix, floor=None):
+    """`matrix`, or the whole-pixel move it amounts to on art this small.
+
+    A pixel artist never rotates a five-pixel arm. They redraw it, and if the
+    turn is small what they redraw is the same arm one pixel over. We cannot
+    redraw, so the honest choice is between the two things we CAN do, and for a
+    long time this picked the wrong one.
+
+    Rotating a part is only animation if the part's ends end up in different
+    places. Take the corners of the art's own bounding box, push them through
+    the transform, and ask how far apart their displacements are. That spread is
+    what a viewer reads as "it turned":
+
+    * Under a pixel, no two pixels of the part move differently at all. The
+      rotation cannot show; all it does is resample.
+    * One to two pixels, it shows as a single staircase step somewhere along the
+      part, in a different place each frame. On a 5x4 arm that is not an arm
+      turning, it is an arm with a chip out of it that moves around.
+    * Past two it starts to read, and past four it plainly does.
+
+    Below the floor the part instead moves by its centroid's displacement,
+    ROUNDED TO WHOLE PIXELS -- the frame the artist would have drawn. Rounding
+    matters as much as the substitution: a part slid 0.4 of a pixel is a part
+    that did not move, and eight frames of that is a limb that flickers between
+    two positions while the character stands still.
+
+    Three things fall out of this that are worth having on their own. The rest
+    pose stays byte-exact, because an identity matrix has zero spread and a zero
+    centroid move, which is the identity again. A whole-pixel translation is a
+    COPY, so a part that takes this path is not resampled at all and keeps every
+    one of its pixels exactly. And it is size-relative without a size in it: the
+    same six-degree shoulder turn is drawn on a 64px character, whose arm is
+    long enough to show it, and quantised on a 16px one, whose arm is not.
+    """
+    floor = LEGIBLE if floor is None else float(floor)
+    if floor <= 0.0:
+        return matrix
+    mask = img.alpha_mask(layer)
+    if not mask.any():
+        return matrix
+    rows, columns = np.nonzero(mask)
+    y0, y1 = float(rows.min()), float(rows.max()) + 1.0
+    x0, x1 = float(columns.min()), float(columns.max()) + 1.0
+    corners = np.array([[x0, y0, 1.0], [x1, y0, 1.0],
+                        [x0, y1, 1.0], [x1, y1, 1.0]]).T
+    moved = (matrix @ corners)[:2] - corners[:2]
+    spread = max(float(np.hypot(*(moved[:, i] - moved[:, j])))
+                 for i in range(4) for j in range(i + 1, 4))
+    if spread >= float(floor):
+        return matrix
+    centre = np.array([columns.mean(), rows.mean(), 1.0])
+    shift = (matrix @ centre)[:2] - centre[:2]
+    out = np.array(skeleton.IDENTITY, dtype=float)
+    out[0, 2], out[1, 2] = _whole(shift[0]), _whole(shift[1])
+    return out
+
+
+def _whole(value):
+    """`value` rounded the way `_transform_layer` itself rounds.
+
+    Not `round`. The resampler maps each output pixel back through the inverse
+    and takes the nearest source, which puts its ties DOWN: measured on a single
+    opaque pixel pushed through the real transform path, +0.5 moves it zero
+    pixels, +0.6 moves it one, -0.5 moves it minus one. Python's `round` is
+    banker's and disagrees at every half.
+
+    Matching matters because both paths exist in one sheet. A part whose
+    transform is quantised here and the same part a frame later, whose transform
+    was legible enough to draw, must land in the same place for the same
+    displacement -- otherwise the limb gains a pixel of travel on exactly the
+    frames the guard fires on, which is a jitter that no amount of tuning the
+    animation removes.
+    """
+    return float(math.ceil(float(value) - 0.5))
+
+
 def _transform_layer(layer, matrix, size, supersample=SUPERSAMPLE):
     """Apply a world transform to one part's layer.
 
@@ -274,7 +374,8 @@ def render_pose(cutout, pose, margin=0):
         layer = img.blank(height, width)
         img.paste(layer, pixels,
                   sprite.origin[0] + margin, sprite.origin[1] + margin)
-        matrix = shift @ transforms[sprite.name] @ np.linalg.inv(shift)
+        matrix = _legible(layer,
+                          shift @ transforms[sprite.name] @ np.linalg.inv(shift))
         moved = _transform_layer(layer, matrix, (width, height))
         img.paste(frame, moved, 0, 0)
 
