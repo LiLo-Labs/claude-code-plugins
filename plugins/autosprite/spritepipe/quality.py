@@ -168,10 +168,10 @@ def _aligned(frames, offset):
     horizontal -- so the character sits `margin` pixels in from the corner,
     while the art it is judged against is trimmed flush. Comparing them as given
     measures one picture against a SHIFTED COPY of another and reports nonsense
-    with total confidence: on a flag it turns a real 21.4% into 84.0%, and
+    with total confidence: on a flag it turns a real 11.0% into 79.5%, and
     nothing about that number looks wrong. The sensitivity is brutal and worth
-    knowing -- one pixel out either way, on the same flag, reads 27.2% and
-    25.4%.
+    knowing -- one pixel out either way, on the same flag, reads 16.6% and
+    15.7%.
 
     The offset is not inferable -- a frame's own content box moves with the
     animation -- so the caller passes it, and it is exactly the `margin` they
@@ -224,9 +224,9 @@ def footprint(frames, rest, reference_frames, offset=(0, 0)):
     **So this number means nothing on its own.** A clip that moves ten pixels,
     all of them right, scores 0% and is not an animation. Read it with
     `coverage` below and compare at MATCHED coverage, or the metric rewards
-    doing less: on a flag, damping the wave took the error from 21.4% to 19.7%
-    by moving a third fewer pixels than the artist does, and on a 15px character
-    it reached 0.0% while moving 22 pixels against the artist's 102.
+    doing less: on a 15px character, damping the walk reaches 0.0% error while
+    moving 22 pixels against the artist's 102, and the error rises with coverage
+    on every clip and character measured.
 
     Two rests, not one, is the other way to get a meaningless answer. Both
     footprints have to be measured from the SAME pose. Every clip here starts
@@ -242,8 +242,8 @@ def footprint(frames, rest, reference_frames, offset=(0, 0)):
     Pass `offset` -- the margin `frames` were rendered with -- or the comparison
     is silently meaningless. Rendered frames carry a margin and the art they are
     judged against does not, so measuring them as given compares a picture with
-    a SHIFTED COPY of another one; on a flag that reports 84.0% where the truth
-    is 21.4%, and the number looks entirely plausible. It is a parameter rather
+    a SHIFTED COPY of another one; on a flag that reports 79.5% where the truth
+    is 11.0%, and the number looks entirely plausible. It is a parameter rather
     than something inferred because a frame's own content box moves with the
     animation, so there is nothing honest to infer it from.
     """

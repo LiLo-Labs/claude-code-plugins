@@ -44,10 +44,11 @@ it is a **permutation**: every output pixel is an input pixel moved by a whole
 number of rows, so there is nothing to sample, average or invent.
 
 > Measured on a CC0 flag against the artist's own sixteen frames of the same
-> wave: of the pixels `wave` disturbs, the artist never touches **21.4%**.
-> Leaning the same cloth rigidly with `shear` gets **68.2%**, and adding a lean
-> on top of the wave gets 63.6% while moving more than twice as many pixels — so
-> cloth is not a thing that leans. Cutting the
+> wave: of the pixels `wave` disturbs, the artist never touches **11.0%**, while
+> disturbing 5977 pixels against the artist's 6608. Leaning the same cloth
+> rigidly with `shear` gets **66.3%**, and adding a lean on top of the wave gets
+> 59.2% while moving more than twice as many pixels — so cloth is not a thing
+> that leans. Cutting the
 > cloth into strips and travelling a wave across them with `spread` *tears*, at
 > 31–61% shed, however many strips.
 
@@ -479,6 +480,17 @@ It does not check whether the parts are *named* right. A rig that calls the head
 a leg reassembles perfectly, because reassembly is about which pixels went where,
 not what they were called. Only watching the preview GIF answers that.
 
+**The gate cannot see what `ingest` already removed.** `flood_background` used
+to mark every border pixel as background before looking at what colour it was —
+so a sprite cropped flush to its own art lost that art, and nothing downstream
+could tell, because `REST` proves the parts reassemble into the *ingested*
+source. On the corpus that silently deleted the top of a knight's helmet, the
+soles of a hero's boots, and — because its blue runs to the left and right edges
+— **the entire blue field of a flag**, 17796 pixels of 26112. Every flag
+measurement in this project was taken against the white Antarctica shape on
+nothing. The background is now the colour that *dominates* the border, and a
+border pixel seeds only if it matches.
+
 **The sharpest case of that is `--facing`.** A subject drawn facing left and
 rigged as right-facing has *every part box mirrored onto the wrong end of it* —
 the head box over the rump, the tail box over the head, so `tail angle` swings
@@ -526,7 +538,7 @@ The two walks agreeing to a tenth of a point across different sizes and
 different anatomies — 26.4% on a 46px biped, 26.5% on a 33px quadruped — is the
 best evidence available that this measures the *clip* rather than the subject.
 
-For scale, the flag's `ripple` — the best-measured subject clip here — is 21.4%.
+For scale, the flag's `ripple` — the best-measured subject clip here — is 11.0%.
 The forest run beats it comfortably.
 
 **Matched error tracks size** — 45–46px at 11.9–26.4%, 33px at 26.5–31.6%, 15px

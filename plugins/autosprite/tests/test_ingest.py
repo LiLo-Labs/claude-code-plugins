@@ -97,3 +97,58 @@ def test_a_gradient_background_does_not_eat_the_character(tmp_path):
     reference = ingest.ingest(path)
     kept = int(image.alpha_mask(reference.pixels).sum())
     assert kept >= int(image.alpha_mask(art).sum()) * 0.95
+
+
+# ---------------------------------------------------------------------------
+# A sprite cropped flush to its own art has ART on the border.
+# ---------------------------------------------------------------------------
+
+def test_art_that_touches_the_border_is_not_eaten_as_background():
+    """A seed used to be marked background for WHERE it was, before any look at
+    what colour it was. On a CC0 32x32 knight packed helmet-on-row-0 to
+    boots-on-row-31 that silently deleted 37 pixels, and nothing downstream
+    could tell: every check in this plugin proves the parts reassemble into the
+    INGESTED source, which no longer had them."""
+    art = image.blank(12, 12)
+    art[:, :] = [255, 0, 255, 255]                       # magenta everywhere
+    art[0:12, 4:8] = [40, 60, 90, 255]                   # a bar touching top AND bottom
+    cleaned, _how = ingest.remove_background(art, tolerance=12)
+    kept = image.alpha_mask(cleaned)
+    assert int(kept.sum()) == 12 * 4                     # the whole bar survives
+    assert kept[0, 5] and kept[11, 5]                    # including both ends
+
+
+def test_a_field_that_reaches_the_edge_is_not_flooded_away():
+    """The failure at scale: a CC0 flag whose blue field runs to the left and
+    right edges had its ENTIRE field removed -- 17796 pixels of 26112 -- leaving
+    only the white shape in the middle, and every measurement taken against that
+    flag was taken against a picture with no flag in it."""
+    art = image.blank(20, 30)
+    art[0:3, :] = [0, 128, 128, 255]                     # background band, top
+    art[17:20, :] = [0, 128, 128, 255]                   # and bottom
+    art[3:17, :] = [57, 124, 206, 255]                   # the field, edge to edge
+    art[7:13, 10:20] = [255, 255, 255, 255]              # a shape on it
+    cleaned, _how = ingest.remove_background(art, tolerance=12)
+    kept = image.alpha_mask(cleaned)
+    assert int(kept.sum()) == 14 * 30                    # the whole field survives
+    assert not kept[0, 0] and not kept[19, 29]           # the bands are gone
+
+
+def test_the_background_is_still_removed_when_it_surrounds_the_art():
+    """The ordinary case has to keep working."""
+    art = image.blank(16, 16)
+    art[:, :] = [255, 255, 255, 255]
+    art[4:12, 4:12] = [200, 40, 40, 255]
+    cleaned, _how = ingest.remove_background(art, tolerance=12)
+    assert int(image.alpha_mask(cleaned).sum()) == 64
+
+
+def test_the_border_colour_is_the_one_that_dominates_it():
+    art = image.blank(10, 10)
+    art[:, :] = [7, 7, 7, 255]
+    art[0:10, 3:5] = [200, 0, 0, 255]
+    import numpy as np
+    rgb = art[:, :, :3].astype(np.int16)
+    dominant, seen, edge = ingest._border_colour(rgb, 10, 10)
+    assert list(dominant) == [7, 7, 7]
+    assert seen < edge

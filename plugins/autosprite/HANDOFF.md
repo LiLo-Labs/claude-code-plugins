@@ -365,6 +365,68 @@ invariant, and the fallback hiding the gap was silent.
   what it moved and the build warns. Instrumented across six sprites and all
   sixteen animations: **zero**.
 
+## The ingest was deleting art, and one asset had no art left
+
+`flood_background` seeds from the border and floods inward. It marked **every
+border pixel as background before looking at what colour it was**:
+
+```python
+for y, x in _border_seeds(height, width):
+    background[y, x] = True      # regardless of its colour
+```
+
+A seed was background for WHERE it sat, not what it was -- and a sprite cropped
+flush to its own art has art on the border. Three of the twenty-eight corpus
+assets were losing pixels to this, and one of them was losing its subject:
+
+| asset | kept before | kept after | what was being deleted |
+|---|---|---|---|
+| `topdown-eldiran-rpg` | 542 | **574** | the top of the helmet and the sole of each boot, on a 32x32 knight packed edge to edge |
+| `grafxkid-oldhero` | 131 | **138** | the soles of his boots, on the bottom row |
+| `subject-flag-sbs` | 8316 | **24669** | **the entire blue field of the flag** |
+
+The flag is the one that matters. Its blue runs to the left and right edges, so
+every blue border pixel was an unconditional seed and the flood ran through the
+whole field. What the pipeline had been animating, and what every flag
+measurement in this project was taken against, was **the white Antarctica shape
+on nothing** -- 8316 pixels of a 26112-pixel image, with 17796 pixels of flag
+deleted before anything else ran.
+
+Nothing downstream could catch it. `REST` proves the parts reassemble into the
+INGESTED source, and the ingested source no longer had them. `PALETTE` proves
+every output colour came from the input, and the deleted colours were simply not
+in the input any more. The flag sat in every sweep as a clean asset.
+
+The fix is small: the background is the colour that **dominates the border**, and
+a border pixel seeds only if it is within tolerance of that. A sprite sheet's
+background is one flat colour behind everything; art that reaches the frame edge
+is a short run of some other colour, and it is a run of ART.
+
+### What it cost, and what it corrected
+
+The corpus went from **1 asset with a problem to 2**. `grafxkid-oldhero` --
+already the second-worst asset, the corpus's smallest character at 10x17 -- got
+the soles of its boots back and its worst clip went 3.88% -> **10.10%**, because
+there is now more boot to come away. That is the right trade: the pipeline was
+hiding a rigging weakness by discarding the pixels that expose it, and the build
+already reports this one by name, frame and part, and says the rig is likely
+wrong for the character. `subject-flag-sbs` went the other way, 1.63% -> 0.24%.
+
+Every flag figure in this file, the README, four docstrings, the PR description
+and a published gallery was measured against a flag with no flag in it, and all
+of them are now re-derived. The conclusions all survived and got stronger:
+
+| driving a flag's cloth | before, on the mutilated flag | re-measured |
+|---|---|---|
+| the artist's own frames disturb | 4594 px | **6608 px** |
+| **`wave`** | 21.4%, moving 3822 | **11.0%, moving 5977** |
+| `shear` instead | 68.2% | **66.3%** |
+| `wave` + a lean | 63.6% | **59.2%** |
+
+`wave` now beats `shear` six-fold rather than three-fold, and covers 0.90 of what
+the artist disturbs. One conclusion did have to change: the reason a bigger wave
+is a dead end. See that section.
+
 ## The character clips had never been measured, and now they have
 
 Sixteen of the thirty clips here are character clips, and until now not one had
@@ -402,9 +464,9 @@ anatomies -- 26.4% on a 46px biped, 26.5% on a 33px quadruped -- is the best
 evidence available that the method measures the clip rather than the subject.
 
 For scale: the flag's `ripple`, the best-measured subject clip in the plugin, is
-21.4%. The forest run at 4.8% shipped beats it comfortably; the brawler's idle
-is three times worse than it, and moves half as much as it should while being
-two-thirds wrong.
+11.0%. The forest run at 4.8% shipped beats it; the brawler's idle is five
+times worse than it, and moves half as much as it should while being two-thirds
+wrong.
 
 ### The idle: measured, fixed, and the fix argued down twice on the way
 
@@ -412,7 +474,8 @@ The clip was a one-pixel bob and nothing else -- no squash at all -- while the
 brawler's own idle redraws 109 of his 156 pixels. Adding a **widen-and-settle**
 to the root track took it from 66.0% at 0.49 coverage to **58.3% at 0.66** on
 the brawler and from 47.1% at 0.47 to **44.5% at 0.70** on the horse: error down
-and coverage up on both, corpus unchanged at 1 of 28, all 694 tests green.
+and coverage up on both, corpus unchanged (1 of 28 at the time; see the ingest
+bug below, which later moved it to 2), all tests green.
 
 It goes in the ROOT track rather than a `torso` one, because a root track's
 squash already composes onto whatever part is the root -- the torso of a
@@ -763,17 +826,31 @@ silently.
 
 Each was cheap, and each would have been a plausible thing to build.
 
-**A longer or shorter cloth wave.** The flag under-moves the artist by 17%
-(3822 px against 4594), and the misses are 87% concentrated in the top and
-bottom fifths of the cloth. So: more amplitude, or a different wavelength?
-Neither. Sweeping amplitude 4 -> 8 -> 12 -> 18 takes the footprint error from
-21.4% to 67.0% while the *missed* count barely moves (1589 -> 1531): moving more
-does not reach the artist's pixels, it only adds pixels the artist never
-touches. And sweeping the wave from 1 to 3 periods across the part changes the
-error by a fifth of a point at every amplitude -- so a `wave_length` channel
-would have been a dial that provably does nothing. The residual is a change of
-SHAPE at the cloth's edges, which a column permutation cannot express, and that
-limit stands where it was.
+**A longer or shorter cloth wave.** The flag disturbs 5977 pixels against the
+artist's 6608 -- 0.90 coverage -- and the misses are 83% concentrated in the top
+and bottom fifths of the cloth. So: more amplitude, or a different wavelength?
+
+A **different wavelength does nothing at all**. One, one and a half, two and
+three periods across the part give 11.0%, 11.0%, 11.0% and 11.0%, moving 5977,
+5972, 5982 and 5960 pixels. A `wave_length` channel would have been a dial that
+provably does not move.
+
+**More amplitude does reach those pixels**, and costs more than it buys:
+
+| amplitude | error | pixels moved | of the artist's, missed |
+|---|---|---|---|
+| 2 | 4.7% | 3779 | 3005 |
+| **4, what ships** | **11.0%** | **5977** | **1288** |
+| 8 | 30.6% | 9335 | 125 |
+| 12 | 44.7% | 11887 | 38 |
+| 18 | 56.2% | 15043 | 25 |
+
+At 8 the crest reaches almost everything the artist touches -- 125 pixels missed
+of 6608 -- and is wrong about three times as often, disturbing 1.41 of what the
+artist disturbs. Amplitude 4 is the matched-coverage point and the best error
+there, so it stays. (An earlier telling of this said the missed count "barely
+moves"; that was measured on a flag whose blue field the ingest was deleting,
+and it is not true of the real one.)
 
 **A stillness check, to catch a windmill without ground truth.** The windmill's
 rotating roof was caught only by `footprint` and by the critic. The hypothesis:
@@ -886,18 +963,17 @@ On the CC0 flag, against the artist's own sixteen frames:
 
 | | footprint error | pixels moved |
 |---|---|---|
-| `ripple` as written | 21.4% | 3822 |
-| + turbulence 1.0 on `wave` | 20.9% | 3788 |
-| + turbulence 2.0 on `wave` | 23.0% | 3807 |
-| + turbulence 1.0 on `wave_phase` | **19.7%** | **3076** |
-| + turbulence 1.0 on `angle` | 28.5% | 4252 |
+| `ripple` as written | 11.0% | 5977 |
+| + turbulence 1.0 on `wave` | 10.9% | 5930 |
+| + turbulence 2.0 on `wave` | 12.4% | 6100 |
+| + turbulence 1.0 on `wave_phase` | **10.4%** | **5029** |
+| + turbulence 1.0 on `angle` | 18.2% | 6905 |
 
-The artist's own frames disturb **4594** pixels, so `ripple` already under-moves
-by 17%. The best-looking row is therefore a trap: `wave_phase` scores lowest by
-moving a third less than the artist, and `footprint` is one-sided by design --
-it punishes moving the wrong pixels and not moving too few. Same-coverage
-against same-coverage, turbulence is worth half a point on 3800 pixels, which is
-about nineteen pixels and inside the noise.
+The artist's own frames disturb **6608** pixels. The best-looking row is a trap:
+`wave_phase` scores lowest by moving 16% less than `ripple` already does, and
+`footprint` is one-sided by design -- it punishes moving the wrong pixels and
+not moving too few. Same-coverage against same-coverage, turbulence is worth a
+tenth of a point on 5977 pixels, which is six pixels and inside the noise.
 
 So it is **not** applied to `ripple`, `sway` or `gust`. It ships applied only to
 the two clips where a measurement supports it, both for the discrete-channel
@@ -1087,26 +1163,27 @@ which is the strongest palette claim in the vocabulary.
 
 | driving a flag's cloth | worst-frame shed | pixels moved | of what we disturb, the artist never touches |
 |---|---|---|---|
-| the artist's own sixteen frames | -- | 4594 | -- |
-| `shear`, leaning it rigidly | 0.07% | 6803 | 68.2% |
-| **`wave`, amplitude 4** | **0.00%** | **3822** | **21.4%** |
-| `wave` + a lean on top | 0.00% | 8558 | 63.6% |
+| the artist's own sixteen frames | -- | 6608 | -- |
+| `shear`, leaning it rigidly | 0.00% | 11188 | 66.3% |
+| **`wave`, amplitude 4** | **0.00%** | **5977** | **11.0%** |
+| `wave` + a lean on top | 0.00% | 13714 | 59.2% |
 
 So cloth is not a thing that leans: adding a shear to the wave moves more than
 twice as many pixels for a worse score. `ripple` and `sway`'s surface half now
 drive `wave`.
 
 Every row is rendered at `render.suggest_margin` and measured at that same
-offset, and the answer is margin-independent -- 0, 2, 8, 16, 32 and 114 all give
-21.4% for `wave`, which is the check that the alignment is right rather than
-lucky.
+offset, and the answer is margin-independent -- 2, 8, 16, 32 and 114 all give
+11.0% for `wave` (a zero margin gives 12.0%, because a limb swung past the edge
+is clipped rather than misaligned), which is the check that the alignment is
+right rather than lucky.
 
 ### A measurement error worth more than the measurement
 
 `render_pose` draws into a canvas with a MARGIN and the art it is judged
 against is trimmed flush, so `quality.footprint` was comparing a picture with a
-*shifted copy* of another one. On this flag that turns a real 21.4% into 84.0%,
-and nothing about 84% looks wrong -- it agrees with the story I already
+*shifted copy* of another one. On this flag that turns a real 11.0% into 79.5%,
+and nothing about 79.5% looks wrong -- it agrees with the story I already
 believed, which is why the first round of flag numbers, reported at 70-79% in a
 commit message and in this file, all survived.
 
@@ -1114,8 +1191,8 @@ commit message and in this file, all survived.
 and 36% for `shear` -- were also wrong, were published in the README, in two
 docstrings, in the PR description and in a gallery, and stood for hours. They
 cannot be reproduced by ANY offset of the render they claim to describe: 113
-gives 27.2%, 114 gives 21.4%, 115 gives 25.4%. The correct pair is **21.4% and
-68.2%**, which makes the conclusion stronger than the wrong numbers did, and the
+gives 16.6%, 114 gives 11.0%, 115 gives 15.7%. The correct pair is **11.0% and
+66.3%**, which makes the conclusion stronger than the wrong numbers did, and the
 lesson sharper than the first telling of it: a measurement this sensitive is not
 finished when it stops looking wrong. It is finished when it is reproduced from
 scratch by a script that takes the render margin from the renderer, and when
@@ -1159,7 +1236,7 @@ Two changes, and the corpus needed both:
 |---|---|---|
 | `topdown-eldiran-rpg` | 7.14% | **0.00%** |
 | `creature-slime-andhegames` | 5.45% | **0.00%** |
-| assets with a problem | 3 of 28 | **1 of 28** |
+| assets with a problem | 3 of 28 | **2 of 28** (1 until the ingest fix below restored art that was being deleted) |
 
 The slime was fixed by the same change without being looked at: it is a 23x28
 blob with two three-pixel feet under a body they barely touch, which is the same
@@ -1206,7 +1283,7 @@ A prompt change is a code change and has to be measured the same way.
 hand-rigged as pole + cloth. There is no pole in that drawing -- the "pole" part
 was a 1%-wide sliver containing no pixels -- and the critic said so, and said the
 subject should be one part with a surface trait. Rigged its way: 0.00% shed
-both, footprint error 21.6% against 21.4%, 3817 against 3822 pixels disturbed.
+both, footprint error 11.2% against 11.0%, 5840 against 5977 pixels disturbed.
 **No measurement here can tell those two rigs apart.** The critic could.
 
 **And it confabulated, on the one kind of clip where nothing moves.** Shown a

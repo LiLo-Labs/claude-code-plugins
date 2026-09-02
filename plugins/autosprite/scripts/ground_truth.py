@@ -11,8 +11,8 @@ Three things this script insists on, each of which changed an answer:
 
 1. **The alignment is proved, not assumed.** The rest pose, rendered and placed
    back into the artist's coordinate space, must be byte-identical to the
-   source. Nothing is reported otherwise. A one-pixel error reads 27.2% where
-   the truth is 21.4%.
+   source. Nothing is reported otherwise. On a flag, one pixel out either way
+   reads 16.6% or 15.7% where the truth is 11.0%.
 2. **Both footprints from the same rest.** Our clips all start from the source
    image and an artist's strips usually do not, so their frame 0 counts as
    motion too. Getting this wrong reported `attack` at 78.9% where the parallel
