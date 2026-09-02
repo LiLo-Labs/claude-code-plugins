@@ -517,25 +517,39 @@ and every character measured -- `footprint` alone always favours doing less.
 **Shipped** is what a user actually gets, with the coverage beside it so it
 cannot be read alone; **matched** is how clips compare to each other.
 
-Ten clips across four characters, sorted by the comparable column:
+Twelve clips across five characters, sorted by the comparable column. **These
+are the numbers on the current head**; the table this replaces was measured
+before the joint collar, skinning, the legibility guard, the face-on walk fix and
+-- most importantly -- before `sumohulk` was found to be mis-faced, so every one
+of its rows in it was on a mirrored rig:
 
 | subject | clip | content height | shipped | coverage | matched |
 |---|---|---|---|---|---|
-| `platformer-forest-64` | run | 45 px | **4.8%** | 0.78 | **11.9%** |
-| `platformer-mv-male` | crouch | 46 px | 18.0% | 1.07 | **14.8%** |
-| `platformer-mv-male` | walk | 46 px | 26.4% | 1.00 | 26.4% |
-| `platformer-mv-male` | attack | 46 px | 36.5% | 1.50 | 21.1% |
-| `creature-horse-scratchio` | walk | 33 px | 24.7% | 0.81 | 26.5% |
-| `creature-horse-scratchio` | run | 33 px | 17.9% | 0.76 | 31.6% |
-| `platformer-sumohulk-16` | jump | 15 px | 47.1% | 1.72 | 34.2% |
-| `platformer-sumohulk-16` | walk | 15 px | 19.2% | 0.60 | 36.6% |
-| `creature-horse-scratchio` | idle | 33 px | 44.5% | 0.70 | **46.1%** |
-| `platformer-sumohulk-16` | attack | 15 px | 46.5% | 1.32 | 50.9% |
-| `platformer-sumohulk-16` | idle | 15 px | 58.3% | 0.66 | **63.2%** |
+| `platformer-forest-64` | run | 45 px | **4.5%** | 0.76 | **12.4%** |
+| `platformer-mv-male` | crouch | 46 px | 18.8% | 1.08 | **15.3%** |
+| `platformer-mv-male` | attack | 46 px | 36.7% | 1.51 | 21.4% |
+| `platformer-sumohulk-16` | walk | 15 px | 9.1% | 0.25 | 25.8% |
+| `topdown-eldiran-rpg` | walk | 32 px | 24.1% | 0.75 | 26.0% |
+| `creature-horse-scratchio` | walk | 33 px | 25.4% | 0.80 | 27.1% |
+| `platformer-mv-male` | walk | 46 px | 27.2% | 0.87 | 27.9% |
+| `platformer-sumohulk-16` | jump | 15 px | 41.5% | 1.45 | 28.7% |
+| `creature-horse-scratchio` | run | 33 px | 18.8% | 0.75 | 31.7% |
+| `platformer-sumohulk-16` | attack | 15 px | 42.0% | 1.03 | 42.0% |
+| `creature-horse-scratchio` | idle | 33 px | 44.0% | 0.72 | **46.1%** |
+| `platformer-sumohulk-16` | idle | 15 px | 59.4% | 0.63 | **61.1%** |
 
-The two walks agreeing to a tenth of a point at different sizes and different
-anatomies -- 26.4% on a 46px biped, 26.5% on a 33px quadruped -- is the best
-evidence available that the method measures the clip rather than the subject.
+An earlier revision of this file drew a conclusion from the two walks agreeing to
+a tenth of a point across a 46px biped and a 33px quadruped. **That coincidence
+is gone** -- 27.9% against 27.1% -- and the claim went with it. It was one
+decimal place of agreement between two numbers that have both since moved twice,
+which is not evidence of anything.
+
+A warning that has now caught the same asset twice: `truth.json` and the corpus's
+own `meta.json` each carry a `facing`, and until 2026-09-02 they DISAGREED about
+`sumohulk` -- `front` in one and `right` in the other. A corpus shed sweep and a
+ground-truth run were therefore rigging the same sprite two different ways, and
+any figure combining the two sources is suspect. They agree now; if a third
+source of facing ever appears, make them agree at the point of reading.
 
 For scale: the flag's `ripple`, the best-measured subject clip in the plugin, is
 11.0%. The forest run at 4.8% shipped beats it; the brawler's idle is five
