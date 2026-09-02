@@ -527,14 +527,14 @@ of its rows in it was on a mirrored rig:
 |---|---|---|---|---|---|
 | `platformer-forest-64` | run | 45 px | **4.5%** | 0.76 | **12.4%** |
 | `platformer-mv-male` | crouch | 46 px | 18.8% | 1.08 | **15.3%** |
-| `platformer-mv-male` | attack | 46 px | 36.7% | 1.51 | 21.4% |
+| `platformer-mv-male` | attack | 46 px | 30.7% | 1.38 | 19.9% |
 | `platformer-sumohulk-16` | walk | 15 px | 9.1% | 0.25 | 25.8% |
 | `topdown-eldiran-rpg` | walk | 32 px | 24.1% | 0.75 | 26.0% |
 | `creature-horse-scratchio` | walk | 33 px | 25.4% | 0.80 | 27.1% |
 | `platformer-mv-male` | walk | 46 px | 27.2% | 0.87 | 27.9% |
 | `platformer-sumohulk-16` | jump | 15 px | 41.5% | 1.45 | 28.7% |
 | `creature-horse-scratchio` | run | 33 px | 18.8% | 0.75 | 31.7% |
-| `platformer-sumohulk-16` | attack | 15 px | 42.0% | 1.03 | 42.0% |
+| `platformer-sumohulk-16` | attack | 15 px | 40.6% | 0.97 | 40.6% |
 | `creature-horse-scratchio` | idle | 33 px | 44.0% | 0.72 | **46.1%** |
 | `platformer-sumohulk-16` | idle | 15 px | 59.4% | 0.63 | **61.1%** |
 
@@ -787,6 +787,118 @@ over-scaled for small sprites". The second character refuted it: at full scale
 `mv-male` disturbs 535 pixels against the artist's 536, so its motion is already
 the right size, and the brawler at matched coverage wants **more** motion, not
 less. One data point would have shipped a scaling law that was wrong.
+
+## The idle weight shift: a twenty-point win that tears the character in half
+
+The `idle` is the worst clip in the library and has been every time this file
+has been asked. Reading the brawler's own idle frame by frame says why, and the
+observation is right: **a standing biped shifts its weight**, and this clip has
+no lateral motion in it at all. His body -- head, chest, belt -- travels one
+pixel and then two sideways while his feet stay in their columns, and his mass
+goes UP, 156 pixels to 163, where ours falls to 138. At 0.63 coverage the clip
+is plainly under-moving.
+
+Authored as `torso dx 3`, that reads as a thirteen-point win: **59.4% error at
+0.63 coverage to 45.8% at 0.98**, the shape a real fix has, with the horse
+untouched because she roots on a `body` and not a `torso`.
+
+**It is wrong, and the way it is wrong is instructive.** The legs are CHILDREN
+of the torso in every humanoid rig the template rigger builds, so a torso `dx`
+carries them bodily. The whole character skates:
+
+| foot columns, per frame | frame 1 | 2 | 3 | 4 |
+|---|---|---|---|---|
+| the artist's own brawler | (2,11) | (2,12) | (2,11) | -- |
+| `mv-male` as shipped | (7,20) | (7,20) | (7,20) | (7,20) |
+| `mv-male` with `torso dx 3` | (7,20) | **(9,22)** | **(11,24)** | **(9,22)** |
+
+The artist's left foot edge never moves at all; only his right edge grows by
+one, which is a foot taking weight. Ours travels four pixels and comes back --
+a camera pan, scored as a weight shift because `footprint` rewards overlap and
+the artist does disturb those columns. It scores well on the 15px brawler and
+only on him, because at 15px three authored pixels scale to 1.4 and round to
+one; every character above about 20px gets the skate at full size.
+
+### Countering on the legs plants the feet, and tears the waist instead
+
+The construction that is actually right: shift the torso and counter on the
+legs. Skinning damps a part's pose by distance from its pivot, so a leg `dx` of
+-k moves the foot by -k and leaves the hip where the torso put it. Body
+travels, feet stay. Expressing "the legs of something that HAS a torso" needed
+one new thing, and it is worth recording as a mechanism even though nothing
+ships using it: a `under:` selector term, ANDed with the others --
+`"trait:support under:torso"`. A horse's hind legs and a person's legs are both
+`leg_near` and both `support`; the only thing separating them is what they hang
+off, so a selector that cannot say `under:` cannot address one anatomy without
+addressing the other.
+
+It works exactly as designed. Feet planted on all four bipeds, the horse byte
+for byte identical at every amount, and the brawler:
+
+| brawler `idle` | shipped | coverage | matched |
+|---|---|---|---|
+| as it ships | 59.4% | 0.63 | 61.1% |
+| torso dx 2, legs counter | 48.3% | 0.82 | 51.2% |
+| torso dx 3, legs counter | 45.3% | 0.87 | 41.4% |
+| **torso dx 4, legs counter** | **41.1%** | **1.03** | **41.1%** |
+
+Twenty points at matched coverage, on the worst clip in the library, with the
+feet provably still. **Rendered at 14x it is unusable.** The torso translates
+rigidly -- a `dx` has zero corner spread, so `_legible` hands it a whole-pixel
+translation and skinning never runs on it -- so the torso's bottom edge slides
+off the hips it sits on and its outline pixels cut a dark diagonal gash across
+the character's waist. At `dx 3` `mv-male`'s near leg is a brown wedge floating
+free of her body. At `dx 2`, where her feet do not move by even one column, the
+gash is still there.
+
+So it is refused at every amount tested, in both constructions, and the `under:`
+selector is reverted with it -- shipping an unused mechanism is a mistake this
+file has already recorded twice.
+
+**What it costs to know this: the metric said +20 and the eye said torn in
+half, and that is now seven times in this project that they disagreed and the
+eye was right every time.** The lesson has stopped being about any one clip.
+`footprint` cannot see connectivity, `shed` cannot see a gash that stays
+8-connected, and neither can see that a silhouette is a person. A number is
+only ever a reason to go and look.
+
+What the idle actually wants is unchanged and still open: it under-moves at 0.63
+coverage and a biped really does shift its weight. The route that is not blocked
+is making a translation skinnable -- the torso leaning over a hip that stays put
+-- which is a `render.py` question about `_legible`, not a keyframe.
+
+## The attack's torso lean, halved, with the third reading it was waiting for
+
+Damping this was written up and left unapplied once because it improved two
+readings of three and made the 15px brawler worse. Re-measured independently on
+the current pipeline it improves **both characters that have an artist's strike,
+on both readings**:
+
+| `attack` | brawler | coverage | brawler matched | `mv-male` | coverage | `mv-male` matched |
+|---|---|---|---|---|---|---|
+| lean -8 / +10 / +11 | 42.0% | 1.03 | 42.0% | 36.7% | 1.51 | 21.4% |
+| **halved, -4 / +5 / +5.5** | **40.6%** | **0.97** | **40.6%** | **30.7%** | **1.38** | **19.9%** |
+
+Half is the brawler's matched-coverage point. Going on to zero buys `mv-male`
+another nine points and drops the brawler to 0.83 coverage, which is
+`footprint`'s one-sidedness paying itself rather than a better animation.
+
+The principle is what justifies the direction and it did not come from the
+number: **in a side view an in-plane torso rotation is a lean, not a coil.** A
+real strike turns the torso about the vertical axis, which a 2D side view cannot
+show at all, so a large in-plane rotation models the wrong thing -- and the
+critic, shown the frames and told nothing, called it "the figure topples
+sideways rather than driving a blow".
+
+Cost, swept over the whole corpus on the only clip that changed:
+`platformer-grass-prowne` goes from 5.00% to 5.23% pre-repair shed and
+`grafxkid-oldhero` picks up 0.13% where it had none. The build takes **both to
+0.00%** -- the first by the repair loop, which was already firing on it before
+this change and damps the arm swing to 40%, and the second without needing a
+repair at all.
+
+This is the one change of the two that ships. Applied, the other ten
+ground-truth clips are byte for byte unchanged and all 761 tests pass.
 
 ## Weather, and a class of motion that is passage rather than movement
 

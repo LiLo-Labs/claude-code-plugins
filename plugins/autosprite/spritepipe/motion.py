@@ -1241,17 +1241,37 @@ def _library():
             "arm_far": [{"t": 0.0, "angle": 0.0}, {"t": 0.2, "angle": -20.0},
                         {"t": 0.45, "angle": 30.0}, {"t": 0.6, "angle": 34.0},
                         {"t": 1.0, "angle": 0.0}],
-            "torso": [{"t": 0.0, "angle": 0.0}, {"t": 0.2, "angle": -8.0},
-                      {"t": 0.45, "angle": 10.0}, {"t": 0.6, "angle": 11.0},
+            # HALVED, and the argument came before the third measurement that
+            # settled it. IN A SIDE VIEW AN IN-PLANE TORSO ROTATION IS A LEAN,
+            # NOT A COIL: a real strike turns the torso about the vertical axis,
+            # which a 2D side view cannot show at all, so a large in-plane
+            # rotation models the wrong thing and the critic reads it as "the
+            # figure topples sideways rather than driving a blow". Damping it
+            # was left unapplied once because it improved two readings of three
+            # and made the 15px brawler worse. On the current pipeline it
+            # improves BOTH characters that have an artist's strike, on BOTH
+            # readings: the brawler 42.0% -> 40.6% error with coverage 1.03 ->
+            # 0.97, and `mv-male` 36.7% -> 30.7% shipped and 21.4% -> 19.9%
+            # matched with coverage 1.51 -> 1.38. Half is the brawler's
+            # matched-coverage point; going on to zero buys `mv-male` another
+            # nine points and drops the brawler to 0.83 coverage, which is
+            # `footprint`'s one-sidedness paying itself rather than a better
+            # animation.
+            "torso": [{"t": 0.0, "angle": 0.0}, {"t": 0.2, "angle": -4.0},
+                      {"t": 0.45, "angle": 5.0}, {"t": 0.6, "angle": 5.5},
                       {"t": 1.0, "angle": 0.0}],
             # The head COUNTER-rotates, and that is not a style choice. A
             # part's angle composes onto its parent's, so a head hanging off a
-            # torso that turns 11 degrees and authored at +6 turns 17 in the
-            # world -- more than the torso it sits on. The critic reads that as
+            # torso that turned 11 degrees and authored at +6 turned 17 in the
+            # world -- more than the torso it sits on. The critic read that as
             # "the head tips more than the torso at the peak, which reads as a
             # wobble rather than a committed strike". Every angle authored on a
             # child is a departure FROM its parent, and this is the clip where
-            # that stopped being invisible.
+            # that stopped being invisible. The torso peak is 5.5 now rather
+            # than 11, so the arithmetic in that example is history; the -3 is
+            # kept because what it buys is unchanged in kind -- the head still
+            # ends up turning less than the chest it rides, which is what a
+            # committed strike looks like.
             "head": [{"t": 0.0, "angle": 0.0}, {"t": 0.2, "angle": 2.0},
                      {"t": 0.5, "angle": -3.0}, {"t": 1.0, "angle": 0.0}],
             # The near leg steps once and HOLDS through the contact; the far
