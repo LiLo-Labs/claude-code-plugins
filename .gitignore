@@ -17,3 +17,6 @@ __pycache__/
 *.env
 keys.env
 .secrets/
+
+# workflow agent worktrees, not project content
+.claude/worktrees/
