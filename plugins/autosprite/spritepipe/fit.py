@@ -53,13 +53,39 @@ from . import skeleton
 # blob covers more target than moving a leg. The result fits at 0.78 and is not a
 # walk. A neck does not do that, and the rig should not either.
 LIMITS = {
-    "head": 14.0, "torso": 12.0, "body": 12.0,
+    # A head is a face. At 32px it is a dozen pixels of visor slit or eye, and
+    # ANY rotation nearest-neighbour can draw smears them: three and a half
+    # degrees turned the corpus knight's "|||" visor into "\\\". Swept against
+    # an exaggerated walk, dropping the head from 14 degrees to 4 costs 0.01 of
+    # silhouette agreement -- 0.66 worst-frame against 0.65 -- and keeps the face
+    # legible, which is the thing a player is actually looking at.
+    "head": 4.0, "torso": 8.0, "body": 8.0,
     "arm_near": 85.0, "arm_far": 85.0,
     "leg_near": 50.0, "leg_far": 50.0,
     "tail": 45.0, "wing_near": 60.0, "wing_far": 60.0,
     "accessory": 40.0, "prop": 90.0,
 }
 DEFAULT_LIMIT = 40.0
+
+# And how far it may SLIDE, in pixels of the authored 32px character. Left
+# unconstrained the solve translates whatever helps: fitting an exaggerated walk
+# on the corpus knight it lifted the ROOT seven pixels -- a quarter of the
+# character's height -- while translating the head five pixels down to cancel it.
+# Two channels fighting each other to explain the video's own camera drift.
+#
+# A head does not slide on its neck; that is what the neck's rotation is for. A
+# hand may, because an arm reaching is mostly translation at this scale.
+SHIFTS = {
+    "head": 0.6, "torso": 1.2, "body": 1.2,
+    "arm_near": 3.5, "arm_far": 3.5,
+    "leg_near": 2.5, "leg_far": 2.5,
+    "prop": 4.0,
+}
+DEFAULT_SHIFT = 2.5
+
+# A clip captured in place should not walk out of frame. The root carries the
+# character's bob, which is one or two pixels, not seven.
+ROOT_SHIFT = 2.5
 
 # How much a pose is charged for departing from rest, as a fraction of the
 # agreement it buys. Among poses that fit equally well, prefer the one that moved
@@ -84,6 +110,16 @@ def limit_for(part):
     return LIMITS.get(part.role, DEFAULT_LIMIT)
 
 
+def shift_for(part, height=32.0, authored=32.0):
+    """How far this part's role permits it to slide, scaled to the character.
+
+    In pixels of the 32px character the numbers were measured on, so a 64px
+    sprite gets twice the allowance and a 16px one half -- a pixel means a
+    different amount of body on each.
+    """
+    return SHIFTS.get(part.role, DEFAULT_SHIFT) * (height / float(authored))
+
+
 def effort(rig, pose):
     """How far a pose departs from rest, as a share of what each part is allowed.
 
@@ -98,8 +134,9 @@ def effort(rig, pose):
         if own is None:
             continue
         allowed = limit_for(part)
+        slide = shift_for(part, rig.size[1])
         total += abs(own.angle) / allowed if allowed else 0.0
-        total += (abs(own.dx) + abs(own.dy)) / 8.0
+        total += (abs(own.dx) + abs(own.dy)) / max(1e-6, slide)
         count += 1
     return (total / count) if count else 0.0
 
@@ -154,9 +191,10 @@ def fit_pose(cutout, target, margin, start=None, passes=PASSES,
 
         best = scored()
         for count, width in passes:
+            root_cap = ROOT_SHIFT * (rig.size[1] / 32.0)
             for channel, half in ROOT_SWEEPS:
                 keep = getattr(pose, channel)
-                for value in _span(keep, half * width, count):
+                for value in _span(keep, half * width, count, root_cap):
                     setattr(pose, channel, float(value))
                     score = scored()
                     if score > best:
@@ -171,9 +209,10 @@ def fit_pose(cutout, target, margin, start=None, passes=PASSES,
                                         current.sx, current.sy)
                 pose.set(part.name, own)
                 allowed = limit_for(part)
+                slide = shift_for(part, rig.size[1])
                 for channel, half in SWEEPS:
                     keep = getattr(own, channel)
-                    cap = allowed if channel == "angle" else None
+                    cap = allowed if channel == "angle" else slide
                     for value in _span(keep, half * width, count, cap):
                         setattr(own, channel, float(value))
                         score = scored()
