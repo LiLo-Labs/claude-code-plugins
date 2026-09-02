@@ -1391,18 +1391,54 @@ not a thing that leans.
 
 ## Backlog, in value order
 
-Honest and short. The easy things are gone.
+Honest and short. The easy things are gone, and 2026-09-02 closed several of
+them by refutation rather than by shipping -- read the sections named below
+before re-attempting any of these, because each is a measured NO and not an
+unexplored idea.
 
-0. ~~**Measure the VISION backend.**~~ **DONE, and the answer is NO.** See
-   "The vision rigger was the great hope, and it loses" below.
+0. ~~**Measure the VISION backend.**~~ **DONE, and the answer is NO.**
+0. ~~**A second segment per limb (knee, elbow).**~~ **Measured, and it makes
+   the ground truth worse.** See "the knee is a motion requirement".
+0. ~~**A wider `fit` search (scale, shear, more passes).**~~ **Refuted: every
+   point of IoU it buys is bought by deforming the character.**
+0. ~~**Better generated motion, or a different model.**~~ **Refuted: the fit
+   score is very nearly a restatement of how far the target moved.**
+0. ~~**The idle's lateral weight shift.**~~ **Refused in both constructions,
+   and the generalisation meant to unlock it measures worse.**
 
-1. **The rigger splits one mass and calls the halves a pair.** The silhouette
+1. **WIDEN THE GROUND TRUTH. This is now the highest-value item and it is not
+   blocked.** Every conclusion in this file rests on **twelve clips across five
+   characters**, and on 2026-09-02 alone that thinness nearly shipped three
+   wrong answers: a lateral idle sway measured on the ONE 15px character where
+   its three authored pixels round to one; a scaling law drawn from a single
+   brawler and refuted by the second character; and a knee that improves the fit
+   and costs the ground truth. Two of the five characters have no artist `idle`
+   at all, so the worst clip in the library is tuned against a single subject.
+
+   What is needed is CC0 sprites cut from ANIMATED sheets, which is what makes a
+   character usable here -- the corpus already had them and nobody noticed for
+   weeks. Priority order by what the current set cannot answer: a second
+   quadruped, any character with an artist's `idle` above 20px, and a robed or
+   blob-shaped figure (which also unblocks item 3). Verify each licence on its
+   own licence page; commit no art.
+
+2. **`motion.select` addresses parts by ROLE, so a split limb's two segments are
+   indistinguishable.** Both halves of a split `leg_far` receive the same track,
+   and because the shin is a child of the thigh their world rotations compound
+   -- so every hand-authored clip in the library silently means something
+   different on a split rig. This is the actual blocker under the knee, and it
+   is a design question rather than a bug: either the splitter names segments
+   distinctly and clips address them, or `select` learns depth. The `under:`
+   selector built and reverted on 2026-09-02 (see "the idle weight shift") is
+   one shape this could take.
+
+3. **The rigger splits one mass and calls the halves a pair.** The silhouette
    backend's remaining defect, said by the critic of five corpus characters: a
    floor-length robe hem, a slime, a squat blob, a tunic, a cape. It cuts the
    mass down the middle, calls the halves `leg_far` and `leg_near`, and swings
    them apart.
 
-   **The intervention is now validated and the detector is not.** Rigging the
+   **The intervention is validated and the detector is not.** Rigging the
    necromancer's lower body as ONE part instead of two legs and asking the
    critic about both:
 
@@ -1424,35 +1460,29 @@ Honest and short. The easy things are gone.
    characters. So there is no number here to justify shipping the rig change on
    its own -- the motion has to come with it.
 
-   **The unsolved part is telling which characters want it.** Every corpus
-   silhouette parts somewhere, so "never parts" does not discriminate.
-   `find_split` returning None catches the necromancer correctly and `fry-caped`
-   incorrectly -- the caped hero has real legs whose gap is closed near the
-   floor by his cape, which is a false negative in `find_split` rather than a
-   legless character. The only separator found is "the deepest parting is within
-   20% of the floor" (fry-caped 11%, necromancer 39%), and that is a threshold
-   fitted to two points, which this file already records going wrong twice.
-   **This wants more robed and blob-shaped CC0 art before it is worth fitting.**
+   **The unsolved part is telling which characters want it**, and it is blocked
+   on item 1. Every corpus silhouette parts somewhere, so "never parts" does not
+   discriminate. `find_split` returning None catches the necromancer correctly
+   and `fry-caped` incorrectly -- the caped hero has real legs whose gap is
+   closed near the floor by his cape, which is a false negative in `find_split`
+   rather than a legless character. The only separator found is "the deepest
+   parting is within 20% of the floor" (fry-caped 11%, necromancer 39%), and
+   that is a threshold fitted to two points, which this file already records
+   going wrong twice.
 
-   And it is worth remembering what the vision backend is for: a model can see
-   that a robe hem is a robe hem, and already rigs these correctly. The
-   silhouette rigger saying "the hip line is a proportion rather than a
-   measurement" and pointing at the vision backend may simply be the honest
-   ceiling.
-
-2. **A wider motion library still.** Fifteen character clips against
+4. **A wider motion library still.** Fifteen character clips against
    autosprite.io's ~100. Roll, slide, swim, fly, shoot, push, pull, wave, sit,
    kneel, taunt, revive. Each is a readable keyframe table; each must be checked
    against the distinct-picture warning, because a symmetric swing draws half as
    many pictures as it claims.
 
-3. **`topdown-dcss` is a cloaked humanoid the silhouette reads as a prop.** Its
+5. **`topdown-dcss` is a cloaked humanoid the silhouette reads as a prop.** Its
    outline is a smooth bell: no parting, no neck. The critic can see a head and
    two arms because it can see COLOUR. Whether the classifier should ever look
    at colour is an open question and a fragile one; the vision backend already
    gets this right.
 
-4. **The critic proposes limb angles and nothing else.** Tallied over 40 calls
+6. **The critic proposes limb angles and nothing else.** Tallied over 40 calls
    across the two rig audits: 21 verdicts of `rig`, 13 `loose`, 6 `good`, and
    of the 13 clips that drew motion advice the roles touched were `leg_far` 11,
    `leg_near` 11, `arm_near` 9, `arm_far` 8, `root` 2, `torso` 1. `head` and
