@@ -153,17 +153,49 @@ def sampled(video, count, until=ANCHORED):
     return [video[i] for i in _np.linspace(0, end, int(count)).astype(int)]
 
 
-def to_sprite(frame, source, tolerance=30):
+def calibrate(frame, source, tolerance=30):
+    """(scale, floor) read once off a video's FIRST frame, for reuse on the rest.
+
+    The first frame of an anchored video is the source sprite -- drift measured
+    at 0 -- so it is the one frame whose scale is known to be right, and the only
+    honest place to measure from.
+
+    Measuring per frame instead is a real bug and it corrupted every pose that
+    changes the silhouette's bounding box. Scaling each frame so its content
+    HEIGHT matches the source means a character raising a sword above its head
+    gets taller content, so the body is shrunk to compensate -- and the fitted
+    attack came back squashed, with the rig contorting to explain a shortening
+    that the model never drew.
+    """
+    cleaned, _how = ingest_module.remove_background(frame_rgba(frame),
+                                                    tolerance=tolerance)
+    box = img.content_box(cleaned)
+    if box is None or box[3] <= box[1]:
+        return None, None
+    inside = img.content_box(source)
+    return (inside[3] - inside[1]) / float(box[3] - box[1]), inside[3]
+
+
+def frame_rgba(frame):
+    if frame.shape[-1] == 3:
+        return np.dstack([frame, np.full(frame.shape[:2], 255, np.uint8)])
+    return frame
+
+
+def to_sprite(frame, source, tolerance=30, scale=None, floor=None):
     """One video frame reduced to a sprite on `source`'s grid and palette.
 
-    The character is cropped to its own content and scaled so its HEIGHT matches
-    the source's, because a video model drifts the framing and a fixed crop would
-    read that drift as the character growing.
+    Pass `scale` and `floor` from `calibrate` on the video's first frame and
+    every frame of the clip is measured the same way. Without them each frame is
+    normalised against itself, which reads a raised arm as a shrinking body.
+
+    Aligned by the FLOOR rather than by the box, because a character stands on
+    the ground and its feet are the part that must not wander; the top of the
+    content moves whenever the pose does.
     """
     from PIL import Image
-    if frame.shape[-1] == 3:
-        frame = np.dstack([frame, np.full(frame.shape[:2], 255, np.uint8)])
-    cleaned, _how = ingest_module.remove_background(frame, tolerance=tolerance)
+    cleaned, _how = ingest_module.remove_background(frame_rgba(frame),
+                                                    tolerance=tolerance)
     box = img.content_box(cleaned)
     # An empty box, not just a missing one: a frame the model rendered blank --
     # or one whose whole content the background removal took -- yields a
@@ -173,11 +205,15 @@ def to_sprite(frame, source, tolerance=30):
         return None
     crop = cleaned[box[1]:box[3], box[0]:box[2]]
     inside = img.content_box(source)
-    tall = inside[3] - inside[1]
-    wide = max(1, int(round(crop.shape[1] * tall / float(crop.shape[0]))))
+    if scale is None:
+        scale = (inside[3] - inside[1]) / float(crop.shape[0])
+    if floor is None:
+        floor = inside[3]
+    tall = max(1, int(round(crop.shape[0] * float(scale))))
+    wide = max(1, int(round(crop.shape[1] * float(scale))))
     small = np.array(Image.fromarray(crop).resize((wide, tall), Image.NEAREST))
     out = img.blank(source.shape[0], source.shape[1])
-    img.paste(out, small, (source.shape[1] - wide) // 2, inside[1])
+    img.paste(out, small, (source.shape[1] - wide) // 2, int(floor) - tall)
     return conform_module.conform(out, source)[0]
 
 

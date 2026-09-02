@@ -225,3 +225,60 @@ def test_a_frame_whose_content_all_washes_out_yields_nothing(monkeypatch):
     art = source()
     monkeypatch.setattr(generate.img, "content_box", lambda _p: (5, 5, 5, 5))
     assert generate.to_sprite(np.full((32, 32, 3), 200, np.uint8), art) is None
+
+
+# -- measuring a video the same way in every frame -------------------------
+
+def test_calibration_reads_the_scale_off_the_first_frame():
+    art = source()
+    frame = np.full((64, 64, 3), 255, np.uint8)
+    frame[16:48, 24:40] = (40, 90, 200)          # content 32 rows tall
+    scale, floor = generate.calibrate(frame, art)
+    inside = image.content_box(art)
+    assert scale == pytest.approx((inside[3] - inside[1]) / 32.0)
+    assert floor == inside[3]
+
+
+def test_a_raised_arm_does_not_shrink_the_body():
+    """The bug this fixes, stated as a test. Normalising each frame against its
+    OWN height means a character raising a sword gets taller content, so the
+    body is scaled down to compensate -- and the fitted attack came back
+    squashed, with the rig contorting to explain a shortening nobody drew."""
+    art = source()
+    plain = np.full((64, 64, 3), 255, np.uint8)
+    plain[16:48, 24:40] = (40, 90, 200)
+    raised = plain.copy()
+    raised[4:16, 30:34] = (40, 90, 200)          # a sword above the head
+
+    scale, floor = generate.calibrate(plain, art)
+    steady = [generate.to_sprite(f, art, scale=scale, floor=floor)
+              for f in (plain, raised)]
+    drifting = [generate.to_sprite(f, art) for f in (plain, raised)]
+
+    def body_rows(sprite):
+        mask = image.alpha_mask(sprite)
+        rows = np.nonzero(mask.any(axis=1))[0]
+        return int(rows.max() - rows.min()) if rows.size else 0
+
+    # Calibrated: the raised arm makes the content TALLER, as it should.
+    assert body_rows(steady[1]) > body_rows(steady[0])
+    # Uncalibrated: both come back the same height, because the body was shrunk
+    # by exactly as much as the arm added.
+    assert body_rows(drifting[1]) == body_rows(drifting[0])
+
+
+def test_frames_are_aligned_by_the_floor_not_by_the_box():
+    """A character stands on the ground. Its feet must not wander when the top
+    of the silhouette moves."""
+    art = source()
+    plain = np.full((64, 64, 3), 255, np.uint8)
+    plain[16:48, 24:40] = (40, 90, 200)
+    raised = plain.copy()
+    raised[4:16, 30:34] = (40, 90, 200)
+    scale, floor = generate.calibrate(plain, art)
+    feet = []
+    for frame in (plain, raised):
+        mask = image.alpha_mask(generate.to_sprite(frame, art, scale=scale,
+                                                   floor=floor))
+        feet.append(int(np.nonzero(mask.any(axis=1))[0].max()))
+    assert feet[0] == feet[1]
