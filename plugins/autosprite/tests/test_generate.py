@@ -119,3 +119,43 @@ def test_a_data_uri_round_trips_the_pixels_exactly():
     raw = base64.b64decode(uri.split(",", 1)[1])
     back = np.array(PILImage.open(io.BytesIO(raw)).convert("RGBA"))
     assert image.equal(back, art)
+
+
+# -- waiting for a slow job ------------------------------------------------
+
+def test_a_finished_prediction_is_returned_as_is():
+    answer = {"status": "succeeded", "output": ["x"]}
+    assert generate.settled(answer, "tok") is answer
+
+
+def test_a_starting_prediction_is_polled_until_it_finishes(monkeypatch):
+    """`Prefer: wait` gives up after about a minute and returns whatever the job
+    is doing. For a video that is `starting`, and reading it as a failure
+    reports a running job dead -- which is exactly what happened."""
+    seen = []
+
+    def fake_get(url, api_token):
+        seen.append(url)
+        return ({"status": "processing"} if len(seen) < 3
+                else {"status": "succeeded", "output": ["done"]})
+
+    monkeypatch.setattr(generate, "_get", fake_get)
+    monkeypatch.setattr(generate.time, "sleep", lambda _s: None)
+    answer = generate.settled(
+        {"status": "starting", "urls": {"get": "https://x/predictions/1"}}, "tok")
+    assert answer["status"] == "succeeded"
+    assert answer["output"] == ["done"]
+    assert len(seen) == 3
+
+
+def test_a_prediction_with_no_poll_url_is_handed_back_rather_than_hanging():
+    answer = {"status": "starting"}
+    assert generate.settled(answer, "tok") is answer
+
+
+def test_a_job_that_never_finishes_is_unavailable(monkeypatch):
+    monkeypatch.setattr(generate, "_get", lambda u, t: {"status": "processing"})
+    monkeypatch.setattr(generate.time, "sleep", lambda _s: None)
+    with pytest.raises(generate.Unavailable):
+        generate.settled({"status": "starting", "urls": {"get": "https://x/1"}},
+                         "tok", patience=0.01, every=0)

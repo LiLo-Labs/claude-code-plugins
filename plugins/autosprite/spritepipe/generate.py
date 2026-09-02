@@ -92,6 +92,34 @@ def _post(url, payload, api_token, wait=True):
         raise
 
 
+def _get(url, api_token):
+    request = urllib.request.Request(
+        url, headers={"Authorization": "Bearer " + api_token})
+    return json.load(urllib.request.urlopen(request, timeout=TIMEOUT))
+
+
+def settled(answer, api_token, patience=900, every=5):
+    """Poll a prediction until it finishes, and return it.
+
+    `Prefer: wait` holds the connection for about a minute and then hands back
+    whatever the job is doing, which for a still image is the answer and for a
+    VIDEO is `{"status": "starting"}`. Reading that as a failure is how two
+    video jobs were reported dead here while they were both running fine.
+    """
+    if answer.get("status") in ("succeeded", "failed", "canceled"):
+        return answer
+    url = (answer.get("urls") or {}).get("get")
+    if not url:
+        return answer
+    deadline = time.time() + patience
+    while time.time() < deadline:
+        answer = _get(url, api_token)
+        if answer.get("status") in ("succeeded", "failed", "canceled"):
+            return answer
+        time.sleep(every)
+    raise Unavailable("still %s after %ds" % (answer.get("status"), patience))
+
+
 def _fetch(url):
     return urllib.request.urlopen(url, timeout=TIMEOUT).read()
 
@@ -124,8 +152,8 @@ class ReplicateBackend:
                              "return_spritesheet": bool(sheet)}}
         if seed is not None:
             payload["input"]["seed"] = int(seed)
-        answer = _post("%s/models/%s/predictions" % (REPLICATE, self.model),
-                       payload, self.token)
+        answer = settled(_post("%s/models/%s/predictions" % (REPLICATE, self.model),
+                               payload, self.token), self.token)
         if answer.get("status") == 402 or answer.get("detail"):
             raise Unavailable(str(answer.get("detail"))[:300])
         output = answer.get("output")
