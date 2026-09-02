@@ -15,15 +15,33 @@ the depth buffer or it is not -- votes are scored against the views that could
 actually have seen it, so an instance hidden in five views is not punished for
 the five, only judged on the ones where it showed.
 
-The orbit alone always leaves a residue: instances small in every view that
-reaches them, or turned so far from every orbit camera that they read as a
-smear. Both are failures of the LOOK, not of the judgement, so the second
-pass fixes the looking (circumstance 2). It does two things the orbit cannot:
-it SHOWS what is already indexed, so the question becomes "what did we miss"
-instead of "what is here" and the agent's attention goes to the gaps; and it
-aims cameras down the surface normal of unindexed candidates, so a cone that
-was edge-on to all eighteen orbit cameras finally gets a face-on look. Both
-passes vote into the same index and consensus is scored once at the end.
+The orbit alone always leaves a residue, and it is a residue of the LOOKING,
+not of the judgement (circumstance 2). An orbit camera sits on the bounding
+sphere and frames the whole model, so an instance on a steeply turned facet
+is foreshortened in every one of them at once; orbiting harder cannot fix
+what the orbit's own geometry costs. So the aimed rounds leave the sphere:
+each camera sits on the outward normal of an unindexed look-alike and looks
+straight in, at instance scale. They also SHOW what is already indexed --
+confirmed instances tinted -- so the question is "what did we miss" rather
+than "what is here".
+
+Re-asking the ORBIT looks under that same tinted question was tried and cut.
+Measured on the shell: 162 re-asks confirmed three instances the first pass
+had missed, while 24 aimed looks confirmed three -- about seven times the
+yield per look, at a seventh of the cost. Attention was never the binding
+constraint; the geometry of the look was. A better question cannot recover
+an answer the viewpoint does not contain.
+
+The aimed rounds REPEAT, because each round changes both halves of its own
+question. Confirming an instance takes it out of the candidate pool, so the
+next round aims somewhere new; and it joins the signature that ranks the
+pool, so a round that confirms small instances widens the band the next
+round reaches with. The survey stops when a round stops finding -- a fact
+about the model, not a number chosen in advance.
+
+Every round is scored on its OWN evidence. Pooling them would put every
+earlier view into the denominator of a node only a later round found,
+punishing it for the blindness that round exists to correct.
 
 Nothing is flood filled. A unit's boundary is its node's boundary, which is
 the geometry's own.
@@ -258,13 +276,15 @@ def _aim_cameras(mesh, face_node, groups, confirmed, characteristic, features,
 
 def survey(backend, mesh, frame, up, feature, hint, intent, out_dir, tree,
            characteristic, views=6, pixels=900, zoom_tiles=3, workers=8,
-           min_votes=2, min_share=0.34, aims=96, log=print):
+           min_votes=2, min_share=0.34, aims=64, max_rounds=8, min_new=2,
+           log=print):
     """Look from many different cameras; let tree nodes collect the votes.
 
-    Two passes into one index. The first orbits and asks what is there. The
-    second shows what the first found and asks what it missed, from cameras
-    aimed down the normals of unindexed look-alikes. Both vote into the same
-    node index; consensus is scored once, over both.
+    One orbiting pass asks what is there. Then aimed rounds repeat until they
+    stop finding: each puts a camera on the outward normal of an unindexed
+    look-alike, shows what is already indexed, and asks what is still
+    unmarked. Every round is scored on its own evidence, and a node confirmed
+    by any round is confirmed.
     """
     import os as os_module
     from concurrent.futures import ThreadPoolExecutor
@@ -374,38 +394,50 @@ def survey(backend, mesh, frame, up, feature, hint, intent, out_dir, tree,
     log("  pass 1: %d nodes pointed at; %d pass consensus"
         % (int((votes > 0).sum()), len(winners)))
 
-    # Pass two. Show what pass one found and ask only for the misses, from
-    # the orbit looks again AND from cameras aimed down the normals of
-    # unindexed look-alikes. A node already confirmed is excluded from the
-    # denominator here: the question no longer offers it, so views that did
-    # not offer it must not count against it.
-    if len(winners):
+    # The aimed rounds. Each one takes the unindexed nodes that most look
+    # like the instances confirmed SO FAR, puts a camera on each one's
+    # outward normal, and asks what is still unmarked. The loop is the point:
+    # every round changes both halves of its own question. Confirming an
+    # instance removes it from the candidate pool, so the next round aims
+    # somewhere new; and it joins the signature the pool is ranked against,
+    # so a round that confirms small cones widens the band the next round
+    # will reach with. The survey stops when a round stops finding, which is
+    # a fact about the model rather than a number chosen in advance.
+    groups = _groups(face_node)
+    settled = np.zeros(total, dtype=bool)
+    settled[winners] = True
+    for number in range(1, max_rounds + 1):
+        if not len(winners):
+            break
+        aimed = _aim_cameras(mesh, face_node, groups, winners, characteristic,
+                             features, areas, pixels, family, limit=aims)
+        if not aimed:
+            log("  round %d: no unindexed candidate looks like the family; "
+                "the pool is exhausted" % number)
+            break
         marked = np.isin(face_node, winners)
-        settled = np.zeros(total, dtype=bool)
-        settled[winners] = True
-        aimed = _aim_cameras(mesh, face_node, _groups(face_node), winners,
-                             characteristic, features, areas, pixels, family,
-                             limit=aims)
-        log("  pass 2: %d looks aimed down candidate normals" % len(aimed))
         with ThreadPoolExecutor(max_workers=workers) as pool:
             more = [r for r in pool.map(lambda job: look(job, marked), aimed)
                     if r is not None]
-        # Each pass is a self-contained survey and is scored on its OWN
-        # evidence. Pooling them would put every pass-one view into the
-        # denominator of a node that only pass two ever found -- punishing it
-        # for the blindness the second pass exists to correct, which is
-        # circumstance 2 one level up. A node confirmed by either survey is
-        # confirmed.
-        gap_votes, gap_shown = tally(more, ignore=settled)
-        found, _share = _consensus(gap_votes, gap_shown, min_votes, min_share)
+        # Each round is a self-contained survey and is scored on its OWN
+        # evidence. Pooling rounds would put every earlier view into the
+        # denominator of a node only this round found -- punishing it for the
+        # blindness this round exists to correct, which is circumstance 2 one
+        # level up. A node confirmed by any round is confirmed.
+        found, _share = _consensus(*tally(more, ignore=settled), min_votes,
+                                   min_share)
+        fresh = np.setdiff1d(found, np.flatnonzero(settled))
         winners = np.union1d(winners, found)
-        log("  pass 2: %d nodes pointed at; %d pass consensus on the gap "
-            "survey's own evidence (%d of them new)"
-            % (int((gap_votes > 0).sum()), len(found),
-               len(np.setdiff1d(found, np.flatnonzero(settled)))))
-        log("  %d instances indexed (>=%d votes or unanimous where rarely "
-            "seen, >=%.0f%% of the views that could see them)"
-            % (len(winners), min_votes, 100 * min_share))
+        settled[winners] = True
+        log("  round %d: %d aimed looks -> %d pass, %d new (%d indexed)"
+            % (number, len(more), len(found), len(fresh), len(winners)))
+        if len(fresh) < min_new:
+            log("  round %d found %d, below the %d that would justify another;"
+                " stopping" % (number, len(fresh), min_new))
+            break
+    log("  %d instances indexed (>=%d votes or unanimous where rarely seen, "
+        ">=%.0f%% of the views that could see them)"
+        % (len(winners), min_votes, 100 * min_share))
 
     unit = np.full(len(mesh.faces), -1, dtype=np.int64)
     for number, node in enumerate(winners):
