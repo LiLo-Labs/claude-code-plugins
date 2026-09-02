@@ -355,10 +355,10 @@ def survey(backend, mesh, frame, up, feature, hint, intent, out_dir, tree,
         % (family, len(every), len(results)))
 
     total = int(face_node.max()) + 1
-    votes = np.zeros(total, dtype=np.int64)
-    shown = np.zeros(total, dtype=np.int64)
 
     def tally(batch, ignore=None):
+        votes = np.zeros(total, dtype=np.int64)
+        shown = np.zeros(total, dtype=np.int64)
         for hits, visible_faces in batch:
             pointed = np.unique(face_node[np.array(hits, dtype=np.int64)]) \
                 if hits else np.array([], dtype=np.int64)
@@ -367,9 +367,10 @@ def survey(backend, mesh, frame, up, feature, hint, intent, out_dir, tree,
             if ignore is not None:
                 here = here[~ignore[here]]
             shown[here] += 1
+        return votes, shown
 
-    tally(results)
-    winners, share = _consensus(votes, shown, min_votes, min_share)
+    votes, shown = tally(results)
+    winners, _share = _consensus(votes, shown, min_votes, min_share)
     log("  pass 1: %d nodes pointed at; %d pass consensus"
         % (int((votes > 0).sum()), len(winners)))
 
@@ -391,13 +392,22 @@ def survey(backend, mesh, frame, up, feature, hint, intent, out_dir, tree,
         with ThreadPoolExecutor(max_workers=workers) as pool:
             more = [r for r in pool.map(lambda job: look(job, marked), second)
                     if r is not None]
-        tally(more, ignore=settled)
-        winners, share = _consensus(votes, shown, min_votes, min_share)
-        log("  %d nodes pointed at over both passes; %d pass consensus "
-            "(>=%d votes or unanimous where rarely seen, >=%.0f%% of views "
-            "that could see them)"
-            % (int((votes > 0).sum()), len(winners), min_votes,
-               100 * min_share))
+        # Each pass is a self-contained survey and is scored on its OWN
+        # evidence. Pooling them would put every pass-one view into the
+        # denominator of a node that only pass two ever found -- punishing it
+        # for the blindness the second pass exists to correct, which is
+        # circumstance 2 one level up. A node confirmed by either survey is
+        # confirmed.
+        gap_votes, gap_shown = tally(more, ignore=settled)
+        found, _share = _consensus(gap_votes, gap_shown, min_votes, min_share)
+        winners = np.union1d(winners, found)
+        log("  pass 2: %d nodes pointed at; %d pass consensus on the gap "
+            "survey's own evidence (%d of them new)"
+            % (int((gap_votes > 0).sum()), len(found),
+               len(np.setdiff1d(found, np.flatnonzero(settled)))))
+        log("  %d instances indexed (>=%d votes or unanimous where rarely "
+            "seen, >=%.0f%% of the views that could see them)"
+            % (len(winners), min_votes, 100 * min_share))
 
     unit = np.full(len(mesh.faces), -1, dtype=np.int64)
     for number, node in enumerate(winners):
