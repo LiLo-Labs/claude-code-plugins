@@ -813,23 +813,41 @@ its own position, and advancing the phase makes the crest travel. It is a
 PERMUTATION of the part's pixels -- nothing sampled, averaged or invented --
 which is the strongest palette claim in the vocabulary.
 
-| driving a flag's cloth | worst-frame shed | of what we disturb, the artist never touches |
-|---|---|---|
-| `shear`, leaning it rigidly | 0.10% | 36% |
-| **`wave`, amplitude 4** | **0.00%** | **16%** |
-| `wave` + a lean on top | 0.00% | 26-38% |
+| driving a flag's cloth | worst-frame shed | pixels moved | of what we disturb, the artist never touches |
+|---|---|---|---|
+| the artist's own sixteen frames | -- | 4594 | -- |
+| `shear`, leaning it rigidly | 0.07% | 6803 | 68.2% |
+| **`wave`, amplitude 4** | **0.00%** | **3822** | **21.4%** |
+| `wave` + a lean on top | 0.00% | 8558 | 63.6% |
 
-So cloth is not a thing that leans: adding a shear to the wave makes it worse at
-every amplitude tried. `ripple` and `sway`'s surface half now drive `wave`.
+So cloth is not a thing that leans: adding a shear to the wave moves more than
+twice as many pixels for a worse score. `ripple` and `sway`'s surface half now
+drive `wave`.
+
+Every row is rendered at `render.suggest_margin` and measured at that same
+offset, and the answer is margin-independent -- 0, 2, 8, 16, 32 and 114 all give
+21.4% for `wave`, which is the check that the alignment is right rather than
+lucky.
 
 ### A measurement error worth more than the measurement
 
-Every flag number above was first reported at **70-79%**, in a commit message
-and in this file, and all of them were wrong. `render_pose` draws into a canvas
-with a MARGIN and the art it is judged against is trimmed flush, so
-`quality.footprint` was comparing a picture with a *shifted copy* of another
-one. It turned a real 15% into 68%, and nothing about 68% looked wrong -- it
-agreed with the story I already believed, which is why it survived.
+`render_pose` draws into a canvas with a MARGIN and the art it is judged
+against is trimmed flush, so `quality.footprint` was comparing a picture with a
+*shifted copy* of another one. On this flag that turns a real 21.4% into 84.0%,
+and nothing about 84% looks wrong -- it agrees with the story I already
+believed, which is why the first round of flag numbers, reported at 70-79% in a
+commit message and in this file, all survived.
+
+**And the fix did not end it.** The numbers that replaced them -- 16% for `wave`
+and 36% for `shear` -- were also wrong, were published in the README, in two
+docstrings, in the PR description and in a gallery, and stood for hours. They
+cannot be reproduced by ANY offset of the render they claim to describe: 113
+gives 27.2%, 114 gives 21.4%, 115 gives 25.4%. The correct pair is **21.4% and
+68.2%**, which makes the conclusion stronger than the wrong numbers did, and the
+lesson sharper than the first telling of it: a measurement this sensitive is not
+finished when it stops looking wrong. It is finished when it is reproduced from
+scratch by a script that takes the render margin from the renderer, and when
+varying that margin does not move the answer.
 
 `footprint` now takes the margin as a parameter rather than trying to infer it,
 because a frame's own content box moves with the animation and there is nothing
@@ -915,9 +933,9 @@ A prompt change is a code change and has to be measured the same way.
 **It caught a rig that measured identically to a correct one.** The flag was
 hand-rigged as pole + cloth. There is no pole in that drawing -- the "pole" part
 was a 1%-wide sliver containing no pixels -- and the critic said so, and said the
-subject should be one part with a surface trait. Rigged its way: same 0.00% shed,
-same 16% footprint error, 3818 vs 3822 pixels disturbed. **No measurement here
-can tell those two rigs apart.** The critic could.
+subject should be one part with a surface trait. Rigged its way: 0.00% shed
+both, footprint error 21.6% against 21.4%, 3817 against 3822 pixels disturbed.
+**No measurement here can tell those two rigs apart.** The critic could.
 
 **And it confabulated, on the one kind of clip where nothing moves.** Shown a
 gem's `flicker` it reported that the gem popped larger, drifted sideways and

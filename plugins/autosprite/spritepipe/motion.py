@@ -50,7 +50,7 @@ from .skeleton import PartPose, Pose
 # of the part's pixels -- nothing sampled, nothing averaged, nothing invented --
 # which is the strongest palette claim in the vocabulary. Measured on a flag
 # against the artist's own frames, leaning the cloth rigidly moves 70% of pixels
-# the artist never touches and waving it moves 15%.
+# the artist never touches and waving it moves 21.4%.
 CHANNELS = ("angle", "dx", "dy", "sx", "sy", "cycle", "shear",
             "wave", "wave_phase", "scroll_x", "scroll_y")
 REST = {"angle": 0.0, "dx": 0.0, "dy": 0.0, "sx": 1.0, "sy": 1.0, "cycle": 0.0,

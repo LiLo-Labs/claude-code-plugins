@@ -44,9 +44,10 @@ it is a **permutation**: every output pixel is an input pixel moved by a whole
 number of rows, so there is nothing to sample, average or invent.
 
 > Measured on a CC0 flag against the artist's own sixteen frames of the same
-> wave: of the pixels `wave` disturbs, the artist never touches **16%**. Leaning
-> the same cloth rigidly with `shear` gets 36%, and adding a lean on top of the
-> wave makes it worse again — so cloth is not a thing that leans. Cutting the
+> wave: of the pixels `wave` disturbs, the artist never touches **21.4%**.
+> Leaning the same cloth rigidly with `shear` gets **68.2%**, and adding a lean
+> on top of the wave gets 63.6% while moving more than twice as many pixels — so
+> cloth is not a thing that leans. Cutting the
 > cloth into strips and travelling a wave across them with `spread` *tears*, at
 > 31–61% shed, however many strips.
 

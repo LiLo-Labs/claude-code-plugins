@@ -172,9 +172,9 @@ def wave_columns(array, amplitude, phase):
     The one deformation this pipeline can honestly do. Cloth, water and smoke
     do not hinge and do not rotate; their INTERIOR moves, and a rigid transform
     of the whole part cannot say that. Measured on a CC0 flag against the
-    artist's own sixteen frames of the same wave: leaning the cloth rigidly with
-    `shear` disturbs 70% of pixels the artist never touches, and this disturbs
-    15%.
+    artist's own sixteen frames of the same wave, as the share of what it
+    disturbs that the artist never touches: leaning the cloth rigidly with
+    `shear` scores 68.2% and this scores 21.4%.
 
     It is palette-safe for the strongest possible reason -- it is a
     PERMUTATION. Every output pixel is an input pixel moved by a whole number of

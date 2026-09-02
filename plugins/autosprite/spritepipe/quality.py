@@ -168,8 +168,10 @@ def _aligned(frames, offset):
     horizontal -- so the character sits `margin` pixels in from the corner,
     while the art it is judged against is trimmed flush. Comparing them as given
     measures one picture against a SHIFTED COPY of another and reports nonsense
-    with total confidence: on a flag it turned a real 15% into 68%, and nothing
-    about that number looked wrong.
+    with total confidence: on a flag it turns a real 21.4% into 84.0%, and
+    nothing about that number looks wrong. The sensitivity is brutal and worth
+    knowing -- one pixel out either way, on the same flag, reads 27.2% and
+    25.4%.
 
     The offset is not inferable -- a frame's own content box moves with the
     animation -- so the caller passes it, and it is exactly the `margin` they
@@ -203,8 +205,8 @@ def footprint(frames, rest, reference_frames, offset=(0, 0)):
     Pass `offset` -- the margin `frames` were rendered with -- or the comparison
     is silently meaningless. Rendered frames carry a margin and the art they are
     judged against does not, so measuring them as given compares a picture with
-    a SHIFTED COPY of another one; on a flag that reported 68% where the truth
-    was 15%, and the number looked entirely plausible. It is a parameter rather
+    a SHIFTED COPY of another one; on a flag that reports 84.0% where the truth
+    is 21.4%, and the number looks entirely plausible. It is a parameter rather
     than something inferred because a frame's own content box moves with the
     animation, so there is nothing honest to infer it from.
     """
