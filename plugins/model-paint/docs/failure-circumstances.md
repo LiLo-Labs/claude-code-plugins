@@ -38,6 +38,33 @@ answer. Cameras take the chosen up; confirm gates try several directions
 and report UNSEEN rather than no; identity asks carry both close and
 context scales and move faces only on two-angle agreement.
 
+A quieter form of the same loss, and the one that caps RECALL rather than
+correctness: an orbit is a set of compromises. Every orbit camera sits on
+the bounding sphere and frames the whole model, so an instance on a steeply
+turned facet is foreshortened in all of them at once and no amount of
+orbiting fixes it -- the orbit never leaves the sphere. And every look asks
+the same open question, so attention lands on the same conspicuous instances
+each time.
+
+*Incident:* the shell's barnacle survey, where 162 looks over 18 orbit
+cameras indexed the same conspicuous cones repeatedly and left a scatter of
+small or edge-on ones untouched.
+*Invariant:* the survey looks twice. The second pass SHOWS what the first
+found -- confirmed instances tinted in the image -- and asks only what is
+missing, so attention moves to the gaps; and it adds cameras that leave the
+bounding sphere, each sitting on the outward normal of an unindexed
+look-alike and looking straight in, so an edge-on instance finally gets a
+face-on look. Aiming those cameras by geometric signature is not labelling:
+what is at the end of the aim still has to be pointed at and still has to
+pass consensus (`index3d.survey`).
+
+The consequence for the gate: a bar of two votes is unreachable for an
+instance the cameras only ever reached once, which rejects it for the
+cameras' failing rather than its own. The bar is the smaller of the asked-for
+count and the number of looks that actually contained the node -- seen twice,
+agreed twice; seen once, agreed once -- with the share gate keeping it honest,
+since a node offered to ten views and pointed at in one still fails.
+
 ## 3. Priors beat weak evidence
 
 Any text an agent reads -- user intent, prompt examples -- acts as a prior
