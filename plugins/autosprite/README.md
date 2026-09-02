@@ -515,10 +515,11 @@ with its coverage beside it; **matched** is how clips compare to each other.
 | MV male | walk | 46 px | 26.4% | 1.00 | 26.4% |
 | Animated horse (ScratchIO) | walk | 33 px | 24.7% | 0.81 | 26.5% |
 | Animated horse | run | 33 px | 17.9% | 0.76 | 31.6% |
+| MV male | attack | 46 px | 36.5% | 1.50 | 21.1% |
 | SumoHulk brawler (Eris) | jump | 15 px | 47.1% | 1.72 | 34.2% |
 | SumoHulk brawler | walk | 15 px | 19.2% | 0.60 | 36.6% |
 | Animated horse | idle | 33 px | 44.5% | 0.70 | **46.1%** |
-| SumoHulk brawler | attack | 15 px | 48.5% | 1.57 | 48.4% |
+| SumoHulk brawler | attack | 15 px | 46.5% | 1.32 | 50.9% |
 | SumoHulk brawler | idle | 15 px | 58.3% | 0.66 | **63.2%** |
 
 The two walks agreeing to a tenth of a point across different sizes and

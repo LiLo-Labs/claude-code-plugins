@@ -388,12 +388,13 @@ Ten clips across four characters, sorted by the comparable column:
 | `platformer-forest-64` | run | 45 px | **4.8%** | 0.78 | **11.9%** |
 | `platformer-mv-male` | crouch | 46 px | 18.0% | 1.07 | **14.8%** |
 | `platformer-mv-male` | walk | 46 px | 26.4% | 1.00 | 26.4% |
+| `platformer-mv-male` | attack | 46 px | 36.5% | 1.50 | 21.1% |
 | `creature-horse-scratchio` | walk | 33 px | 24.7% | 0.81 | 26.5% |
 | `creature-horse-scratchio` | run | 33 px | 17.9% | 0.76 | 31.6% |
 | `platformer-sumohulk-16` | jump | 15 px | 47.1% | 1.72 | 34.2% |
 | `platformer-sumohulk-16` | walk | 15 px | 19.2% | 0.60 | 36.6% |
 | `creature-horse-scratchio` | idle | 33 px | 44.5% | 0.70 | **46.1%** |
-| `platformer-sumohulk-16` | attack | 15 px | 48.5% | 1.57 | 48.4% |
+| `platformer-sumohulk-16` | attack | 15 px | 46.5% | 1.32 | 50.9% |
 | `platformer-sumohulk-16` | idle | 15 px | 58.3% | 0.66 | **63.2%** |
 
 The two walks agreeing to a tenth of a point at different sizes and different
@@ -437,6 +438,57 @@ motion. `shed` reported 0.00% on it, because the nub stays connected.
 
 On the shipped version the critic returns `good` on the horse and, on the
 brawler, `rig` with two complaints and **no motion complaint at all**.
+
+### The attack was too big, and the critic said which part of it
+
+Measured on two characters and, on one of them, two different rigs, the attack
+disturbed **1.6 to 1.8 times** as many pixels as the artist's own strike does
+from the same standing pose. A uniform damp would have fixed the number; asking
+the critic instead -- on a vision rig, because on the silhouette rig it kept
+returning `rig` about arm boxes that are 2-pixel horizontal slivers -- got a
+diagnosis of WHICH part:
+
+> *"Both legs swing wide through every frame, so the stance slides instead of
+> staying planted through the strike."*
+> *"The lunge spread peaks harder than the arm swing, pulling focus away from
+> the attack itself."*
+> *"The head tips more than the torso at the peak, which reads as a wobble
+> rather than a committed strike."*
+
+So: the near leg steps once and holds through the contact, the far leg becomes
+the planted one and barely moves, and the lunge halves. The arm arc is
+untouched, because the arm was never the problem.
+
+| | shipped before | after |
+|---|---|---|
+| `mv-male`, vision rig | 46.6% at 1.82 coverage | **40.7% at 1.60** |
+| `mv-male`, template rig | 44.6% at 1.76 | **36.4% at 1.50** |
+| `sumohulk`, template rig | 48.5% at 1.57 | **46.5% at 1.32** |
+
+**The head note is the transferable part.** A part's angle composes onto its
+parent's, so a head authored at +6 on a torso turning 11 turns **17** in the
+world -- more than the torso it sits on. Every angle authored on a child is a
+departure *from* its parent, and this is the clip where that stopped being
+invisible. The head now counter-rotates.
+
+### The torso lead, recorded rather than fitted
+
+The critic's remaining complaint is the torso: *"the torso tilt is large enough
+that the figure reads as toppling sideways rather than driving a blow."* There
+is a real principle behind that -- **in a side view an in-plane torso rotation
+is a lean, not a coil.** A real strike's torso rotation is about the vertical
+axis, which a 2D side view cannot show at all, so authoring a large in-plane one
+models the wrong thing.
+
+Scaling it down improves both `mv-male` rigs monotonically (vision 40.7 -> 35.1%,
+template 36.4 -> 26.9% at 0.3, coverage falling toward 1.0 the whole way). It
+makes the 15px brawler *worse* at 0.7 and 0.5 and much better at 0.3, which is
+the ~100-pixel noise that character's numbers have shown throughout.
+
+It is not applied, because the bar for changing a shipped clip here is that it
+improve every ground-truth subject and this improves two of three. The principle
+is worth more than the change: it needs a third character with an attack strip
+to settle.
 
 ### `--facing` is the one default that is both catastrophic and silent
 
