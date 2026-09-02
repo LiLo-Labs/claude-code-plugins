@@ -1091,22 +1091,8 @@ not a thing that leans.
 
 Honest and short. The easy things are gone.
 
-0. **Measure the VISION backend across the whole corpus. It needs no new code.**
-   Every number in this file, and every conclusion drawn from one, was measured
-   on the TEMPLATE backend -- which is the honest floor of what this pipeline
-   does with nothing attached, and is now the largest known source of error in
-   it. On the corpus knight its "arms" are 5x4 chips of mitten while the torso
-   keeps both pauldrons and the tops of both boots; on two of four other real
-   characters the arm box is a 1-2 pixel sliver. The one data point that exists
-   says a vision rig takes a character's walk from 26.4% to **19.4%**, and
-   `platformer-grass-prowne`'s jump from 15.4% shed to **0.00%**.
-
-   Nothing else in this backlog is worth doing before this, because every other
-   item is tuned against rigs that may be wrong. `scripts/ground_truth.py` takes
-   a `"rig"` path per subject and `vision.make_backend("headless", ...)` already
-   builds one; the work is running it, saving the rigs, and putting the two
-   columns side by side. If the vision rigs win as expected, several entries
-   below are answers to a question that stops being asked.
+0. ~~**Measure the VISION backend.**~~ **DONE, and the answer is NO.** See
+   "The vision rigger was the great hope, and it loses" below.
 
 1. **The rigger splits one mass and calls the halves a pair.** The silhouette
    backend's remaining defect, said by the critic of five corpus characters: a
@@ -1450,6 +1436,85 @@ probably wrong:
 2. **Neutralise** -- subtract each limb's drawn lean from its animation angles.
    `REST` survives (it is about the cut) but frame 0 of every clip stops looking
    like the source art: the character visibly straightens before it walks.
+
+## The vision rigger was the great hope, and it loses
+
+**Backlog item zero, run, and the answer is no.** Every number in this file was
+measured on the TEMPLATE backend, and the standing assumption -- stated in the
+PR, in this file, and in the build's own warnings to the user -- was that the
+silhouette rigger is the pipeline's largest remaining source of error and a
+model that actually LOOKS at the art would beat it. One data point supported
+that. Twelve now refute it.
+
+Vision rigs built with `claude -p` on Opus, one per ground-truth subject, 21-49
+seconds each. Both columns are the matched-coverage error, which is the only
+comparable one:
+
+| subject | clip | template | vision |
+|---|---|---|---|
+| sumohulk | walk | 27.7% | **27.6%** |
+| sumohulk | idle | 61.1% | **59.6%** |
+| sumohulk | jump | **28.7%** | 32.8% |
+| sumohulk | attack | 42.0% | **38.6%** |
+| horse | idle | 46.1% | **43.9%** |
+| horse | walk | 27.2% | **26.0%** |
+| horse | run | 32.1% | **29.1%** |
+| forest | run | **12.5%** | 17.0% |
+| mv-male | walk | 27.3% | **26.4%** |
+| mv-male | crouch | **14.8%** | 30.1% |
+| mv-male | attack | **21.6%** | 27.9% |
+| eldiran | walk | **29.1%** | 59.8% |
+| **mean** | | **30.9%** | 34.9% |
+
+Six clips each, one tie, and the template wins the mean by four points. The
+`19.4%` figure quoted elsewhere in this file for a vision rig is not reproduced
+by any of these and should be treated as unverified until someone re-derives it.
+
+**The reason is worth more than the result, and it is the same reason twice.**
+The knight is the largest single gap -- 29.1% against 59.8% -- and it is exactly
+the sprite where the vision rig's boxes look obviously more correct:
+
+    template   torso (0, 14, 26, 26)   arms 5x4 chips of mitten, legs boot tips
+    vision     torso (4, 14, 22, 26)   arms (0,14,8,26) and (18,14,26,26)
+                                        legs from row 24, greaves included
+
+That is the same segmentation the seam carve produced and this file already
+records as refuted -- arrived at independently, by a model looking at the
+picture, and it loses by thirty points. Rendered large the reason is plain: the
+vision arm boxes OVERLAP the torso's x range, they are smaller than it, so
+smallest-box-wins hands each arm a strip of chest -- and rotating that strip
+**breaks the belt**, a solid red line across the waist, in half the frames. The
+head bobs again too, because the arm carries shoulder with it.
+
+So three independent attempts -- a stretched arm box (recorded above), a
+luminance seam carve, and an Opus vision rig -- all produce anatomically better
+parts and all animate worse, and all three fail the same way: a limb given the
+part of the body it genuinely attaches to will TEAR that body when it moves
+rigidly.
+
+**The conclusion is that the ceiling is not the rigger.** It is that ownership
+is a partition of rectangles and a part is moved rigidly. An artist's arm is
+attached at the shoulder and free at the hand; ours is equally free along its
+whole length, so every pixel of the shoulder travels as far as the mitten does.
+Nothing about better boxes fixes that. What would: a per-part weight that falls
+to zero at the joint, so a part DEFORMS rather than translates -- which is
+skinning, and is a much larger change than any rig backend.
+
+Two smaller findings from the same run:
+
+* **`--facing` caught a fourth subject, and this time it caught the harness.**
+  The vision model called `sumohulk` face-on; the ground-truth harness had been
+  defaulting it to right-facing. The artist's own strip settles it -- a frog
+  hopping AT the camera -- so every sumohulk number published before this was on
+  a mis-faced rig. Corrected: walk 36.2% -> 27.7%, jump 34.7% -> 28.7%, attack
+  54.5% -> 42.0% at matched coverage, idle 57.3% -> 61.1%.
+* **And the model over-called it on two.** It read `forest` and `mv-male` as
+  face-on; both artists' strips are unmistakable profiles. A silhouette-symmetry
+  test was tried first to settle this and is useless -- hair and a held item put
+  the two profile characters at 72.6% and 76.6% against the true face-on
+  knight's 93.3%, with no threshold between them. **Only the artist's animation
+  frames answer this question.** The facing field is the one thing a vision rig
+  is measurably WORSE at than a default.
 
 ## Dead ends — measured, not guessed
 
