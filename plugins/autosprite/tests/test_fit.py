@@ -320,3 +320,35 @@ def test_a_limb_reaching_sideways_splits_along_its_reach():
     assert upper.box[1] == lower.box[1] and upper.box[3] == lower.box[3], \
         "segments must sit end to end along the reach"
     assert upper.box[2] == lower.box[0]
+
+
+def test_a_limb_too_short_for_its_cuts_to_differ_reports_no_best_cut():
+    """A four-pixel arm collapses every candidate cut onto the same row, so the
+    'sweep' is one rig measured three times. On the corpus knight cuts at 0.4,
+    0.5 and 0.6 all scored an identical 0.731 -- which reads as a robust plateau
+    and is a single data point wearing three hats. Reporting a best cut there
+    invents a precision the measurement does not have."""
+    from spritepipe import rig as R
+    # Four long along its own split axis: cuts at 0.4, 0.5 and 0.6 land at
+    # 11.6, 12.0 and 12.4, and all three round to row 12.
+    built = R.Rig((32, 32), [
+        R.Part("torso", "torso", (10, 8, 22, 22), None, (16, 22)),
+        R.Part("arm_near", "arm_near", (22, 10, 26, 14), "torso", (24, 10)),
+        R.Part("arm_far", "arm_far", (6, 10, 10, 14), "torso", (8, 10)),
+    ])
+    boxes = set()
+    for cut in (0.4, 0.5, 0.6):
+        grown = fit.split_part(built, "arm_near", cut)
+        if grown is not None:
+            boxes.add((grown.by_name("arm_near").box,
+                       grown.by_name("arm_near_lower").box))
+    assert len(boxes) == 1, "the fixture must actually be degenerate"
+
+    art = image.blank(32, 32)
+    art[8:22, 10:22] = (40, 90, 200, 255)
+    art[10:14, 22:26] = (40, 90, 200, 255)
+    art[10:14, 6:10] = (40, 90, 200, 255)
+    cut = cutout.cut(built, art)
+    margin = render.suggest_margin(built)
+    targets = [image.alpha_mask(render.render_pose(cut, skeleton.Pose(), margin=margin))]
+    assert fit.better_split(cut, targets, "arm_near", margin=margin) is None

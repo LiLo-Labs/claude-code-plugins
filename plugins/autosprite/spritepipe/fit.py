@@ -424,11 +424,20 @@ def better_split(cutout, targets, name, margin=None, cuts=(0.4, 0.5, 0.6),
     reference = cutout.reference
     before = sum(base[i][1] for i in hard) / float(len(hard))
 
-    best = None
+    best, seen = None, set()
     for cut in cuts:
         grown = split_part(rig, name, cut)
         if grown is None:
             continue
+        # A short limb collapses every candidate cut onto the same row, and then
+        # the "sweep" is one rig measured three times. Measured on the corpus
+        # knight, whose arms are four pixels tall: cuts at 0.4, 0.5 and 0.6 all
+        # round to row 22 and score an identical 0.731, which reads as a robust
+        # plateau and is a single data point wearing three hats.
+        shape = (grown.by_name(name).box, grown.by_name(name + "_lower").box)
+        if shape in seen:
+            continue
+        seen.add(shape)
         try:
             cut_out = cutout_module.cut(grown, reference)
         except Exception:
@@ -440,6 +449,11 @@ def better_split(cutout, targets, name, margin=None, cuts=(0.4, 0.5, 0.6),
         if best is None or after > best[2]:
             best = (grown, cut, after)
     if best is None or best[2] - before < float(worth):
+        return None
+    if len(seen) < 2:
+        # One distinct rig is not a search. The part is too short for the cut
+        # point to mean anything, and reporting a "best" cut here would invent a
+        # precision the measurement does not have.
         return None
     return best[0], best[1], best[2] - before
 
