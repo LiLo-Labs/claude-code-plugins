@@ -489,19 +489,26 @@ connected blob in every frame, eight different pictures, 0.00% shed.
 the same motion, where an asset ships them. `scripts/ground_truth.py` runs it
 over the character clips, which for a long time nothing had measured at all:
 
-| subject | clip | content height | of what we move, the artist never touches |
-|---|---|---|---|
-| MV male (MoikMellah) | crouch | 46 px | **14.8%** |
-| MV male | walk | 46 px | **26.4%** |
-| SumoHulk brawler (Eris) | jump | 15 px | 34.2% |
-| SumoHulk brawler | walk | 15 px | **36.6%** |
-| SumoHulk brawler | attack | 15 px | 48.4% |
-| SumoHulk brawler | idle | 15 px | **63.7%** |
+Two readings, because the error rises with coverage on every clip measured, so
+`footprint` alone always favours doing less. **Shipped** is what a user gets,
+with its coverage beside it; **matched** is how clips compare to each other.
 
-For scale, the flag's `ripple` — the best-measured clip here — is 21.4%. A 46px
-character's crouch beats it; a 15px character's idle is three times worse.
+| subject | clip | content height | shipped | coverage | matched |
+|---|---|---|---|---|---|
+| Forest platformer (damarindra) | run | 45 px | **4.8%** | 0.78 | 11.9% |
+| MV male (MoikMellah) | crouch | 46 px | 18.0% | 1.07 | **14.8%** |
+| MV male | walk | 46 px | **26.4%** | 1.00 | 26.4% |
+| SumoHulk brawler (Eris) | walk | 15 px | 19.2% | 0.60 | **36.6%** |
+| SumoHulk brawler | jump | 15 px | 47.1% | 1.72 | 34.2% |
+| SumoHulk brawler | attack | 15 px | 48.5% | 1.57 | 48.4% |
+| SumoHulk brawler | idle | 15 px | 66.0% | 0.49 | **63.7%** |
 
-**Cutout animation has a size floor, and it is somewhere between those two.** At
+For scale, the flag's `ripple` — the best-measured subject clip here — is 21.4%.
+The forest run beats it comfortably; the brawler's idle is three times worse,
+and is the only clip wrong in both directions at once: it moves half what the
+artist moves and two-thirds of that is in the wrong place.
+
+**Cutout animation has a size floor, and it is somewhere between 15 and 45px.** At
 15px an artist is not transforming parts, they are redrawing: the brawler's idle
 redraws 109 of his 156 pixels, and no rotation of a four-pixel arm gets there.
 This is the same story the corpus tells elsewhere — the two assets `shed` still

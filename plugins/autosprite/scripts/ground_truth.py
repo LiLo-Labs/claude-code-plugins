@@ -18,8 +18,16 @@ Three things this script insists on, each of which changed an answer:
    motion too. Getting this wrong reported `attack` at 78.9% where the parallel
    figure is 48.4%.
 3. **Compared at matched coverage.** `footprint` is one-sided and so rewards
-   moving less; the row reported is the one whose disturbed-pixel count comes
-   closest to the artist's.
+   moving less -- the error rises monotonically with coverage on every clip and
+   every character measured -- so the comparable row is the one whose
+   disturbed-pixel count comes closest to the artist's.
+
+Two readings are printed, and they answer different questions. **Shipped** is
+what a user actually gets, with the coverage beside it so it cannot be read
+alone. **Matched** is how clips compare to each other and to the artist. They
+are not the same operating point and neither is a substitute: the forest run
+ships at 4.8% error while disturbing 78% of what the artist disturbs, and
+pushing it to full coverage costs error rather than saving it.
 
 Usage:
     python3 scripts/ground_truth.py path/to/truth.json
@@ -129,14 +137,20 @@ def measure(subject, clip_name, artist_frames, factors=FACTORS):
                      "error": (wrong / total * 100) if total else 0.0,
                      "distinct": len({f.tobytes() for f in frames}),
                      "frames": len(frames)})
-    return min(rows, key=lambda row: abs(row["ours"] - theirs)), rows
+    shipped = next(row for row in rows if row["scale"] == 1.0)
+    matched = min(rows, key=lambda row: abs(row["ours"] - theirs))
+    return shipped, matched, rows
 
 
 def main(path):
     subjects = json.load(open(path))
-    print("%-12s %-8s %5s %8s %9s %9s %8s %9s"
-          % ("subject", "clip", "px", "at scale", "we move", "they move",
-             "error", "distinct"))
+    # Two readings, because the error rises with coverage on every clip and
+    # character measured: `footprint` alone always favours doing less. The
+    # matched column is how clips compare to each other; the shipped column is
+    # what a user actually gets.
+    print("%-12s %-8s %5s | %8s %8s | %8s %8s %8s"
+          % ("subject", "clip", "px", "shipped", "coverage",
+             "matched", "at scale", "distinct"))
     failures = 0
     for entry in subjects:
         subject = Subject(entry["source"], entry.get("rig"))
@@ -147,11 +161,13 @@ def main(path):
         for clip_name, spec in entry["clips"].items():
             artist = cells(entry["sheet"], spec["rows"], spec["columns"],
                            entry["cell"])
-            best, _rows = measure(subject, clip_name, artist)
-            print("%-12s %-8s %5d %8.2f %9d %9d %7.1f%% %6d/%d"
+            shipped, matched, _rows = measure(subject, clip_name, artist)
+            print("%-12s %-8s %5d | %7.1f%% %8.2f | %7.1f%% %8.2f %6d/%d"
                   % (entry["name"], clip_name, subject.content_height,
-                     best["scale"], best["ours"], best["theirs"], best["error"],
-                     best["distinct"], best["frames"]))
+                     shipped["error"],
+                     shipped["ours"] / float(shipped["theirs"] or 1),
+                     matched["error"], matched["scale"],
+                     matched["distinct"], matched["frames"]))
     return 1 if failures else 0
 
 

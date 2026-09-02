@@ -376,21 +376,44 @@ Several corpus characters were cut from **animated** sheets, so the ground truth
 was there the whole time. Two are now measured, at opposite ends of the size
 range, by `scripts/ground_truth.py`:
 
-| subject | clip | content height | we move | they move | of what we move, the artist never touches |
+Two readings, because the error rises monotonically with coverage on every clip
+and every character measured -- `footprint` alone always favours doing less.
+**Shipped** is what a user actually gets, with the coverage beside it so it
+cannot be read alone; **matched** is how clips compare to each other.
+
+| subject | clip | content height | shipped | coverage | matched |
 |---|---|---|---|---|---|
-| `platformer-mv-male` | crouch | 46 px | 588 | 596 | **14.8%** |
-| `platformer-mv-male` | walk | 46 px | 535 | 536 | **26.4%** |
-| `platformer-sumohulk-16` | jump | 15 px | 146 | 121 | 34.2% |
-| `platformer-sumohulk-16` | walk | 15 px | 134 | 131 | **36.6%** |
-| `platformer-sumohulk-16` | attack | 15 px | 126 | 109 | 48.4% |
-| `platformer-sumohulk-16` | idle | 15 px | 102 | 109 | **63.7%** |
+| `platformer-forest-64` | run | 45 px | **4.8%** | 0.78 | 11.9% |
+| `platformer-mv-male` | crouch | 46 px | 18.0% | 1.07 | **14.8%** |
+| `platformer-mv-male` | walk | 46 px | **26.4%** | 1.00 | 26.4% |
+| `platformer-sumohulk-16` | walk | 15 px | 19.2% | 0.60 | **36.6%** |
+| `platformer-sumohulk-16` | jump | 15 px | 47.1% | 1.72 | 34.2% |
+| `platformer-sumohulk-16` | attack | 15 px | 48.5% | 1.57 | 48.4% |
+| `platformer-sumohulk-16` | idle | 15 px | 66.0% | 0.49 | **63.7%** |
 
-For scale: the flag's `ripple`, the best-measured clip in the plugin, is 21.4%.
-A 46px character's crouch beats it. A 15px character's idle is three times
-worse than it.
+For scale: the flag's `ripple`, the best-measured subject clip in the plugin, is
+21.4%. The forest run at 4.8% shipped beats it comfortably; the brawler's idle
+is three times worse than it, and moves half as much as it should while being
+two-thirds wrong.
 
-**The size effect is the headline.** Every clip on the 46px character scores
-better than every clip on the 15px one. That is consistent with everything else
+### The leads this opens, recorded rather than acted on
+
+Neither is a fix yet, because both rest on ONE character and this measurement
+has already killed one conclusion drawn from one character.
+
+- **On the 15px brawler the clips lose their relative scale.** `jump` and
+  `attack` ship at 1.72 and 1.57 of the artist's coverage; `walk` and `idle`
+  ship at 0.60 and 0.49. Some too big, some too small, on the same character.
+  On the 46px `mv-male` both clips ship between 1.00 and 1.07. So this is not a
+  size *law* applied to everything -- it is individual clips coming apart from
+  each other once the sprite is small enough for a 1px floor and integer
+  rounding to dominate.
+- **The `idle` is the worst clip in the plugin**, and it is the only one that is
+  wrong in both directions at once. The brawler's own idle redraws 109 of his
+  156 pixels; ours moves 53 and puts two-thirds of them where he does not.
+
+**The size effect is the headline.** Every clip on the two large characters
+scores better than every clip on the 15px one. That is consistent with everything else
 the corpus says -- the two assets `shed` still fails on are 8x23 and 10x17, the
 smallest characters in the set -- and it has a plain explanation. At 15px an
 artist is not transforming parts, they are REDRAWING: the brawler's idle
