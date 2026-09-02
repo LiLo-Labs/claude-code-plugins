@@ -258,7 +258,7 @@ def _aim_cameras(mesh, face_node, groups, confirmed, characteristic, features,
 
 def survey(backend, mesh, frame, up, feature, hint, intent, out_dir, tree,
            characteristic, views=6, pixels=900, zoom_tiles=3, workers=8,
-           min_votes=2, min_share=0.34, aims=24, log=print):
+           min_votes=2, min_share=0.34, aims=96, log=print):
     """Look from many different cameras; let tree nodes collect the votes.
 
     Two passes into one index. The first orbits and asks what is there. The
@@ -386,21 +386,10 @@ def survey(backend, mesh, frame, up, feature, hint, intent, out_dir, tree,
         aimed = _aim_cameras(mesh, face_node, _groups(face_node), winners,
                              characteristic, features, areas, pixels, family,
                              limit=aims)
-        log("  pass 2: %d gap looks (%d orbit, %d aimed down candidate "
-            "normals)" % (len(jobs) + len(aimed), len(jobs), len(aimed)))
-        more = []
-        for name, batch in (("re-ask", jobs), ("aimed", aimed)):
-            if not batch:
-                continue
-            with ThreadPoolExecutor(max_workers=workers) as pool:
-                got = [r for r in pool.map(lambda job: look(job, marked),
-                                           batch) if r is not None]
-            more.extend(got)
-            hot, _s = _consensus(*tally(got, ignore=settled), min_votes,
-                                 min_share)
-            log("    %s: %d looks -> %d pass, %d of them new"
-                % (name, len(got), len(hot),
-                   len(np.setdiff1d(hot, np.flatnonzero(settled)))))
+        log("  pass 2: %d looks aimed down candidate normals" % len(aimed))
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            more = [r for r in pool.map(lambda job: look(job, marked), aimed)
+                    if r is not None]
         # Each pass is a self-contained survey and is scored on its OWN
         # evidence. Pooling them would put every pass-one view into the
         # denominator of a node that only pass two ever found -- punishing it
