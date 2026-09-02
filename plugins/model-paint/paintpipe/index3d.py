@@ -386,12 +386,21 @@ def survey(backend, mesh, frame, up, feature, hint, intent, out_dir, tree,
         aimed = _aim_cameras(mesh, face_node, _groups(face_node), winners,
                              characteristic, features, areas, pixels, family,
                              limit=aims)
-        second = jobs + aimed
         log("  pass 2: %d gap looks (%d orbit, %d aimed down candidate "
-            "normals)" % (len(second), len(jobs), len(aimed)))
-        with ThreadPoolExecutor(max_workers=workers) as pool:
-            more = [r for r in pool.map(lambda job: look(job, marked), second)
-                    if r is not None]
+            "normals)" % (len(jobs) + len(aimed), len(jobs), len(aimed)))
+        more = []
+        for name, batch in (("re-ask", jobs), ("aimed", aimed)):
+            if not batch:
+                continue
+            with ThreadPoolExecutor(max_workers=workers) as pool:
+                got = [r for r in pool.map(lambda job: look(job, marked),
+                                           batch) if r is not None]
+            more.extend(got)
+            hot, _s = _consensus(*tally(got, ignore=settled), min_votes,
+                                 min_share)
+            log("    %s: %d looks -> %d pass, %d of them new"
+                % (name, len(got), len(hot),
+                   len(np.setdiff1d(hot, np.flatnonzero(settled)))))
         # Each pass is a self-contained survey and is scored on its OWN
         # evidence. Pooling them would put every pass-one view into the
         # denominator of a node that only pass two ever found -- punishing it
