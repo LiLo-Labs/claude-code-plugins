@@ -351,7 +351,19 @@ def split_part(rig, name, at=0.5):
     if part is None or part.pivot is None:
         return None
     x0, y0, x1, y1 = part.box
-    tall = (y1 - y0) >= (x1 - x0)
+    px, py = part.pivot
+    # WHICH WAY the limb runs, decided by the pivot rather than by the box's
+    # aspect. The pivot is the joint and the limb extends away from it, so the
+    # axis with the greater reach from the pivot is its length.
+    #
+    # Using the box's longer side instead is wrong and was: the corpus knight's
+    # left leg is eight wide and six tall, so it split SIDE BY SIDE into two
+    # half-legs standing next to each other rather than into a thigh and a shin.
+    # Its right leg, six by six, happened to split correctly, which is how the
+    # bug survived a glance.
+    across = max(px - x0, x1 - px)
+    along = max(py - y0, y1 - py)
+    tall = along >= across
     length = (y1 - y0) if tall else (x1 - x0)
     if length < 4:
         return None

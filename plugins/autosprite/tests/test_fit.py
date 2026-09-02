@@ -283,3 +283,40 @@ def test_the_reported_score_is_the_raw_agreement_not_the_penalised_one():
     pose, score = fit.fit_pose(cut, target, margin, passes=((3, 1.0),))
     assert score == pytest.approx(
         fit.agreement(silhouette(cut, pose, margin), target), abs=1e-9)
+
+
+def test_the_split_axis_follows_the_pivot_not_the_box_aspect():
+    """A limb bends across its LENGTH, and length runs away from the joint. The
+    corpus knight's left leg is 8 wide and 6 tall with its hip on the top edge:
+    split by aspect it becomes two half-legs standing side by side."""
+    from spritepipe import rig as R
+    built = R.Rig((32, 32), [
+        R.Part("torso", "torso", (4, 14, 28, 26), None, (16, 26)),
+        # wider than it is tall, but the hip is on the TOP edge, so it hangs down
+        R.Part("leg_near", "leg_near", (14, 26, 22, 32), "torso", (18, 26)),
+        R.Part("leg_far", "leg_far", (7, 26, 13, 32), "torso", (10, 26)),
+    ])
+    grown = fit.split_part(built, "leg_near", 0.5)
+    upper = grown.by_name("leg_near")
+    lower = grown.by_name("leg_near_lower")
+    assert upper.box[0] == lower.box[0] and upper.box[2] == lower.box[2], \
+        "the two segments must sit one ABOVE the other, not side by side"
+    assert upper.box[3] == lower.box[1]
+    assert upper.box[1] == 26 and lower.box[3] == 32
+
+
+def test_a_limb_reaching_sideways_splits_along_its_reach():
+    """The mirror case: an arm held straight out from the shoulder is longer
+    across than down, and its joint is at one END of that reach."""
+    from spritepipe import rig as R
+    built = R.Rig((32, 32), [
+        R.Part("torso", "torso", (10, 8, 22, 24), None, (16, 24)),
+        R.Part("arm_near", "arm_near", (22, 10, 32, 14), "torso", (22, 12)),
+        R.Part("arm_far", "arm_far", (0, 10, 10, 14), "torso", (10, 12)),
+    ])
+    grown = fit.split_part(built, "arm_near", 0.5)
+    upper = grown.by_name("arm_near")
+    lower = grown.by_name("arm_near_lower")
+    assert upper.box[1] == lower.box[1] and upper.box[3] == lower.box[3], \
+        "segments must sit end to end along the reach"
+    assert upper.box[2] == lower.box[0]

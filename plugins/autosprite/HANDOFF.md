@@ -1437,6 +1437,81 @@ probably wrong:
    `REST` survives (it is about the cut) but frame 0 of every clip stops looking
    like the source art: the character visibly straightens before it walks.
 
+## Generated motion, fitted to the rig: what it fixed and what it did not
+
+**The idea is Mixamo's and it is structurally right.** Mixamo never ships the
+motion-capture actor's body; it ships YOUR character moved by a skeleton fitted
+to the capture. Applied here: generate an animation, SOLVE for the rig pose that
+explains each frame, discard the generated pixels. Identity stops being something
+measured and becomes something untouched -- byte-exact REST and palette-subset
+hold exactly as they always did, because no generated pixel is ever composited.
+`fit.py`, and it works: solved against a generated walk, per-frame silhouette
+agreement 0.88-1.00.
+
+It also makes a solved clip REUSABLE. Keyed by role, a walk solved once drives
+every other character in the corpus. That is a motion library built by
+generation rather than a generation step in every user's build, and most of the
+per-user cost gone.
+
+### Four bugs the fit found, three of them in the fit itself
+
+* **A neck does not turn forty degrees.** Given an exaggerated target the solve
+  rotated the HEAD forty degrees and smeared it across the chest, because a head
+  is a large blob and moving a large blob covers more target than moving a leg.
+  That pose scores 0.78 and is not a walk. `LIMITS` per role, and a `TIDINESS`
+  charge so that among poses which explain the target equally well the tidiest
+  wins. Cost: nothing. Worst-frame IoU 0.70 against 0.69, and a completely
+  different animation.
+* **A head does not slide either.** Unconstrained, the solve lifted the ROOT
+  seven pixels -- a quarter of the character -- while sliding the head five
+  pixels DOWN to cancel it: two channels fighting to explain the video's own
+  camera drift. `SHIFTS` per role, scaled by character height.
+* **A raised sword was shrinking the body raising it.** `to_sprite` normalised
+  every video frame against ITS OWN content height, so a taller silhouette meant
+  a smaller body, and the fitted attack came back squashed with the rig
+  contorting to explain a shortening nobody drew. `calibrate` reads scale and
+  floor once off frame 0 -- the one frame whose scale is known right, because
+  drift measures 0 there. Attack fit 0.57-0.61 -> 0.69-0.77.
+* **`split_part` cut limbs the wrong way.** It chose its axis by the box's
+  aspect, and the corpus knight's left leg is eight wide by six tall with the hip
+  on the top edge -- so it split SIDE BY SIDE into two half-legs standing next to
+  each other. Its right leg, six by six, split correctly, which is how the bug
+  survived a glance. The axis is now chosen by where the PIVOT sits: a limb
+  extends away from its joint, and that direction is its length.
+
+### A head is a face
+
+At 32px a helmet is a dozen pixels of visor slit and ANY rotation
+nearest-neighbour can draw smears them: three and a half degrees turned "|||"
+into "\\\". Swept against an exaggerated walk, dropping the head from 14
+degrees to 4 costs **0.01** of agreement. The same sweep found 14 and 8 degrees
+produce byte-identical output, which is what pointed at the root -- the head was
+not using its rotation at all, it was being carried.
+
+### The measurement disagreed with the eye three times, and lost every time
+
+Every constraint above COSTS silhouette agreement. Worst-frame IoU on the
+exaggerated walk went 0.66 to 0.62 across them, and every one improved the
+frames. Agreement rewards covering the target, and a contorted smeared knight
+covers it perfectly well. **A fit score cannot tell a pose from a contortion.**
+
+### What is still wrong, and it is not the fit
+
+The legs are mush and no constraint reaches it. Running the real build on the
+corpus knight, the six shipped clips split cleanly by what a RIGID body can do:
+
+    die     good      -- a whole-body topple is exactly a rigid rig's strength
+    idle    good      -- subtle, character intact
+    walk    fair      -- legs move, head steady
+    run     fair
+    hurt    fair
+    attack  weak      -- a swing needs an elbow
+
+The build's own warning says it: *"walk is 8 frames but only 7 different
+pictures; either the motion is too small for a character this size"*. The clips
+that look good are the ones a rigid body can perform. The clips that look bad
+need a limb to bend. That is the whole remaining gap.
+
 ## Skinning: the joint does not move, and that was the ceiling
 
 **The answer to the three refutations below.** A stretched arm box, a luminance
