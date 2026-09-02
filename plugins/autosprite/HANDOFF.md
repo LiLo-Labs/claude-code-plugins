@@ -788,6 +788,100 @@ over-scaled for small sprites". The second character refuted it: at full scale
 the right size, and the brawler at matched coverage wants **more** motion, not
 less. One data point would have shipped a scaling law that was wrong.
 
+## The ground truth doubled, and the first thing it did was refute this file
+
+Twelve clips across five characters was the evidence base for everything above,
+and this file has recorded that thinness as a risk three times without acting on
+it. It is now **twenty-six clips across ten characters**, and it is
+**reproducible**, which it never was before.
+
+### `scripts/fetch_truth.py`, and the subject it caught
+
+Every measurement here rests on an artist's own animation frames, and until now
+the whole set lived in `/tmp`, rebuilt by hand from prose notes. A container is
+reclaimed and the evidence goes with it -- a number nobody can reproduce, which
+is the one thing this project has been strict about everywhere else. The recipe
+is committed; no art is (`.gitignore` excludes PNGs deliberately).
+
+It re-reads each OpenGameArt **licence field** on every run and refuses a subject
+whose page no longer says CC0 -- the standing rule written down as code, and it
+bites: a real CC-BY-SA/GPL/OGA-BY asset is rejected, a CC0 one is not.
+
+**A clean rebuild reproduces all ten sources BYTE FOR BYTE and measures
+identically, and getting there caught one subject whose provenance was wrong.**
+`topdown-eldiran-rpg` came from a hand-composed intermediate sheet, and the raw
+download turns out to be a 384x672 sheet of twenty-one characters, magenta-keyed
+rather than alpha, of which only **row 128** is the knight every eldiran number
+in this file was measured against. That row existed nowhere but in a temporary
+file. Writing the recipe was the only thing that would ever have found it.
+
+### The new five, and what each one is for
+
+| subject | px | what the set could not answer without it |
+|---|---|---|
+| `deer` | 51 | a side-on quadruped **with an artist's idle** -- the set had quadrupeds, and it had idles, and no subject with both |
+| `boar` | 28 | a SECOND quadruped at half the height, which separates a size effect from a subject effect |
+| `shieldmaiden` | 23 | a humanoid with an artist's idle **above 20px** |
+| `samurai` | 17 | a held prop that extends well past the silhouette |
+| `slime` | 14 | **legless**, the case the rigger gets wrong by cutting one mass in half and calling it a pair of legs |
+
+Facing was read off each artist's own motion, never off a glance -- the rule this
+file already paid for twice. Both humanoids run FACE-ON: the shieldmaiden's
+shield stays circular and centred through all six frames, both helmet horns stay
+symmetric, and the body never turns.
+
+### The mean got worse, and that is the honest number
+
+| | 12 clips, 5 characters | **26 clips, 10 characters** |
+|---|---|---|
+| shipped | 28.48% | 32.32% |
+| matched | 29.67% | 34.46% |
+| at coverage 1.00 | 30.08% | **33.90%** |
+
+Nothing regressed; the set stopped being flattering. Every figure in this file
+quoted as a corpus mean and measured before 2026-09-02 is a five-character mean
+and should be read as one.
+
+## An artist's `idle` is not one motion, and that is why it is the worst clip
+
+The single most useful thing the wider set produced, and no amount of tuning
+could have found it. **How much of itself an artist's own idle redraws, across
+the seven characters that have one:**
+
+| subject | px | the artist disturbs | what the idle actually IS |
+|---|---|---|---|
+| `boar` | 28 | **8.8%** (59 of 669) | a **tail flick**. The body does not move at all |
+| `sumohulk` | 15 | 69.9% | breathing, whole-body |
+| `shieldmaiden` | 23 | 65.5% | breathing with a cape |
+| `samurai` | 17 | 87.6% | breathing with a swinging chain |
+| `deer` | 51 | 91.1% | a **grazing cycle**, head down to the ground |
+| `slime` | 14 | 93.6% | a whole-body wobble |
+| `horse` | 33 | 94.1% | whole-body weight shift |
+
+**A factor of ten, and size does not explain it**: the boar at 28px moves least
+and the sumohulk at 15px moves seven times more of itself. Read frame by frame
+the two extremes are not the same kind of animation at all -- the boar's entire
+idle is 14 to 24 pixels of tail, redrawn behind a rump that never changes, while
+the deer puts its head on the ground and lifts it again.
+
+Both are what their artist called `idle`.
+
+**So a single `idle` clip cannot be right, and the error it posts is dominated by
+an amplitude that nothing in a still sprite predicts.** That is the whole reason
+the idle is the worst clip on every character that has one, and it retroactively
+explains the day spent failing to fix it: every attempt tuned amplitude against
+ONE subject, which is the mistake this file has now recorded four times. The
+boar posts 99.6% error not because the rig is wrong -- its rig is the same shape
+as the horse's, which posts 46.1% -- but because we move 416 pixels where its
+artist moves 59.
+
+The fix is therefore not a better keyframe table. It is that **the amount of an
+idle is a choice, and the library should offer more than one** -- a twitch, a
+breath and a behaviour are three animations, not three tunings of one. That is
+also the direction the product wants anyway: fifteen clips against
+autosprite.io's hundred, and this is the first hard evidence about which clips
+the hundred should be.
+
 ## The hip was in the middle of the leg, and a hip is not the middle of a leg
 
 Every limb pivot the template rigger emitted was the **centre of the part's own
@@ -1406,21 +1500,27 @@ unexplored idea.
 0. ~~**The idle's lateral weight shift.**~~ **Refused in both constructions,
    and the generalisation meant to unlock it measures worse.**
 
-1. **WIDEN THE GROUND TRUTH. This is now the highest-value item and it is not
-   blocked.** Every conclusion in this file rests on **twelve clips across five
-   characters**, and on 2026-09-02 alone that thinness nearly shipped three
-   wrong answers: a lateral idle sway measured on the ONE 15px character where
-   its three authored pixels round to one; a scaling law drawn from a single
-   brawler and refuted by the second character; and a knee that improves the fit
-   and costs the ground truth. Two of the five characters have no artist `idle`
-   at all, so the worst clip in the library is tuned against a single subject.
+1. ~~**WIDEN THE GROUND TRUTH.**~~ **DONE: twenty-six clips across ten
+   characters, and reproducible.** `scripts/fetch_truth.py` rebuilds the whole
+   set from recorded CC0 sources, re-checking every licence field as it goes;
+   a clean rebuild reproduces all ten sources byte for byte and measures
+   identically. See "the ground truth doubled". The corpus mean got WORSE
+   (30.08% -> 33.90% at coverage 1.00) because the old set was flattering, and
+   the first thing the new characters produced was the idle finding below.
 
-   What is needed is CC0 sprites cut from ANIMATED sheets, which is what makes a
-   character usable here -- the corpus already had them and nobody noticed for
-   weeks. Priority order by what the current set cannot answer: a second
-   quadruped, any character with an artist's `idle` above 20px, and a robed or
-   blob-shaped figure (which also unblocks item 3). Verify each licence on its
-   own licence page; commit no art.
+   **What it still cannot answer**, for whoever widens it next: there is no
+   side-on humanoid with an artist's `idle` (the two new ones are both face-on),
+   no winged subject with an artist's clip at all, and nothing above 51px.
+
+1b. **THE IDLE IS A CHOICE, NOT A TUNING -- the library needs more than one.**
+   Across the seven characters that have an artist's idle, it redraws between
+   **8.8% and 94%** of the sprite, and size does not explain the spread. The
+   boar's whole idle is a tail flick; the deer puts its head on the ground.
+   One keyframe table cannot be both, which is why `idle` is the worst clip on
+   every character that has one and why a day of tuning it against a single
+   subject went nowhere. A twitch, a breath and a behaviour are three
+   animations. This is now the highest-value item, it is unblocked, and it is
+   the first hard evidence about WHICH clips a wider library should contain.
 
 2. **`motion.select` addresses parts by ROLE, so a split limb's two segments are
    indistinguishable.** Both halves of a split `leg_far` receive the same track,
