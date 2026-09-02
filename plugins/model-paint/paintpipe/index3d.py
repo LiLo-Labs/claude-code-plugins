@@ -206,27 +206,27 @@ def confirm(backend, mesh, frame, up, feature, hint, intent, out_dir, unit,
     def ask(number):
         faces = np.flatnonzero(unit == number)
         if not len(faces):
-            return number, "unclear", ""
+            return number, "unseen", ""
         weight = areas[faces]
         outward = (normals[faces] * weight[:, None]).sum(axis=0)
         norm = np.linalg.norm(outward)
         if norm < 1e-9:
-            return number, "unclear", ""
-        outward = outward / norm
+            return number, "unseen", ""
+        inward = -outward / norm   # see _aim_cameras: forward looks INTO the surface
         target = (centres[faces] * weight[:, None]).sum(axis=0) / weight.sum()
         # Framed at several instance widths, so the agent sees the thing IN
         # its surroundings and can tell a cone on a rib from a cone on a
         # frond -- the distinction a tight crop destroys.
         reach = float(np.sqrt(weight.sum() / np.pi)) * 7.0
-        side = np.cross(outward, [0.0, 0.0, 1.0])
+        side = np.cross(inward, [0.0, 0.0, 1.0])
         if np.linalg.norm(side) < 1e-6:
-            side = np.cross(outward, [0.0, 1.0, 0.0])
-        spun = np.cross(side / np.linalg.norm(side), outward)
-        camera = render_module.Camera(outward, spun, target, reach, pixels)
+            side = np.cross(inward, [0.0, 1.0, 0.0])
+        spun = np.cross(side / np.linalg.norm(side), inward)
+        camera = render_module.Camera(inward, spun, target, reach, pixels)
         bundle = render_module.render_bundle(mesh, camera, "zenithal", frame)
         visible = bundle["visible"]
         if not visible.any():
-            return number, "unclear", ""
+            return number, "unseen", ""
         lit = np.clip(bundle["rgb_lit"], 0, 1)
         shade = 0.32 + 0.60 * lit
         image = np.ones((pixels, pixels, 3))
@@ -236,7 +236,7 @@ def confirm(backend, mesh, frame, up, feature, hint, intent, out_dir, unit,
         hit = bundle["hit_id"]
         blue = visible & (hit >= 0) & member[np.maximum(hit, 0)]
         if blue.sum() < 60:
-            return number, "unclear", ""
+            return number, "unseen", ""
         image[blue] = np.stack([shade[blue] * 0.30, shade[blue] * 0.45,
                                 np.minimum(shade[blue] * 1.25, 1.0)], axis=1)
         path = os_module.path.join(out_dir, "confirm-%d.png" % number)
@@ -252,7 +252,7 @@ def confirm(backend, mesh, frame, up, feature, hint, intent, out_dir, unit,
     with ThreadPoolExecutor(max_workers=workers) as pool:
         verdicts = list(pool.map(ask, numbers))
 
-    kept, dropped, unclear, named = [], [], 0, {}
+    kept, dropped, unclear, unseen, named = [], [], 0, 0, {}
     for number, verdict, actually in verdicts:
         if verdict == "no":
             dropped.append(number)
@@ -260,10 +260,18 @@ def confirm(backend, mesh, frame, up, feature, hint, intent, out_dir, unit,
             named[label] = named.get(label, 0) + 1
         else:
             kept.append(number)
-            if verdict != "yes":
+            if verdict == "unseen":
+                unseen += 1
+            elif verdict != "yes":
                 unclear += 1
-    log("  confirm: %d kept, %d renamed away, %d unclear (kept)"
-        % (len(kept), len(dropped), unclear))
+    # "unseen" is counted apart from "unclear" on purpose. Unclear is a
+    # judgement the agent made about a picture it saw; unseen means no
+    # picture reached it at all, and a gate that reports those as one number
+    # hides its own coverage. A run where most instances were never shown is
+    # not a 90%-pass rate, and the log must not be able to say it is.
+    log("  confirm: %d kept, %d renamed away, %d unclear, %d never shown "
+        "(kept, but unexamined)"
+        % (len(kept), len(dropped), unclear, unseen))
     for label, count in sorted(named.items(), key=lambda kv: -kv[1])[:8]:
         log("    not a %s, actually: %s x%d" % (feature.split(" -- ")[0],
                                                 label, count))
@@ -381,13 +389,19 @@ def _aim_cameras(mesh, face_node, groups, confirmed, characteristic, features,
         norm = np.linalg.norm(outward)
         if norm < 1e-9:
             continue
-        outward = outward / norm
+        # Camera.rays() puts the ray origin at centre - forward * 4r, so
+        # `forward` is the direction the camera LOOKS, pointing from outside
+        # into the surface. The outward normal is where the camera stands;
+        # what it looks along is the negative. Passing the normal itself put
+        # the camera inside the model for 58% of candidates on the shell,
+        # which rendered the far side and wasted the look entirely.
+        inward = -outward
         target = (centres[faces] * weight[:, None]).sum(axis=0) / weight.sum()
-        side = np.cross(outward, [0.0, 0.0, 1.0])
+        side = np.cross(inward, [0.0, 0.0, 1.0])
         if np.linalg.norm(side) < 1e-6:
-            side = np.cross(outward, [0.0, 1.0, 0.0])
-        spun = np.cross(side / np.linalg.norm(side), outward)
-        out.append((render_module.Camera(outward, spun, target, reach, pixels),
+            side = np.cross(inward, [0.0, 1.0, 0.0])
+        spun = np.cross(side / np.linalg.norm(side), inward)
+        out.append((render_module.Camera(inward, spun, target, reach, pixels),
                     "aim%d" % int(node)))
     return out
 
