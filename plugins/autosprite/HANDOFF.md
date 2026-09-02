@@ -1091,6 +1091,23 @@ not a thing that leans.
 
 Honest and short. The easy things are gone.
 
+0. **Measure the VISION backend across the whole corpus. It needs no new code.**
+   Every number in this file, and every conclusion drawn from one, was measured
+   on the TEMPLATE backend -- which is the honest floor of what this pipeline
+   does with nothing attached, and is now the largest known source of error in
+   it. On the corpus knight its "arms" are 5x4 chips of mitten while the torso
+   keeps both pauldrons and the tops of both boots; on two of four other real
+   characters the arm box is a 1-2 pixel sliver. The one data point that exists
+   says a vision rig takes a character's walk from 26.4% to **19.4%**, and
+   `platformer-grass-prowne`'s jump from 15.4% shed to **0.00%**.
+
+   Nothing else in this backlog is worth doing before this, because every other
+   item is tuned against rigs that may be wrong. `scripts/ground_truth.py` takes
+   a `"rig"` path per subject and `vision.make_backend("headless", ...)` already
+   builds one; the work is running it, saving the rigs, and putting the two
+   columns side by side. If the vision rigs win as expected, several entries
+   below are answers to a question that stops being asked.
+
 1. **The rigger splits one mass and calls the halves a pair.** The silhouette
    backend's remaining defect, said by the critic of five corpus characters: a
    floor-length robe hem, a slime, a squat blob, a tunic, a cape. It cuts the
