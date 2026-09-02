@@ -526,8 +526,8 @@ of its rows in it was on a mirrored rig:
 | subject | clip | content height | shipped | coverage | matched |
 |---|---|---|---|---|---|
 | `platformer-forest-64` | run | 45 px | **4.5%** | 0.76 | **12.4%** |
-| `platformer-mv-male` | crouch | 46 px | 18.8% | 1.08 | **15.3%** |
-| `platformer-mv-male` | attack | 46 px | 30.7% | 1.38 | 19.9% |
+| `platformer-mv-male` | crouch | 46 px | 18.6% | 1.08 | **15.3%** |
+| `platformer-mv-male` | attack | 46 px | 30.8% | 1.38 | 19.9% |
 | `platformer-sumohulk-16` | walk | 15 px | 9.1% | 0.25 | 25.8% |
 | `topdown-eldiran-rpg` | walk | 32 px | 24.1% | 0.75 | 26.0% |
 | `creature-horse-scratchio` | walk | 33 px | 25.4% | 0.80 | 27.1% |
@@ -863,9 +863,43 @@ eye was right every time.** The lesson has stopped being about any one clip.
 only ever a reason to go and look.
 
 What the idle actually wants is unchanged and still open: it under-moves at 0.63
-coverage and a biped really does shift its weight. The route that is not blocked
-is making a translation skinnable -- the torso leaning over a hip that stays put
--- which is a `render.py` question about `_legible`, not a keyframe.
+coverage and a biped really does shift its weight. The next section is how far
+that got.
+
+### Why the shift is blocked, exactly, and what unblocks it
+
+The guard was measuring the wrong quantity for a skinned part, and that is now
+fixed: a skinned pixel takes its weight's share of its part's transform, so the
+pixel at the joint takes the **parent's** transform and the one at the free end
+takes all of the part's own. The spread a viewer reads is between those two.
+Measured among four corners that all take the part's transform together, a pure
+translation has spread **zero** by construction -- so no translation could ever
+be legible, and skinning could never run on one. `_legible` now takes a `pinned`
+matrix, passed only for a part that will actually be skinned.
+
+It is a correct fix and it buys almost nothing today: `mv-male`'s crouch goes
+18.8% -> 18.6% and its attack 30.7% -> 30.8%, every other clip is byte for byte
+identical, and all 761 tests pass plus three new ones. That is because the part
+this was supposed to unblock -- the torso -- is the **root**, and
+`skin.bands` returns `None` for a part with no parent, so a root is never
+skinned at all.
+
+**That exclusion is the real blocker, and it is not arbitrary.** A child
+composes onto its parent's UNDAMPED world transform. Skin the root and its hip
+pixels stay where the pivot is while the legs hanging off that hip attach as
+though it had moved the full `dx` -- a gap at the hip instead of a gash across
+the waist. Trading one tear for another.
+
+What the whole thing wants is one change, and it is a real generalisation rather
+than a patch: **a child should attach at its parent's transform evaluated at the
+child's own attachment weight.** A leg touches the torso at the torso's pivot,
+where the weight is ~0, so a weight-shifted torso would carry its legs by
+almost nothing and the feet would stay planted with no counter-track authored at
+all. Every other clip keeps working because at rest, and for any part whose
+attachment sits at weight 0 today, the composition is unchanged. It touches
+`skeleton.world_transforms`, so it is a change to measure across the whole
+corpus rather than to bolt on -- but it is the single named thing standing
+between the library's worst clip and twenty points.
 
 ## The attack's torso lean, halved, with the third reading it was waiting for
 

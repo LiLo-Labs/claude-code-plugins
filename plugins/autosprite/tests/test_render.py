@@ -348,3 +348,41 @@ def test_a_wave_is_applied_in_the_part_s_own_space(hero_cutout):
     turned = render.render_pose(
         cut, skeleton.Pose({name: skeleton.PartPose(wave=3.0, angle=90.0)}), margin=8)
     assert not image.equal(upright, turned)
+
+
+def test_a_translation_is_illegible_alone_and_legible_on_a_held_part():
+    """The guard's spread is between a skinned part's two ENDS, not its corners.
+
+    A pure translation moves all four corners of a part exactly together, so
+    measured among themselves they have zero spread and the guard quantises --
+    which is right for a part that moves rigidly and wrong for one whose joint
+    is pinned, where the held end takes the parent's transform and the free end
+    takes all of this one. Without the `pinned` reading no translation could
+    ever be legible, so skinning could never run on one.
+    """
+    layer = image.blank(12, 12)
+    layer[3:9, 3:9] = (255, 0, 0, 255)
+    slide = skeleton.translate(4.0, 0.0)
+
+    rigid = render._legible(layer, slide)
+    assert rigid is not slide, "four corners moving together have no spread"
+    assert (rigid[0, 2], rigid[1, 2]) == (4.0, 0.0), "and it becomes the whole-pixel move"
+
+    held = render._legible(layer, slide, pinned=np.array(skeleton.IDENTITY, dtype=float))
+    assert held is slide, "a held end that stays while the free end travels 4px does show"
+
+
+def test_a_held_end_going_nowhere_different_still_quantises():
+    """`pinned` widens what counts as spread; it does not make everything legible."""
+    layer = image.blank(12, 12)
+    layer[3:9, 3:9] = (255, 0, 0, 255)
+    crawl = skeleton.translate(0.3, 0.0)
+    same = np.array(skeleton.IDENTITY, dtype=float)
+    assert render._legible(layer, crawl, pinned=same) is not crawl
+
+
+def test_the_rest_pose_survives_the_pinned_reading(hero, hero_cutout):
+    """At rest the part and its parent take the same transform, so the spread is
+    zero from both readings and REST stays byte-exact -- which is the guarantee
+    every other one on this branch is built on."""
+    assert image.equal(render.render_pose(hero_cutout, skeleton.Pose()), hero.pixels)

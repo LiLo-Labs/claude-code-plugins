@@ -209,7 +209,7 @@ def _reconnect(frame, outvoted, whole=True):
 LEGIBLE = 1.0
 
 
-def _legible(layer, matrix, floor=None):
+def _legible(layer, matrix, floor=None, pinned=None):
     """`matrix`, or the whole-pixel move it amounts to on art this small.
 
     A pixel artist never rotates a five-pixel arm. They redraw it, and if the
@@ -242,6 +242,20 @@ def _legible(layer, matrix, floor=None):
     one of its pixels exactly. And it is size-relative without a size in it: the
     same six-degree shoulder turn is drawn on a 64px character, whose arm is
     long enough to show it, and quantised on a 16px one, whose arm is not.
+
+    `pinned` IS WHAT A SKINNED PART'S HELD END DOES, and without it this
+    measured the wrong thing on every part that skinning would have touched. A
+    skinned pixel takes its weight's share of the part's own transform, so the
+    pixel at the joint takes the PARENT's transform and the one at the free end
+    takes all of `matrix`. The spread a viewer reads is between those two, not
+    among four corners that all take `matrix` together -- and for a pure
+    TRANSLATION the four corners always move exactly together, spread zero, so
+    a translation could never be legible and skinning could never run on one. A
+    torso slid sideways therefore moved as one rigid block off the hips it sits
+    on, which is a body that skates and tears rather than one that leans.
+
+    Passed only for a part that will actually be skinned, so a rigid part is
+    judged exactly as it always was.
     """
     floor = LEGIBLE if floor is None else float(floor)
     if floor <= 0.0:
@@ -258,8 +272,13 @@ def _legible(layer, matrix, floor=None):
     corners = np.array([[x0, y0, 1.0], [x1, y0, 1.0],
                         [x0, y1, 1.0], [x1, y1, 1.0]]).T
     moved = (matrix @ corners)[:2] - corners[:2]
-    spread = max(float(np.hypot(*(moved[:, i] - moved[:, j])))
-                 for i in range(4) for j in range(i + 1, 4))
+    displacements = [moved[:, i] for i in range(4)]
+    if pinned is not None:
+        held = (pinned @ corners)[:2] - corners[:2]
+        displacements += [held[:, i] for i in range(4)]
+    spread = max(float(np.hypot(*(displacements[i] - displacements[j])))
+                 for i in range(len(displacements))
+                 for j in range(i + 1, len(displacements)))
     if spread >= float(floor):
         return matrix
     centre = np.array([columns.mean(), rows.mean(), 1.0])
@@ -414,9 +433,18 @@ def render_pose(cutout, pose, margin=0):
         # size argument and lets neighbouring bands round apart -- a limb with a
         # step in it. If the part's own transform is too small to draw, there is
         # nothing for skinning to protect either, so it takes the rigid path.
-        legible = _legible(layer, rigid)
-        pieces = (None if legible is not rigid
-                  else _skinned(rig, cutout, sprite, pixels, parts_local))
+        # Skinning is resolved FIRST because the guard needs to know whether
+        # this part has a held end and where that end is going: a pixel at
+        # weight 0 takes the parent's transform, so the differential travel the
+        # guard exists to measure is between the parent's and the part's own.
+        # Asked without that, a translation reads as zero spread on every part
+        # in the rig and skinning never sees one.
+        pieces = _skinned(rig, cutout, sprite, pixels, parts_local)
+        pinned = (None if pieces is None
+                  else shift @ pieces[0] @ np.linalg.inv(shift))
+        legible = _legible(layer, rigid, pinned=pinned)
+        if legible is not rigid:
+            pieces = None
         if pieces is None:
             moved = _transform_layer(layer, legible, (width, height))
             img.paste(frame, moved, 0, 0)
