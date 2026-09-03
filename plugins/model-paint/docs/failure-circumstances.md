@@ -49,13 +49,37 @@ each time.
 *Incident:* the shell's barnacle survey, where 162 looks over 18 orbit
 cameras indexed the same conspicuous cones repeatedly and left a scatter of
 small or edge-on ones untouched.
-*Invariant:* the survey looks twice, and the second pass LEAVES THE SPHERE --
-each of its cameras sits on the outward normal of an unindexed look-alike and
-looks straight in, so an edge-on instance finally gets a face-on look. Aiming
-by geometric signature is not labelling: what is at the end of the aim still
-has to be pointed at and still has to pass consensus (`index3d.survey`).
+*Invariant:* the survey looks again and again, and its cameras LEAVE THE
+SPHERE -- each sits on the outward normal of an unindexed look-alike and looks
+straight in, so an edge-on instance finally gets a face-on look. Aiming by
+geometric signature is not labelling: what is at the end of the aim still has
+to be pointed at and still has to pass consensus. A second proposer, an agent
+shown the whole piece with the index tinted, says where the index ISN'T --
+which the signature cannot do, because it can only offer what already
+resembles what is confirmed, and so walks outward from the index without ever
+crossing a gap (`index3d.survey`).
 *Measured:* 77 instances from the orbit alone; 102 once the vote bar stopped
-punishing instances the cameras only reached once; 120 with 96 aimed looks.
+punishing instances the cameras only reached once; 142 from repeated aimed
+rounds; 157 with the overview agent directing as well.
+
+Two corollaries, both paid for:
+
+A camera angle is not free variety. Tilting the aimed camera 26-42 degrees
+off the normal gives back exactly the foreshortening the aimed camera exists
+to remove: rounds run at those angles found 5, 5, 5, 3, 2, 2, 3 where face-on
+rounds found 22, 10, 7, 1. Vary the angle enough that a revisit is a new look,
+and no further -- 8 to 18 degrees.
+
+**A proposer that cannot see the feature is not a weak proposer; it is noise
+in the shape of one, and it bills the same as a good one.** The overview agent
+was first shown the raw lit buffer at whole-model scale, where a 3mm cone on a
+110mm piece has no readable relief. Asked to point at cones it could not see,
+it pointed anyway -- naming the same hundred-odd places every round whatever
+had already been found, for $329 and one fewer instance than the geometric
+aims alone had found for $29. Rendered instead through the presentation path,
+key/fill/sky over ambient occlusion, 58% of its places land on unindexed
+surface and the same code finds 157. Before trusting any stage that looks,
+look at what it was shown.
 
 The half of that fix which did NOT work is the more useful finding. The
 second pass also tints what the first pass found and asks "what did we
@@ -234,6 +258,14 @@ and asks what the tinted shape actually is. The gate exits through selection
 (see 6): the agent may name what the shape really is, and those names are the
 finding, not the rejection. On the shell they named a whole second family the
 index had been quietly mixing in.
+
+A DROP is a verdict too, and inherits its render's losses like any other (see
+2). The first gate dropped on a single look and discarded barnacles that are
+plainly ridged and cratered from any other angle. An instance is now dropped
+only when a second angle agrees; when the angles disagree it is kept and
+reported as contested, because that is a fact worth logging rather than a coin
+to flip. On the shell 19 of 157 instances were contested -- every one of them
+would have been thrown away by the single-look gate.
 *Watch for:* a stage whose recall number is reported by the stage that
 produced it, and any gate whose "could not tell" and "was never shown" land in
 the same bucket. The first confirm run read "125 kept, 81 unclear" when only 58
