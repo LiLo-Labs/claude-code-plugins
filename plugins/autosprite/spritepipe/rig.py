@@ -34,7 +34,23 @@ ROLES = (
     "shadow",      # a baked ground shadow; stays on the floor, never moves
     "prop",        # a held item; rides the near arm if one exists
     "accessory",   # hats, capes, scarves; ride the parent with a small lag
+    "segment",     # the far half of a part `fit.split_part` cut in two -- a
+                   # shin below a thigh, a skull beyond a neck. Addressed by
+                   # NAME, never by role, and that is the whole point: track
+                   # selectors bind by role, so leaving the two halves sharing
+                   # one role made every existing clip rotate BOTH and compound
+                   # the angle down the chain. With the far half held here, a
+                   # `head` track still addresses the neck alone and the skull
+                   # follows it rigidly -- which is exactly what that track did
+                   # before the part was ever split.
 )
+
+# What a rigger may DECLARE. `segment` is not in it: nothing names a segment
+# when describing a character, it only comes into being when `fit.split_part`
+# cuts an existing part in two. It stays in ROLES so a rig carrying one still
+# loads and validates.
+DECLARABLE = tuple(role for role in ROLES if role != "segment")
+
 
 PAIRED = {
     "arm_near": "arm_far", "arm_far": "arm_near",

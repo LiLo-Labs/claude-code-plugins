@@ -319,6 +319,36 @@ def body_mask(mask, keep=0.15):
     return kept if kept.any() else mask
 
 
+
+def neck_row(mask, column, top, bottom):
+    """The row where the neck crosses into the body, read off the art.
+
+    In the head box's body-ward column the neck shows up as one run of opaque
+    pixels -- deer rows 17..29, horse 2..18, boar 0..10 on the corpus -- and the
+    joint is the middle of it. The old rule used the head box's own bottom edge,
+    which is 0.95 of the belly line and so lands at the BRISKET: on all three
+    corpus quadrupeds it fell at or just below the bottom of that run, outside
+    the art entirely. A neck rotated about a point under the chest swings the
+    whole head like a pendulum hung from the knees instead of bending at the
+    withers.
+
+    Falls back to `bottom` when the column is empty, which is what a head box
+    that overshoots the art looks like.
+    """
+    import numpy as _np
+    rows = _np.nonzero(mask[top:bottom, column])[0]
+    if not len(rows):
+        return bottom
+    best = run = (rows[0], rows[0])
+    for row in rows[1:]:
+        if row == run[1] + 1:
+            run = (run[0], row)
+        else:
+            run = (row, row)
+        if run[1] - run[0] > best[1] - best[0]:
+            best = run
+    return int(top + (best[0] + best[1]) // 2)
+
 def find_split(mask, floor=0.35, slack=2):
     """The row where the legs part, found by scanning up from the feet.
 
@@ -814,10 +844,27 @@ class TemplateBackend(Backend):
                         width, max(int(height * 0.10) + 1, int(belly * 0.8)))
 
 
+        # The neck joins the body at the BODY-WARD END of the head box, not at
+        # its middle. The tail five lines below already knows this; the head did
+        # not, and the inconsistency is visible: on the corpus deer the pivot
+        # landed at x=7 of a head box running 0..15, which is eight pixels in
+        # FRONT of the withers, out past the chest. Rotating the neck about a
+        # point in mid-air swings its base away from the shoulder and opens a
+        # gap there -- the same failure the hip pivot had, and the same fix.
+        #
+        # Only side-on, for the same reason the hip rule is: on a creature
+        # facing the viewer the head box is the leading THIRD of the width and
+        # has no body-ward end to speak of.
+        if facing in FACE_ON:
+            head_pivot = ((head_box[0] + head_box[2]) // 2, head_box[3])
+        else:
+            head_pivot_x = (head_box[0] if facing == "right"
+                            else max(head_box[0], head_box[2] - 1))
+            head_pivot = (head_pivot_x,
+                          neck_row(mask, head_pivot_x, head_box[1], head_box[3]))
         parts = [rig_module.Part("body", "body", (0, 0, width, belly), None,
                                  (width // 2, belly)),
-                 rig_module.Part("head", "head", head_box, "body",
-                                 ((head_box[0] + head_box[2]) // 2, head_box[3])),
+                 rig_module.Part("head", "head", head_box, "body", head_pivot),
                  rig_module.Part("tail", "tail", tail_box, "body",
                                  (tail_box[2] if facing == "right" else tail_box[0],
                                   (tail_box[1] + tail_box[3]) // 2))]
@@ -1020,7 +1067,7 @@ class HeadlessBackend(Backend):
         height, width = reference.pixels.shape[:2]
         prompt = DESCRIBE_PROMPT % {
             "width": width, "height": height,
-            "roles": ", ".join(rig_module.ROLES),
+            "roles": ", ".join(rig_module.DECLARABLE),
             "traits": ", ".join(rig_module.TRAITS),
             "intent": ("The user says this is: %s\n" % intent) if intent else "",
         }

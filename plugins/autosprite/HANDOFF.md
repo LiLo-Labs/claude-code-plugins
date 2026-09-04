@@ -788,6 +788,79 @@ over-scaled for small sprites". The second character refuted it: at full scale
 the right size, and the brawler at matched coverage wants **more** motion, not
 less. One data point would have shipped a scaling law that was wrong.
 
+## A quadruped idles at ONE END, and that is why the three quadrupeds fail
+
+The backlog said the idle needs three clips because an artist's idle ranges from
+8.8% to 94% of the sprite. Chasing that produced a better answer: **amplitude is
+not the discriminator, and neither is height. Position ALONG THE LENGTH is.**
+
+Our `idle` scores well on some subjects and badly on others with no relation to
+how much the artist moves -- the samurai disturbs 87.6% of itself and we explain
+it at 32.8%, the deer disturbs 91.1% and we manage only 61.3%. Splitting the
+disturbed pixels into head-end, middle and tail-end thirds says why at once:
+
+| subject | the artist disturbs | our `idle` disturbs |
+|---|---|---|
+| `deer` | **93% head-end** / 7% mid / 0% tail | 41% / 26% / 33% |
+| `horse` | 74% head-end / 10% / 16% | 43% / 22% / 35% |
+| `boar` | 0% head / 5% / **95% tail-end** | 35% / 33% / 32% |
+| `samurai` | 24% / 49% / 27% | 23% / 52% / 26% |
+| `shieldmaiden` | 39% / 40% / 22% | 35% / 40% / 25% |
+| `slime` | 30% / 35% / 34% | 30% / 30% / 40% |
+| `sumohulk` | 37% / 25% / 39% | 41% / 41% / 19% |
+
+**The three subjects whose distribution we get wrong are the three quadrupeds,
+and they are exactly the three worst idle scores in the library.** Every biped
+and the blob match closely, and we score them well. A standing quadruped does
+not breathe symmetrically: it lowers its head to graze, or it flicks its tail.
+Our `idle` drives a ROOT SQUASH, which is symmetric about the centre by
+construction and cannot say either.
+
+Splitting by height finds nothing -- artist and clip agree within a few points
+on every subject -- so it really is the long axis, which is the axis a biped
+does not have enough of for this to show.
+
+### Both single-segment fixes buy a great deal and break the picture
+
+Removing the root squash and driving the head is worth an enormous amount on the
+number, at coverage 1.00:
+
+| head channel (no root) | `deer` | `horse` | head-end share, deer |
+|---|---|---|---|
+| the shipped `idle` | 61.3% | 46.1% | 41% |
+| `dy` 7 | **36.3%** | **25.4%** | **91%** (artist: 93%) |
+| `angle` -20 | 51.0% | 34.8% | |
+| `angle` -35 | 44.2% | 27.5% | |
+| `angle` -50 | 44.5% | 37.3% | |
+
+Twenty-five points on the deer and twenty on the horse, and the distribution
+lands on 91% against the artist's 93%. **Rendered at 4-5x, both are unusable.**
+
+`dy` slides the head straight DOWN into the body: the deer's antlers overlap its
+own back and the horse's head disappears into its neck. `angle` rotates the head
+box about the withers, which sweeps the antlers through the deer's spine and
+smears the horse's mane into a dark band across its neck.
+
+### The reason is one measurement, and it connects this to the knee
+
+**A quadruped's `head` part is head AND NECK as one rigid block** -- 31 rows of a
+51px deer and 19 of a 33px horse, 58 to 61% of the animal's height. The artist's
+grazing motion BENDS that: the neck arcs down while the skull stays level to the
+ground. A rigid block pivoted at the withers cannot arc; it can only sweep, and
+what it sweeps through is the animal's own body.
+
+So the grazing idle is not a keyframe problem at all. It wants **a neck joint**:
+a second segment in the head chain, exactly as a bend wants an elbow and a knee.
+That is the same finding as the limb-segment entry in this file, arrived at from
+the opposite direction, and it strengthens it -- the earlier objection to
+splitting limbs was that no hand-authored clip authors a bend, and here is a clip
+that would.
+
+**Nothing is shipped from this.** The distribution measurement is the durable
+part; both fixes are refused, and `head dy`/`head angle` on a quadruped join the
+dead ends with their numbers above. The eighth and ninth times on this project
+that a large measured gain turned out to be a broken picture.
+
 ## The retargeting proof: 990 pairs, and the two defects it found
 
 The claim this project shares with Mixamo is one sentence -- **a motion written
@@ -1675,15 +1748,26 @@ unexplored idea.
    side-on humanoid with an artist's `idle` (the two new ones are both face-on),
    no winged subject with an artist's clip at all, and nothing above 51px.
 
-1b. **THE IDLE IS A CHOICE, NOT A TUNING -- the library needs more than one.**
-   Across the seven characters that have an artist's idle, it redraws between
-   **8.8% and 94%** of the sprite, and size does not explain the spread. The
-   boar's whole idle is a tail flick; the deer puts its head on the ground.
-   One keyframe table cannot be both, which is why `idle` is the worst clip on
-   every character that has one and why a day of tuning it against a single
-   subject went nowhere. A twitch, a breath and a behaviour are three
-   animations. This is now the highest-value item, it is unblocked, and it is
-   the first hard evidence about WHICH clips a wider library should contain.
+1b. **THE IDLE IS A CHOICE, NOT A TUNING -- and the axis is POSITION, not
+   amplitude.** The first version of this entry said the library needs a twitch,
+   a breath and a behaviour because an artist's idle redraws between 8.8% and
+   94% of the sprite. Measured, amplitude is not what separates the good scores
+   from the bad: the samurai disturbs 87.6% of itself and we explain it at
+   32.8%, the deer disturbs 91.1% and we manage 61.3%. What separates them is
+   WHERE ALONG THE LENGTH -- the deer puts 93% of its idle at the head end, the
+   boar 95% at the tail end, and our root squash spreads it 41/26/33 because a
+   squash is symmetric about the centre. The three subjects whose distribution
+   we get wrong are the three quadrupeds and the three worst idles in the
+   library. See "a quadruped idles at ONE END".
+
+   **And the head-end clip is blocked on a rig change, which is measured.** Both
+   ways of driving the head are worth twenty to twenty-five points at coverage
+   1.00 and both are unusable at 4x, because a quadruped's `head` part is head
+   AND NECK as one rigid block (58-61% of the animal's height): translation
+   buries it in the body, rotation sweeps it through the spine. A grazing idle
+   wants a NECK JOINT. That makes it the same item as the limb-segment entry
+   below, and answers that entry's standing objection -- "no hand-authored clip
+   authors a bend" -- because this is one.
 
    Two measured warnings for whoever takes it. An appendage-only `twitch` was
    built and scores 100% on all three quadrupeds, because of 1c below. And
@@ -2376,7 +2460,166 @@ already asks exactly that question -- or on a character big enough to draw it.
 Never by default. `fit.split_part` and `fit.better_split` stay; nothing calls
 them from `build`, and that is deliberate.
 
+## Splitting a part doubled the angle every existing clip asked of it
+
+`fit.split_part` gave both halves of a cut the original's role. Track selectors
+bind by ROLE -- `motion.select` falls through to `part.role == selector` for a
+bare name -- so a clip's `head` track matched the neck AND the skull, and the
+skull, being a child of the neck, composed the neck's rotation on top of its
+own. Measured on the humanoid fixture at a 20 degree ask:
+
+    leg_near        composed angle  +20.00 deg
+    leg_near_lower  composed angle  +40.00 deg
+
+This is how the grazing experiment above was measured wrong the first time. A
+sweep over how far the skull should COUNTER-rotate returned byte-identical
+numbers for shares of 0.0, 0.5 and 0.8, because the `head_lower` track was
+matching no part at all while the `head` track drove both segments. An invariant
+that cannot be varied is the loudest signal available that a knob is not
+connected, and it is worth reaching for deliberately: the numbers looked
+plausible and only their refusal to move gave the bug away.
+
+The far half now takes a new role, `segment`, and is addressed by name. A
+`head` track is back to meaning what it meant before the part was ever split --
+the anchored segment rotates and the rest of the chain rides it rigidly -- and a
+clip that wants the bend asks for `name:head_lower` explicitly. `segment` is
+deliberately absent from `rig.DECLARABLE`, the vocabulary offered to a vision
+rigger, because nothing NAMES a segment when describing a character; it stays in
+`ROLES` so a rig carrying one still validates.
+
+The test asserts the composed angles rather than the pixels. Two half sprites
+rasterise and skin separately from one whole one -- 3 differing pixels of 178 on
+the fixture -- and that is a difference in sampling, not in pose; the chain is
+the exact invariant, so the chain is what is pinned.
+
+## The head pivot on a side-on creature — read off the art, and shipped
+
+`vision._creature` placed a quadruped's head pivot at the head box's x-CENTRE
+and its own bottom edge. Both coordinates were wrong, and the tail three lines
+below already knew the rule for one of them.
+
+**x — the body-ward end.** A neck joins the body at the end of the head box
+nearest the shoulder, not in the middle of it. On the corpus deer the pivot
+landed at x=7 of a box running 0..15: eight pixels in FRONT of the withers, out
+past the chest. The tail part built in the same constructor already writes
+`tail_box[2] if facing == "right" else tail_box[0]` -- the body-ward end -- so
+the head was the one part in the creature rig not following a rule its own
+neighbour follows.
+
+**y — the withers, from the art.** The old answer was `head_box[3]`, which is
+0.95 of the belly line. Measured against the three corpus quadrupeds, that row
+falls at or BELOW the bottom of the neck's own cross-section every time:
+
+| | neck run at the body-ward column | old pivot row |
+|---|---|---|
+| deer  | 17..29 | 31 |
+| horse |  2..18 | 19 |
+| boar  |  0..10 | 11 |
+
+-- so the joint sat outside the animal, under the brisket, and a rotated head
+swung like a pendulum hung from the knees. `vision.neck_row` reads the longest
+run of art in that column and takes its middle. It is the longest run and not
+the first because an ear or an antler tine crosses the same column above the
+neck.
+
+Measured on the ten-subject ground truth, this moves exactly the three clips
+that rotate a creature's head and nothing else -- **3 better, 0 worse, 23
+unchanged**:
+
+| clip | shipped | matched |
+|---|---|---|
+| horse run | 18.8% -> **17.0%** | 31.7% -> **30.4%** |
+| deer run  | 25.4% -> **24.3%** | 23.7% -> **22.9%** |
+| boar run  | 22.5% -> **21.4%** | 22.5% -> **21.4%** |
+
+Both halves earn their place: x alone gives 17.3 / 25.1 / 22.0, and adding the
+withers row improves all three again. `idle` is untouched because its only head
+channel is `dy`, and a translation does not care where the pivot is -- which is
+also why this fix was invisible until something rotated a creature's head.
+
 ## Dead ends — measured, not guessed
+
+### A grazing idle for quadrupeds — refuted, and the reason is the neck
+
+Two of the three side-on creatures in the ground truth have an artist idle that
+is a GRAZING CYCLE, and measuring where those artists put their pixels is the
+sharpest result in this file:
+
+| | artist | ours (`idle`) |
+|---|---|---|
+| deer: share of disturbance forward of the withers  | **91%** | 39% |
+| horse: same | **84%** | 60% |
+
+The artists move the head and neck and hold the body, legs and tail perfectly
+still -- on the deer the entire hind half of the animal is untouched in all nine
+frames. Our `idle` spends half to two thirds of its budget on a body the artist
+never moves.
+
+**Correction, measured after this was first written here.** The cause was
+recorded as the root track's WIDENING, anchored at the body box's x-centre, with
+the rigid hind legs 26px from that centre against the forelegs' 14px and so
+swinging twice as far. The arithmetic is right and the conclusion was wrong:
+taking the widening out entirely moves the deer's forward share only 31.6% to
+35.0%. It is the root track ENTIRE -- bob and widening together -- and the
+reason is duller than the geometry: any whole-body transform disturbs the front
+and the rear alike, so a one-pixel bob spends as much on the hindquarters as on
+the neck. Remove the root altogether and the distribution snaps into place:
+
+| | forward share | error |
+|---|---|---|
+| deer, shipped   | 31.6% | 62.2% |
+| deer, no root   | **74.0%** (artist 79.1%) | **23.4%** |
+| horse, shipped  | 27.1% | 44.0% |
+| horse, no root  | **83.9%** (artist 60.7%) | **1.6%** |
+
+That is a diagnosis and not a fix, and the frame count is why: a creature idle
+with no root track draws **2 distinct frames out of 4** on the horse and 3 of 4
+on the deer, because the root was carrying nearly all of the motion. A
+four-frame idle that draws two pictures is precisely the stutter this clip's own
+note was written to avoid. It trades a lively idle that moves the wrong pixels
+for a correct one that barely moves, and the motion that ought to replace the
+root -- head and neck -- is the graze below, which cutout cannot draw. Sweeping
+the widening share against a head nod over both subjects buys at best 1 to 2.5
+points at matched coverage and the two disagree on the sign, so there is nothing
+to ship here yet.
+
+So a `graze` clip looked obvious, and it does not work. Built on the two-segment
+neck `fit.split_part` now produces -- neck rotating at the withers, skull
+counter-rotating to stay level -- it improves every number available:
+
+| | coverage | error |
+|---|---|---|
+| `idle`, deer  | 0.47 | 53.6% |
+| `graze` -35 deg, skull 0.8 | 0.43 | **25.0%** |
+| `graze` -80 deg, skull 0.8 | 0.42 | **17.7%** |
+
+and at 4x it is plainly worse than what it replaces. At -35 deg the deer's nose
+reaches chest height where the artist's reaches the GROUND; at -80 deg -- the
+best error of anything measured here -- the head does not lower at all, it
+collapses sideways into the shoulder while the antlers sweep down over the neck.
+`footprint` scores overlap with the artist's swept region, and a head folded
+into the chest overlaps that region beautifully.
+
+**Why it cannot work as a cutout.** The artist REDRAWS the neck. On the deer it
+is about 12px from withers to poll in the alert pose and roughly twice that at
+the grass; the head-column pixel count runs 7 at frame 0 and 135 at frame 4.
+Cutout animation moves the artist's own pixels and never draws new ones, so the
+one thing this motion is made of is the one thing the technique cannot do. `sy`
+is the obvious substitute and it measurably makes things worse -- at -50 deg,
+18.6% at sy 1.0 against 42.1% at sy 1.6 -- because scaling a boxed neck fattens
+and smears it rather than extending it along its own axis.
+
+What survives from the attempt, and is worth keeping: the head pivot fix above,
+which came out of looking at why the first render tore; and the finding that a
+quadruped idle should be spending its motion FORWARD of the withers, which is
+true regardless of whether the head can reach the ground. A gentler head-and-
+neck idle that does not try to graze has not been tried and is the obvious next
+thing.
+
+**The eleventh time the metric and the eye disagreed, and the eleventh time the
+eye was right.** Twice in this session alone, and both times the number improved
+while the picture got worse.
+
 
 ### Segmenting a limb by the shading crease the artist drew — the third rig fix, refuted
 

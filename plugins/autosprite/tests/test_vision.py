@@ -819,3 +819,64 @@ def test_a_hip_stays_inside_its_own_leg():
         if leg is None:
             continue
         assert leg.box[0] <= leg.pivot[0] <= leg.box[2] - 1, (role, leg.pivot, leg.box)
+
+
+def test_a_side_on_creatures_head_pivots_at_the_withers_not_the_brisket():
+    """A quadruped's neck joins the body at the top of the chest, and the joint
+    has to be read off the art rather than taken from the head box's own bottom
+    edge -- that edge is 0.95 of the belly line, which on all three corpus
+    quadrupeds fell at or below the BOTTOM of the neck's cross-section, i.e.
+    outside the animal. A head rotated about a point under the chest swings like
+    a pendulum hung from the knees.
+
+    Here the neck is a narrow band at rows 4..9 leading a deep body, so the
+    withers is row 6 and the brisket -- the old answer -- is row 13.
+    """
+    mask = np.zeros((20, 30), dtype=bool)
+    mask[4:10, 20:30] = True           # head and neck, facing right
+    mask[2:14, 6:22] = True            # body, much deeper than the neck
+    mask[14:20, 7:11] = True           # hind legs
+    mask[14:20, 16:21] = True          # fore legs
+    parts, _notes = vision.TemplateBackend()._creature(mask, 30, 20, "right")
+    head = [part for part in parts if part.name == "head"][0]
+    # Body-ward end of the head box, because that is where the neck crosses in.
+    assert head.pivot[0] == head.box[0]
+    # And partway UP the neck, not at the bottom of the head box.
+    assert head.box[1] <= head.pivot[1] < head.box[3]
+    assert 4 <= head.pivot[1] <= 9, head.pivot
+
+
+def test_a_face_on_creature_keeps_its_head_pivot_centred():
+    """The withers rule is a side-on one: a creature facing the viewer has no
+    body-ward end to its head box."""
+    mask = np.zeros((20, 30), dtype=bool)
+    mask[2:14, 6:24] = True
+    mask[14:20, 8:12] = True
+    mask[14:20, 18:22] = True
+    parts, _notes = vision.TemplateBackend()._creature(mask, 30, 20, "front")
+    head = [part for part in parts if part.name == "head"][0]
+    assert head.pivot[0] == (head.box[0] + head.box[2]) // 2
+
+
+def test_neck_row_falls_back_when_the_head_box_overshoots_the_art():
+    empty = np.zeros((12, 12), dtype=bool)
+    assert vision.neck_row(empty, 3, 0, 9) == 9
+
+
+def test_neck_row_takes_the_longest_run_not_the_first():
+    """An antler tine or an ear crossing the same column is a short run above
+    the neck's own; taking the first would hang the head off the ear."""
+    mask = np.zeros((20, 6), dtype=bool)
+    mask[1:3, 2] = True                # an ear: two rows
+    mask[8:15, 2] = True               # the neck: seven rows
+    assert vision.neck_row(mask, 2, 0, 20) == 11
+
+
+def test_the_rigger_is_not_offered_the_internal_segment_role():
+    """`segment` exists so `fit.split_part` can cut a part in two without the
+    halves colliding on one role. Nothing NAMES a segment when describing a
+    character, so it does not belong in the vocabulary a rigger picks from --
+    but it stays in ROLES so a rig that already carries one still validates."""
+    assert "segment" in R.ROLES
+    assert "segment" not in R.DECLARABLE
+    assert set(R.DECLARABLE) < set(R.ROLES)
