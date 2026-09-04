@@ -231,7 +231,10 @@ def evaluate(report, budget=None):
 
 def probe_code(targets=None):
     """The snippet to hand to `execute`, with its target list bound in."""
-    return "TARGETS = %s\n%s" % (json.dumps(list(targets) if targets else None), PROBE)
+    # repr, not json.dumps: this is Python source, and JSON's null/true/false
+    # are not Python tokens. The default targets=None path emits a bare `null`
+    # and dies with NameError inside Blender.
+    return "TARGETS = %r\n%s" % (list(targets) if targets else None, PROBE)
 
 
 def verdict(findings):

@@ -51,6 +51,8 @@ import mathutils
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 9876
 PROTOCOL_VERSION = 1
+# Breathing room so the silhouette never touches the frame edge.
+FRAMING_MARGIN = 1.08
 
 # Jobs waiting for the main thread. Each entry is a _Job.
 _jobs: "queue.Queue" = queue.Queue()
@@ -348,12 +350,21 @@ def _h_render(params):
         scene.cycles.samples = samples
 
     camera, created_camera = _ensure_camera(params.get("focus"))
+    lights, world_prev = _ensure_lighting()
     angles = params.get("angles") or [0]
     written = []
+    camera_prev = None
+    # Read it here, not after the finally: the restore puts the caller's engine
+    # back, so reporting it afterwards names the engine that did not make these
+    # pixels. A critique loop reading "CYCLES" trusts the lighting.
+    engine_used = scene.render.engine
     try:
-        radius, center = _framing(params.get("focus"))
+        radius, center, subject_radius = _framing(
+            params.get("focus"), camera, angles, params.get("elevation", 20.0))
+        camera_prev = _fit_camera(camera, radius, subject_radius)
         for angle in angles:
             _place_camera(camera, center, radius, float(angle), float(params.get("elevation", 20.0)))
+            _aim_lights(lights, camera, center)
             path = os.path.join(out_dir, "view_%03d.png" % int(angle))
             scene.render.filepath = path
             bpy.ops.render.render(write_still=True)
@@ -367,8 +378,19 @@ def _h_render(params):
         scene.render.film_transparent = prev["film"]
         if created_camera:
             bpy.data.objects.remove(camera, do_unlink=True)
+        elif camera_prev is not None:
+            camera.data.clip_start = camera_prev["start"]
+            camera.data.clip_end = camera_prev["end"]
+            camera.data.ortho_scale = camera_prev["ortho"]
+        for light in lights:
+            bpy.data.objects.remove(light, do_unlink=True)
+        if world_prev is not None:
+            node, colour, strength = world_prev
+            node.inputs[0].default_value = colour
+            node.inputs[1].default_value = strength
 
-    return {"images": written, "output_dir": out_dir, "engine": scene.render.engine}
+    return {"images": written, "output_dir": out_dir, "engine": engine_used,
+            "lit_by": "blendpipe studio rig" if lights else "the scene"}
 
 
 def _has_engine(identifier):
@@ -397,31 +419,172 @@ def _ensure_camera(focus):
     return camera, True
 
 
-def _framing(focus):
-    """Distance and center that fit the subject in frame."""
+def _orbit_position(center, radius, angle_deg, elevation_deg):
+    import math
+
+    a, e = math.radians(angle_deg), math.radians(elevation_deg)
+    return center + mathutils.Vector(
+        (radius * math.cos(a) * math.cos(e), radius * math.sin(a) * math.cos(e), radius * math.sin(e))
+    )
+
+
+def _half_fov(camera):
+    """Half the camera's field of view, in radians, on a square render.
+
+    The old framing multiplied the subject's size by 2.2 and hoped. That number
+    is only right for a 50mm lens: point a 200mm scene camera at the same object
+    and it fills nothing, a 20mm one and it overflows the frame. Distance has to
+    come from the lens actually mounted.
+    """
+    import math
+
+    data = camera.data
+    if data.type != "PERSP":
+        return None
+    sensor = data.sensor_height if data.sensor_fit == "VERTICAL" else data.sensor_width
+    return math.atan((sensor * 0.5) / max(data.lens, 1e-6))
+
+
+def _framing(focus, camera, angles, elevation):
+    """One orbit distance that fits the subject at every angle in the turnaround.
+
+    Per-angle distance would frame each view tighter, but then the subject
+    changes size between frames and a turnaround stops being comparable — the
+    thing it is for. So solve each angle exactly and take the widest.
+
+    For a view direction f with camera at center - f*d, a corner offset o from
+    the center is in frame when |o·right| and |o·up| stay inside the cone:
+
+        |o·lateral| <= (o·f + d) * tan(half_fov)   ->   d >= |o·lateral|/tan - o·f
+    """
+    import math
+
     objects = [bpy.data.objects[n] for n in focus if n in bpy.data.objects] if focus else [
         o for o in bpy.context.scene.objects if o.type == "MESH" and o.visible_get()
     ]
     if not objects:
-        return 6.0, mathutils.Vector((0.0, 0.0, 0.0))
+        return 6.0, mathutils.Vector((0.0, 0.0, 0.0)), 1.0
 
     corners = []
     for obj in objects:
         corners.extend(obj.matrix_world @ mathutils.Vector(c) for c in obj.bound_box)
     xs, ys, zs = zip(*[(c.x, c.y, c.z) for c in corners])
     center = mathutils.Vector(((min(xs) + max(xs)) / 2, (min(ys) + max(ys)) / 2, (min(zs) + max(zs)) / 2))
-    extent = max(max(xs) - min(xs), max(ys) - min(ys), max(zs) - min(zs))
-    return max(extent * 2.2, 0.5), center
+    offsets = [c - center for c in corners]
+    subject_radius = max((o.length for o in offsets), default=1.0) or 1.0
+
+    half = _half_fov(camera)
+    if half is None:  # orthographic: distance is arbitrary, ortho_scale does the framing
+        return max(subject_radius * 3.0, 1e-4), center, subject_radius
+
+    tan = math.tan(half)
+    world_up = mathutils.Vector((0.0, 0.0, 1.0))
+    needed = 0.0
+    for angle in angles or [0]:
+        position = _orbit_position(center, 1.0, float(angle), float(elevation))
+        forward = (center - position).normalized()
+        right = forward.cross(world_up)
+        right = right.normalized() if right.length > 1e-6 else mathutils.Vector((1.0, 0.0, 0.0))
+        up = right.cross(forward).normalized()
+        for o in offsets:
+            depth = o.dot(forward)
+            for lateral in (o.dot(right), o.dot(up)):
+                needed = max(needed, abs(lateral) / tan - depth)
+
+    # The floor guards a degenerate zero-size subject; it must scale with the
+    # subject, not sit at half a metre. A 2cm gem or bolt is an ordinary game
+    # asset, and an absolute floor parks the camera 16x too far from it.
+    return max(needed * FRAMING_MARGIN, subject_radius * 0.01, 1e-4), center, subject_radius
+
+
+def _fit_camera(camera, distance, subject_radius):
+    """Widen clipping to cover the subject, and scale an ortho camera to fit.
+
+    Clipping matters more than it looks: the default 100m clip_end quietly
+    slices the far half off anything large, and the render still succeeds.
+    """
+    data = camera.data
+    prev = {"start": data.clip_start, "end": data.clip_end, "ortho": data.ortho_scale}
+    data.clip_start = min(data.clip_start, max((distance - subject_radius) * 0.5, 1e-4))
+    data.clip_end = max(data.clip_end, (distance + subject_radius) * 2.0)
+    if data.type != "PERSP":
+        data.ortho_scale = subject_radius * 2.0 * FRAMING_MARGIN
+    return prev
+
+
+def _ensure_lighting():
+    """Add a temporary studio rig, but only when the scene has no lights at all.
+
+    Only when there are none. If the user has lit the scene, the render must
+    show *their* lighting: a turnaround is often exactly how you judge it, and
+    quietly adding a key light means the render agrees with nothing the user can
+    see in the viewport and hides lighting that is genuinely broken. With zero
+    lights the render carries no information to preserve, so a neutral rig
+    strictly adds signal.
+
+    Suns rather than points: a sun's contribution depends only on its rotation,
+    so one orientation works at every radius and the rig needs no re-framing
+    when the subject is 0.2m or 20m across.
+    """
+    scene = bpy.context.scene
+    if any(o.type == "LIGHT" for o in scene.objects):
+        return [], None
+
+    created = []
+    for name, energy, in (("BlendPipeKey", 4.0), ("BlendPipeFill", 1.2), ("BlendPipeRim", 2.5)):
+        data = bpy.data.lights.new(name, type="SUN")
+        data.energy = energy
+        data.angle = 0.5  # soft-edged shadows; a razor terminator reads as an artefact
+        obj = bpy.data.objects.new(name, data)
+        scene.collection.objects.link(obj)
+        created.append(obj)
+
+    # A little ambient so the shadow side is dark rather than absent. Pure black
+    # hides the same geometry a missing key light does.
+    world_prev = None
+    if scene.world is not None and scene.world.use_nodes:
+        bg = scene.world.node_tree.nodes.get("Background")
+        if bg is not None:
+            world_prev = (bg, list(bg.inputs[0].default_value), bg.inputs[1].default_value)
+            bg.inputs[0].default_value = (0.05, 0.05, 0.06, 1.0)
+            bg.inputs[1].default_value = 1.0
+    return created, world_prev
+
+
+def _aim_lights(lights, camera, center):
+    """Point the rig relative to the camera so it follows the turnaround."""
+    import math
+
+    if not lights:
+        return
+    forward = (center - camera.location)
+    if forward.length < 1e-6:
+        return
+    forward.normalize()
+    up = mathutils.Vector((0.0, 0.0, 1.0))
+    right = forward.cross(up)
+    if right.length < 1e-6:
+        right = mathutils.Vector((1.0, 0.0, 0.0))
+    right.normalize()
+
+    # key over the camera's left shoulder, fill low from the right, rim behind.
+    offsets = (
+        (math.radians(-40.0), math.radians(-35.0)),
+        (math.radians(50.0), math.radians(-10.0)),
+        (math.radians(160.0), math.radians(25.0)),
+    )
+    for light, (yaw, pitch) in zip(lights, offsets):
+        direction = forward.copy()
+        direction.rotate(mathutils.Quaternion(up, yaw))
+        direction.rotate(mathutils.Quaternion(direction.cross(up).normalized(), pitch))
+        light.rotation_euler = direction.to_track_quat("-Z", "Y").to_euler()
 
 
 def _place_camera(camera, center, radius, angle_deg, elevation_deg):
-    import math
-
-    a = math.radians(angle_deg)
-    e = math.radians(elevation_deg)
-    camera.location = center + mathutils.Vector(
-        (radius * math.cos(a) * math.cos(e), radius * math.sin(a) * math.cos(e), radius * math.sin(e))
-    )
+    # Shares _orbit_position with the framing solve on purpose: if these two
+    # ever computed the orbit differently, the distance would be fitted to a
+    # camera position that is not the one the render uses.
+    camera.location = _orbit_position(center, radius, angle_deg, elevation_deg)
     direction = center - camera.location
     camera.rotation_euler = direction.to_track_quat("-Z", "Y").to_euler()
 

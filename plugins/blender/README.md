@@ -85,9 +85,17 @@ moving to your own hardware later is one environment variable and nothing else.
 ## Tests
 
 ```
-python3 plugins/blender/tests/test_blendpipe.py
+python3 plugins/blender/tests/test_blendpipe.py      # 64 checks, no Blender needed
+python3 plugins/blender/tests/test_live_blender.py   # 52 checks against real Blender
 ```
 
-56 checks over the bridge protocol, the gate evaluator, the backend resolution
-order, the MCP surface and both guardrails. A fake speaks the addon's wire
-protocol, so none of it needs Blender running.
+The first suite covers the bridge protocol, the gate evaluator, the backend
+resolution order, the MCP surface and both guardrails. A fake speaks the addon's
+wire protocol, so none of it needs Blender running.
+
+The second launches Blender headless, loads the addon, and drives the real
+socket. It exists because the fake answers `execute` with a canned report, which
+proves the wire protocol and the gate arithmetic and can prove nothing about
+`bpy` — the gap where a probe that could not parse, a render that named the wrong
+engine, and renders of unlit scenes all passed. It finds Blender automatically or
+takes `BLENDER_BIN`, and skips rather than fails when there is none.
