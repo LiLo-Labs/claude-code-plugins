@@ -20,6 +20,9 @@ sys.path.insert(0, ROOT)
 spec = importlib.util.spec_from_file_location(
     "blendpipe_addon", os.path.join(ROOT, "blendpipe", "addon.py"))
 addon = importlib.util.module_from_spec(spec)
+# Registered before exec so tests can reach the live module through sys.modules
+# and check its helpers exactly, rather than inferring them from pixels.
+sys.modules[spec.name] = addon
 spec.loader.exec_module(addon)
 addon.register()
 

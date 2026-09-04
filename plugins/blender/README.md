@@ -86,7 +86,7 @@ moving to your own hardware later is one environment variable and nothing else.
 
 ```
 python3 plugins/blender/tests/test_blendpipe.py      # 64 checks, no Blender needed
-python3 plugins/blender/tests/test_live_blender.py   # 52 checks against real Blender
+python3 plugins/blender/tests/test_live_blender.py   # 57 checks against real Blender
 ```
 
 The first suite covers the bridge protocol, the gate evaluator, the backend

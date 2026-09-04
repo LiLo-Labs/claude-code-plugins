@@ -262,6 +262,28 @@ def test_framing_follows_the_lens(out):
               all(s["off"] < 0.1 for s in shots), round(max(s["off"] for s in shots), 3))
 
 
+def test_angle_zero_is_the_front():
+    """Bug: angle 0 sat at +X, so view_000 -- the frame a reader sees first and
+    the one that becomes the thumbnail -- was the *back* of the subject.
+
+    The addon module is live in this Blender, so the orbit can be checked
+    exactly rather than inferred from pixels.
+    """
+    print("\nturnaround orientation")
+    got = ex("""
+import sys, mathutils
+addon = sys.modules["blendpipe_addon"]
+c = mathutils.Vector((0.0, 0.0, 0.0))
+result = {str(a): [round(v, 4) for v in addon._orbit_position(c, 10.0, a, 0.0)]
+          for a in (0, 90, 180, 270)}
+""")
+    # Blender's front view (numpad 1) looks along +Y, so the camera sits at -Y.
+    check("0 deg is Blender's front (-Y)", got["0"] == [0.0, -10.0, 0.0], got["0"])
+    check("90 deg is the right side (+X)", got["90"] == [10.0, 0.0, 0.0], got["90"])
+    check("180 deg is the back (+Y)", got["180"] == [0.0, 10.0, 0.0], got["180"])
+    check("270 deg is the left side (-X)", got["270"] == [-10.0, 0.0, 0.0], got["270"])
+
+
 def test_render_leaves_the_camera_alone(out):
     """The camera is the user's. Widening its clipping to fit a 400m subject is
     fine; leaving it widened is not."""
@@ -280,6 +302,10 @@ bpy.context.scene.camera = c
     bridge.call("render", {"output_dir": os.path.join(out, "restore"),
                            "angles": [0], "resolution": 96}, port=PORT)
     check("clipping and ortho scale are put back", ex(read) == before, before)
+    check("and the camera is back where the user left it",
+          ex("import bpy; c=bpy.context.scene.camera;"
+             " result=[round(v,5) for v in c.location] + [round(v,5) for v in c.rotation_euler]")
+          == [0.0] * 6)
 
     ex("import bpy; d=bpy.context.scene.camera.data; d.type='ORTHO'; d.ortho_scale=1.0")
     r = bridge.call("render", {"output_dir": os.path.join(out, "ortho"),
@@ -340,7 +366,8 @@ def main():
 
         for fn in (test_bridge_is_live, test_probe_runs_in_blender,
                    test_gate_catches_broken_geometry, test_render_lights_an_unlit_scene,
-                   test_render_reports_the_engine_it_used, test_framing_follows_the_lens,
+                   test_render_reports_the_engine_it_used, test_angle_zero_is_the_front,
+                   test_framing_follows_the_lens,
                    test_render_leaves_the_camera_alone, test_exports_write_real_files):
             try:
                 fn(out) if fn.__code__.co_argcount else fn()

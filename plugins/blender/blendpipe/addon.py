@@ -382,6 +382,12 @@ def _h_render(params):
             camera.data.clip_start = camera_prev["start"]
             camera.data.clip_end = camera_prev["end"]
             camera.data.ortho_scale = camera_prev["ortho"]
+            # The turnaround flies the user's camera around the subject. Putting
+            # the clipping back but leaving the camera aimed somewhere else is
+            # the same bug, just harder to notice.
+            camera.rotation_mode = camera_prev["rotation_mode"]
+            camera.location = camera_prev["location"]
+            camera.rotation_euler = camera_prev["rotation"]
         for light in lights:
             bpy.data.objects.remove(light, do_unlink=True)
         if world_prev is not None:
@@ -420,11 +426,19 @@ def _ensure_camera(focus):
 
 
 def _orbit_position(center, radius, angle_deg, elevation_deg):
+    """Orbit position for a turnaround angle, with 0 degrees at Blender's front.
+
+    Front is -Y here, matching numpad 1, so the default turnaround reads front,
+    right, back, left like every turnaround sheet. Measuring from +X instead --
+    the obvious way to write it -- puts the *back* of the subject in view_000,
+    which is the frame a reader sees first and the one that becomes the
+    thumbnail. On Suzanne that frame is an unreadable lump.
+    """
     import math
 
     a, e = math.radians(angle_deg), math.radians(elevation_deg)
     return center + mathutils.Vector(
-        (radius * math.cos(a) * math.cos(e), radius * math.sin(a) * math.cos(e), radius * math.sin(e))
+        (radius * math.sin(a) * math.cos(e), -radius * math.cos(a) * math.cos(e), radius * math.sin(e))
     )
 
 
@@ -504,7 +518,10 @@ def _fit_camera(camera, distance, subject_radius):
     slices the far half off anything large, and the render still succeeds.
     """
     data = camera.data
-    prev = {"start": data.clip_start, "end": data.clip_end, "ortho": data.ortho_scale}
+    prev = {"start": data.clip_start, "end": data.clip_end, "ortho": data.ortho_scale,
+            "location": camera.location.copy(),
+            "rotation": camera.rotation_euler.copy(),
+            "rotation_mode": camera.rotation_mode}
     data.clip_start = min(data.clip_start, max((distance - subject_radius) * 0.5, 1e-4))
     data.clip_end = max(data.clip_end, (distance + subject_radius) * 2.0)
     if data.type != "PERSP":
