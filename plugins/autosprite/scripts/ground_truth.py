@@ -22,7 +22,16 @@ Three things this script insists on, each of which changed an answer:
    every character measured -- so the comparable row is the one whose
    disturbed-pixel count comes closest to the artist's.
 
-Two readings are printed, and they answer different questions. **Shipped** is
+A third column, **under-reach**, answers what neither footprint reading can:
+whether our silhouette travels as far as the artist's. `footprint` compares two
+clips as sets of disturbed pixels and a set has no shape, so a clip scores well
+by sweeping through the right region however it looks doing it -- the grazing
+deer scored 17.7%, the best figure ever measured here, with a head that never
+lowers. The artist drops that outline's top edge nineteen rows; every clip we
+can build moves it two. See `quality.travel`.
+
+Two footprint readings are printed, and they answer different questions.
+**Shipped** is
 what a user actually gets, with the coverage beside it so it cannot be read
 alone. **Matched** is how clips compare to each other and to the artist. They
 are not the same operating point and neither is a substitute: the forest run
@@ -195,9 +204,9 @@ def main(path):
     # character measured: `footprint` alone always favours doing less. The
     # matched column is how clips compare to each other; the shipped column is
     # what a user actually gets.
-    print("%-12s %-8s %5s | %8s %8s | %8s %8s %8s"
+    print("%-12s %-8s %5s | %8s %8s | %8s %8s %8s | %10s"
           % ("subject", "clip", "px", "shipped", "coverage",
-             "matched", "at scale", "distinct"))
+             "matched", "at scale", "distinct", "under-reach"))
     failures = 0
     for entry in subjects:
         subject = Subject(entry["source"], entry.get("rig"),
@@ -212,12 +221,16 @@ def main(path):
                            spec["rows"], spec["columns"], entry["cell"],
                            entry.get("pad", 0))
             shipped, matched, _rows = measure(subject, clip_name, artist)
-            print("%-12s %-8s %5d | %7.1f%% %8.2f | %7.1f%% %8.2f %6d/%d"
+            # Beside the two footprint readings, the one thing neither of them
+            # can see: whether the silhouette REACHES as far as the artist's.
+            short, which = quality.understated(subject.frames(clip_name), artist)
+            print("%-12s %-8s %5d | %7.1f%% %8.2f | %7.1f%% %8.2f %6d/%d | %s"
                   % (entry["name"], clip_name, subject.content_height,
                      shipped["error"],
                      shipped["ours"] / float(shipped["theirs"] or 1),
                      matched["error"], matched["scale"],
-                     matched["distinct"], matched["frames"]))
+                     matched["distinct"], matched["frames"],
+                     ("%5.0fpx %-6s" % (short, which)) if which else "         --"))
     return 1 if failures else 0
 
 

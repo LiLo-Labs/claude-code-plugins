@@ -2460,6 +2460,79 @@ already asks exactly that question -- or on a character big enough to draw it.
 Never by default. `fit.split_part` and `fit.better_split` stay; nothing calls
 them from `build`, and that is deliberate.
 
+## Outline travel — the measure that sees what `footprint` cannot
+
+Eleven times on this project a number improved and the picture got worse, and
+every one of those was caught by rendering the clip and looking at it. That is
+not a run of bad luck, it is a broken objective. `footprint` compares two clips
+as SETS of disturbed pixels, and a set has no shape: a clip scores well by
+sweeping a part through the region the artist happens to disturb, whatever it
+looks like while doing so. The grazing deer is the sharpest case — at a 80
+degree neck rotation it scored **17.7%**, the best figure ever measured here,
+with a head that never lowers.
+
+**Ask about the silhouette's shape over time instead.** The artist's deer drops
+the top of its outline by 19 rows and pushes the left edge out by 13 as the head
+goes to the grass. Every clip this plugin can build for that deer moves the top
+edge by 0 to 2:
+
+| deer clip | top-edge travel |
+|---|---|
+| the artist's own idle | **19** |
+| our shipped `idle` | 2 |
+| our `walk` | 1 |
+| `graze` at -35 deg | 0 |
+| `graze` at -80 deg (best footprint ever recorded) | **0** |
+
+One subtraction says what eleven renders said. `quality.travel` takes the
+peak-to-peak span of six descriptors — the four silhouette extremes and the
+centroid — and `understated` reports the worst shortfall against a reference
+clip. It is now a column in `scripts/ground_truth.py` beside the two footprint
+readings.
+
+**It is a companion to `footprint`, not a replacement, and the corpus shows why
+— they disagree.** `forest run` is the best footprint score in the whole corpus
+at 4.6% and falls 7px short at the bottom edge; `samurai attack` scores 11.2%
+and its sword arm reaches 12px less far than the artist's; `shieldmaiden attack`
+is 10px short. Those three would all have been called good. In the other
+direction `boar idle` is the worst footprint score there is at 95.4% and has no
+under-reach at all, because that artist barely moves and our fault is moving too
+much — which `footprint` catches and reach cannot.
+
+Two properties make it worth keeping. It needs **no alignment**: each clip's
+travel is measured against its own frames, so there is no rest pose to place and
+no byte-exact check to pass first. And it **cannot be gamed by moving less** —
+the direction that `footprint` rewards by construction — because a clip that
+does nothing scores a span of zero. Over-travel shows up as a negative shortfall
+rather than being filtered away, since thrashing is also wrong.
+
+### What was tried first and refuted
+
+The plan was structural invariants, on the theory that the eye had been applying
+cheap geometric checks. Measured against seven shipped clips and five known-bad
+ones, three candidates in a row failed to separate them at all:
+
+| candidate | good clips | bad clips |
+|---|---|---|
+| enclosed holes opened | 0–89 px | 0–10 px |
+| silhouette area drift | 2.6–10.0% | 2.0–10.9% |
+| debris shed / connectivity | 0.00% / 1.000 | 0.00% / 1.000 |
+| a part buried behind others | 0.0–40.5% | **0.0%** |
+
+The last one is the instructive failure. It separates *backwards*: the good
+clips bury parts, because a walking deer's legs pass behind its body, and the
+bad ones bury nothing. The follow-up guess — that the head instead LIES ON TOP
+of the body — is arithmetically the same quantity for a part drawn underneath,
+and measured 0.0% too: the grazing head sweeps into empty space in front of the
+chest, not onto the animal.
+
+So the eye was not applying a geometric invariant. It was comparing the frame
+against what a deer lowering its head looks like, and the usable form of that
+comparison is the artist's own frames — which the ground truth already holds.
+Distinctness (frames drawn / frames asked for) did separate every case cleanly,
+and is worth keeping for what it is: a clip that repeats pictures is wasting
+frames. It is not evidence that a pose is right.
+
 ## Splitting a part doubled the angle every existing clip asked of it
 
 `fit.split_part` gave both halves of a cut the original's role. Track selectors

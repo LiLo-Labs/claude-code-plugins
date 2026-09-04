@@ -237,3 +237,63 @@ def test_measuring_from_two_different_rests_is_not_a_comparison():
     from_the_same_rest = quality.footprint(ours, rest, [rest] + artist)[0]
     assert from_their_guard > from_the_same_rest
     assert from_the_same_rest == pytest.approx(0.0, abs=0.01)
+
+
+# -- outline travel: does the silhouette move like the artist's? -----------
+
+def test_travel_measures_peak_to_peak_not_the_sum_of_steps():
+    """A cycle comes back to where it started, so the steps of a loop sum to
+    zero however far the character reached. The span is the question."""
+    frames = [blob(at=(1, 1)), blob(at=(9, 1)), blob(at=(1, 1))]
+    assert quality.travel(frames)["top"] == 8.0
+
+
+def test_travel_sees_a_reach_no_pixel_count_would():
+    """Two clips can disturb the same number of pixels and one of them reach
+    twice as far. That is the whole point of this measure."""
+    near = [blob(at=(1, 1)), blob(at=(1, 4)), blob(at=(1, 1))]
+    far = [blob(at=(1, 1)), blob(at=(1, 12)), blob(at=(1, 1))]
+    assert quality.travel(near)["left"] == 3.0
+    assert quality.travel(far)["left"] == 11.0
+
+
+def test_a_clip_that_does_not_reach_is_reported_against_the_artists():
+    """The grazing deer in miniature: the reference drops its top edge a long
+    way and ours barely moves. `footprint` scored that clip our best ever."""
+    artist = [blob(at=(1, 1)), blob(at=(12, 1)), blob(at=(1, 1))]
+    ours = [blob(at=(1, 1)), blob(at=(3, 1)), blob(at=(1, 1))]
+    worst, which = quality.understated(ours, artist)
+    assert which == "top" and worst == pytest.approx(9.0)
+
+
+def test_travel_ignores_descriptors_the_artist_barely_moves():
+    """On a small sprite a one-pixel disagreement is rounding, and reporting it
+    would bury a real seventeen-pixel shortfall in noise."""
+    artist = [blob(at=(1, 1)), blob(at=(2, 1)), blob(at=(1, 1))]
+    ours = [blob(at=(1, 1))] * 3
+    assert quality.travel_gap(ours, artist) == {}
+    assert quality.understated(ours, artist) == (0.0, None)
+
+
+def test_thrashing_is_visible_as_a_negative_shortfall():
+    """Over-travel is not filtered away: a clip that moves far more than the
+    artist is also wrong, and this is the number that says so."""
+    artist = [blob(at=(1, 1)), blob(at=(5, 1)), blob(at=(1, 1))]
+    ours = [blob(at=(1, 1)), blob(at=(13, 1)), blob(at=(1, 1))]
+    theirs, mine = quality.travel_gap(ours, artist)["top"]
+    assert theirs == 4.0 and mine == 12.0
+    assert quality.understated(ours, artist) == (0.0, None)
+
+
+def test_travel_needs_no_alignment_between_the_two_clips():
+    """Unlike `footprint`, which refuses to report unless the rest pose lands
+    byte-exact, each clip's travel is measured against its own frames."""
+    artist = [blob(at=(1, 1)), blob(at=(9, 1)), blob(at=(1, 1))]
+    shifted = [blob(at=(5, 6)), blob(at=(13, 6)), blob(at=(5, 6))]
+    assert quality.travel(artist)["top"] == quality.travel(shifted)["top"]
+
+
+def test_an_empty_clip_travels_nowhere():
+    blank = [image.blank(20, 20)]
+    assert quality.travel(blank)["top"] == 0.0
+    assert quality.outline(blank[0]) is None
