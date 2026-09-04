@@ -1,0 +1,16 @@
+{
+  "$schema": "https://anthropic.com/claude-code/plugin.schema.json",
+  "name": "gameassets",
+  "version": "1.0.0",
+  "description": "Search and deliver from a local game-asset library. Indexes asset packs and individual files by concept taxonomy, licence and the work each needs before it is usable in an engine.",
+  "author": {
+    "name": "LiLo Labs"
+  },
+  "keywords": [
+    "gamedev",
+    "assets",
+    "godot",
+    "taxonomy",
+    "licensing"
+  ]
+}

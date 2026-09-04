@@ -106,6 +106,26 @@
         "gamemaker",
         "rpg-maker"
       ]
+    },
+    {
+      "name": "gameassets",
+      "source": "./plugins/gameassets",
+      "description": "Search and deliver from a local game-asset library. Indexes packs and individual assets by concept taxonomy, licence and the work each needs before it is usable.",
+      "version": "1.0.0",
+      "author": {
+        "name": "LiLo Labs"
+      },
+      "category": "gamedev",
+      "tags": [
+        "gamedev",
+        "assets",
+        "godot",
+        "unity",
+        "taxonomy",
+        "licensing",
+        "sqlite",
+        "mcp"
+      ]
     }
   ]
 }
