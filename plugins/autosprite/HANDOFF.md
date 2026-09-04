@@ -2553,10 +2553,35 @@ sharpest result in this file:
 The artists move the head and neck and hold the body, legs and tail perfectly
 still -- on the deer the entire hind half of the animal is untouched in all nine
 frames. Our `idle` spends half to two thirds of its budget on a body the artist
-never moves, and moves the HINDQUARTERS most of all, because the root track's
-widening is applied about the body box's x-centre and the rigid legs translate
-by their pivots' displacement: the hind legs sit 26px from that centre and the
-fore legs 14px, so the rear swings twice as far as the front.
+never moves.
+
+**Correction, measured after this was first written here.** The cause was
+recorded as the root track's WIDENING, anchored at the body box's x-centre, with
+the rigid hind legs 26px from that centre against the forelegs' 14px and so
+swinging twice as far. The arithmetic is right and the conclusion was wrong:
+taking the widening out entirely moves the deer's forward share only 31.6% to
+35.0%. It is the root track ENTIRE -- bob and widening together -- and the
+reason is duller than the geometry: any whole-body transform disturbs the front
+and the rear alike, so a one-pixel bob spends as much on the hindquarters as on
+the neck. Remove the root altogether and the distribution snaps into place:
+
+| | forward share | error |
+|---|---|---|
+| deer, shipped   | 31.6% | 62.2% |
+| deer, no root   | **74.0%** (artist 79.1%) | **23.4%** |
+| horse, shipped  | 27.1% | 44.0% |
+| horse, no root  | **83.9%** (artist 60.7%) | **1.6%** |
+
+That is a diagnosis and not a fix, and the frame count is why: a creature idle
+with no root track draws **2 distinct frames out of 4** on the horse and 3 of 4
+on the deer, because the root was carrying nearly all of the motion. A
+four-frame idle that draws two pictures is precisely the stutter this clip's own
+note was written to avoid. It trades a lively idle that moves the wrong pixels
+for a correct one that barely moves, and the motion that ought to replace the
+root -- head and neck -- is the graze below, which cutout cannot draw. Sweeping
+the widening share against a head nod over both subjects buys at best 1 to 2.5
+points at matched coverage and the two disagree on the sign, so there is nothing
+to ship here yet.
 
 So a `graze` clip looked obvious, and it does not work. Built on the two-segment
 neck `fit.split_part` now produces -- neck rotating at the withers, skull
