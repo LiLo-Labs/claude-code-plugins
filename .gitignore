@@ -12,3 +12,11 @@ __pycache__/
 
 # pytest
 .pytest_cache/
+
+# never commit credentials
+*.env
+keys.env
+.secrets/
+
+# workflow agent worktrees, not project content
+.claude/worktrees/

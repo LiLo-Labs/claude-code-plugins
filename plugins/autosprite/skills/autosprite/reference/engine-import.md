@@ -1,6 +1,6 @@
 # What gets written, and how each engine reads it
 
-Every build writes the sheet, the native atlas, a rig, a frames ZIP, GIF
+Every build writes the sheet, the native atlas, a rig, two ZIPs, GIF
 previews and one file per requested engine. `--engines` takes a comma list,
 `all`, or `web`.
 
@@ -10,6 +10,7 @@ previews and one file per requested engine. `--engines` takes a comma list,
 | `<name>.autosprite.json` | this pipeline. Complete: clips, fps, loop, per-frame rects, anchors, direction fidelity, the source's own report |
 | `<name>.rig.json` | `animate.py` and `rig.py`, for iterating |
 | `<name>-frames.zip` | one PNG per frame, cut back out of the finished sheet |
+| `<name>-animations.zip` | one folder per animation: `<anim>/spritesheet.png`, `<anim>/atlas.json`, `<anim>/frames/01.png…` |
 | `preview/*.gif`, `preview/contact-sheet.png` | you and the user |
 
 ## Phaser 3 / PixiJS
@@ -79,6 +80,11 @@ sprite-atlas importer, and a JSON claiming to be one would import as nothing.
 - **Grid layout**: use *Import Strip* with the `strip` block's `cellWidth`,
   `cellHeight`, `offsetX`, `offsetY`, `columns` and `rows`. One row per clip.
 - **Packed layout**: import `<name>-frames.zip` as loose frames.
+- **One animation at a time**: use `<name>-animations.zip`. Each folder is
+  self-contained -- a horizontal strip, its own atlas with that clip's fps and
+  loop flag, and the individual frames numbered from 01. Every frame in it is
+  byte-identical to the master sheet's own crop, and the ANIMZIP check proves
+  that on every build.
 
 Set each sprite's playback speed from the clip's `fps` and its origin from the
 clip's `origin`.
@@ -111,6 +117,18 @@ atlas at all. Default.
 
 `--layout packed` shelf-packs tightly. Smaller, and unusable without the atlas
 JSON.
+
+`--layout strip` unrolls the grid into one horizontal row. The oldest sheet
+layout there is, and still what GameMaker's *Import Strip* and anything that
+slices by dividing the width by a frame count expect. Same cells and the same
+anchor alignment as the grid.
+
+`--compress` rewrites the sheet as an **indexed PNG**, and here that is
+*lossless* rather than quantised: the sheet's palette is provably a subset of
+the source art's, so there is nothing to throw away. Across the test corpus it
+is about 47% smaller. It is not always a win -- a 256-entry palette table is a
+fixed cost that a four-colour sheet loses on -- so both are written, the smaller
+is kept, and the build says which happened.
 
 `--padding` is a transparent gutter and `--extrude` repeats each frame's edge
 pixels into it. Both default to 1 and both are there for the same reason: the

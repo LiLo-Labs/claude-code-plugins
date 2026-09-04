@@ -8,6 +8,7 @@
 import argparse
 import json
 import os
+import re
 import sys
 
 import _bootstrap  # noqa: F401
@@ -35,16 +36,76 @@ def main():
     parser.add_argument("--kind", default="character", choices=("character", "prop"),
                         help="props rig as one piece and use the prop animations")
 
-    parser.add_argument("--backend", default="template", choices=("template", "claude"),
-                        help="template rigs from the silhouette; claude looks at the art")
+    parser.add_argument("--backend", default="template",
+                        help="template rigs from the silhouette; claude looks "
+                             "at the art; a path to a rig.json builds with that "
+                             "rig exactly as written")
+    parser.add_argument("--rig", help="build with this rig file instead of "
+                                      "inferring one. The same as passing it to "
+                                      "--backend, and the way to use a rig you "
+                                      "have corrected or tagged by hand")
     parser.add_argument("--model", default="claude-opus-5")
     parser.add_argument("--class", dest="character_class", default="auto",
                         choices=("auto", "humanoid", "creature", "prop"))
-    parser.add_argument("--facing", default="right", choices=("right", "left"))
+    parser.add_argument("--facing", default=None,
+                        choices=("right", "left", "front", "back"),
+                        help="which way the subject is drawn facing. Defaults to "
+                             "right, and getting it wrong MIRRORS EVERY PART -- a "
+                             "left-facing horse rigged as right-facing gets its "
+                             "head box on the rump and its tail box on the head. "
+                             "Nothing in the verification gate catches that: the "
+                             "parts still reassemble, the palette still holds and "
+                             "the frames still shed nothing. Only looking does")
     parser.add_argument("--intent", default="",
                         help="what the character is, in a few words; sharpens the rig")
+    parser.add_argument("--attach", action="append", default=[], metavar="SOCKET=FILE",
+                        help="put an item image on the character and animate it "
+                             "with them: --attach hand=sword.png. Sockets are "
+                             "hand, off_hand, head, waist, chest, and are derived "
+                             "from the rig, so one item works on any character "
+                             "that has the part. Add @X,Y to say where the item "
+                             "is held if its own bottom centre is not the grip: "
+                             "--attach hand=sword.png@27,27. The item is scaled "
+                             "to the character it is meeting -- a sword is about "
+                             "twice the arm holding it, snapped to a ratio pixel "
+                             "art survives -- so one item fits a 15px sprite and "
+                             "a 64px one. Add xN to override: "
+                             "--attach hand=dagger.pngx0.5. Repeatable")
 
-    parser.add_argument("--layout", default="grid", choices=("grid", "packed"))
+    parser.add_argument("--layout", default="grid",
+                        choices=("grid", "packed", "strip"),
+                        help="grid: uniform cells, one row per clip. packed: tight. "
+                             "strip: one horizontal row, what Import Strip wants")
+    parser.add_argument("--compress", action="store_true",
+                        help="write the sheet as an indexed PNG - lossless here, "
+                             "because the palette is the source art's own")
+    parser.add_argument("--no-repair", action="store_true",
+                        help="do not damp a limb that swings clear of the body. "
+                             "By default a clip measured to be coming apart has "
+                             "the responsible swing reduced until it holds "
+                             "together, and the build says so")
+    parser.add_argument("--frames", type=int, default=None,
+                        help="redraw every animation at this many frames, 2-64. "
+                             "The motion is a continuous curve, so this samples "
+                             "it more finely rather than interpolating pictures; "
+                             "fps moves with it so the timing is unchanged")
+    parser.add_argument("--frame-size", type=int, default=None,
+                        help="put every frame in a square cell of this many "
+                             "pixels, 8-512, with the character standing at the "
+                             "bottom centre. Refuses rather than crops if the "
+                             "art does not fit")
+    parser.add_argument("--loop-start", type=int, default=None,
+                        help="the frame the loop repeats from, when the clip is "
+                             "an intro followed by a hold. Applies to every "
+                             "animation in the build, so it is normally only "
+                             "useful with a single --animations")
+    parser.add_argument("--loop-end", type=int, default=None,
+                        help="the last frame of the repeat; defaults to the "
+                             "clip's last frame")
+    parser.add_argument("--fps", type=float, default=None,
+                        help="override every animation's frame rate. The frame "
+                             "count is unchanged, so this makes the same motion "
+                             "play faster or slower")
     parser.add_argument("--padding", type=int, default=1)
     parser.add_argument("--extrude", type=int, default=1)
     parser.add_argument("--scale", type=int, default=1,
@@ -60,22 +121,49 @@ def main():
     args = parser.parse_args()
 
     custom = motion.load_custom(args.custom) if args.custom else None
+    try:
+        attach = [_attachment(entry) for entry in args.attach]
+    except ValueError as error:
+        print("build failed: %s" % error, file=sys.stderr)
+        return 2
 
     try:
         build = pipeline.build_sheet(
             args.input, args.out,
             animations=[a.strip() for a in args.animations.split(",") if a.strip()],
-            direction_set=args.directions, backend=args.backend, model=args.model,
-            character_class=args.character_class, facing=args.facing,
+            direction_set=args.directions, backend=args.rig or args.backend,
+            model=args.model,
+            character_class=args.character_class,
+            facing=args.facing or "right",
             intent=args.intent, name=args.name, layout=args.layout,
             padding=args.padding, extrude=args.extrude, scale=args.scale,
             power_of_two=args.power_of_two,
             engines=[e.strip() for e in args.engines.split(",") if e.strip()],
             front=args.front, back=args.back, tolerance=args.tolerance,
-            native=not args.no_native, custom_animations=custom, kind=args.kind)
+            native=not args.no_native, custom_animations=custom, kind=args.kind,
+            compress=args.compress, repair=not args.no_repair,
+            frames=args.frames, frame_size=args.frame_size,
+            fps=args.fps, loop_start=args.loop_start,
+            loop_end=args.loop_end, attach=attach)
     except (ValueError, RuntimeError) as error:
         print("build failed: %s" % error, file=sys.stderr)
         return 2
+
+    # The one input whose default is catastrophic and silent. A left-facing
+    # subject rigged as right-facing has every part box mirrored -- the head box
+    # over the rump, the tail box over the head -- and the gate stays green:
+    # the parts reassemble, the palette holds, nothing sheds. It happened to
+    # this project's own measurement harness on a CC0 horse and was found by a
+    # vision critic, unprompted, after every deterministic check had passed it.
+    # Facing is also not inferable from the drawing: the obvious silhouette
+    # heuristic (the head end of a side-on animal is the taller end) gets two of
+    # three corpus creatures and neither left-facing subject.
+    if args.facing is None and build.rigs["side"].character_class != "prop":
+        build.warn("no --facing was given, so the rig assumes the subject faces "
+                   "RIGHT. If it faces left, every part is mirrored onto the "
+                   "wrong end of it and no check here can tell -- the parts "
+                   "still reassemble, the palette still holds and nothing "
+                   "sheds. Look at the preview, or pass --critic")
 
     report = dict(build.report)
     report["written"] = build.written
@@ -89,6 +177,30 @@ def main():
     return 0 if build.verification.ok else 1
 
 
+def _attachment(entry):
+    """SOCKET=FILE, optionally FILE@X,Y for the grip and FILExN for the size."""
+    if "=" not in entry:
+        raise ValueError("--attach wants SOCKET=FILE, not %r" % entry)
+    socket, path = entry.split("=", 1)
+    grip = scale = None
+    if "@" in path:
+        path, point = path.rsplit("@", 1)
+        try:
+            x, y = point.split(",")
+            grip = (int(x), int(y))
+        except ValueError:
+            raise ValueError("--attach %r: the grip after @ must be X,Y" % entry)
+    sized = re.search(r"x([0-9]+(?:\.[0-9]+)?)$", path)
+    if sized:
+        scale = float(sized.group(1))
+        if scale <= 0:
+            raise ValueError("--attach %r: a scale must be above zero" % entry)
+        path = path[:sized.start()]
+    if not os.path.exists(path):
+        raise ValueError("--attach %r: no such file %s" % (entry, path))
+    return {"socket": socket.strip(), "path": path, "grip": grip, "scale": scale}
+
+
 def _human(build, report):
     lines = []
     side = report["references"]["side"]
@@ -99,8 +211,9 @@ def _human(build, report):
     if side.get("pixel_scale", 1) > 1:
         lines.append("         %s" % side["pixel_scale_note"])
     rig = build.rigs["side"]
-    lines.append("rig      %s, %d parts, by %s"
-                 % (rig.character_class, len(rig.parts), report["rig_actor"]))
+    lines.append("rig      %s, %d parts, facing %s, by %s"
+                 % (rig.character_class, len(rig.parts), rig.facing,
+                    report["rig_actor"]))
     for note in rig.notes:
         lines.append("         %s" % note)
     lines.append("sheet    %dx%d %s, %d clips, %d frames"
@@ -116,9 +229,11 @@ def _human(build, report):
     for key in ("sheet", "atlas", "rig", "frames_zip"):
         if key in build.written:
             lines.append("  %-10s %s" % (key, build.written[key]))
+    if build.written.get("sheet_format"):
+        lines.append("  %-10s %s" % ("", build.written["sheet_format"]))
     engines = [k for k in build.written
                if k not in ("sheet", "atlas", "rig", "frames_zip",
-                            "frames_zip_count", "rpgmaker_report")]
+                            "frames_zip_count", "rpgmaker_report", "sheet_format")]
     if engines:
         lines.append("  %-10s %s" % ("engines", ", ".join(sorted(engines))))
     if build.previews.get("contact_sheet"):

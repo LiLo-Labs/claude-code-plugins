@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 
 import make_fixture
-from spritepipe import image, ingest, rig as R, vision
+from spritepipe import image, ingest, motion, rig as R, vision
 
 
 def rig_of(pixels, **kwargs):
@@ -25,13 +25,43 @@ def test_runs_finds_the_spans_not_the_width():
 def test_the_neck_is_the_last_narrow_row_not_the_first():
     """Taking the first cuts a uniform-width head in half."""
     mask = image.alpha_mask(make_fixture.humanoid())
-    shoulder = vision.find_shoulder(mask)
-    neck = vision.find_neck(mask, shoulder)
+    neck = vision.find_neck(mask)
+    shoulder = vision.find_shoulder(mask, neck)
     assert neck < shoulder
     widths = vision.row_widths(mask)
     assert widths[neck] <= widths[shoulder]
     # The head is rows 1..6 in this fixture; the neck must be at its bottom.
     assert neck >= 4
+
+
+def test_the_neck_is_found_when_the_head_is_wider_than_the_shoulders():
+    """A chibi's head is the widest part of the character, so the body never
+    widens below it. A landmark that looks for widening shoulders puts the neck
+    two rows below the crown, and the rig then animates the face as torso."""
+    art = image.blank(18, 12)
+    art[0:8, 1:11] = [230, 190, 140, 255]      # a big head, 10 wide
+    art[8:9, 4:8] = [230, 190, 140, 255]       # a narrow neck, 4 wide
+    art[9:14, 3:9] = [40, 90, 200, 255]        # a smaller body, 6 wide
+    art[14:18, 3:5] = [60, 60, 90, 255]        # legs, parted
+    art[14:18, 7:9] = [60, 60, 90, 255]
+    mask = image.alpha_mask(image.trim(art)[0])
+    neck = vision.find_neck(mask)
+    assert neck == 8, "the neck is the narrow row, not the top of the skull"
+    assert vision.find_shoulder(mask, neck) > neck
+
+
+def test_a_chibi_gets_a_head_worth_the_name():
+    """The failure this fixes: a 2-row head on a 17-row character."""
+    art = image.blank(18, 12)
+    art[0:8, 1:11] = [230, 190, 140, 255]
+    art[8:9, 4:8] = [230, 190, 140, 255]
+    art[9:14, 3:9] = [40, 90, 200, 255]
+    art[14:18, 3:5] = [60, 60, 90, 255]
+    art[14:18, 7:9] = [60, 60, 90, 255]
+    built = rig_of(image.trim(art)[0])
+    head = built.first_role("head")
+    assert head is not None
+    assert head.height >= 7, "the head box must actually contain the head"
 
 
 def test_the_leg_split_is_found_from_the_feet_not_from_the_middle():
@@ -216,3 +246,576 @@ def test_unparseable_output_names_what_it_saw():
 def test_make_backend_rejects_an_unknown_name():
     with pytest.raises(ValueError):
         vision.make_backend("midjourney", "/tmp")
+
+
+# -- a pair the silhouette only half-resolves ------------------------------
+
+def test_one_arm_is_completed_by_mirroring_rather_than_failing_the_build():
+    """A profile hides the far arm, and a cape can swallow one leg entirely.
+    Emitting only the limb that was found produces a rig `validate` refuses, so
+    a real character would not build at all rather than animate imperfectly."""
+    left, right, mirrored = vision._complete_pair((2, 5, 6, 14), None, (6, 4, 18, 16), 24)
+    assert mirrored
+    assert right is not None
+    assert right[2] - right[0] == 6 - 2, "the partner keeps the found limb's width"
+    centre = (6 + 18) / 2.0
+    assert abs((left[0] + left[2]) / 2.0 - centre) == abs((right[0] + right[2]) / 2.0 - centre)
+
+
+def test_a_mirror_that_lands_outside_is_shifted_back_in_not_truncated():
+    """A truncated box is a one-pixel limb: it validates, animates, and looks
+    exactly like the character lost an arm anyway."""
+    _, right, mirrored = vision._complete_pair((0, 5, 4, 14), None, (2, 4, 8, 16), 10)
+    assert mirrored
+    assert right[2] - right[0] == 4
+    assert 0 <= right[0] and right[2] <= 10
+
+
+def test_completing_a_pair_leaves_a_complete_pair_alone():
+    left, right, mirrored = vision._complete_pair((1, 2, 3, 4), (7, 2, 9, 4), (0, 0, 10, 10))
+    assert not mirrored and left == (1, 2, 3, 4) and right == (7, 2, 9, 4)
+
+
+def test_completing_a_pair_leaves_two_missing_limbs_alone():
+    """Both missing is the other fallback's job, not this one's."""
+    left, right, mirrored = vision._complete_pair(None, None, (0, 0, 10, 10))
+    assert (left, right, mirrored) == (None, None, False)
+
+
+def test_a_character_with_one_visible_arm_produces_a_valid_rig():
+    """The failure this fixes: the build died on real art with 'no arm_far'."""
+    art = image.blank(30, 20)
+    art[2:9, 8:13] = [230, 190, 140, 255]        # head
+    art[9:20, 6:15] = [40, 90, 200, 255]         # torso
+    art[10:18, 2:5] = [230, 190, 140, 255]       # ONE arm, clear of the body
+    art[20:29, 6:9] = [60, 60, 90, 255]          # legs, parted
+    art[20:29, 12:15] = [60, 60, 90, 255]
+    built = rig_of(image.trim(art)[0])
+    assert R.validate(built) == []
+    assert built.first_role("arm_near") is not None
+    assert built.first_role("arm_far") is not None
+    assert any("mirror" in note for note in built.notes)
+
+
+# -- art that is drawn in more than one piece ------------------------------
+
+def with_drop_shadow(art, rows=1, gap=1):
+    """A character with a detached shadow blob below its feet, as real art has."""
+    height, width = art.shape[:2]
+    out = image.blank(height + gap + rows, width)
+    image.paste(out, art, 0, 0)
+    out[height + gap:height + gap + rows, width // 3:width - width // 3] = [90, 90, 100, 255]
+    return out
+
+
+def test_a_detached_shadow_does_not_stand_in_for_the_feet():
+    """Scanning up from the bottom hits the shadow, finds one run, and concludes
+    the legs never part -- which demotes a person to a one-piece prop."""
+    art = image.trim(make_fixture.humanoid())[0]
+    plain = vision.find_split(image.alpha_mask(art))
+    shadowed = vision.find_split(image.alpha_mask(with_drop_shadow(art)))
+    assert plain is not None
+    assert shadowed == plain, "the shadow must not move the hip line"
+
+
+def test_body_mask_drops_a_detached_shadow():
+    art = image.trim(make_fixture.humanoid())[0]
+    body = vision.body_mask(image.alpha_mask(with_drop_shadow(art)))
+    assert not body[art.shape[0]:].any(), "the shadow must not count as body"
+    assert body[:art.shape[0]].any(), "the character must still be there"
+
+
+def test_body_mask_keeps_a_character_genuinely_drawn_in_two_pieces():
+    """A floating sword or a detached head is art, not a shadow."""
+    art = image.blank(20, 20)
+    art[0:8, 2:10] = [200, 40, 40, 255]
+    art[12:20, 2:10] = [40, 90, 200, 255]      # same size, clearly deliberate
+    kept = vision.body_mask(image.alpha_mask(art))
+    assert kept.sum() == image.alpha_mask(art).sum()
+
+
+def test_a_shadowed_character_still_rigs_as_a_humanoid():
+    built = rig_of(image.trim(with_drop_shadow(image.trim(make_fixture.humanoid())[0]))[0])
+    assert built.character_class == "humanoid"
+    assert R.validate(built) == []
+
+
+def test_the_shadow_is_still_owned_by_some_part():
+    """Measurements ignore it; the cut must not - it is the user's art."""
+    art = image.trim(with_drop_shadow(image.trim(make_fixture.humanoid())[0]))[0]
+    built = rig_of(art)
+    from spritepipe import cutout
+    assert image.equal(cutout.cut(built, art).rest(), art)
+
+
+def test_the_leg_split_looks_past_merged_hooves():
+    """A horse's hooves, boots on a ground line, or a baked contact shadow merge
+    the last row back into one span. Requiring the very bottom row to be parted
+    threw the whole signal away and demoted a winged pony to a one-piece prop."""
+    art = image.trim(make_fixture.humanoid())[0]
+    grounded = image.blank(art.shape[0] + 1, art.shape[1])
+    image.paste(grounded, art, 0, 0)
+    box = image.content_box(art)
+    grounded[art.shape[0], box[0]:box[2]] = [60, 60, 90, 255]   # one merged row
+
+    plain = vision.find_split(image.alpha_mask(art))
+    merged = vision.find_split(image.alpha_mask(grounded))
+    assert plain is not None
+    assert merged == plain, "one merged row at the floor must not hide the legs"
+
+
+def test_a_character_that_never_parts_still_reports_none():
+    """The slack must not invent legs on a robe."""
+    robed = image.trim(make_fixture.humanoid(legs_parted=False))[0]
+    assert vision.find_split(image.alpha_mask(robed)) is None
+
+
+def test_the_slack_does_not_reach_arbitrarily_far_up():
+    """Two merged rows is a ground line; ten is a character with no legs."""
+    art = image.trim(make_fixture.humanoid())[0]
+    box = image.content_box(art)
+    padded = image.blank(art.shape[0] + 8, art.shape[1])
+    image.paste(padded, art, 0, 0)
+    for row in range(art.shape[0], art.shape[0] + 8):
+        padded[row, box[0]:box[2]] = [60, 60, 90, 255]
+    assert vision.find_split(image.alpha_mask(padded)) is None
+
+
+# -- a quadruped's legs are columns, not rows -----------------------------
+
+def test_leg_columns_finds_one_run_per_leg_pair():
+    mask = image.alpha_mask(make_fixture.creature())
+    belly = vision.find_split(mask, floor=0.45)
+    assert vision.leg_columns(mask, belly, mask.shape[0]) == [(7, 10), (17, 20)]
+
+
+def test_a_shallow_belly_fringe_does_not_widen_a_leg():
+    """The horse's underside hangs a pixel or two below the belly line the
+    whole length of the animal. Reading legs by presence makes that fringe part
+    of a leg and the leg twenty pixels wide; reading them by reach does not."""
+    mask = np.zeros((10, 20), dtype=bool)
+    mask[:5, :] = True                 # body
+    mask[5:6, 2:18] = True             # a one-pixel fringe under all of it
+    mask[5:10, 3:6] = True             # hind leg
+    mask[5:10, 14:17] = True           # fore leg
+    assert vision.leg_columns(mask, 5, 10) == [(3, 6), (14, 17)]
+
+
+def test_a_notch_inside_one_hoof_does_not_split_it():
+    mask = np.zeros((10, 20), dtype=bool)
+    mask[:5, :] = True
+    mask[5:10, 3:6] = True
+    mask[5:10, 7:9] = True             # same leg, one empty column between
+    mask[5:10, 15:18] = True
+    assert vision.leg_columns(mask, 5, 10) == [(3, 9), (15, 18)]
+
+
+def test_the_leg_groups_split_at_the_animal_s_length():
+    """Three runs: one hind leg, and two forelegs close together."""
+    assert vision.split_leg_groups([(3, 6), (20, 23), (24, 27)]) \
+        == ([(3, 6)], [(20, 23), (24, 27)])
+
+
+def test_one_cluster_of_legs_is_not_a_quadruped():
+    assert vision.split_leg_groups([(3, 6)]) is None
+    assert vision.split_leg_groups([]) is None
+
+
+def test_a_quadruped_rigs_with_four_legs_and_the_forelegs_lead():
+    built = rig_of(make_fixture.creature())
+    assert built.character_class == "creature"
+    roles = {part.name: part.role for part in built.parts}
+    assert roles["foreleg_near"] == "arm_near" and roles["foreleg_far"] == "arm_far"
+    assert roles["hindleg_near"] == "leg_near" and roles["hindleg_far"] == "leg_far"
+    # Facing right, the forelegs are the cluster nearer the head.
+    assert built.by_name("foreleg_near").box[0] > built.by_name("hindleg_near").box[0]
+
+
+def test_a_leg_box_holds_one_leg_not_the_whole_underside():
+    """The bug this replaced: the pegasus's last row is a single merged span,
+    `pair_boxes` halved it, and the far leg's box grew from 5 pixels wide to 15
+    -- a slab holding both leg pairs, which sheared a tenth of the animal off
+    when it swung."""
+    mask = np.zeros((26, 27), dtype=bool)
+    mask[:18, :] = True
+    mask[18:24, 5:10] = True           # hind legs
+    mask[18:25, 17:22] = True          # fore legs
+    mask[24:25, 19:22] = True          # ... ending in one merged hoof row
+    parts = vision.TemplateBackend()._creature(mask, 27, 26, "right")[0]
+    for part in parts:
+        if part.role.endswith("_near") or part.role.endswith("_far"):
+            assert part.box[2] - part.box[0] <= 6, part
+
+
+def test_a_creature_whose_legs_never_part_falls_back_to_halving():
+    mask = np.zeros((14, 16), dtype=bool)
+    mask[:8, :] = True
+    mask[8:14, 5:11] = True            # one block of legs, never parted
+    parts, notes = vision.TemplateBackend()._creature(mask, 16, 14, "right")
+    names = {part.name for part in parts}
+    assert "leg_near" in names and "leg_far" in names
+    assert any("never separate" in note for note in notes)
+
+
+# -- a character drawn face-on --------------------------------------------
+
+def test_a_face_on_rig_draws_both_arms_in_front_of_the_torso():
+    """In profile the far arm is BEHIND the body, which is right there and
+    wrong for a character looking at you: both arms are drawn, both in front."""
+    built = rig_of(make_fixture.humanoid(), facing="front")
+    order = [part.role for part in built.draw_order()]
+    assert order.index("arm_far") > order.index("torso")
+    assert order.index("leg_far") > order.index("torso")
+
+
+def test_a_profile_rig_still_hides_the_far_arm():
+    built = rig_of(make_fixture.humanoid(), facing="right")
+    order = [part.role for part in built.draw_order()]
+    assert order.index("arm_far") < order.index("torso")
+
+
+def test_a_face_on_rig_names_the_limbs_left_and_right():
+    built = rig_of(make_fixture.humanoid(), facing="front")
+    names = {part.name for part in built.parts}
+    assert {"arm_left", "arm_right", "leg_left", "leg_right"} <= names
+    # The roles are untouched: every animation and every exporter reads role.
+    assert built.by_name("arm_left").role == "arm_far"
+    assert any("face-on" in note for note in built.notes)
+
+
+def test_facing_back_is_face_on_too():
+    built = rig_of(make_fixture.humanoid(), facing="back")
+    assert built.by_name("arm_left") is not None
+
+
+def test_a_face_on_rig_still_validates():
+    built = rig_of(make_fixture.humanoid(), facing="front")
+    assert R.validate(built) == []
+
+
+def test_a_face_on_character_is_never_rigged_as_a_side_on_animal():
+    """`classify` reads the silhouette, and a stocky character drawn face-on is
+    wider than it is tall exactly like a horse. The corpus's 16px roguelike hero
+    was rigged with its left arm as a head and its right arm as a tail."""
+    stocky = np.zeros((14, 16, 4), dtype=np.uint8)
+    stocky[2:10, 2:14] = (90, 120, 90, 255)     # a body wider than it is tall
+    stocky[0:4, 5:11] = (200, 170, 140, 255)    # a head
+    stocky[10:14, 3:6] = (60, 60, 70, 255)      # ... standing on two feet,
+    stocky[10:14, 10:13] = (60, 60, 70, 255)    # which is what `classify` reads
+    assert rig_of(stocky).character_class == "creature"
+    front = rig_of(stocky, facing="front")
+    assert front.character_class == "humanoid"
+    assert front.by_role("tail") == []
+    assert any("face-on" in note for note in front.notes)
+
+
+def test_a_side_on_animal_is_still_a_creature():
+    assert rig_of(make_fixture.creature(), facing="right").character_class == "creature"
+    assert rig_of(make_fixture.creature(), facing="left").character_class == "creature"
+
+
+# -- what a character is holding up is not its head -----------------------
+
+def test_the_crown_is_below_a_raised_weapon():
+    """A raised sword, a musket barrel, a staff, a plume, a pair of horns: all
+    stand above the head as a column a few pixels across, and all of them ARE
+    the narrowest rows, so a neck search walks straight into them."""
+    mask = np.zeros((20, 12), dtype=bool)
+    mask[0:6, 5:7] = True        # a raised sword
+    mask[6:11, 3:9] = True       # the head
+    mask[11:20, 2:10] = True     # the body
+    assert vision.find_crown(mask) == 6
+    assert vision.find_neck(mask) >= 6
+
+
+def test_a_character_holding_nothing_up_has_its_crown_at_the_top():
+    mask = np.zeros((20, 12), dtype=bool)
+    mask[0:8, 3:9] = True
+    mask[8:20, 2:10] = True
+    assert vision.find_crown(mask) == 0
+
+
+def test_the_raised_weapon_still_belongs_to_the_head_box():
+    """Horns are part of a helmet. The crown decides where the neck may be
+    found, not where the character starts."""
+    mask = np.zeros((20, 12), dtype=bool)
+    mask[0:6, 5:7] = True
+    mask[6:11, 3:9] = True
+    mask[11:20, 2:10] = True
+    art = np.zeros(mask.shape + (4,), dtype=np.uint8)
+    art[mask] = (200, 200, 200, 255)
+    built = rig_of(art)
+    head = built.first_role("head")
+    assert head is not None and head.box[1] == 0
+
+
+def test_a_silhouette_that_only_widens_downwards_has_no_neck_to_find():
+    """A hood, a helmet worn over the shoulders, a slime. The narrowest row is
+    just the top of the search band, and taking it makes the head three rows of
+    an eighteen-row character with its face animating as torso."""
+    mask = np.zeros((20, 14), dtype=bool)
+    for y in range(20):
+        half = 2 + y // 2
+        mask[y, 7 - half:7 + half] = True
+    assert vision.find_neck(mask) == int(20 * vision.HEADLESS_HEAD)
+
+
+def test_a_real_neck_is_still_preferred_to_the_proportion():
+    mask = np.zeros((20, 12), dtype=bool)
+    mask[0:7, 3:9] = True        # head
+    mask[7:8, 5:7] = True        # neck
+    mask[8:20, 2:10] = True      # body
+    assert vision.find_neck(mask) == 7
+
+
+def test_a_hooded_figure_is_still_a_humanoid_not_a_prop():
+    """`classify` asks whether there IS a neck; `find_neck` asks where it is and
+    refuses when there is none. Routing the first through the second turned a
+    robed necromancer into a one-piece prop."""
+    mask = np.zeros((20, 14), dtype=bool)
+    for y in range(20):
+        half = 2 + y // 3
+        mask[y, 7 - half:7 + half] = True
+    art = np.zeros(mask.shape + (4,), dtype=np.uint8)
+    art[mask] = (120, 40, 160, 255)
+    assert vision.TemplateBackend().classify(mask) == "humanoid"
+    assert rig_of(art).first_role("head") is not None
+
+
+# -- a gap between two boots is not a hip ---------------------------------
+
+def _humanoid_with_leg_band(height, width, split_rows):
+    """A figure whose silhouette parts only `split_rows` rows from the bottom."""
+    mask = np.zeros((height, width), dtype=bool)
+    mask[0:height // 3, width // 4:width - width // 4] = True     # head
+    mask[height // 3:height - split_rows, 1:width - 1] = True     # body and skirt
+    mask[height - split_rows:, 2:width // 2 - 1] = True           # one foot
+    mask[height - split_rows:, width // 2 + 1:width - 2] = True   # the other
+    art = np.zeros(mask.shape + (4,), dtype=np.uint8)
+    art[mask] = (150, 120, 90, 255)
+    return art
+
+
+def test_a_one_row_gap_between_boots_is_not_a_hip():
+    """The shieldmaiden parts on her last row alone. Believing that puts the hip
+    fifteen rows below her waist and swings her feet about it while her actual
+    legs stay welded to the torso."""
+    built = rig_of(_humanoid_with_leg_band(24, 14, 1))
+    leg = built.first_role("leg_near")
+    assert leg.height > 1
+    assert any("boots" in note for note in built.notes)
+
+
+def test_a_real_pair_of_legs_is_believed():
+    built = rig_of(_humanoid_with_leg_band(24, 14, 8))
+    assert built.first_role("leg_near").box[1] == 24 - 8
+    assert not any("boots" in note for note in built.notes)
+
+
+def test_a_few_rows_of_leg_on_a_tiny_character_are_still_legs():
+    """Rows alone would reject three rows on a twelve-pixel character, where
+    three rows is a quarter of the whole figure."""
+    built = rig_of(_humanoid_with_leg_band(12, 8, 3))
+    assert not any("boots" in note for note in built.notes)
+
+
+def test_a_few_rows_of_leg_on_a_large_character_are_boots():
+    built = rig_of(_humanoid_with_leg_band(48, 20, 3))
+    assert any("boots" in note for note in built.notes)
+
+
+# -- a baked contact shadow is the floor, not the character ---------------
+
+def _with_shadow(gap=1):
+    art = np.zeros((20, 14, 4), dtype=np.uint8)
+    art[0:6, 4:10] = (220, 190, 160, 255)      # head
+    art[6:14, 3:11] = (60, 120, 200, 255)      # body
+    art[14:17 - gap, 4:6] = (40, 40, 60, 255)  # legs
+    art[14:17 - gap, 8:10] = (40, 40, 60, 255)
+    art[18:19, 3:11] = (25, 14, 14, 255)       # the shadow, a row below the feet
+    return art
+
+
+def test_a_strip_below_the_feet_is_a_shadow():
+    mask = image.alpha_mask(_with_shadow())
+    assert vision.find_shadow(mask) == (3, 18, 11, 19)
+
+
+def test_a_detached_piece_beside_the_character_is_not_a_shadow():
+    """A floating orb, a held-out lantern, a cape blowing clear: all separate
+    components, all part of the character, all of which must move with it."""
+    art = _with_shadow()
+    art[18:19, 3:11] = 0
+    art[2:5, 11:14] = (255, 220, 80, 255)      # an orb beside the head
+    assert vision.find_shadow(image.alpha_mask(art)) is None
+
+
+def test_a_character_in_one_piece_has_no_shadow():
+    assert vision.find_shadow(image.alpha_mask(make_fixture.prop())) is None
+
+
+def test_the_shadow_is_rigged_behind_everything_and_says_so():
+    built = rig_of(_with_shadow())
+    shadow = built.first_role("shadow")
+    assert shadow is not None
+    assert built.draw_order()[0] is shadow
+    assert any("contact shadow" in note for note in built.notes)
+
+
+def test_renaming_a_limb_face_on_takes_its_children_with_it():
+    """A vision rig called the arm `arm_near` and hung a `musket` off it. Renaming
+    the arm to `arm_right` and leaving the musket pointing at the old name
+    orphaned it, and the whole build was refused as unreachable from the root."""
+    parts = [R.Part("torso", "torso", (0, 0, 10, 20), None, (5, 20)),
+             R.Part("arm_near", "arm_near", (7, 5, 10, 15), "torso", (8, 5)),
+             R.Part("musket", "prop", (8, 0, 10, 12), "arm_near", (9, 10))]
+    vision.face_on(parts, [])
+    assert parts[1].name == "arm_right"
+    assert parts[2].parent == "arm_right"
+
+
+# ---------------------------------------------------------------------------
+# Traits from the model: how anything that is not a humanoid gets animated.
+# ---------------------------------------------------------------------------
+
+def test_the_prompt_offers_every_trait_and_says_what_each_one_means():
+    """A windmill's sails are not in the thirteen-name role list and never will
+    be, so the prompt has to offer the vocabulary that reaches them."""
+    from spritepipe import rig as R
+    prompt = vision.DESCRIBE_PROMPT % {"width": 32, "height": 32,
+                                       "roles": ", ".join(R.ROLES),
+                                       "traits": ", ".join(R.TRAITS),
+                                       "intent": ""}
+    for trait in ("spinner", "stalk", "surface", "glow", "socket"):
+        assert trait in prompt
+    assert "windmill" in prompt and "waterwheel" in prompt
+
+
+def test_a_trait_the_model_names_reaches_the_rig(hero):
+    answer = json.dumps({"class": "prop", "facing": "right", "parts": [
+        {"name": "tower", "role": "body", "box": [0.3, 0.4, 0.7, 1.0],
+         "parent": None, "pivot": [0.5, 1.0]},
+        {"name": "sails", "role": "accessory", "box": [0.1, 0.0, 0.9, 0.5],
+         "parent": "tower", "pivot": [0.5, 0.25], "traits": ["spinner"]},
+    ]})
+    built = vision.HeadlessBackend("/tmp").parse(answer, hero)
+    assert built.by_name("sails").has_trait("spinner")
+    assert motion.select(built, "trait:spinner") == [built.by_name("sails")]
+
+
+def test_a_trait_that_is_not_a_trait_is_dropped_and_reported(hero):
+    answer = json.dumps({"class": "prop", "parts": [
+        {"name": "body", "role": "body", "box": [0.0, 0.0, 1.0, 1.0],
+         "parent": None, "pivot": [0.5, 1.0], "traits": ["wobbly"]},
+    ]})
+    built = vision.HeadlessBackend("/tmp").parse(answer, hero)
+    assert built.by_name("body").tags == ()
+    assert any("not a trait" in note for note in built.notes)
+
+
+def test_a_trait_the_role_already_implies_is_not_stored_twice(hero):
+    """An accessory is already a stalk. Recording it again would put it in the
+    rig file as though the rigger had decided something it had not."""
+    answer = json.dumps({"class": "humanoid", "parts": [
+        {"name": "body", "role": "body", "box": [0.0, 0.2, 1.0, 1.0],
+         "parent": None, "pivot": [0.5, 1.0]},
+        {"name": "cape", "role": "accessory", "box": [0.0, 0.0, 0.4, 0.8],
+         "parent": "body", "pivot": [0.2, 0.2], "traits": ["stalk"]},
+    ]})
+    cape = vision.HeadlessBackend("/tmp").parse(answer, hero).by_name("cape")
+    assert cape.tags == ()
+    assert cape.has_trait("stalk")      # ... and it still is one
+
+
+def test_the_prompt_no_longer_assumes_the_subject_is_a_character():
+    from spritepipe import rig as R
+    prompt = vision.DESCRIBE_PROMPT % {"width": 32, "height": 32,
+                                       "roles": ", ".join(R.ROLES),
+                                       "traits": ", ".join(R.TRAITS),
+                                       "intent": ""}
+    assert "It may not be a character" in prompt
+    assert "tight to the thing that moves" in prompt
+
+
+def test_an_arm_found_on_almost_no_rows_is_reported_as_unreliable():
+    """`core_and_limbs` collects only the rows where the silhouette parts into
+    three spans, which is right about the pixels and produces a BOX as tall as
+    however many rows happened to part. On a real shieldmaiden that was one row
+    of a six-row band: a sliver the walk then swings while the actual arm sits
+    frozen inside the torso. The rig cannot fix it -- see HANDOFF for the
+    measurement that says replacing the box is worse -- so it says so."""
+    art = make_fixture.humanoid(arms_clear=False)
+    built = rig_of(art)
+    arm = built.first_role("arm_near")
+    band = built.first_role("torso").box[3] - arm.box[1]
+    if (arm.box[3] - arm.box[1]) < band * vision.ARM_BAND:
+        assert any("barely separate" in note for note in built.notes)
+
+
+def test_an_arm_that_separates_properly_draws_no_complaint():
+    art = make_fixture.humanoid(arms_clear=True)
+    built = rig_of(art)
+    assert not any("barely separate" in note for note in built.notes)
+
+
+def test_a_hip_is_the_end_of_the_leg_nearest_the_body():
+    """A leg turns about where it MEETS THE PELVIS, not about its own middle.
+
+    Pivoting at the middle swings the outer half of the hip away from the torso
+    and drives the inner half across the crotch, and both halves of that are
+    wrong in the same frame -- visible at 5x as a walk whose pelvis splits open
+    high and whose thighs come away from the body.
+    """
+    built = rig_of(_humanoid_with_leg_band(32, 14, 12), facing="right")
+    torso = built.first_role("torso")
+    centre = (torso.box[0] + torso.box[2]) / 2.0
+    for role in ("leg_near", "leg_far"):
+        leg = built.first_role(role)
+        if leg is None or leg.height <= leg.width:
+            continue
+        inner = leg.box[0] if leg.box[0] >= centre else leg.box[2] - 1
+        assert abs(leg.pivot[0] - centre) <= abs(inner - centre) + 0.5, (
+            role, leg.pivot, leg.box, centre)
+        middle = (leg.box[0] + leg.box[2]) // 2
+        if abs(middle - centre) > 1:
+            assert leg.pivot[0] != middle, (role, "still the middle of the box")
+
+
+def test_a_face_on_leg_keeps_the_middle_of_its_box():
+    """`fronted` rewrites a face-on clip's swings as TRANSLATIONS -- a leg
+    walking towards the camera foreshortens, and what reads is the foot leaving
+    the floor -- and a translation does not care where its pivot is. Moving it
+    anyway costs both face-on characters in the ground truth and buys nothing."""
+    built = rig_of(_humanoid_with_leg_band(32, 14, 12), facing="front")
+    for role in ("leg_near", "leg_far", "leg_left", "leg_right"):
+        leg = built.first_role(role)
+        if leg is None:
+            continue
+        assert leg.pivot[0] == (leg.box[0] + leg.box[2]) // 2, (role, leg.pivot)
+
+
+def test_a_square_leg_box_is_not_a_limb_with_a_hip_at_one_end():
+    """`grafxkid-oldhero` is ten wide with 5x5 legs, so the box's inner edge is
+    two pixels from its middle on a character ten pixels across -- and moving the
+    joint there throws 0.3% of the sprite loose on its run, where the corpus is
+    otherwise at 0.00%. The same size floor this project keeps rediscovering."""
+    built = rig_of(_humanoid_with_leg_band(20, 10, 4), facing="right")
+    for role in ("leg_near", "leg_far"):
+        leg = built.first_role(role)
+        if leg is None or leg.height > leg.width:
+            continue
+        assert leg.pivot[0] == (leg.box[0] + leg.box[2]) // 2, (role, leg.pivot)
+
+
+def test_a_hip_stays_inside_its_own_leg():
+    """Boxes are half-open and a pivot is a PIXEL, so clamping to `box[2]` puts
+    the joint one column outside the leg. A foot that does not hang under its own
+    joint swings DOWN as well as up, which sinks a planted clip below the row the
+    character was drawn standing on, because `plant` floors a clip at its
+    deepest pose."""
+    built = rig_of(_humanoid_with_leg_band(32, 14, 12), facing="right")
+    for role in ("leg_near", "leg_far"):
+        leg = built.first_role(role)
+        if leg is None:
+            continue
+        assert leg.box[0] <= leg.pivot[0] <= leg.box[2] - 1, (role, leg.pivot, leg.box)

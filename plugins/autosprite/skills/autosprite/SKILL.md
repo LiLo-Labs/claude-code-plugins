@@ -1,6 +1,6 @@
 ---
 name: autosprite
-description: Use when the user wants animated sprite sheets from character art - turning one character image into idle/walk/run/jump/attack cycles, 8-direction movement, prop animations, or outfit and skin variants, and exporting them for Unity, Godot, Phaser, GameMaker, RPG Maker or Unreal. Triggers on "make a sprite sheet", "animate this character", "walk cycle from this image", "8-direction sprites", "spritesheet for Godot/Unity", "recolour this sprite".
+description: Use when the user wants animated sprite sheets from character art - turning one character image into idle, walk, run, dash, climb, crouch, jump, land, attack, block, cast, throw, hurt, die or sleep cycles, front-facing or top-down as well as side-on, 8-direction movement, prop animations, or outfit and skin variants, and exporting them for Unity, Godot, Phaser, GameMaker, RPG Maker or Unreal. Triggers on "make a sprite sheet", "animate this character", "walk cycle from this image", "8-direction sprites", "top-down RPG sprites", "spritesheet for Godot/Unity", "recolour this sprite".
 ---
 
 # AutoSprite
@@ -48,10 +48,14 @@ are.
 2. **Read the notes the rigger wrote.** They say what it measured and what it
    had to guess: "the arms never separate from the body in the silhouette" means
    the arm boxes are a proportion, not a measurement, and are the first thing to
-   check.
-3. **Check `rest pose reconstructs the source exactly: True`.** If it is False
-   the parts do not reassemble into the user's image and every frame is suspect.
-   Stop and say so.
+   check. A large **stray count** means many opaque pixels fell outside every
+   box; they are safely carried by the root and will not move independently, but
+   a big number says the rig missed something the user can see.
+3. **Check `rest pose reconstructs the source exactly: True`.** False means the
+   cut lost or duplicated pixels, which is a bug in this plugin rather than in
+   the rig -- stop, say so, and report it. True does NOT mean the rig is right:
+   a rig that calls the head a leg reassembles perfectly. Only the overlay and
+   the GIFs answer that.
 4. **Ask what the character is, once, if it is not obvious**, and pass it as
    `--intent`. "A knight with a shield on his left arm" changes what the vision
    backend calls the shield.
@@ -109,16 +113,47 @@ Ask for the game, not for a list of animations. The answer picks the set:
 
 | The user says | Give them |
 |---|---|
-| A platformer, a metroidvania, "jumping" | `--animations platformer` (idle, walk, run, jump, attack, hurt) |
+| A platformer, a metroidvania, "jumping" | `--animations platformer` (idle, walk, run, jump, land, crouch, dash, attack, hurt) |
 | Top-down, an RPG, roguelike, "moving in 8 directions" | `--animations topdown --directions 8` |
 | RPG Maker | `--animations walk --directions 4` -- MV/MZ needs exactly the four cardinals |
 | "Just a walk cycle" | `--animations basic` |
+| A brawler, an action RPG, "combat" | `--animations action` (adds block, cast, throw) |
 | Nothing in particular | `--animations full` and let them cut it down |
+| "Everything you have" | `--animations everything` -- all fifteen |
 | A coin, a potion, a chest, a pickup | `--kind prop --animations pickup` |
+| A bird, a dragon, anything with wings | `--animations winged` (idle, fly, walk, attack, hurt, die) |
+
+The character library is idle, walk, run, dash, climb, fly, crouch, jump, land,
+attack, block, cast, throw, hurt, die, sleep. **Wings beat in phase**, unlike
+every other pair: a body has to stay under itself so legs and arms alternate,
+but wings beat together because that is what makes lift. Two of them come with a caveat to
+pass on: **climb** reads as reaching rather than gripping, because a profile
+drawing has no front view to turn towards a wall; **sleep** lays the character
+over with a root rotation, the same trick `die` uses, because a standing
+drawing cannot be folded into a lying pose any other way.
 
 Frame counts and rates are already tuned per animation and are visible in the
 build output. Change them only when the user asks or when the build warns that
 frames repeat -- which means the motion is too small for a character that size.
+
+When the user does ask, two flags cover it:
+
+- **`--frames N`** (2-64) redraws every clip at N frames. The motion is a
+  continuous curve, so this samples it more finely rather than interpolating
+  finished pictures, and fps moves with the count so the timing is unchanged.
+  Useful when an engine or a jam wants a fixed frame count.
+- **`--fps N`** overrides every clip's frame rate without changing the frame
+  count, so the same motion plays faster or slower.
+- **`--loop-start N` / `--loop-end N`** name the frames a clip repeats between,
+  for a clip that is an intro followed by a hold. `block` ships with them: the
+  guard is raised once and then held while the button is down. They land in the
+  native atlas and, because Aseprite has no in/out points on a tag, as a second
+  `<name>_loop` frameTag that every importer already understands.
+- **`--frame-size N`** (8-512) puts every frame in a square N-pixel cell with
+  the character standing at the bottom centre, so every clip of every character
+  shares one floor and one origin. This is what a tile-based importer and a
+  fixed collision box want. It refuses rather than crops if the art does not
+  fit, and the error says the size that would.
 
 ## Directions, and what not to claim
 
@@ -134,6 +169,12 @@ direction with how it was made and you must repeat that label honestly:
   This is the one worth flagging out loud. `--reference-front` and
   `--reference-back` turn N and S from substituted into drawn.
 
+A supplied front or back reference is rigged **face-on**, not with the side
+view's facing: both limbs of a pair in front of the torso, named left and right,
+and every clip trading its sideways swing for a lift. So the southward walk of a
+four-direction sheet lifts its feet where the eastward one sweeps its legs
+across the picture, which is what those two views actually look like.
+
 Never describe an 8-direction sheet built from one side view as eight views of
 the character. Say which are drawn and which are approximated, and offer the two
 extra references that would fix the cardinals.
@@ -148,14 +189,40 @@ of stills. Read them yourself before showing the user.
 What to look for, in order:
 
 1. **Does the character come apart?** A limb detaching means its pivot is not on
-   its joint.
-2. **Do the feet slide?** The walk's contact frames should have a foot planted.
+   its joint. Note that a *single part* can no longer come apart under a squash
+   or a rotation: if a transform splits something the artist drew in one piece,
+   the renderer threads it back together with the colour that block would have
+   had. So anything still detaching is two parts separating, which is a rig
+   question. The build repairs this by itself where it can: a clip measured to
+   be shedding has the responsible swing -- and only that one -- reduced until
+   it holds together, and the build report's `repairs` says which part, on which
+   frame, and by how much. When it says damping did NOT put the character back
+   together, believe it: that is a rig problem, and re-rigging is the fix.
+   `--no-repair` turns it off.
+2. **Does the ground line stay put?** A sprite with a baked contact shadow gets
+   a `shadow` part that never moves, so the floor stays where the artist drew
+   it while the character jumps off it. If a sprite's shadow still rides the
+   character, the rigger did not recognise it -- check the rig notes.
+3. **Do the feet slide?** The walk is *planted*: a clip that claims a foot is on
+   the floor throughout has the root corrected down until it is, so the walk's
+   feet sit on exactly one row in every frame and the body's bob comes out of
+   the leg geometry rather than being authored. A run and a jump are not
+   planted, because both genuinely leave the ground. If a walk still floats, the
+   rig's leg boxes are not legs.
    If both feet move every frame the leg amplitudes are too large for the stride.
-3. **Does anything freeze?** The build warns when frames repeat. On a small
-   character the built-in amplitudes can round to nothing; scale the motion up
-   with a custom animation rather than upscaling the art.
-4. **Does the near limb read as in front?** If the far arm is drawn over the
+4. **Does anything freeze?** The build warns when frames repeat. Vertical
+   travel is floored at one pixel so a small character's bob cannot round away,
+   but the limb amplitudes still can; scale the motion up with a custom
+   animation rather than upscaling the art.
+5. **Does the near limb read as in front?** If the far arm is drawn over the
    torso, near and far are swapped -- pass the other `--facing`.
+6. **Is the character looking at you?** If it is drawn face-on, `--facing front`
+   (or `back`) is not cosmetic. It draws both limbs of each pair in front of the
+   torso, names them left and right instead of near and far, and trades every
+   clip's sideways limb swing for a lift, because a leg walking towards the
+   camera foreshortens rather than sweeping across the picture. Built as a
+   profile, a top-down RPG sprite splays its legs and reads as doing the splits
+   -- and it will still measure zero debris, so only your eyes will catch it.
 
 Show the user the contact sheet and one or two GIFs, name what you checked, and
 ask about the specific thing you are unsure of. Do not ask them to review 44
@@ -164,7 +231,26 @@ frames.
 ## Iterating on motion
 
 When the user says a cycle is wrong, do not rebuild the sheet. Change the
-keyframes and re-render that one clip:
+keyframes and re-render that one clip.
+
+**Try the critic first.** `--critic claude` shows the rendered clip to a vision
+model and asks what is wrong with the MOTION, then folds its answer back into
+the keyframes as deltas. It is the only thing here that judges whether a cycle
+*reads*, which is exactly what the debris measurement cannot do:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/animate.py" \
+  --input A --rig W/<name>.rig.json --animation walk --critic claude --out look/
+```
+
+Every round is re-rendered and re-measured, and one that makes the character
+come apart is thrown away, so the critic can only change how the motion reads.
+Two rounds is the default and usually enough; it stops early when it has nothing
+left to say. Read what it says out loud to the user -- its problems list is
+specific ("the staff arm reads as a detached blob", "the legs barely alternate")
+and is often the fastest route to the real complaint.
+
+If the critic is satisfied and the user is not, edit the keyframes by hand:
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/animate.py" \

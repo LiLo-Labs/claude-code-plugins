@@ -31,11 +31,15 @@ class Clip:
     """One animation, in one direction, with the frames already stabilised."""
 
     def __init__(self, name, frames, fps=10, loop=True, direction=None,
+                 loop_start=None, loop_end=None,
                  anchor=(0, 0), fidelity="drawn", note=""):
         self.name = name
         self.frames = list(frames)
         self.fps = float(fps)
         self.loop = bool(loop)
+        # Where the repeat begins and ends, when the whole clip is not the loop.
+        self.loop_start = None if loop_start is None else int(loop_start)
+        self.loop_end = None if loop_end is None else int(loop_end)
         self.direction = direction
         self.anchor = tuple(int(v) for v in anchor)
         self.fidelity = fidelity
@@ -138,13 +142,18 @@ def pack(clips, layout="grid", padding=1, extrude=1, power_of_two=False,
     if not clips:
         raise ValueError("nothing to pack")
     if scale > 1:
-        clips = [Clip(clip.name, [img.scale_nearest(frame, scale) for frame in clip.frames],
+        clips = [Clip(clip.name,
+                      [img.scale_nearest(frame, scale) for frame in clip.frames],
                       clip.fps, clip.loop, clip.direction,
-                      (clip.anchor[0] * scale, clip.anchor[1] * scale),
-                      clip.fidelity, clip.note)
+                      loop_start=clip.loop_start, loop_end=clip.loop_end,
+                      anchor=(clip.anchor[0] * scale, clip.anchor[1] * scale),
+                      fidelity=clip.fidelity, note=clip.note)
                  for clip in clips]
 
-    builder = _pack_grid if layout == "grid" else _pack_shelf
+    builder = {"grid": _pack_grid, "packed": _pack_shelf,
+               "strip": _pack_strip}.get(layout)
+    if builder is None:
+        raise ValueError("unknown layout %r (grid | packed | strip)" % layout)
     pixels, placements, cell = builder(clips, padding, extrude, max_width)
 
     if power_of_two:
@@ -206,6 +215,37 @@ def _pack_grid(clips, padding, extrude, max_width):
                 index * step_x + gutter, row * step_y + gutter, cell_w, cell_h,
                 cell_anchor))
     return pixels, placements, (cell_w, cell_h)
+
+
+def _pack_strip(clips, padding, extrude, max_width):
+    """Every frame in one row, clips end to end. A horizontal strip.
+
+    The oldest sprite-sheet layout there is, and still the one several importers
+    want by default: GameMaker's Import Strip, and anything that slices by
+    dividing the width by a frame count. It is the same cells as the grid,
+    unrolled, so the anchor alignment carries over unchanged.
+    """
+    pixels, placements, cell = _pack_grid(clips, padding, extrude, 1 << 30)
+    gutter = padding + extrude
+    step_x = cell[0] + 2 * gutter
+    step_y = cell[1] + 2 * gutter
+    total = len(placements)
+    width = total * step_x
+    if width > max_width:
+        raise ValueError("a strip of %d frames is %dpx wide, over the %dpx limit; "
+                         "use --layout grid" % (total, width, max_width))
+
+    strip = img.blank(step_y, width)
+    ordered = sorted(placements, key=lambda p: (p.clip, p.index))
+    out = []
+    for slot, placement in enumerate(ordered):
+        window = pixels[placement.y - gutter:placement.y - gutter + step_y,
+                        placement.x - gutter:placement.x - gutter + step_x]
+        img.paste(strip, window, slot * step_x, 0)
+        out.append(Placement(placement.name, placement.clip, placement.index,
+                             slot * step_x + gutter, gutter,
+                             placement.width, placement.height, placement.anchor))
+    return strip, out, cell
 
 
 def _pack_shelf(clips, padding, extrude, max_width):

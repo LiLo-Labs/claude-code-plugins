@@ -87,8 +87,8 @@
     {
       "name": "autosprite",
       "source": "./plugins/autosprite",
-      "description": "Turn one character image into a finished, engine-ready animated sprite sheet. Vision rigs the character into parts and joints, a deterministic skeletal animator draws idle/walk/run/jump/attack and 8-direction movement from those parts, and the sheet exports to Unity, Godot, Phaser, GameMaker, RPG Maker and Unreal \u2014 with every output pixel provably drawn from the source art's own palette.",
-      "version": "0.1.0",
+      "description": "Turn one character image into a finished, engine-ready sprite sheet. Vision rigs the character into parts and joints, a deterministic skeletal animator draws fifteen animations and 8-direction movement from those parts, and the build measures its own output: a clip that comes apart has the responsible swing damped and reported, a transform is not allowed to break what the artist drew in one piece, and a walk keeps its feet on the floor. Exports to Unity, Godot, Phaser, GameMaker, RPG Maker and Unreal with every output frame provably built from the source's own palette.",
+      "version": "0.2.0",
       "author": {
         "name": "LiLo Labs"
       },

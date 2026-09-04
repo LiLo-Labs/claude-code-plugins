@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from spritepipe import image, motion, render, skeleton
+from spritepipe import cutout, image, motion, quality, render, rig as R, skeleton
 
 
 def test_the_identity_pose_reproduces_the_reference_exactly(hero, hero_cutout):
@@ -201,3 +201,261 @@ def test_supersampling_does_not_move_the_part(hero_cutout):
 def test_an_unrotated_part_never_goes_through_the_resampler(hero, hero_cutout):
     """Most parts in most frames take this path, and it stays pixel-exact."""
     assert image.equal(render.render_pose(hero_cutout, skeleton.Pose()), hero.pixels)
+
+
+# -- the last pixel of planting -------------------------------------------
+
+def test_levelling_puts_the_drawn_feet_on_one_row():
+    """`skeleton.plant` is exact in continuous space and then the rasteriser
+    rounds: a foot computed at 31.4 and one at 31.6 land a pixel apart."""
+    art = image.blank(26, 10)
+    art[0:12, 2:8] = (80, 110, 160, 255)
+    art[12:26, 4:6] = (60, 60, 70, 255)         # a long thin leg
+    built = R.Rig((10, 26), [
+        R.Part("torso", "torso", (0, 0, 10, 12), None, (5, 12)),
+        R.Part("leg_near", "leg_near", (3, 12, 7, 26), "torso", (5, 12)),
+    ], "humanoid", "right", anchor=(5, 26))
+    cut = cutout.cut(built, art)
+    poses = []
+    for angle in (0.0, 9.0, 18.0, 9.0):
+        pose = skeleton.Pose()
+        pose.set("leg_near", skeleton.PartPose(angle=angle))
+        poses.append(pose)
+    margin = render.suggest_margin(built)
+    frames = [render.render_pose(cut, pose, margin=margin) for pose in poses]
+    lows = {int(image.alpha_mask(f).nonzero()[0].max()) for f in frames}
+    assert len(lows) > 1, "the fixture is meant to lift its foot"
+
+    levelled = render.level_to_floor(cut, poses, frames, margin)
+    assert len({int(image.alpha_mask(f).nonzero()[0].max()) for f in levelled}) == 1
+
+
+def test_levelling_a_clip_already_on_one_row_redraws_nothing():
+    art = image.blank(12, 8)
+    art[:, :] = (200, 100, 50, 255)
+    built = R.Rig((8, 12), [R.Part("torso", "torso", (0, 0, 8, 12), None, (4, 12))],
+                  "prop", "right", anchor=(4, 12))
+    cut = cutout.cut(built, art)
+    poses = [skeleton.Pose() for _ in range(3)]
+    margin = render.suggest_margin(built)
+    frames = [render.render_pose(cut, pose, margin=margin) for pose in poses]
+    assert render.level_to_floor(cut, poses, frames, margin) is frames
+
+
+def test_a_shadow_does_not_stand_in_for_the_feet_when_levelling():
+    """The shadow is the floor, not the character. It never moves, so measuring
+    it reports the same row every frame and makes this a no-op on exactly the
+    sprites that have one."""
+    art = image.blank(28, 10)
+    art[0:12, 2:8] = (80, 110, 160, 255)
+    art[12:25, 4:6] = (60, 60, 70, 255)
+    art[27:28, 2:8] = (25, 14, 14, 255)         # a contact shadow, below the foot
+    built = R.Rig((10, 28), [
+        R.Part("torso", "torso", (0, 0, 10, 12), None, (5, 12)),
+        R.Part("leg_near", "leg_near", (3, 12, 7, 25), "torso", (5, 12)),
+        R.Part("shadow", "shadow", (2, 27, 8, 28), "torso", (5, 28)),
+    ], "humanoid", "right", anchor=(5, 28))
+    cut = cutout.cut(built, art)
+    poses = []
+    for angle in (0.0, 20.0):
+        pose = skeleton.Pose()
+        pose.set("leg_near", skeleton.PartPose(angle=angle))
+        poses.append(pose)
+    margin = render.suggest_margin(built)
+    frames = [render.render_pose(cut, pose, margin=margin) for pose in poses]
+    levelled = render.level_to_floor(cut, poses, frames, margin)
+    assert levelled is not frames, "the shadow masked the lift"
+
+
+# -- a transform must not break what was drawn in one piece ---------------
+
+def _flask():
+    art = image.blank(14, 11)
+    art[7:14, 1:10] = (200, 60, 60, 255)      # bowl
+    art[4:7, 5:6] = (180, 180, 190, 255)      # a one-pixel neck
+    art[1:4, 3:8] = (180, 180, 190, 255)      # rim
+    return art
+
+
+def _squashed(art, sx):
+    built = R.Rig((art.shape[1], art.shape[0]),
+                  [R.Part("body", "body", (0, 0, art.shape[1], art.shape[0]),
+                          None, (art.shape[1] // 2, art.shape[0]))],
+                  "prop", "right", anchor=(art.shape[1] // 2, art.shape[0]))
+    cut = cutout.cut(built, art)
+    pose = skeleton.Pose()
+    pose.set("body", skeleton.PartPose(sx=sx))
+    return render.render_pose(cut, pose, margin=render.suggest_margin(built))
+
+
+def test_a_squash_no_longer_takes_the_cork_off():
+    """The neck is two pixels and the rim is five, so the neck loses the
+    coverage vote first and the cork comes away while nothing has rotated."""
+    art = _flask()
+    for sx in (0.3, 0.4, 0.5, 0.6, 0.7):
+        frame = _squashed(art, sx)
+        assert len(quality.blob_sizes(image.alpha_mask(frame))) == 1, sx
+
+
+def test_reconnecting_only_ever_uses_a_colour_the_block_already_had():
+    art = _flask()
+    allowed = {tuple(int(v) for v in colour) for colour in image.unique_colors(art)}
+    for sx in (0.3, 0.45, 0.6):
+        for colour in image.unique_colors(_squashed(art, sx)):
+            assert tuple(int(v) for v in colour) in allowed
+
+
+def test_a_character_drawn_in_two_pieces_is_left_in_two_pieces():
+    """A floating orb, a detached shadow, a character the artist drew apart:
+    none of that is the renderer's business to weld together."""
+    art = image.blank(14, 11)
+    art[7:14, 1:10] = (200, 60, 60, 255)
+    art[1:4, 3:8] = (180, 180, 190, 255)      # no neck at all
+    assert len(quality.blob_sizes(image.alpha_mask(art))) == 2
+    frame = _squashed(art, 0.4)
+    assert len(quality.blob_sizes(image.alpha_mask(frame))) == 2
+
+
+def test_reconnect_leaves_a_whole_frame_alone():
+    art = _flask()
+    frame = _squashed(art, 1.0)
+    assert image.equal(render._reconnect(frame, np.zeros_like(frame)), frame)
+
+
+def test_a_wave_reaches_the_render_and_keeps_the_palette(hero_cutout):
+    """The channel is applied to a part's own pixels before its transform, so
+    the guarantee has to survive that path too."""
+    from spritepipe import palette
+
+    cut = hero_cutout
+    name = cut.sprites[0].name
+    rest = render.render_pose(cut, skeleton.Pose(), margin=4)
+    waved = render.render_pose(
+        cut, skeleton.Pose({name: skeleton.PartPose(wave=3.0, wave_phase=0.2)}),
+        margin=4)
+    assert not image.equal(rest, waved)
+    locked = image.unique_colors(cut.reference)
+    assert len(palette.escapes(waved, locked)) == 0
+
+
+def test_a_wave_is_applied_in_the_part_s_own_space(hero_cutout):
+    """Before the transform, so a part the rig has turned on its side waves
+    along its own length rather than along the screen's."""
+    cut = hero_cutout
+    name = cut.sprites[0].name
+    upright = render.render_pose(
+        cut, skeleton.Pose({name: skeleton.PartPose(wave=3.0)}), margin=8)
+    turned = render.render_pose(
+        cut, skeleton.Pose({name: skeleton.PartPose(wave=3.0, angle=90.0)}), margin=8)
+    assert not image.equal(upright, turned)
+
+
+def test_a_translation_is_illegible_alone_and_legible_on_a_held_part():
+    """The guard's spread is between a skinned part's two ENDS, not its corners.
+
+    A pure translation moves all four corners of a part exactly together, so
+    measured among themselves they have zero spread and the guard quantises --
+    which is right for a part that moves rigidly and wrong for one whose joint
+    is pinned, where the held end takes the parent's transform and the free end
+    takes all of this one. Without the `pinned` reading no translation could
+    ever be legible, so skinning could never run on one.
+    """
+    layer = image.blank(12, 12)
+    layer[3:9, 3:9] = (255, 0, 0, 255)
+    slide = skeleton.translate(4.0, 0.0)
+
+    rigid = render._legible(layer, slide)
+    assert rigid is not slide, "four corners moving together have no spread"
+    assert (rigid[0, 2], rigid[1, 2]) == (4.0, 0.0), "and it becomes the whole-pixel move"
+
+    held = render._legible(layer, slide, pinned=np.array(skeleton.IDENTITY, dtype=float))
+    assert held is slide, "a held end that stays while the free end travels 4px does show"
+
+
+def test_a_held_end_going_nowhere_different_still_quantises():
+    """`pinned` widens what counts as spread; it does not make everything legible."""
+    layer = image.blank(12, 12)
+    layer[3:9, 3:9] = (255, 0, 0, 255)
+    crawl = skeleton.translate(0.3, 0.0)
+    same = np.array(skeleton.IDENTITY, dtype=float)
+    assert render._legible(layer, crawl, pinned=same) is not crawl
+
+
+def test_the_rest_pose_survives_the_pinned_reading(hero, hero_cutout):
+    """At rest the part and its parent take the same transform, so the spread is
+    zero from both readings and REST stays byte-exact -- which is the guarantee
+    every other one on this branch is built on."""
+    assert image.equal(render.render_pose(hero_cutout, skeleton.Pose()), hero.pixels)
+
+
+def test_anchoring_off_renders_exactly_what_it_always_did(hero_cutout):
+    """`ANCHORED` is a refuted idea kept behind a flag, so its cost when off has
+    to be zero -- not close, byte for byte."""
+    pose = skeleton.Pose({"arm_near": skeleton.PartPose(angle=24.0),
+                          "torso": skeleton.PartPose(dx=3.0, angle=6.0),
+                          "leg_far": skeleton.PartPose(angle=-11.0)}, dy=2.0)
+    was = render.ANCHORED
+    try:
+        render.ANCHORED = False
+        plain = render.render_pose(hero_cutout, pose, margin=8)
+    finally:
+        render.ANCHORED = was
+    assert image.equal(plain, render.render_pose(hero_cutout, pose, margin=8))
+
+
+def test_a_leg_attaches_near_its_torso_pivot_and_a_head_at_the_free_end(hero_cutout):
+    """What `attachment_weights` reads: a leg meets a torso AT the hip, which is
+    the torso's own pivot and so nearly zero weight, while a head sits at the
+    torso's free end and rides all of it."""
+    found = hero_cutout.attachment_weights()
+    assert found, "a humanoid cut should place at least one joint"
+    legs = [w for name, w in found.items() if name.startswith("leg_")]
+    heads = [w for name, w in found.items() if name.startswith("head")]
+    assert legs and heads
+    assert max(legs) < min(heads), (
+        "a leg must ride less of its torso than the head does", found)
+
+
+def test_a_root_only_clip_is_drawn_in_one_piece(hero, hero_cutout):
+    """A clip that drives the root AND NOTHING ELSE is a statement about the
+    subject, not its parts: a coin spins, a crate tumbles.
+
+    Drawn part by part that is a lie the resampler exposes. `spin` narrows a
+    sprite to 14% of its width, so every part is reduced to under a pixel about
+    its OWN pivot and they land apart -- measured on a 23px corpus character,
+    45.45% of it came loose. Assembled first and moved once, 0.00% does.
+    """
+    narrow = skeleton.Pose({hero_cutout.rig.root.name: skeleton.PartPose(sx=0.14)},
+                           whole=True)
+    wide = skeleton.Pose({hero_cutout.rig.root.name: skeleton.PartPose(sx=0.14)})
+    one = render.render_pose(hero_cutout, narrow, margin=8)
+    apart = render.render_pose(hero_cutout, wide, margin=8)
+    assert not image.equal(one, apart), "the one-piece path did not engage"
+    base = quality.debris(hero.pixels)
+    assert quality.debris(one) - base <= quality.debris(apart) - base
+
+
+def test_one_piece_still_reproduces_the_rest_pose_exactly(hero, hero_cutout):
+    """The identity is the identity down either path, or REST means nothing for
+    every root-only clip in the library."""
+    rest = skeleton.Pose(whole=True)
+    assert image.equal(render.render_pose(hero_cutout, rest), hero.pixels)
+
+
+def test_a_grounded_shadow_does_not_spin_with_the_subject():
+    """A baked ground shadow is the FLOOR the subject stands on, drawn into the
+    same sprite -- `world_transforms` pins it to the identity for that reason,
+    and the one-piece path has to keep the same promise."""
+    art = image.blank(12, 10)
+    art[0:8, 3:7] = (200, 60, 60, 255)        # the subject
+    art[9:11, 1:9] = (40, 40, 60, 255)        # its baked shadow
+    built = R.Rig((10, 12), [
+        R.Part("body", "body", (3, 0, 7, 8), None, (5, 8), 1),
+        R.Part("shade", "shadow", (1, 9, 9, 11), None, (5, 10), 0),
+    ])
+    cut = cutout.cut(built, art)
+    turned = render.render_pose(
+        cut, skeleton.Pose({"body": skeleton.PartPose(sx=0.2)}, whole=True))
+    shadow_rows = turned[9:11]
+    assert (shadow_rows[..., 3] > 0).sum() == (art[9:11, ..., 3] > 0).sum(), \
+        "the floor moved with the subject"

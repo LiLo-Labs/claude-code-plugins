@@ -1,5 +1,9 @@
 # AutoSprite Plugin
 
+> **Picking this work up?** Start with [HANDOFF.md](HANDOFF.md): what is
+> measured to work, the ordered backlog, and the dead ends that are not worth
+> walking again.
+
 Turns one character image into a finished, engine-ready animated sprite sheet
 from a single command.
 
@@ -20,6 +24,124 @@ hero.png                                       hero-sprites/
 
 The input file is never written to.
 
+## Five operations that are not a rotation
+
+Six of the eleven animation channels are an affine transform — `angle`, `dx`,
+`dy`, `sx`, `sy` and `shear`. The other five are not, and each is what some
+subject with no limbs actually does.
+
+**`shear`** leans a part's top away from its base, in degrees, without turning
+it: the base stays where the artist drew it and everything above slides in
+proportion to how far above it is. It costs nothing — one more term in a matrix
+that was being built anyway.
+
+**`wave`** and **`wave_phase`** slide each *column* of a part vertically by a
+whole number of pixels, sinusoidally in its own position; advancing the phase
+makes the crest travel. It is the only deformation here that is not a rigid
+transform of the whole part, and it is what cloth and water actually do — their
+*interior* moves. It is also the strongest palette claim in the plugin, because
+it is a **permutation**: every output pixel is an input pixel moved by a whole
+number of rows, so there is nothing to sample, average or invent.
+
+> Measured on a CC0 flag against the artist's own sixteen frames of the same
+> wave: of the pixels `wave` disturbs, the artist never touches **11.0%**, while
+> disturbing 5977 pixels against the artist's 6608. Leaning the same cloth
+> rigidly with `shear` gets **66.3%**, and adding a lean on top of the wave gets
+> 59.2% while moving more than twice as many pixels — so cloth is not a thing
+> that leans. Cutting the
+> cloth into strips and travelling a wave across them with `spread` *tears*, at
+> 31–61% shed, however many strips.
+
+**`scroll_x`** and **`scroll_y`** slide a part's pixels *within its own box* and
+wrap what falls off the far side back to the near one. Rain, snow, a waterfall,
+a river, a conveyor, a treadmill of ground under a runner, smoke leaving a
+chimney — a whole class of subject whose motion is not a movement of the thing
+but a movement **through** it, and which nothing else here can say: `dx` moves
+the part, and a part that leaves its own box comes away from whatever it hangs
+on. Wrapping is a **bijection**, so it is a stronger claim than `wave` makes:
+every colour keeps exactly the count it started with, nothing falls off the end,
+and it is the only motion in the plugin that structurally cannot detach anything
+from anything.
+
+The number is a *fraction of the part's own box*, not a count of pixels. That is
+what lets one clip close its loop on a subject it has never met: "one whole box
+per cycle" is exact whether the box is eight pixels or eight hundred, and a test
+asserts the frame after the last is the first, byte for byte, at three different
+sizes.
+
+> A sheet of rain also broke a measurement, which was the more useful half.
+> `shed` asks how much of the subject came **away** from it, and that presumes
+> there is an "it" — one connected thing a limb can detach from. Rain is fifty
+> separate marks, so moving them changes which ones happen to touch and the
+> number wanders while the pixel count stays exactly constant. Every one of the
+> twenty-eight corpus sprites has a largest connected blob of **96.2% to 100%**
+> of its pixels, so art that is genuinely in pieces is easy to recognise: such a
+> subject is now measured for **conservation** instead — a far stricter question,
+> since any drift at all is a bug rather than a matter of degree — and `repair`,
+> which damps whatever `shed` blames, is skipped rather than left explaining a
+> sheet of rain in the language of limbs coming off a body.
+
+**`cycle`** is a whole-numbered step along a part's own shading **ramp**. Nothing moves: every pixel stays exactly where the artist
+put it and changes shade instead, so the light changes and the silhouette does
+not.
+
+It is what a subject with no limbs actually does. A torch flickers, a rune
+pulses, a window lights up at dusk, water catches the light — none of which is a
+rotation of anything, and all of which were unsayable when the vocabulary was
+five affine scalars.
+
+It is also the strongest form of the palette guarantee in the whole plugin.
+A step lands on a shade **the part itself already uses** — not merely one that
+exists somewhere in the art — so there is nothing for the enforcement pass to
+catch because nothing can escape.
+
+Three rules had to be added, and real art found all three:
+
+- **The art's darkest colour never moves, and nothing steps down onto it.**
+  Ramps are found by hue and adjacency, and an outline touches everything it
+  surrounds, so it lands in the ramp of whatever it outlines — and a step lifts
+  the outline with the fill, which is the most obvious tell in pixel art.
+- **A step never leaves the span of shades the part itself occupies.** A torch's
+  fire and its timber are both hue 21 and they touch, so the ramp finder makes
+  them one ramp — and stepping the flame down walked it out of the fire and into
+  the wood. The flame turned brown. Clamped to its own span, it darkens and
+  stops. This is why the guarantee above is about the *part* and not the art.
+- **A step may not cost most of the shades on show.** Clamping at the end of a
+  ramp merges what is already there; losing one shade is what a ramp end looks
+  like, and losing three of four is the shading being deleted. The step is
+  reduced until it stops costing them, and reduced to nothing if a part is
+  already crowded at the top of its ramp — which is the palette guarantee doing
+  its job rather than failing at it.
+
+## Parts overlap at their joints
+
+Ownership is a partition — the smallest box containing a pixel wins — so without
+help the parts *tile* the drawing and each part's array is cropped to its own
+box. Rotate one and it drags a slab away from a hard edge: a hole on one side, a
+floating piece on the other. That was the corpus's worst failure mode, and it is
+why a rigged knight came apart into rectangles while `shed` scored it 0.00% (the
+pieces stayed touching).
+
+Every part now carries a one-pixel **collar** — a copy of the art immediately
+beside it, so a joint has material on both sides of the seam. Real cutout rigs
+do this by drawing each limb whole into the shoulder; here it is derived.
+
+**It costs nothing.** Compositing at rest still reproduces the source exactly,
+because the front-most part wins every shared pixel and the collar is a copy of
+what was already there — `REST` is untouched, and a test asserts it at four
+collar widths. A spinner's collar is clipped to its disc so the hub rule stands.
+
+| | before | after |
+|---|---|---|
+| a CC0 knight's front walk | 7.92% shed | **0.00%** |
+| corpus assets with a problem | 2 of 28 | **0 of 28** |
+| worst shed across the corpus | 15.38% | **4.32%** |
+
+The corpus went 89.4% at the start, to 15.4% after all the repair work, to
+**4.32%** once the parts stopped tiling — including the 8×23 character with 2px
+limbs that `repair` had correctly declared unfixable, because the problem was
+never the motion.
+
 ## The palette guarantee
 
 **Nothing in this plugin generates a pixel.** There is no image model anywhere
@@ -34,8 +156,19 @@ Three mechanisms hold it:
    into existence.
 2. **Every composite is an alpha test, not a blend.** Two overlapping parts
    never average into a third colour.
-3. **`verify.py` checks it and reports.** The `PALETTE` check compares the
-   finished sheet's colours against the source's and fails on any escape.
+3. **`verify.py` checks it and reports.** The atlas records every image a
+   pixel is allowed to have come from — each with the ingest settings it was
+   read at and a digest of the file — and `PALETTE` rebuilds the allowed set
+   from those and fails on any escape. That is what a build with a `--front`
+   reference or an attached item needs: a front view exists to show what the
+   side cannot, and checking it against the side view's colours alone failed
+   builds that were entirely correct.
+4. **The snapping pass is no longer silent.** A final enforcement snaps any
+   escapee to the nearest allowed colour, which would make `PALETTE` pass
+   whether or not the pipeline kept its promise. It now reports what it moved,
+   and the build warns — every transform here is nearest-neighbour, so anything
+   it has to fix is a bug. Measured across the corpus, all sixteen animations
+   on six sprites: **zero**.
 
 The corollary is a real constraint, stated plainly: this plugin cannot draw a
 view your reference does not contain. A back view needs a back drawing. It will
@@ -72,21 +205,237 @@ runs against the template backend, so CI needs no model and no network.
 
 ## What it makes
 
-**Character animations** — idle, walk, run, jump, attack, hurt, die. Frame
-counts and rates are tuned per animation; both are overridable. Presets: `basic`,
-`platformer`, `topdown`, `full`.
+**Sixteen character animations** — idle, walk, run, dash, climb, fly, crouch,
+jump, land, attack, block, cast, throw, hurt, die, sleep. Frame counts, rates and loop
+points are tuned per animation and all three are overridable (`--frames`,
+`--fps`, `--loop-start`/`--loop-end`). Presets: `basic`, `platformer`,
+`topdown`, `action`, `full`, `everything`.
+
+**A measurement for whether the RIGHT pixels moved** — every other measurement
+here asks whether a frame is *intact*. `shed` catches a limb that came away;
+`distinct_frames` catches a cycle that holds still. Both pass, with a perfect
+score, on an animation that is coherent and moves entirely the wrong pixels: a
+windmill whose whole roof turns with its sails is one connected blob in every
+frame and eight different pictures. When an asset ships the artist's own frames
+of the same motion, `quality.footprint` compares the two footprints and reports
+what share of what we move the artist never touches. It caught a rig scoring
+0.00% shed and 8/8 distinct frames whose sails box covered a third of the image.
+
+It also paid for a rigging rule: **a part that turns claims a disc, not a
+rectangle.** Sails drawn as a cross through a tower cannot be separated from the
+tower by any rectangle, so a `spinner` claims only the disc about its pivot —
+anything further out leaves the rigger's own box on the way round. Measured
+against the artist's four sail frames, that takes footprint error from 40% to
+**9%**, with `shed` reporting 0.00% either way. A pixel the spinner gives up
+falls to the next smallest box that covers it, so `REST` is untouched.
+
+**A build that checks and repairs its own pictures** — every other check here
+proves something about bookkeeping, and all of them pass on frames that are
+visibly wrong, because mass is conserved when parts are merely scrambled. So the
+build also measures what a viewer sees, and acts on it:
+
+- A clip measured to be coming apart has the responsible motion reduced until it
+  holds together, and the report says which part, on which frame, and by how
+  much. Rotation first, because it is usually the culprit and the cheapest thing
+  to lose — then **translation**, because a part that merely *abuts* its parent
+  rather than overlapping it comes away the moment it moves at all. A limb's
+  partner is damped with it, because they are in counter-phase and damping one
+  leg and not the other makes the cycle limp. When damping does not help it says
+  so and changes nothing, because that is a rig problem and quietly shipping a
+  quieter broken clip would hide it.
+- A transform is not allowed to break something the artist drew in one piece. A
+  flask squashed to 40% loses its two-pixel neck before its five-pixel rim, so
+  the cork comes off with nothing having rotated; the renderer threads it back
+  with the colour that block would have had.
+- A clip that claims a foot is on the floor has the root corrected until it is,
+  because a rigid leg rotated about the hip lifts its own foot. The walk's body
+  bob then comes out of the leg geometry rather than being authored.
+
+**A vision critic** — `--critic claude` shows a rendered clip to a vision model
+and asks what is wrong with the *motion* -- or with the RIG, which it is also
+shown, so it can answer "this rig is wrong for this character" rather than
+tuning a limb the character does not have -- then folds the answer back into the
+keyframes. It is also told the exact list of channels the clip writes, because
+without it, shown a torch flicker and told the animation was made by rotating
+parts about their joints, it reported a pop, a drift and a stall on a clip where
+nothing moves at all. It is the only thing here that judges whether a cycle reads, which no
+measurement in this plugin can. Every round is re-measured, and one that makes
+the character come apart is thrown away — so the model can improve how the
+motion looks and can never break the character to do it.
+
+**Operators** — a named rewrite of a keyframe table, so a principle is written
+once instead of typed into every clip. An operator takes an animation and a rig
+and returns another animation, and the only thing it ever touches is keyframe
+numbers — so what ships is still a table you can read and argue with, and the
+palette guarantee is untouched by construction, because an operator reaches a
+pixel only through the same matrix every number in the library already reaches
+it through.
+
+| op | what it is |
+|---|---|
+| `lag` | **follow-through** — what a part does, done later by the thing hanging off it |
+| `envelope` | amplitude as a function of *t*: a gust that arrives and dies, a flare that builds |
+| `taper` | a chain whose far end moves more than its near end |
+| `anticipate` | the wind-up — and it *makes the room*, by compressing the action |
+| `settle` | a one-shot that rings down instead of stopping dead |
+| `damp` | the whole of one track, quieter |
+| `volume` | squash that keeps its area, as a constructor rather than a discipline |
+| `hinge` | a door, shutter or lid: it swings about its edge in the third dimension, which flat-on is a *narrowing* rather than a turn — a door that rotates goes through the wall |
+| `retime` | a time warp on the whole clip: the same poses in the same order, on a different schedule. A stagger, a limp, a beat held before the release |
+| `turbulence` | wind is not a sine wave. Each part gets its own small, ragged, **loop-closed** wander on top of whatever it was already doing — a sum of whole-numbered harmonics, so its period is the cycle exactly, phased from each part's *name* so a build is reproducible and re-ordering a rig file changes nothing |
+
+Addresses are the same selectors as everything else — a role, `name:X`,
+`trait:X` — and deliberately nothing more.
+
+```json
+"ops": [{"op": "lag", "on": "trait:stalk", "of": "torso", "frames": 1.5},
+        {"op": "taper", "on": "trait:stalk", "gain": [1.0, 1.6]}]
+```
+
+Three easings were added with them — `back`, `elastic` and `bounce` — because
+the five original ones are all *monotone*, so none of them can go the wrong way
+first or past the target and come back, and every wind-up and overshoot in the
+library had been typed out as extra keyframes. A fourth, `arc`, is a quarter
+sine, so a `dx` and `dy` keyed together bow into an arc instead of chording
+across it.
+
+**Every clip already uses one.** All sixteen give a trailing part follow-through
+off the torso — off the head in `idle` and `die`, which move nothing else above
+the waist. Until operators existed that had to be typed into sixteen clips by
+hand, so it was typed into none, and a cape hung perfectly rigid through every
+animation in the library. Measured on a real caped hero: fifteen of sixteen
+clips now move the cape, at 0.00% shed, with every frame distinct.
 
 **Custom animations** — a JSON keyframe table, validated and rendered by the
 same path as the built-ins. This is how a plain-language request ("make the walk
 look tired") becomes motion: write the keyframes, render, watch, adjust.
 
+A keyframe carries a whole pose, which is compact and has one hard limit: every
+channel of a part shares one set of instants, and a key that omits a channel is
+asserting that channel is at rest. "The stretch peaks two frames after the punch
+lands" is therefore unsayable — adding the late `sx` key drags the angle back to
+zero with it. So a track may also carry **lanes**: one channel, on its own
+timeline, with its own easing.
+
+```json
+"arm_near": {
+  "keys":  [{"t": 0.0, "angle": -25}, {"t": 0.35, "angle": 75, "easing": "ease_out"}],
+  "lanes": {"sx": [{"t": 0.45, "v": 1.2}, {"t": 0.8, "v": 1.0}]}
+}
+```
+
+A lane replaces one channel and leaves every other one alone, so the sixteen
+built-in clips — none of which uses a lane — sample exactly as they did. This is
+the mechanism behind overlapping action and follow-through, which is most of
+what separates motion that reads as animation from motion that reads as parts
+moving.
+
 **Eight-direction movement** — with every direction labelled `drawn`,
 `mirrored`, `foreshortened` or `substituted`, so nothing claims to be a view it
 is not. `--reference-front` and `--reference-back` turn the cardinals into
-drawn ones.
+drawn ones, and each is rigged **face-on** rather than with the side view's
+facing: both limbs of a pair in front of the torso, named left and right, and
+every clip trading its sideways swing for a lift. A leg walking towards the
+camera foreshortens; it does not sweep across the picture. `--facing front` does
+the same for a single sprite drawn that way.
 
-**Props** — bob, spin, tumble, pulse, swing. A prop rigs as one piece, which is
-never wrong, only plain.
+**Anything that is not a character** — two kinds of clip, and they are not the
+same kind of thing. `bob`, `spin`, `tumble`, `pulse` and `swing` move the sprite
+as one piece, which for a coin is not a lesser path but the right answer. The
+rest are addressed by **what a part is** rather than by a name from a
+thirteen-word humanoid vocabulary:
+
+| Clip | Addressed at | Which is |
+|---|---|---|
+| `turn` | `trait:spinner` | sails, a waterwheel, a cog, a fan |
+| `sway` | `trait:stalk` `trait:surface` | a canopy, a cape, a flag, a field of wheat |
+| `gust` | `trait:stalk` `trait:crown` | the same, hit once by the wind and settling |
+| `ripple` | `trait:surface` | water, a banner, a curtain |
+| `creak` | `trait:socket` | a shutter, a sign, a lantern hung on a building |
+| `flicker` | `trait:glow` | a torch, a forge, a rune, a lit window |
+| `shimmer` | `trait:surface` | light travelling across water or glass |
+
+A trait is a property a role implies (every `accessory` is a `stalk`, every leg
+is a `support`) plus anything the rig tags a part with, so a windmill's sails
+keep whatever role they were given and are tagged `spinner`. `gust` was written
+for trees and drives a hero's cape, because "fixed at its base, free at its tip"
+is true of both and `tail` is true of neither.
+
+A clip may name several parts at once and give each one a **spread** — the same
+curve, played a little later by each in turn. That single field is a travelling
+wave across a wheat field, a chain of segments following the one before it, and
+a canopy lagging its trunk. A track may also say which way the wave travels,
+with **`along`**: `x`, `-x`, `y`, `-y`, `radial` (out from the anchor) or
+`chain` (distance along the skeleton, for a tail that curls back on itself and
+so reads as doubling back in every spatial axis).
+
+Parts are placed on that axis by *position*, not by rank, which is the half that
+matters: three stalks bunched at the left of a field and one alone at the right
+are four ranks and so play at four even intervals, which is four things taking
+turns rather than a wave. Without an axis the order is the order the rig
+happened to LIST its parts in — and the first real multi-part rig this was
+pointed at, a vision-rigged wheat field, returned four stalks left to right and
+then a full-width sheet lying over all of them, which declaration order plays
+last, as though it stood to the right of the field it covers.
+
+> Two spread rules the build now says out loud, both found in *this* library
+> first. A spread of exactly one frame makes every part a **byte-identical**
+> copy of its neighbour, one frame later — two CC0 banners driven by `ripple`
+> were the same eight pictures. And a spread cannot vary a *stepped* channel at
+> all: the renderer rounds `cycle` to whole shades, so moving `shimmer`'s spread
+> from 0.25 to 0.30 produced byte-identical frames and moving `flicker`'s cost
+> the offset torch a third of its pictures. `turbulence` is what varies a
+> stepped channel; both clips ship with one, measured.
+
+Nothing here ships a row of identical frames: a clip addressed at a trait the
+subject does not have is dropped, and the build says which trait was missing.
+
+A prop with no such part still rigs as one piece, which is never wrong, only
+plain — and the vision prompt says so, because it had been splitting a glass
+flask into bowl, neck and cork, none of which is a joint.
+
+**Two ZIPs** — `<name>-frames.zip` is every frame as a loose PNG;
+`<name>-animations.zip` is one folder per animation with its own strip, atlas and
+numbered frames, which is what an importer taking one animation at a time
+wants.
+
+**Outfitting** — `--attach hand=sword.png`. A sword drawn once ends up in the
+right hand of a character it has never met, in front of the arm, and swings
+through every clip. Sockets — `hand`, `off_hand`, `head`, `waist`, `chest` — are
+**derived from the rig rather than declared**, which is what makes "works with
+every character" true rather than aspirational: a hand is the free end of the
+near arm, and every humanoid rig has one whether or not its author thought about
+outfitting. A rig with no far arm has no off-hand and says so, instead of putting
+a shield in the middle of the torso.
+
+The item is **scaled to the character it is meeting** — a hand prop is about
+twice the long axis of the arm holding it, snapped to a ratio pixel art survives
+(pixel art does not scale by 0.37) and resampled nearest-neighbour, so no colour
+is invented. The 30px CC0 sword landed anywhere from **1.4× to 30×** the arm it
+hung on across seventeen corpus characters; it now lands between 1.9× and 2.2×,
+and the build says *"scaled 0.25x: 30 px drawn against a 4 px arm_near"* rather
+than resizing silently. `--attach hand=dagger.pngx0.5` overrides it, because a
+dagger is a short sword rather than a small character.
+
+The socket itself is measured on the character's **drawn pixels**, not on the
+rectangle around them: the free end of an arm is the drawn pixel furthest from
+that arm's own hinge, which is what a hand *is*. Across every socket of every
+corpus rig, the point landed on a solid pixel of the character 51% of the time
+by the old box rule and **99%** now — and the 49% were items floating clear of
+the hand that was supposed to be holding them.
+
+The item is composited into the source art *before anything else runs*, and the
+composed image is written out as `<name>.source.png`. That is what makes it cost
+nothing: the item is a rig part parented to the arm, so forward kinematics
+carries it and there is no second pipeline to keep in step — and every check
+still means what it meant. REST still proves the parts reassemble into the
+source exactly, because the composed art **is** the source. PALETTE still proves
+every output colour came from the input, because the input now contains the
+sword's colours. Nothing was relaxed to let an item in.
+
+The limitation, stated rather than discovered: an item goes **in front of** the
+part it hangs on. Compositing at rest cannot record pixels hidden at rest, so a
+scabbard behind the body would lose whatever the body covers.
 
 **Outfit and skin variants** — recoloured by shading RAMP rather than by colour,
 so the shading survives. Ramps are found by hue *and by adjacency*: two shades
@@ -108,6 +457,14 @@ python3 scripts/rig.py --input hero.png --out out/ --backend claude --preview
 # build
 python3 scripts/build.py --input hero.png --out out/ \
     --animations platformer --directions 4 --backend claude
+
+# fix a line of the rig -- tag the sails `spinner` -- and build with that rig
+python3 scripts/build.py --input mill.png --out out/ \
+    --rig out/mill.rig.json --animations building
+
+# put a sword in their hand; @27,27 says where it is held
+python3 scripts/build.py --input hero.png --out out/ \
+    --attach hand=sword.png@27,27 --attach head=hat.png
 
 # iterate on one cycle without rebuilding the sheet
 python3 scripts/animate.py --input hero.png --rig out/hero.rig.json \
@@ -135,14 +492,126 @@ independently, and the exit status is the answer:
 |---|---|
 | `RECT` | Every atlas rect lies inside the sheet and has content in it |
 | `ZIP` | Every frame in the ZIP is byte-identical to its crop from the sheet |
-| `PALETTE` | Every colour in the sheet came from the source art |
+| `ANIMZIP` | Every frame in the per-animation ZIP is byte-identical to its master crop and to its own strip |
+| `PALETTE` | Every colour in the sheet came from an image the build declared |
 | `ENGINES` | Every engine file's rects, counts and animation names match the atlas |
 | `ANCHOR` | Every frame of a clip shares one anchor |
 | `REST` | The rig's parts reassemble into the source image **exactly** |
 
-`REST` is the strongest of them and the one that catches a bad rig rather than a
-bad export: if the parts do not reassemble into the original, some pixel of your
-art is in the wrong part and every frame is wrong.
+`REST` is the one that checks the cut rather than an export: it proves that
+splitting the art into parts lost and duplicated nothing. It earned its place —
+it caught a real bug where every pixel outside the rig's declared boxes (115 of
+them on the first real sprite this was run against) was assigned to the root and
+then silently dropped, producing a sheet that built fine and was missing part of
+the art.
+
+It does not check whether the parts are *named* right. A rig that calls the head
+a leg reassembles perfectly, because reassembly is about which pixels went where,
+not what they were called. Only watching the preview GIF answers that.
+
+**The gate cannot see what `ingest` already removed.** `flood_background` used
+to mark every border pixel as background before looking at what colour it was —
+so a sprite cropped flush to its own art lost that art, and nothing downstream
+could tell, because `REST` proves the parts reassemble into the *ingested*
+source. On the corpus that silently deleted the top of a knight's helmet, the
+soles of a hero's boots, and — because its blue runs to the left and right edges
+— **the entire blue field of a flag**, 17796 pixels of 26112. Every flag
+measurement in this project was taken against the white Antarctica shape on
+nothing. The background is now the colour that *dominates* the border, and a
+border pixel seeds only if it matches.
+
+**The sharpest case of that is `--facing`.** A subject drawn facing left and
+rigged as right-facing has *every part box mirrored onto the wrong end of it* —
+the head box over the rump, the tail box over the head, so `tail angle` swings
+the head around like a tail. Every check above stays green: the parts still
+reassemble, the palette still holds, and on the corpus's CC0 horse the mirrored
+rig sheds **0.00%** and appears in the sweep as a clean asset. A test records
+that the gate cannot catch it, so nobody later assumes it can.
+
+It is also not inferable from the drawing — the obvious silhouette heuristic (a
+side-on animal's head end is the taller end) gets two of three corpus creatures
+and neither left-facing subject. So the build says out loud when it has assumed
+rather than been told, and the assumption is printed on the rig line and written
+into the rig file. It was a vision critic that caught it, unprompted, in this
+project's own measurement harness.
+
+## Judged against an artist, where an artist's frames exist
+
+Every check above asks whether a frame is *intact*. None asks whether the right
+pixels moved — and a windmill whose entire roof rotates with its sails is one
+connected blob in every frame, eight different pictures, 0.00% shed.
+
+`quality.footprint` compares our footprint against the artist's own frames of
+the same motion, where an asset ships them. `scripts/ground_truth.py` runs it
+over the character clips, which for a long time nothing had measured at all:
+
+Two readings, because the error rises with coverage on every clip measured, so
+`footprint` alone always favours doing less. **Shipped** is what a user gets,
+with its coverage beside it; **matched** is how clips compare to each other.
+
+| subject | clip | content height | shipped | coverage | matched |
+|---|---|---|---|---|---|
+| Forest platformer (damarindra) | run | 45 px | **4.8%** | 0.78 | **11.9%** |
+| MV male (MoikMellah) | crouch | 46 px | 18.0% | 1.07 | **14.8%** |
+| MV male | walk | 46 px | 26.4% | 1.00 | 26.4% |
+| Animated horse (ScratchIO) | walk | 33 px | 24.7% | 0.81 | 26.5% |
+| Animated horse | run | 33 px | 17.9% | 0.76 | 31.6% |
+| MV male | attack | 46 px | 36.5% | 1.50 | 21.1% |
+| SumoHulk brawler (Eris) | jump | 15 px | 47.1% | 1.72 | 34.2% |
+| SumoHulk brawler | walk | 15 px | 19.2% | 0.60 | 36.6% |
+| Animated horse | idle | 33 px | 44.5% | 0.70 | **46.1%** |
+| SumoHulk brawler | attack | 15 px | 46.5% | 1.32 | 50.9% |
+| SumoHulk brawler | idle | 15 px | 58.3% | 0.66 | **63.2%** |
+
+The two walks agreeing to a tenth of a point across different sizes and
+different anatomies — 26.4% on a 46px biped, 26.5% on a 33px quadruped — is the
+best evidence available that this measures the *clip* rather than the subject.
+
+For scale, the flag's `ripple` — the best-measured subject clip here — is 11.0%.
+The forest run beats it comfortably.
+
+**Matched error tracks size** — 45–46px at 11.9–26.4%, 33px at 26.5–31.6%, 15px
+at 34.2–48.4% — **except the idles**, which are the worst clip in the library at
+every size, on a biped and a quadruped alike.
+
+> The idle was a one-pixel bob and nothing else, no squash at all, while the
+> brawler's own idle redraws 109 of his 156 pixels. Adding a **widen-and-settle**
+> to the root track took it from 66.0% at 0.49 coverage to 58.3% at 0.66 on the
+> brawler and from 47.1% at 0.47 to 44.5% at 0.70 on the horse — error down and
+> coverage up on both, corpus unchanged. Two stronger versions scored better
+> still and were argued down by the critic: one *"reads rubbery rather than like
+> breathing"*, and the other exposed a rig defect (an armless blob given arms)
+> that `shed` scored at 0.00% because the torn nub stays connected.
+
+**The critic then caught a bug in the measurement itself.** Asked to judge a
+variant, it opened with something nobody asked about: *"the horse is drawn facing
+LEFT, but the rig assumes it faces right… the tail box sits over the head, so
+`tail angle` swings the horse's head around like a tail."* The corpus metadata
+says `"facing": "left"` and the harness had defaulted to right, so every horse
+number before that was measured on a mirrored rig.
+
+**And the mirrored rig still scored 14.7% on the run.** That is what `footprint`
+actually rewards: a horse rigged back-to-front still moves legs and a body, so it
+still overlaps the artist's footprint. The metric is a strong detector of moving
+pixels the artist *never* moves — that is how it caught the windmill — and a weak
+guide to whether the right pixels moved for the right reason.
+
+**Cutout animation has a size floor, and it is somewhere between 15 and 45px.** At
+15px an artist is not transforming parts, they are redrawing: the brawler's idle
+redraws 109 of his 156 pixels, and no rotation of a four-pixel arm gets there.
+This is the same story the corpus tells elsewhere — the two assets `shed` still
+fails on are 8×23 and 10×17, the smallest characters in it.
+
+> The script insists on three things, each of which changed an answer. The
+> **alignment is proved** — the rest pose, rendered and placed back into the
+> artist's coordinate space, must be byte-identical to the source, or nothing
+> is reported. **Both footprints are measured from the same rest**, because our
+> clips start from the source image and an artist's strips usually do not;
+> getting that wrong reported `attack` at 78.9% where the parallel figure is
+> 48.4%. And the comparison is at **matched coverage**, because `footprint` is
+> one-sided and so rewards doing less — damping the brawler's walk reaches 0.0%
+> error while moving 22 pixels against the artist's 102. `quality.coverage`
+> returns that other half.
 
 ## Input handling
 
@@ -176,7 +645,7 @@ pip install -r requirements-test.txt
 python3 -m pytest tests -q
 ```
 
-270 tests, no network, no model, a few seconds. Fixtures are generated rather
+630 tests, no network, no model, well under a minute. Fixtures are generated rather
 than checked in — `tests/make_fixture.py` builds parametric sprites so a test can
 have the exact property it is about (arms clear of the body or touching, legs
 parted or robed) instead of one PNG having to serve every case.

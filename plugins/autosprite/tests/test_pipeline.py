@@ -5,7 +5,7 @@ import os
 
 import pytest
 
-from spritepipe import image, ingest, motion, pipeline
+from spritepipe import image, ingest, motion, pipeline, quality
 
 
 def build(path, out, **kwargs):
@@ -164,3 +164,201 @@ def test_an_invalid_rig_is_refused_rather_than_animated(hero_path, tmp_path):
 def test_no_animations_selected_is_refused(hero_path, tmp_path):
     with pytest.raises(ValueError):
         build(hero_path, tmp_path / "out", animations=[])
+
+
+def _feet(clip):
+    """How much lower one half of the figure is than the other, per frame."""
+    out = []
+    for frame in clip.frames:
+        mask = image.alpha_mask(frame)
+        rows, columns = mask.nonzero()
+        if not len(rows):
+            out.append(0)
+            continue
+        middle = (columns.min() + columns.max()) // 2
+        left = mask[:, :middle + 1].nonzero()[0]
+        right = mask[:, middle + 1:].nonzero()[0]
+        out.append((int(left.max()) if len(left) else 0)
+                   - (int(right.max()) if len(right) else 0))
+    return out
+
+
+def _width_of(clip):
+    out = []
+    for frame in clip.frames:
+        columns = image.alpha_mask(frame).nonzero()[1]
+        out.append(int(columns.max()) - int(columns.min()) + 1 if columns.size else 0)
+    return out
+
+
+def test_a_face_on_walk_swings_across_the_picture_far_less(hero_path, tmp_path):
+    """A profile walk sweeps the legs across the picture and the silhouette
+    widens as they splay. Towards the camera there is no across to sweep
+    through: the same phase drives a lift instead, so the character stays the
+    width it was drawn."""
+    front = build(hero_path, tmp_path / "front", animations=["walk"], facing="front")
+    side = build(hero_path, tmp_path / "side", animations=["walk"], facing="right")
+    front_clip = next(clip for clip in front.clips if clip.name == "walk")
+    side_clip = next(clip for clip in side.clips if clip.name == "walk")
+
+    front_widths, side_widths = _width_of(front_clip), _width_of(side_clip)
+    assert max(front_widths) - min(front_widths) < max(side_widths) - min(side_widths)
+    assert max(front_widths) < max(side_widths)
+    # ... and the feet still alternate, or it would not read as a walk at all.
+    swing = _feet(front_clip)
+    assert max(swing) - min(swing) >= 2
+    assert front.verification.ok, front.verification.report()
+
+
+def test_a_face_on_build_names_the_limbs_left_and_right(hero_path, tmp_path):
+    result = build(hero_path, tmp_path / "out", animations=["walk"], facing="front")
+    assert result.rigs["side"].by_name("arm_left") is not None
+
+
+def test_a_baked_shadow_keeps_the_ground_line_still(tmp_path):
+    """The corpus's 16px hero stands on a five-pixel contact shadow. Rigged as
+    part of him it rides the root: five rows off the ground at the apex of a
+    jump, two per walk step, so the ground pumps along with the animation."""
+    art = image.blank(20, 14)
+    art[0:6, 4:10] = (220, 190, 160, 255)
+    art[6:14, 3:11] = (60, 120, 200, 255)
+    art[14:16, 4:6] = (40, 40, 60, 255)
+    art[14:16, 8:10] = (40, 40, 60, 255)
+    art[18:19, 3:11] = (25, 14, 14, 255)
+    path = tmp_path / "hero.png"
+    image.save(art, str(path))
+
+    result = build(str(path), tmp_path / "out", animations=["jump"])
+    assert result.rigs["side"].first_role("shadow") is not None
+    clip = next(clip for clip in result.clips if clip.name == "jump")
+    floors = set()
+    for frame in clip.frames:
+        rows = image.alpha_mask(frame).nonzero()[0]
+        floors.add(int(rows.max()))
+    assert len(floors) == 1, "the ground line moved: %s" % sorted(floors)
+    assert result.verification.ok, result.verification.report()
+
+
+def test_a_fixed_frame_size_gives_every_clip_the_same_cell(hero_path, tmp_path):
+    result = build(hero_path, tmp_path / "out", animations=["walk", "jump"],
+                   frames=12, frame_size=64)
+    assert result.sheet.cell == (64, 64)
+    anchors = set()
+    for clip in result.clips:
+        assert len(clip.frames) == 12
+        assert all(frame.shape[:2] == (64, 64) for frame in clip.frames)
+        anchors.add(tuple(clip.anchor))
+    assert len(anchors) == 1, "the character must stand in the same place in every clip"
+    assert result.verification.ok, result.verification.report()
+
+
+def test_a_cell_too_small_for_the_character_is_refused(hero_path, tmp_path):
+    with pytest.raises(ValueError) as caught:
+        build(hero_path, tmp_path / "out", animations=["walk"], frame_size=8)
+    assert "--frame-size" in str(caught.value)
+
+
+def test_the_frame_count_is_bounded(hero_path, tmp_path):
+    with pytest.raises(ValueError):
+        build(hero_path, tmp_path / "out", animations=["walk"], frames=200)
+
+
+def test_a_supplied_front_reference_is_rigged_face_on(hero_path, tmp_path):
+    """Rigging it with the side view's facing gives a sagittal near/far rig to a
+    picture with no depth axis -- the exact defect `--facing front` exists to
+    fix, reintroduced through the back door for anyone who supplies the extra
+    references."""
+    result = build(hero_path, tmp_path / "out", animations=["walk"],
+                   direction_set="4", front=hero_path)
+    assert result.rigs["side"].facing == "right"
+    assert result.rigs["front"].facing == "front"
+    assert result.rigs["front"].by_name("arm_left") is not None
+    assert result.rigs["side"].by_name("arm_left") is None
+    assert result.verification.ok, result.verification.report()
+
+
+def test_the_front_view_s_clips_get_the_face_on_motion(hero_path, tmp_path):
+    """The southward direction is drawn from the front reference, so it must
+    lift its feet rather than sweep its legs across the picture."""
+    result = build(hero_path, tmp_path / "out", animations=["walk"],
+                   direction_set="4", front=hero_path)
+    south = next(clip for clip in result.clips if clip.direction == "S")
+    east = next(clip for clip in result.clips if clip.direction == "E")
+    assert max(_width_of(south)) - min(_width_of(south)) \
+        < max(_width_of(east)) - min(_width_of(east))
+
+
+def test_a_walking_character_keeps_a_foot_on_the_floor(hero_path, tmp_path):
+    """A rigid leg rotated about the hip lifts its own foot: six pixels of
+    daylight under a 64px character at the walk's own amplitudes. The clip
+    declares itself grounded and the root is corrected back down."""
+    result = build(hero_path, tmp_path / "out", animations=["walk"])
+    clip = next(clip for clip in result.clips if clip.name == "walk")
+    floors = {int(image.alpha_mask(frame).nonzero()[0].max()) for frame in clip.frames}
+    assert len(floors) == 1, "the feet left the floor: %s" % sorted(floors)
+
+
+def test_a_running_character_is_allowed_to_leave_the_ground(hero_path, tmp_path):
+    """A run has a flight phase and a jump is nothing but one, so neither is
+    planted -- holding them down would delete the animation."""
+    result = build(hero_path, tmp_path / "out", animations=["run", "jump"])
+    for name in ("run", "jump"):
+        clip = next(clip for clip in result.clips if clip.name == name)
+        floors = {int(image.alpha_mask(frame).nonzero()[0].max()) for frame in clip.frames}
+        assert len(floors) > 1, "%s never leaves the ground" % name
+
+
+def test_loop_points_and_fps_can_be_overridden(hero_path, tmp_path):
+    result = build(hero_path, tmp_path / "out", animations=["walk"],
+                   fps=24, loop_start=2, loop_end=5)
+    clip = next(clip for clip in result.clips if clip.name == "walk")
+    assert clip.fps == 24
+    assert (clip.loop_start, clip.loop_end) == (2, 5)
+    assert result.verification.ok, result.verification.report()
+
+
+def test_a_loop_point_past_the_end_is_refused(hero_path, tmp_path):
+    with pytest.raises(ValueError) as caught:
+        build(hero_path, tmp_path / "out", animations=["walk"], loop_start=99)
+    assert "loop_start" in str(caught.value)
+
+
+# ---------------------------------------------------------------------------
+# Facing is the one input whose default is catastrophic AND silent.
+# ---------------------------------------------------------------------------
+
+def test_a_mirrored_facing_passes_every_check_in_the_gate(hero_path, tmp_path):
+    """The reason the CLI warns about it. A subject rigged the wrong way round
+    has every part box on the wrong end -- and the parts still reassemble, the
+    palette still holds, and nothing sheds. This test exists to record that the
+    gate cannot catch it, so that nobody later assumes it can."""
+    forwards = pipeline.build_sheet(
+        hero_path, str(tmp_path / "fwd"), animations=["walk"],
+        backend="template", facing="right", name="hero")
+    backwards = pipeline.build_sheet(
+        hero_path, str(tmp_path / "back"), animations=["walk"],
+        backend="template", facing="left", name="hero")
+
+    assert forwards.verification.ok and backwards.verification.ok
+    assert ([check["check"] for check in forwards.verification.checks]
+            == [check["check"] for check in backwards.verification.checks])
+    # Two different animations, both fully verified.
+    assert (forwards.clips[0].frames[0].tobytes()
+            != backwards.clips[0].frames[0].tobytes())
+    # And `shed` does not raise its voice either. On this fixture the mirrored
+    # build sheds 2.3% -- below the 5% the build warns at, so it is not
+    # reported. On the corpus's CC0 horse, which really is drawn facing left,
+    # the mirrored rig sheds 0.00% and appears in the sweep as a clean asset.
+    for build in (forwards, backwards):
+        worst, _index = quality.shed(build.clips[0].frames,
+                                     build.references["side"].pixels)
+        assert worst < 0.05
+
+
+def test_the_rig_records_which_way_it_assumed_the_subject_faces(hero_path, tmp_path):
+    """So the assumption is at least visible in the artefact."""
+    build = pipeline.build_sheet(
+        hero_path, str(tmp_path / "out"), animations=["idle"],
+        backend="template", facing="left", name="hero")
+    assert build.rigs["side"].facing == "left"
+    assert json.load(open(build.written["rig"]))["facing"] == "left"

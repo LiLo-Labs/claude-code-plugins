@@ -49,7 +49,8 @@ def main():
     parser.add_argument("--model", default="claude-opus-5")
     parser.add_argument("--class", dest="character_class", default="auto",
                         choices=("auto", "humanoid", "creature", "prop"))
-    parser.add_argument("--facing", default="right", choices=("right", "left"))
+    parser.add_argument("--facing", default="right",
+                        choices=("right", "left", "front", "back"))
     parser.add_argument("--intent", default="")
     parser.add_argument("--preview", action="store_true",
                         help="write rig-overlay.png showing every box and pivot")
@@ -81,8 +82,8 @@ def main():
         written["overlay"] = overlay_path
 
     report = {"rig": built.to_dict(), "problems": problems,
-              "rest_pose_exact": exact, "written": written,
-              "reference": reference.summary()}
+              "rest_pose_exact": exact, "strays": pieces.strays,
+              "written": written, "reference": reference.summary()}
     if args.json:
         print(json.dumps(report, indent=2))
     else:
@@ -95,6 +96,10 @@ def main():
         for note in built.notes:
             print("  note: %s" % note)
         print("  rest pose reconstructs the source exactly: %s" % exact)
+        if pieces.strays:
+            share = pieces.strays / max(1, int(image.alpha_mask(reference.pixels).sum()))
+            print("  %d opaque pixels (%.0f%%) fall outside every box; the root "
+                  "carries them" % (pieces.strays, share * 100))
         for problem in problems:
             print("  PROBLEM: %s" % problem)
         for key, value in written.items():

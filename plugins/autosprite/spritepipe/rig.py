@@ -31,6 +31,7 @@ ROLES = (
     "tail",        # trails the body with a lag
     "wing_near",
     "wing_far",
+    "shadow",      # a baked ground shadow; stays on the floor, never moves
     "prop",        # a held item; rides the near arm if one exists
     "accessory",   # hats, capes, scarves; ride the parent with a small lag
 )
@@ -41,9 +42,57 @@ PAIRED = {
     "wing_near": "wing_far", "wing_far": "wing_near",
 }
 
+# What a part IS, as opposed to what a humanoid calls it.
+#
+# The role list above is thirteen anatomical names, and it is simultaneously the
+# part vocabulary, the animation address space and the z-order table -- for
+# every subject in the world. That is why a windmill is offered a house that
+# bobs: `sails` is not in the list, and nothing in the list means "this turns
+# about its hub".
+#
+# A trait is the property an animation actually wants to address. "Fixed at its
+# base, free at its tip, so it trails" is a real universal: it is true of a
+# tail, a cape, a chimney's plume, a tree's canopy and a flag, and false of an
+# arm. `arm_near` is not a universal of anything. Addressing a lag at `stalk`
+# is one line that works on all five; addressing it at `tail` works on one.
+TRAITS = (
+    "mass",       # the main body; everything else hangs off it
+    "crown",      # sits on top of the mass and counter-moves
+    "limb",       # swings from a joint at one end
+    "support",    # a limb that reaches the floor and takes weight
+    "stalk",      # fixed at its base, free at its tip; it trails
+    "spinner",    # turns continuously about a hub -- sails, wheels, cogs
+    "surface",    # a broad face that ripples rather than hinges -- cloth, water
+    "socket",     # attached and swappable; rides its host
+    "ground",     # not part of the subject at all; the floor under it
+    "glow",       # emits or catches light, so it brightens and dims in place
+    "flow",       # something moves THROUGH it while it stays where it is --
+                  # rain, snow, a waterfall, a river, a conveyor, smoke
+)
+
+TRAITS_BY_ROLE = {
+    "body": ("mass",),
+    "torso": ("mass",),
+    "head": ("crown",),
+    "arm_near": ("limb",),
+    "arm_far": ("limb",),
+    "leg_near": ("limb", "support"),
+    "leg_far": ("limb", "support"),
+    "tail": ("stalk",),
+    "wing_near": ("limb",),
+    "wing_far": ("limb",),
+    "shadow": ("ground",),
+    "prop": ("socket",),
+    # Documented as "ride the parent with a small lag", which is what a stalk
+    # does. A cape and a scarf are stalks; a hat is the odd one out and its
+    # rigger can drop the tag.
+    "accessory": ("socket", "stalk"),
+}
+
 
 class Part:
-    def __init__(self, name, role, box, parent=None, pivot=None, z=0, confidence=1.0):
+    def __init__(self, name, role, box, parent=None, pivot=None, z=0,
+                 confidence=1.0, tags=()):
         self.name = str(name)
         self.role = str(role)
         self.box = tuple(int(v) for v in box)
@@ -51,6 +100,23 @@ class Part:
         self.pivot = tuple(int(v) for v in pivot) if pivot is not None else None
         self.z = int(z)
         self.confidence = float(confidence)
+        # Traits this part has beyond the ones its role implies. This is the
+        # escape hatch out of the thirteen-name enum: a windmill's sails keep
+        # whatever role the rig gave them and are tagged `spinner`, and every
+        # animation addressed at spinners then drives them.
+        self.tags = tuple(str(tag) for tag in tags)
+
+    @property
+    def traits(self):
+        """Everything this part can be addressed as, role and tags together."""
+        found = list(TRAITS_BY_ROLE.get(self.role, ()))
+        for tag in self.tags:
+            if tag not in found:
+                found.append(tag)
+        return tuple(found)
+
+    def has_trait(self, trait):
+        return trait in self.traits
 
     @property
     def width(self):
@@ -65,15 +131,19 @@ class Part:
         return self.width * self.height
 
     def to_dict(self):
-        return {"name": self.name, "role": self.role, "box": list(self.box),
-                "parent": self.parent, "pivot": list(self.pivot) if self.pivot else None,
-                "z": self.z, "confidence": round(self.confidence, 3)}
+        document = {"name": self.name, "role": self.role, "box": list(self.box),
+                    "parent": self.parent,
+                    "pivot": list(self.pivot) if self.pivot else None,
+                    "z": self.z, "confidence": round(self.confidence, 3)}
+        if self.tags:
+            document["tags"] = list(self.tags)
+        return document
 
     @classmethod
     def from_dict(cls, data):
         return cls(data["name"], data.get("role", "body"), data["box"],
                    data.get("parent"), data.get("pivot"), data.get("z", 0),
-                   data.get("confidence", 1.0))
+                   data.get("confidence", 1.0), data.get("tags", ()))
 
     def __repr__(self):
         return "Part(%s, %s, box=%s, z=%d)" % (self.name, self.role, self.box, self.z)

@@ -30,10 +30,75 @@ from . import rig as rig_module
 
 # Draw order by role. Far limbs behind the body, near limbs in front of it.
 Z_BY_ROLE = {
-    "wing_far": -2, "arm_far": -1, "leg_far": 0, "body": 1, "torso": 1,
+    "shadow": -3, "wing_far": -2, "arm_far": -1, "leg_far": 0, "body": 1, "torso": 1,
     "leg_near": 2, "tail": 2, "head": 3, "accessory": 4, "arm_near": 5,
     "prop": 6, "wing_near": 6,
 }
+
+
+# What share of a character is its head when the silhouette offers no neck
+# to measure. A hood, a helmet worn over the shoulders or a blob has none.
+HEADLESS_HEAD = 0.30
+
+# A parting that leaves only a couple of rows below it is not a pair of legs, it
+# is a pair of boots. The shieldmaiden's silhouette parts on its last row alone
+# -- 4% of her -- and the rig then swings her feet about a hip joint fifteen
+# rows above them while her actual legs stay welded to the torso.
+#
+# Both conditions are needed. Rows alone would reject three rows of leg on a
+# twelve-pixel character, where three rows is a quarter of the whole figure; a
+# share alone would reject a slime's four-pixel nubs, which are the only legs it
+# has. Measured over the corpus, a foot gap is one to two rows and under 11% of
+# the character, and the smallest thing that is genuinely a leg is four rows and
+# 14%.
+# The share of the shoulder-to-hip band an arm has to cover to be believed.
+# Below it the silhouette found a couple of rows that happened to part, not a
+# limb -- and the rig says so rather than pretending. See `_humanoid`.
+ARM_BAND = 0.4
+
+LEG_ROWS = 3
+LEG_BAND = 0.15
+
+
+FACE_ON = ("front", "back")
+
+# Drawn face-on there is no far side, so a "far" limb is not behind anything and
+# must not be drawn behind the torso. It keeps its role, because every animation
+# and every exporter dispatches on role and the pair still has to swing in
+# counter-phase; only the depth and the name change.
+FACE_ON_Z = {"arm_far": 4, "leg_far": 2, "wing_far": 6}
+FACE_ON_NAMES = {"arm_far": "arm_left", "arm_near": "arm_right",
+                 "leg_far": "leg_left", "leg_near": "leg_right",
+                 "wing_far": "wing_left", "wing_near": "wing_right"}
+
+
+def face_on(parts, notes):
+    """Bring a sagittal rig round to face the camera.
+
+    A profile rig is built on a depth axis the picture does not have: `arm_far`
+    is drawn BEHIND the torso, which is right for a character in profile and
+    wrong for one looking at you, whose arms are both in front and both fully
+    drawn. Renaming them left and right is not cosmetic either -- a user reading
+    `arm_far` on a front-facing sprite has to guess which arm the rigger meant.
+    """
+    renamed = {}
+    for part in parts:
+        if part.role in FACE_ON_Z:
+            part.z = FACE_ON_Z[part.role]
+        if part.role in FACE_ON_NAMES and part.name == part.role:
+            renamed[part.name] = FACE_ON_NAMES[part.role]
+            part.name = renamed[part.name]
+    # A part that named one of these as its parent -- a sword riding an arm --
+    # has to follow the rename, or it is orphaned and the rig is refused as
+    # unreachable from the root. A vision rig hit exactly that: the model called
+    # the arm `arm_near` and hung a `musket` off it.
+    for part in parts:
+        if part.parent in renamed:
+            part.parent = renamed[part.parent]
+    if renamed:
+        notes.append("drawn face-on: the paired limbs are the character's left "
+                     "and right, both in front of the torso, and the animations "
+                     "trade their swing for a lift")
 
 
 # --------------------------------------------------------------------------
@@ -83,68 +148,213 @@ def _bbox(spans):
             max(span[2] for span in spans), max(ys) + 1)
 
 
-def find_shoulder(mask, low=0.10, high=0.55):
-    """The row where the silhouette widens most sharply. That is the shoulders.
+def find_shadow(mask, keep=0.15):
+    """A piece of art lying below the character's feet is the floor, not them.
 
-    Scanning for the narrowest row alone finds the top of the head on any
-    character whose head is a uniform-width block, which is most pixel art. The
-    step is the reliable landmark; the neck is then found relative to it.
+    Sprite packs bake contact shadows in constantly, and a shadow rigged as part
+    of the character is worse than one rigged as nothing: it rides the root, so
+    it lifts off the ground at the apex of a jump and bobs with every walk step,
+    and the ground line pumps along with the animation. Given its own part it
+    simply stays where it was drawn.
+
+    Only what is BELOW the body counts. A detached cape, a floating orb, a
+    held-out lantern are all separate components too, and all of them belong to
+    the character and should move with it.
+    """
+    body = body_mask(mask, keep)
+    loose = mask & ~body
+    if not loose.any():
+        return None
+    rows, columns = np.nonzero(loose)
+    body_rows = np.nonzero(body.any(axis=1))[0]
+    if not body_rows.size or int(rows.min()) < int(body_rows.max()):
+        return None
+    return (int(columns.min()), int(rows.min()),
+            int(columns.max()) + 1, int(rows.max()) + 1)
+
+
+def find_crown(mask, share=0.35):
+    """The first row where the CHARACTER starts, past anything it is holding up.
+
+    A raised sword, a musket barrel, a staff, a plume, a pair of horns: all of
+    them stand above the head as a column a few pixels across, and all of them
+    ruin a search for the narrowest row, because they ARE the narrowest rows.
+    The shieldmaiden's neck landed at row 4 of 23, inside her horns, so the rig
+    called her sword tip a head and animated her actual helmet as torso.
+
+    A protrusion is thin and a head is not, so the crown is simply the topmost
+    row reaching a share of the character's widest. Rows above it still belong
+    to the head box -- horns are part of a helmet -- they just do not get to
+    claim the neck.
+    """
+    widths = row_widths(mask)
+    peak = float(widths.max()) if widths.size else 0.0
+    if peak <= 0:
+        return 0
+    reaching = np.flatnonzero(widths >= peak * float(share))
+    return int(reaching[0]) if reaching.size else 0
+
+
+def narrowest_upper_row(mask, low=0.10, high=0.55):
+    """The narrowest row of the upper body, and the band it was searched in.
+
+    Two different questions are asked of this. `find_neck` asks WHERE the neck
+    is and has to refuse to answer when there is no neck; `classify` asks
+    WHETHER there is one at all, and needs the narrowest row either way to
+    decide. Sharing the measurement keeps them from drifting apart -- they did
+    once, and a robed figure with no neck was demoted to a one-piece prop.
+
+    Returns (row, y0, y1). The LAST row achieving the minimum is taken, so a
+    head of uniform width resolves to its bottom row rather than its top one.
     """
     height = mask.shape[0]
-    y0, y1 = max(1, int(height * low)), max(3, int(height * high))
-    widths = row_widths(mask)[y0:y1].astype(float)
-    if widths.size < 2:
-        return max(1, int(height * 0.3))
-    return int(y0 + int(np.argmax(np.diff(widths))) + 1)
-
-
-def find_neck(mask, shoulder=None):
-    """The last row that still belongs to the head.
-
-    Walking down from the top, the head is the narrow part and the neck is the
-    LAST narrow row before the shoulders, not the first. Taking the first is how
-    a rig ends up cutting a character's face in half.
-    """
-    height = mask.shape[0]
-    if shoulder is None:
-        shoulder = find_shoulder(mask)
-    y0 = max(0, int(height * 0.06))
-    y1 = max(y0 + 1, min(shoulder, height - 1))
+    y0 = max(1, int(height * low), find_crown(mask))
+    y1 = max(y0 + 1, min(int(height * high), height - 1))
     widths = row_widths(mask)[y0:y1].astype(float)
     if widths.size == 0 or not widths.any():
-        return max(0, shoulder - 1)
+        return None, y0, y1
     widths[widths == 0] = np.inf
-    narrowest = float(widths.min())
-    # Last occurrence of the minimum, so a uniform-width head resolves to its
-    # bottom row rather than its top one.
-    last = int(np.flatnonzero(widths <= narrowest)[-1])
-    return int(y0 + last)
+    last = int(np.flatnonzero(widths <= float(widths.min()))[-1])
+    return int(y0 + last), y0, y1
 
 
-def find_split(mask, floor=0.35):
+def find_neck(mask, low=0.10, high=0.55):
+    """The narrowest row in the upper body. That is the neck.
+
+    Deliberately independent of where the shoulders are, because the obvious
+    landmark -- the row where the silhouette widens into the shoulders -- is
+    wrong for a whole category of sprite. A chibi's head is the WIDEST part of
+    the character, so the body never widens below it, and a shoulder-first
+    search puts the "shoulders" two rows down from the crown and the neck above
+    them. The rig then has a two-row head on a seventeen-row character and the
+    face animates as part of the torso.
+
+    A neck is narrow whether the head above it is bigger or smaller than the
+    body below it, so search for narrowness and nothing else -- but only below
+    the crown, or a raised sword wins, and only where the narrowness is a local
+    minimum, or a hood wins.
+    """
+    height = mask.shape[0]
+    neck, y0, y1 = narrowest_upper_row(mask, low, high)
+    if neck is None:
+        return int(height * HEADLESS_HEAD)
+
+    # A neck is a row narrower than the character both above and below it. On a
+    # hooded figure, a slime, or anything else that only widens downwards there
+    # is no such row, and the minimum is simply the top of the search band --
+    # which would make the head three rows of an eighteen-row character and
+    # animate its face as torso. Say so, and take a proportion instead.
+    widths = row_widths(mask)
+    # Everything below the neck, not just the rest of the search band: a neck
+    # found on the band's last row has nothing under it inside the band, and a
+    # chibi's neck -- immediately under a head that is the widest thing on the
+    # character -- lands exactly there.
+    above, below = widths[y0:neck], widths[neck + 1:]
+    if not (above.size and above.max() > widths[neck]
+            and below.size and below.max() > widths[neck]):
+        return int(height * HEADLESS_HEAD)
+    return neck
+
+
+def find_shoulder(mask, neck=None):
+    """The first row below the neck that is at least as wide as the neck.
+
+    Derived from the neck rather than the other way round. Its only job is to
+    say where the arms start, and the arms start where the body stops being a
+    neck -- which is true whether the shoulders are broader than the head or
+    narrower.
+    """
+    height = mask.shape[0]
+    if neck is None:
+        neck = find_neck(mask)
+    widths = row_widths(mask)
+    limit = min(height, max(neck + 2, int(height * 0.75)))
+    for y in range(neck + 1, limit):
+        if widths[y] >= widths[neck]:
+            return int(y)
+    return int(min(neck + 1, height - 1))
+
+
+def body_mask(mask, keep=0.15):
+    """The character without anything detached from it.
+
+    Real sprites routinely carry a baked drop shadow: a separate blob a row or
+    two below the feet. It is part of the art and the rig must still own it, but
+    it is not part of the BODY, and letting it stand in for the feet breaks
+    every measurement taken from the bottom up -- the leg split most of all,
+    which then finds a single shadow-shaped run, concludes the legs never part,
+    and demotes a person to a one-piece prop.
+
+    So measurements use the largest connected component and boxes use the whole
+    mask. Anything holding at least `keep` of the art is kept as body, so a
+    character genuinely drawn in two pieces is not thrown away.
+    """
+    height, width = mask.shape
+    seen = np.zeros_like(mask)
+    best, best_size, total = None, 0, int(mask.sum())
+    kept = np.zeros_like(mask)
+    for sy in range(height):
+        for sx in range(width):
+            if mask[sy, sx] and not seen[sy, sx]:
+                stack, blob = [(sy, sx)], []
+                seen[sy, sx] = True
+                while stack:
+                    y, x = stack.pop()
+                    blob.append((y, x))
+                    for dy in (-1, 0, 1):
+                        for dx in (-1, 0, 1):
+                            ny, nx = y + dy, x + dx
+                            if (0 <= ny < height and 0 <= nx < width
+                                    and mask[ny, nx] and not seen[ny, nx]):
+                                seen[ny, nx] = True
+                                stack.append((ny, nx))
+                if len(blob) > best_size:
+                    best, best_size = blob, len(blob)
+                if total and len(blob) >= total * keep:
+                    for y, x in blob:
+                        kept[y, x] = True
+    if not kept.any() and best:
+        for y, x in best:
+            kept[y, x] = True
+    return kept if kept.any() else mask
+
+
+def find_split(mask, floor=0.35, slack=2):
     """The row where the legs part, found by scanning up from the feet.
 
     Scanning down from the middle finds the first row with two spans, and on any
     character whose arms hang clear of the body that row is the armpit, not the
     crotch -- the rig then puts the hips at chest height and the character walks
     on its elbows. The legs are different from the arms in one reliable way:
-    once they part they STAY parted all the way to the floor. So the crotch is
-    the highest row from which every row down to the bottom has at least two
-    spans.
+    once they part they STAY parted, down to the floor.
 
-    None when the bottom row is a single span -- a robe, a slime, a prop. The
+    Down to the floor, but not always THROUGH it. A horse's hooves, a pair of
+    boots on a ground line, a baked contact shadow -- any of them merges the last
+    row or two back into one span, and requiring the very bottom row to be
+    parted threw the whole signal away: a winged pony with six clearly parted
+    rows of legs was demoted to a one-piece prop because its hooves met on the
+    final row. `slack` is how many merged rows at the bottom to look past.
+
+    None when the character genuinely never parts -- a robe, a slime, a prop. The
     caller falls back to a proportion, and records that it did.
     """
     height = mask.shape[0]
-    bottom = None
-    for y in range(height - 1, -1, -1):
-        if mask[y].any():
-            bottom = y
-            break
-    if bottom is None or row_runs(mask[bottom]) < 2:
+    mask = body_mask(mask)
+    rows = [y for y in range(height) if mask[y].any()]
+    if not rows:
         return None
+    bottom = rows[-1]
+
+    parted = None
+    for y in range(bottom, max(-1, bottom - int(slack) - 1), -1):
+        if y >= 0 and mask[y].any() and row_runs(mask[y]) >= 2:
+            parted = y
+            break
+    if parted is None:
+        return None
+
     limit = max(1, int(height * floor))
-    y = bottom
+    y = parted
     while y - 1 >= limit and row_runs(mask[y - 1]) >= 2:
         y -= 1
     return int(y)
@@ -179,6 +389,110 @@ def core_and_limbs(mask, y0, y1, center_x):
             else:
                 right.append((y,) + span)
     return _bbox(core), _bbox(left), _bbox(right)
+
+
+def _complete_pair(left, right, reference_box, width=None):
+    """Given one of a symmetric pair, invent its partner by mirroring.
+
+    A silhouette routinely resolves only one of a pair: on a profile the near
+    arm hides the far one, and a cape or a long coat can swallow one leg
+    entirely. Emitting the one that was found and stopping there produces a rig
+    that `validate` rejects outright -- paired limbs animate in counter-phase
+    and need both halves -- so a real character would fail to build at all
+    rather than animate imperfectly.
+
+    Mirroring about the parent's centreline is the right guess and a cheap one:
+    on a symmetric character it is where the partner actually is, and where it
+    is not, it is still hidden behind the body and never seen.
+
+    The mirror is SHIFTED back inside the image rather than truncated when it
+    lands outside. On a character trimmed tight to an outstretched arm, the
+    reflection falls past the opposite edge, and a truncated box is an empty or
+    one-pixel limb -- which validates, animates, and looks like the character
+    lost an arm anyway.
+
+    Returns (left, right, mirrored) where `mirrored` says a partner was invented.
+    """
+    if (left is None) == (right is None):
+        return left, right, False
+    centre = (reference_box[0] + reference_box[2]) / 2.0
+    found = left if right is None else right
+    x0, y0, x1, y1 = found
+    span = x1 - x0
+    mirror_x0 = int(round(2 * centre - x1))
+    mirror_x1 = mirror_x0 + span
+    if width is not None:
+        if mirror_x0 < 0:
+            mirror_x0, mirror_x1 = 0, min(int(width), span)
+        elif mirror_x1 > width:
+            mirror_x0, mirror_x1 = max(0, int(width) - span), int(width)
+    partner = (mirror_x0, y0, mirror_x1, y1)
+    if partner[2] <= partner[0]:
+        partner = found
+    if right is None:
+        return left, partner, True
+    return partner, right, True
+
+
+def leg_columns(mask, belly, height, floor_share=0.6, gap=1):
+    """Where a side-on animal's legs are, read as COLUMNS rather than rows.
+
+    `pair_boxes` reads a band row by row and halves any row that has not parted
+    yet. That is right under a biped's hips, where an unparted row really is two
+    legs touching. It is wrong under a quadruped, where the unparted row is the
+    last row of a single hoof: on the pegasus, one such row at the very bottom
+    stretched the far leg's box from 5 pixels wide to 15, so a box holding BOTH
+    leg pairs rotated about its middle and sheared a tenth of the animal off.
+
+    A leg, seen side-on, is a run of columns that reaches down towards the
+    floor. Everything shallower is belly fringe, a contact shadow or the tip of
+    a dragging tail, and must not widen a leg's box. So measure each column's
+    reach below the belly line, keep the columns that reach at least
+    `floor_share` of the deepest, and return their runs, bridging gaps of up to
+    `gap` columns so a two-pixel notch inside one hoof does not split it.
+    """
+    height = int(height)
+    belly = int(belly)
+    if belly >= height:
+        return []
+    below = mask[belly:height]
+    width = mask.shape[1]
+    reach = [0] * width
+    for x in range(width):
+        column = np.nonzero(below[:, x])[0]
+        reach[x] = int(column[-1]) + 1 if len(column) else 0
+    deepest = max(reach) if reach else 0
+    if deepest <= 0:
+        return []
+    floor = max(2, int(deepest * float(floor_share)))
+    found, start, missing = [], None, 0
+    for x in range(width + 1):
+        deep = x < width and reach[x] >= floor
+        if deep:
+            if start is None:
+                start = x
+            missing = 0
+        elif start is not None:
+            missing += 1
+            if missing > gap or x >= width:
+                found.append((start, x - missing + 1))
+                start, missing = None, 0
+    return found
+
+
+def split_leg_groups(columns):
+    """Split leg column runs into the trailing group and the leading group.
+
+    A quadruped's four legs read as two clusters far apart with, at most, a
+    small gap inside each cluster where one leg of a pair shows past the other.
+    The largest gap between runs is therefore the animal's own length, and it is
+    the only place the split can honestly go.
+    """
+    if len(columns) < 2:
+        return None
+    gaps = [(columns[i + 1][0] - columns[i][1], i) for i in range(len(columns) - 1)]
+    _, at = max(gaps)
+    return columns[:at + 1], columns[at + 1:]
 
 
 def pair_boxes(mask, y0, y1):
@@ -230,13 +544,40 @@ class TemplateBackend(Backend):
         kind = character_class
         if kind == "auto":
             kind = self.classify(mask)
+        if kind == "creature" and facing in FACE_ON:
+            # `_creature` builds a SIDE-ON animal: head at the leading end, tail
+            # trailing, legs under the belly. None of that survives the camera
+            # moving round to the front, and `classify` cannot know -- it reads
+            # the silhouette, and a stocky character drawn face-on is wider than
+            # it is tall exactly like a horse. The corpus's 16px roguelike hero
+            # was rigged with its left arm as a head and its right arm as a tail.
+            kind = "humanoid"
+            notes_from_class = ("wider than tall, which usually means a side-on "
+                                "animal, but it is drawn face-on -- rigged as an "
+                                "upright character instead")
+        else:
+            notes_from_class = None
 
         builder = {"humanoid": self._humanoid, "creature": self._creature,
                    "prop": self._prop}.get(kind, self._prop)
         parts, notes = builder(mask, width, height, facing)
+        if notes_from_class:
+            notes.insert(0, notes_from_class)
+
+        shadow = find_shadow(mask)
+        if shadow is not None and parts:
+            root = next((p for p in parts if p.parent is None), parts[0])
+            parts.append(rig_module.Part(
+                "shadow", "shadow", shadow, root.name,
+                ((shadow[0] + shadow[2]) // 2, shadow[3])))
+            notes.append("there is a contact shadow drawn below the feet; it is "
+                         "rigged as ground and stays put, rather than riding the "
+                         "character up into the air")
 
         for part in parts:
             part.z = Z_BY_ROLE.get(part.role, 1)
+        if facing in FACE_ON:
+            face_on(parts, notes)
         built = rig_module.Rig((width, height), parts, kind, facing,
                                anchor=(width // 2, height), actor=self.actor,
                                notes=notes)
@@ -251,18 +592,38 @@ class TemplateBackend(Backend):
         the silhouette has LEGS -- a bottom that parts and stays parted -- and
         proportion only then decides whether they are a person's or an animal's.
 
-        With no legs, a shoulder step is what is left: a narrow head over a
-        markedly wider body is a person even under a robe. Nothing else is, and
-        prop is the safe answer, because a prop animates as one piece and one
-        piece is never wrong -- only plain.
+        With no legs, the question is whether the shape has a NECK: a row
+        markedly narrower than the mass below it. That works for a chibi, whose
+        head is the widest part of the character and which therefore has no
+        shoulder step at all. Testing for widening shoulders instead demotes
+        every big-headed sprite -- a large fraction of all pixel art -- to a
+        one-piece prop.
         """
         height, width = mask.shape
         tall = height >= width * 1.15
         if find_split(mask) is not None:
             return "humanoid" if tall else "creature"
-        if tall and self._has_shoulders(mask):
+        if tall and self._has_neck(mask):
             return "humanoid"
         return "prop"
+
+    def _has_neck(self, mask, ratio=0.8):
+        """Is there a row narrow enough, with enough mass below it, to be a neck?
+
+        Asks the narrowest row directly rather than going through `find_neck`,
+        which refuses to name a neck it cannot find and answers with a
+        proportion instead. Routing this through that refusal turned a robed
+        necromancer -- narrow hood, wide skirt, no neck to speak of -- into a
+        one-piece prop.
+        """
+        neck, _, _ = narrowest_upper_row(mask)
+        if neck is None:
+            return False
+        widths = row_widths(mask)
+        below = widths[neck + 1:]
+        if below.size == 0 or not below.any():
+            return False
+        return float(widths[neck]) <= float(below.max()) * ratio
 
     def _has_shoulders(self, mask, ratio=1.25):
         shoulder = find_shoulder(mask)
@@ -274,13 +635,22 @@ class TemplateBackend(Backend):
 
     def _humanoid(self, mask, width, height, facing):
         notes = []
-        shoulder = find_shoulder(mask)
-        neck = find_neck(mask, shoulder)
+        neck = find_neck(mask)
+        shoulder = find_shoulder(mask, neck)
         split = find_split(mask)
+        if split is not None and (height - split <= LEG_ROWS
+                                  and height - split < height * LEG_BAND):
+            notes.append("the silhouette parts only %d row(s) from the bottom, "
+                         "which is a gap between two boots rather than a hip; "
+                         "the legs are inside a skirt or a coat, so the hip "
+                         "line is a proportion (62%% of height) instead"
+                         % (height - split))
+            split = None
         if split is None:
             split = int(height * 0.62)
-            notes.append("the silhouette never parts, so the hip line is a "
-                         "proportion (62% of height) rather than a measurement")
+            if not notes:
+                notes.append("the silhouette never parts, so the hip line is a "
+                             "proportion (62% of height) rather than a measurement")
         hip = max(neck + 2, min(int(split), height - 1))
         arm_top = max(neck + 1, min(shoulder, hip - 1))
 
@@ -296,6 +666,42 @@ class TemplateBackend(Backend):
         torso_box = (torso_box[0], neck + 1, torso_box[2], hip)
         left_leg, right_leg = pair_boxes(mask, hip, height)
 
+        # An arm found on two rows out of fourteen is not an arm, and the rig
+        # should say so. `core_and_limbs` collects only the rows where the
+        # silhouette actually parts into three spans -- right about the PIXELS,
+        # since an arm touching the body there belongs to the torso -- and
+        # produces a BOX as tall as however many rows happened to part. On a
+        # shieldmaiden that is one row: a 4x1 sliver that the walk then swings
+        # while the real arm sits frozen inside the torso. The vision critic
+        # reported it, unprompted, on four of the eight characters it was shown.
+        #
+        # Replacing such a box with the outer-strip fallback was built and
+        # MEASURED and is a dead end -- see HANDOFF: it makes two clean corpus
+        # characters come apart to buy one broken one back. A guess that is
+        # bigger is a worse guess when it is wrong, and on a character whose
+        # arms never leave the body there is nothing in the silhouette to find.
+        #
+        # The obvious refinement of that -- keep the x range, which the parted
+        # rows really did measure, and stretch only the HEIGHT to the
+        # shoulder-to-hip band -- was then measured too, against an artist's own
+        # walk. It moves the walk from 26.4% to 21.7% at matched coverage and
+        # sheds 11.6% doing it, four frames of a character coming apart, because
+        # the stretched column swallows torso pixels at the shoulder and hip and
+        # rotating them tears the body. Better animation of a torn character is
+        # not better. The information is not in the silhouette; a vision rig
+        # gets this character's walk to 19.4%.
+        # So the box is left alone and the user is told, which is the same
+        # answer the "never separate" case below already gives.
+        band = max(1, hip - arm_top)
+        thin = [box for box in (left_arm, right_arm)
+                if box is not None and (box[3] - box[1]) < band * ARM_BAND]
+        if thin:
+            notes.append("the arms barely separate from the body in the "
+                         "silhouette, so each arm box is only %d row(s) of a "
+                         "%d-row shoulder-to-hip band and the arm swing will "
+                         "hardly read; a vision rig will do better here"
+                         % (min(box[3] - box[1] for box in thin), band))
+
         if left_arm is None and right_arm is None:
             # Arms never separate from the body. Give each side the outer third
             # of the torso so the walk cycle still has something to swing, and
@@ -306,6 +712,19 @@ class TemplateBackend(Backend):
             notes.append("the arms never separate from the body in the "
                          "silhouette, so each arm is the outer third of the "
                          "torso; a vision rig will do better here")
+        else:
+            left_arm, right_arm, mirrored = _complete_pair(
+                left_arm, right_arm, torso_box, width)
+            if mirrored:
+                notes.append("only one arm separates from the body in the "
+                             "silhouette; the other is its mirror about the "
+                             "torso's centreline")
+        left_leg, right_leg, mirrored_legs = _complete_pair(
+            left_leg, right_leg, torso_box, width)
+        if mirrored_legs:
+            notes.append("only one leg separates from the body in the "
+                         "silhouette; the other is its mirror about the "
+                         "torso's centreline")
 
         far_arm, near_arm = (left_arm, right_arm) if facing == "right" else (right_arm, left_arm)
         far_leg, near_leg = (left_leg, right_leg) if facing == "right" else (right_leg, left_leg)
@@ -317,6 +736,28 @@ class TemplateBackend(Backend):
                             (head_extent[0], 0, head_extent[1], neck + 1), "torso",
                             ((head_extent[0] + head_extent[1]) // 2, neck)),
         ]
+        # A HIP IS NOT THE MIDDLE OF THE LEG. Every limb pivot here was the
+        # centre of its own box, which is where a leg's mass is and not where it
+        # is attached: the joint is where the leg meets the pelvis, so it is the
+        # end of the leg's x range nearest the body's centreline. Pivoting at the
+        # middle instead swings the outer half of the hip away from the torso and
+        # drives the inner half across the crotch, and both halves of that are
+        # wrong in the same frame.
+        #
+        # Only where the leg actually TURNS about the joint. `Animation.fronted`
+        # rewrites a face-on clip's swings as translations -- a leg walking
+        # towards the camera foreshortens, and what reads is the foot leaving the
+        # floor -- and a translation does not care where its pivot is. Measured
+        # against the artists' own frames at their own coverage: the two profile
+        # humanoids improve (mv-male walk 27.6% -> 22.2%, forest run 14.3% ->
+        # 12.7%, mv-male crouch 15.4% -> 15.0%) and applying it to the two
+        # face-on ones as well costs 1.2 and 0.6 points for nothing.
+        #
+        # The same reasoning applied to the ARMS was measured and does not pay --
+        # see HANDOFF. An arm box here is a chip of mitten that barely separates
+        # from the body, so it has no inner edge worth finding.
+        centreline = (torso_box[0] + torso_box[2]) / 2.0
+        turning = facing not in FACE_ON
         for name, role, box in (("arm_far", "arm_far", far_arm),
                                 ("arm_near", "arm_near", near_arm),
                                 ("leg_far", "leg_far", far_leg),
@@ -324,8 +765,28 @@ class TemplateBackend(Backend):
             if box is None or box[2] <= box[0] or box[3] <= box[1]:
                 continue
             pivot_y = box[1] if role.startswith("arm") else hip
+            # And only on a leg that is LONGER THAN IT IS WIDE. A limb extends
+            # away from its joint, and that direction is its length -- the same
+            # thing `fit.split_part` has to know to cut one. A leg box that is
+            # square is not a limb with a hip at one end, it is a chip of the
+            # lower body: `grafxkid-oldhero` is 10x18 and its legs are 5x5, so
+            # the box's inner edge is two pixels from its middle on a character
+            # ten pixels wide, and moving the joint there throws 0.3% of the
+            # sprite loose on its run where the corpus is otherwise at 0.00%.
+            # The same size floor this project keeps rediscovering.
+            long_enough = (box[3] - box[1]) > (box[2] - box[0])
+            if role.startswith("leg") and turning and long_enough:
+                # box[2] - 1, not box[2]: boxes are half-open and the pivot is a
+                # PIXEL. Clamping to box[2] puts the joint one column outside the
+                # leg, and a foot that does not hang under its own joint swings
+                # DOWN as well as up -- which sinks the whole planted clip below
+                # the row the character was drawn standing on, because `plant`
+                # floors a clip at its deepest pose.
+                pivot_x = int(round(min(max(centreline, box[0]), box[2] - 1)))
+            else:
+                pivot_x = (box[0] + box[2]) // 2
             parts.append(rig_module.Part(name, role, box, "torso",
-                                         ((box[0] + box[2]) // 2, pivot_y)))
+                                         (pivot_x, pivot_y)))
 
         notes.append("shoulders at row %d, neck at row %d, hips at row %d"
                      % (shoulder, neck, hip))
@@ -352,8 +813,6 @@ class TemplateBackend(Backend):
             tail_box = (width - tail_span, int(height * 0.10),
                         width, max(int(height * 0.10) + 1, int(belly * 0.8)))
 
-        left_leg, right_leg = pair_boxes(mask, belly, height)
-        fore, hind = (right_leg, left_leg) if facing == "right" else (left_leg, right_leg)
 
         parts = [rig_module.Part("body", "body", (0, 0, width, belly), None,
                                  (width // 2, belly)),
@@ -362,13 +821,58 @@ class TemplateBackend(Backend):
                  rig_module.Part("tail", "tail", tail_box, "body",
                                  (tail_box[2] if facing == "right" else tail_box[0],
                                   (tail_box[1] + tail_box[3]) // 2))]
-        for name, role, box in (("leg_near", "leg_near", fore),
-                                ("leg_far", "leg_far", hind)):
+        groups = split_leg_groups(leg_columns(mask, belly, height))
+        if groups is None:
+            # Only one cluster of legs reaches the floor: this reads as a biped
+            # or a creature standing square, so fall back to the row-wise split.
+            left_leg, right_leg = pair_boxes(mask, belly, height)
+            lead, trail = ((right_leg, left_leg) if facing == "right"
+                           else (left_leg, right_leg))
+            legs = [("leg_near", "leg_near", lead), ("leg_far", "leg_far", trail)]
+            notes.append("the legs never separate into fore and hind, so they "
+                         "are split down the middle as a biped's are")
+        else:
+            trailing, leading = groups
+            fore_columns, hind_columns = ((leading, trailing) if facing == "right"
+                                          else (trailing, leading))
+            legs = (self._leg_pair(mask, fore_columns, belly, height, "foreleg", "arm")
+                    + self._leg_pair(mask, hind_columns, belly, height, "hindleg", "leg"))
+            notes.append("four legs: the columns reaching the floor form two "
+                         "clusters, forelegs at x%s and hindlegs at x%s"
+                         % (fore_columns[0][0], hind_columns[0][0]))
+        for name, role, box in legs:
             if box is None or box[2] <= box[0] or box[3] <= box[1]:
                 continue
             parts.append(rig_module.Part(name, role, box, "body",
                                          ((box[0] + box[2]) // 2, belly)))
         return [p for p in parts if p.width > 0 and p.height > 0], notes
+
+    @staticmethod
+    def _leg_pair(mask, columns, belly, height, name, role_stem):
+        """One end of a quadruped: a near leg, and its partner behind it.
+
+        Where the cluster resolves into two column runs, both legs are drawn and
+        each gets its own; where it resolves into one, the near leg hides the far
+        one, and the far part is emitted over the same box. `cutout` gives every
+        shared pixel to the near partner, so the far leg is then empty -- which
+        is what a profile view actually shows, and keeps the pair complete for
+        the animations that swing them in counter-phase.
+        """
+        def box_of(x0, x1):
+            band = mask[belly:height, x0:x1]
+            rows = np.nonzero(band.any(axis=1))[0]
+            if not len(rows):
+                return None
+            return (x0, belly, x1, belly + int(rows[-1]) + 1)
+
+        if len(columns) >= 2:
+            near = box_of(columns[-1][0], columns[-1][1])
+            far = box_of(columns[0][0], columns[0][1])
+        else:
+            near = box_of(columns[0][0], columns[0][1])
+            far = near
+        return [("%s_near" % name, "%s_near" % role_stem, near),
+                ("%s_far" % name, "%s_far" % role_stem, far)]
 
     def _prop(self, mask, width, height, facing):
         return ([rig_module.Part("body", "body", (0, 0, width, height), None,
@@ -376,13 +880,17 @@ class TemplateBackend(Backend):
                 ["one piece: props animate as a whole, never articulated"])
 
 
-DESCRIBE_PROMPT = """You are looking at one game character sprite, shown at its \
+DESCRIBE_PROMPT = """You are looking at one game sprite, shown at its \
 native resolution and then again at 6x so you can see individual pixels. The \
-image is %(width)dx%(height)d pixels, origin top-left, and the character fills \
+image is %(width)dx%(height)d pixels, origin top-left, and the subject fills \
 it edge to edge -- it has already been trimmed.
 
-Your job is to say which rectangle of this image is which part of the character, \
-so that a skeletal animator can cut those rectangles out and swing them.
+It may not be a character. It may be a windmill, a tree, a lantern, a banner, a \
+waterwheel or a cottage. Answer for whatever it actually is.
+
+Your job is to say which rectangle of this image is which part of the subject, \
+and what each part DOES, so that an animator can cut those rectangles out and \
+move them.
 
 %(intent)s
 
@@ -393,7 +901,8 @@ Answer with JSON only. No prose, no markdown fence.
   "facing": "right" | "left" | "front" | "back",
   "parts": [
     {"name": "torso", "role": "torso", "box": [x0, y0, x1, y1],
-     "parent": null, "pivot": [x, y], "confidence": 0.0-1.0}
+     "parent": null, "pivot": [x, y], "confidence": 0.0-1.0,
+     "traits": []}
   ]
 }
 
@@ -404,8 +913,53 @@ Rules that decide whether this rig works or produces a broken character:
 - **role must be one of**: %(roles)s. The animator dispatches on role and
   ignores name, so a "sword_arm" named part with role "arm_near" animates
   correctly. Use "body" for anything that should simply ride its parent.
+- **traits say what a part DOES, and are how anything that is not a humanoid
+  gets animated at all.** The role list above is thirteen anatomical names; a
+  windmill's sails are not in it and never will be. Give such a part role
+  "accessory" or "body" and then the traits that are true of it, from:
+  %(traits)s. They mean:
+    * `spinner` -- turns continuously about a hub: sails, a waterwheel, a cog,
+      a fan, a gear. Its pivot must be the hub it turns about.
+    * `stalk` -- fixed at its base and free at its tip, so it trails and sways:
+      a tree's canopy, a flag, a cape, a plume of smoke, a hanging rope.
+    * `surface` -- a broad face with no joint, that ripples rather than hinges:
+      water, a banner, a curtain, a field of crops. A pond's surface RIPPLES;
+      a river's surface FLOWS -- see the next one.
+    * `glow` -- emits or catches light, so it brightens and dims WITHOUT moving:
+      a torch flame, a forge, a rune, a lit window, a lantern's glass.
+    * `flow` -- something moves THROUGH it while the thing itself stays exactly
+      where it is: rain, snow, a waterfall's sheet, a river's surface, a
+      conveyor belt, smoke leaving a chimney, a treadmill of ground. Use this
+      rather than `surface` when the motion is passage rather than rippling,
+      and rather than a `dx`/`dy` on the part, which would move the part off
+      whatever it hangs on.
+    * `socket` -- hangs off the subject and can swing a little: a shutter, a
+      sign, a door, a lantern on a bracket.
+    * `crown` -- sits on top of the main mass and counter-moves.
+    * `mass` -- the main body everything else hangs off.
+  Most parts need no traits: their role already implies the right ones (an
+  accessory already sways, a leg already takes weight). Add a trait only when
+  the drawing shows something the role does not already say. A part with no
+  trait and no matching role simply rides its parent, which for a chimney is
+  correct and for a windmill's sails is the difference between a windmill and a
+  house that bobs.
 - **Exactly one part has "parent": null.** That is the root -- torso for a
   humanoid, body for anything else. Every other part names its parent.
+- **On an inanimate object the root is its main mass**, with role "body". A
+  sword's root is its blade, not its grip; a flask's is the bowl, not the cork.
+  Getting this inverted makes the object's bulk swing as an accessory of a fake
+  body, which is exactly what it looks like. "prop" is for something a
+  CHARACTER holds, not for the parts of an object that is itself the subject.
+- **An object that does not bend gets one part.** A glass flask's neck is not a
+  joint and its rim is not an accessory: splitting a rigid thing into pieces
+  only gives them a chance to come apart. Emit the extra parts only where the
+  drawing shows something that could actually move separately -- a chest's lid,
+  a lantern's swinging handle, a windmill's sails.
+- **A box must be tight to the thing that moves.** This matters most for a part
+  that turns: a box drawn round a windmill's sails that also contains the tower
+  will drag the tower round with them and leave a hole where it was. If the
+  moving part and the still part cannot be separated by a rectangle, say so by
+  emitting one part -- a wrong articulation is worse than none.
 - **pivot is the joint: the point that stays still when the part rotates.**
   A shoulder, not the middle of the arm. A neck, not the middle of the head.
   It usually sits just inside the PARENT, on the edge they share.
@@ -418,6 +972,11 @@ Rules that decide whether this rig works or produces a broken character:
   one box, or it will be dropped from every frame. Overlap is fine and expected;
   the smallest box containing a pixel is the one that owns it, so a head box
   inside a torso box does the right thing.
+- **A contact shadow under the feet is role "shadow".** Plenty of sprites are
+  drawn standing on a dark ellipse or bar. It is the floor, not the character:
+  given that role it stays on the ground while the character jumps off it.
+  Only what lies UNDER the feet -- a floating orb or a held-out lantern is part
+  of the character and moves with it.
 - **Do not invent parts you cannot see.** A character with no tail gets no tail.
   Confidence below 0.5 on a part means "I think this is here"; the pipeline
   weights it and shows it to the user for confirmation.
@@ -462,6 +1021,7 @@ class HeadlessBackend(Backend):
         prompt = DESCRIBE_PROMPT % {
             "width": width, "height": height,
             "roles": ", ".join(rig_module.ROLES),
+            "traits": ", ".join(rig_module.TRAITS),
             "intent": ("The user says this is: %s\n" % intent) if intent else "",
         }
         prompt += "\n\nRead these two files: %s and %s\n" % (native, zoomed)
@@ -518,9 +1078,17 @@ class HeadlessBackend(Backend):
             if pivot is None:
                 pivot = ((box[0] + box[2]) // 2, box[1])
                 notes.append("%s: no pivot given, using the top-centre of its box" % name)
+            tags = []
+            for tag in entry.get("traits") or entry.get("tags") or ():
+                tag = str(tag)
+                if tag not in rig_module.TRAITS:
+                    notes.append("%s: %r is not a trait, ignored" % (name, tag))
+                    continue
+                if tag not in rig_module.TRAITS_BY_ROLE.get(role, ()):
+                    tags.append(tag)
             parts.append(rig_module.Part(name, role, box, entry.get("parent"), pivot,
                                          Z_BY_ROLE.get(role, 1),
-                                         float(entry.get("confidence", 0.7))))
+                                         float(entry.get("confidence", 0.7)), tags))
 
         roots = [part for part in parts if part.parent is None]
         if not roots:
@@ -546,9 +1114,12 @@ class HeadlessBackend(Backend):
                              "to the root" % (part.name, part.parent))
                 part.parent = root_name
 
+        resolved = data.get("facing", facing)
+        if resolved in FACE_ON:
+            face_on(parts, notes)
+
         built = rig_module.Rig((width, height), parts,
-                               data.get("class", "humanoid"),
-                               data.get("facing", facing),
+                               data.get("class", "humanoid"), resolved,
                                anchor=(width // 2, height),
                                actor=self.actor, notes=notes)
         _break_cycles(built)
@@ -623,9 +1194,47 @@ def _denormalise_point(point, width, height):
     return (int(max(0, min(round(x), width))), int(max(0, min(round(y), height))))
 
 
+class FileBackend(Backend):
+    """A rig read from a JSON file, so a CORRECTED rig can be built with.
+
+    The rig is the one artefact in the pipeline a model has an opinion about,
+    and the README's whole claim about it is that a human can fix it in ten
+    seconds by editing one line of JSON. That claim was not true end to end:
+    a rig could be edited and previewed one clip at a time, and the only way to
+    build a sheet was to re-run the rigger and hope it landed on the same
+    answer. It is the path a tag has to travel too -- tagging a windmill's
+    sails `spinner` is exactly the one-line edit that turns a house that bobs
+    into a windmill that turns.
+
+    It refuses a rig for a different picture rather than building a wrong
+    sheet: a rig is a set of boxes in one image's coordinates and means nothing
+    against another.
+    """
+
+    def __init__(self, path):
+        self.path = str(path)
+        self.actor = "file:%s" % os.path.basename(self.path)
+
+    def rig(self, reference, character_class="auto", facing="right", intent=""):
+        built = rig_module.Rig.load(self.path)
+        height, width = reference.pixels.shape[:2]
+        if tuple(built.size) != (width, height):
+            raise ValueError(
+                "%s is a rig for a %dx%d image, but this one works out at %dx%d "
+                "-- a rig's boxes are coordinates in one picture and mean "
+                "nothing in another"
+                % (self.path, built.size[0], built.size[1], width, height))
+        built.notes = list(built.notes) + ["rig read from %s, not inferred"
+                                           % self.path]
+        return built
+
+
 def make_backend(name, workdir, model="claude-opus-5"):
     if name in ("template", "none", "deterministic"):
         return TemplateBackend()
     if name in ("claude", "headless", "vision"):
         return HeadlessBackend(workdir, model=model)
-    raise ValueError("unknown rig backend %r (template | claude)" % name)
+    if os.path.exists(name):
+        return FileBackend(name)
+    raise ValueError("unknown rig backend %r (template | claude | a path to a "
+                     "rig.json)" % name)

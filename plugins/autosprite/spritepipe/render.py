@@ -11,11 +11,15 @@ jump, a lunge. `stabilize.py` crops every frame of a sheet back to one common
 box afterwards, so the margin costs nothing in the output.
 """
 
+import copy
+import math
+
 import numpy as np
 from PIL import Image as PILImage
 
 from . import image as img
 from . import skeleton
+from . import skin
 
 
 def canvas_size(rig, margin):
@@ -50,7 +54,7 @@ COVERAGE = 0.5
 ALPHA_FLOOR_CODE = img.ALPHA_FLOOR
 
 
-def _mode_downscale(pixels, factor):
+def _mode_downscale(pixels, factor, with_outvoted=False):
     """Shrink by `factor`, giving each block the most common colour in it.
 
     This is the half of supersampling that keeps the palette guarantee: the
@@ -98,6 +102,15 @@ def _mode_downscale(pixels, factor):
     out[:, :, 1] = (best >> 16) & 0xFF
     out[:, :, 2] = (best >> 8) & 0xFF
     out[:, :, 3] = best & 0xFF
+    if with_outvoted:
+        # What each block WOULD have been if coverage had not vetoed it. A
+        # two-pixel neck squashed to less than half a pixel loses that vote and
+        # the flask's cork comes off; the colour it lost with is right here, and
+        # `_reconnect` puts a thread of it back rather than inventing one.
+        outvoted = out.copy()
+        outvoted[cover == 0] = 0
+        out[~keep] = 0
+        return out, outvoted
     out[~keep] = 0
     return out
 
@@ -112,6 +125,186 @@ def _affine_coefficients(matrix):
     inverse = np.linalg.inv(matrix)
     return (inverse[0, 0], inverse[0, 1], inverse[0, 2],
             inverse[1, 0], inverse[1, 1], inverse[1, 2])
+
+
+def _one_piece(layer):
+    """Was this layer drawn as a single connected blob?"""
+    from . import quality
+    mask = img.alpha_mask(layer)
+    if not mask.any():
+        return False
+    return len(quality.blob_sizes(mask)) == 1
+
+
+def _reconnect(frame, outvoted, whole=True):
+    """Put back the thinnest thread of a piece the reduction voted away.
+
+    A transform must not break something the artist drew in one piece. The
+    flask is the case: squashed to 40% its two-pixel neck falls below the
+    coverage threshold while its four-pixel rim survives, so the cork comes off
+    and floats. No amount of damping the motion fixes that, because the failure
+    is in the MIDDLE of the squash range rather than at its extreme -- which is
+    why flooring the squash was measured and reverted twice.
+
+    So repair it where it happens. Where the reduction split one piece into
+    several, join each stray back to the main one along the shortest line
+    between them, colouring each pixel with what its own block would have been
+    had coverage not vetoed it. Every colour therefore came from the block it is
+    drawn in, and the palette guarantee is untouched.
+    """
+    from . import quality
+
+    labels, count = quality.label(img.alpha_mask(frame))
+    if count <= 1:
+        return frame
+    if not (whole() if callable(whole) else whole):
+        # Whatever came apart was already apart. A floating orb, a detached
+        # shadow, a character the artist drew in two: none of that is the
+        # renderer's business to weld together.
+        return frame
+    sizes = [int((labels == index).sum()) for index in range(count)]
+    main = int(np.argmax(sizes))
+    main_points = np.argwhere(labels == main)
+    out = frame.copy()
+    for index in range(count):
+        if index == main:
+            continue
+        stray = np.argwhere(labels == index)
+        gaps = ((stray[:, None, :] - main_points[None, :, :]) ** 2).sum(axis=2)
+        here, there = np.unravel_index(int(np.argmin(gaps)), gaps.shape)
+        start, end = stray[here], main_points[there]
+        steps = int(max(abs(start[0] - end[0]), abs(start[1] - end[1])))
+        for step in range(1, steps):
+            y = int(round(start[0] + (end[0] - start[0]) * step / steps))
+            x = int(round(start[1] + (end[1] - start[1]) * step / steps))
+            if out[y, x, 3]:
+                continue
+            colour = outvoted[y, x]
+            if not colour[3]:
+                colour = frame[end[0], end[1]]
+            out[y, x] = colour
+    return out
+
+
+# How differently the two ends of a part must move before its transform is worth
+# drawing as a transform. Below this the deformation reshuffles pixels inside
+# the cells they already occupy.
+#
+# One pixel is not a taste. It is the point below which NO TWO PIXELS of the
+# part move differently at all, so whatever the matrix says, the part cannot
+# turn, squash or shear -- it can only be resampled. Larger thresholds were
+# measured and the whole corpus says one:
+#
+#     LEGIBLE   mass error, mean   footprint vs the artist, mean
+#     off               11.46%                  31.08%
+#     1.0               10.11%                  30.89%     <- better on both
+#     1.5                9.92%                  31.08%
+#     2.0                9.14%                  31.22%
+#     3.0                9.28%                  31.49%     and sheds more
+#
+# Past a pixel it starts buying mass with fidelity: a 1.5px squash on a 20px
+# character IS visible, and quantising it away flattens the anticipation out of
+# a jump. One pixel is the only value that is strictly better than doing
+# nothing, which is why it is the one here.
+LEGIBLE = 1.0
+
+
+def _legible(layer, matrix, floor=None, pinned=None):
+    """`matrix`, or the whole-pixel move it amounts to on art this small.
+
+    A pixel artist never rotates a five-pixel arm. They redraw it, and if the
+    turn is small what they redraw is the same arm one pixel over. We cannot
+    redraw, so the honest choice is between the two things we CAN do, and for a
+    long time this picked the wrong one.
+
+    Rotating a part is only animation if the part's ends end up in different
+    places. Take the corners of the art's own bounding box, push them through
+    the transform, and ask how far apart their displacements are. That spread is
+    what a viewer reads as "it turned":
+
+    * Under a pixel, no two pixels of the part move differently at all. The
+      rotation cannot show; all it does is resample.
+    * One to two pixels, it shows as a single staircase step somewhere along the
+      part, in a different place each frame. On a 5x4 arm that is not an arm
+      turning, it is an arm with a chip out of it that moves around.
+    * Past two it starts to read, and past four it plainly does.
+
+    Below the floor the part instead moves by its centroid's displacement,
+    ROUNDED TO WHOLE PIXELS -- the frame the artist would have drawn. Rounding
+    matters as much as the substitution: a part slid 0.4 of a pixel is a part
+    that did not move, and eight frames of that is a limb that flickers between
+    two positions while the character stands still.
+
+    Three things fall out of this that are worth having on their own. The rest
+    pose stays byte-exact, because an identity matrix has zero spread and a zero
+    centroid move, which is the identity again. A whole-pixel translation is a
+    COPY, so a part that takes this path is not resampled at all and keeps every
+    one of its pixels exactly. And it is size-relative without a size in it: the
+    same six-degree shoulder turn is drawn on a 64px character, whose arm is
+    long enough to show it, and quantised on a 16px one, whose arm is not.
+
+    `pinned` IS WHAT A SKINNED PART'S HELD END DOES, and without it this
+    measured the wrong thing on every part that skinning would have touched. A
+    skinned pixel takes its weight's share of the part's own transform, so the
+    pixel at the joint takes the PARENT's transform and the one at the free end
+    takes all of `matrix`. The spread a viewer reads is between those two, not
+    among four corners that all take `matrix` together -- and for a pure
+    TRANSLATION the four corners always move exactly together, spread zero, so
+    a translation could never be legible and skinning could never run on one. A
+    torso slid sideways therefore moved as one rigid block off the hips it sits
+    on, which is a body that skates and tears rather than one that leans.
+
+    Passed only for a part that will actually be skinned, so a rigid part is
+    judged exactly as it always was.
+    """
+    floor = LEGIBLE if floor is None else float(floor)
+    if floor <= 0.0:
+        return matrix
+    # Returning `matrix` ITSELF, not a copy, on every path that decides not to
+    # quantise: `render_pose` tests identity against it to learn whether the
+    # part's transform was legible, and a copy would read as "quantised".
+    mask = img.alpha_mask(layer)
+    if not mask.any():
+        return matrix
+    rows, columns = np.nonzero(mask)
+    y0, y1 = float(rows.min()), float(rows.max()) + 1.0
+    x0, x1 = float(columns.min()), float(columns.max()) + 1.0
+    corners = np.array([[x0, y0, 1.0], [x1, y0, 1.0],
+                        [x0, y1, 1.0], [x1, y1, 1.0]]).T
+    moved = (matrix @ corners)[:2] - corners[:2]
+    displacements = [moved[:, i] for i in range(4)]
+    if pinned is not None:
+        held = (pinned @ corners)[:2] - corners[:2]
+        displacements += [held[:, i] for i in range(4)]
+    spread = max(float(np.hypot(*(displacements[i] - displacements[j])))
+                 for i in range(len(displacements))
+                 for j in range(i + 1, len(displacements)))
+    if spread >= float(floor):
+        return matrix
+    centre = np.array([columns.mean(), rows.mean(), 1.0])
+    shift = (matrix @ centre)[:2] - centre[:2]
+    out = np.array(skeleton.IDENTITY, dtype=float)
+    out[0, 2], out[1, 2] = _whole(shift[0]), _whole(shift[1])
+    return out
+
+
+def _whole(value):
+    """`value` rounded the way `_transform_layer` itself rounds.
+
+    Not `round`. The resampler maps each output pixel back through the inverse
+    and takes the nearest source, which puts its ties DOWN: measured on a single
+    opaque pixel pushed through the real transform path, +0.5 moves it zero
+    pixels, +0.6 moves it one, -0.5 moves it minus one. Python's `round` is
+    banker's and disagrees at every half.
+
+    Matching matters because both paths exist in one sheet. A part whose
+    transform is quantised here and the same part a frame later, whose transform
+    was legible enough to draw, must land in the same place for the same
+    displacement -- otherwise the limb gains a pixel of travel on exactly the
+    frames the guard fires on, which is a jitter that no amount of tuning the
+    animation removes.
+    """
+    return float(math.ceil(float(value) - 0.5))
 
 
 def _transform_layer(layer, matrix, size, supersample=SUPERSAMPLE):
@@ -150,7 +343,12 @@ def _transform_layer(layer, matrix, size, supersample=SUPERSAMPLE):
         moved = PILImage.fromarray(np.ascontiguousarray(big_layer), mode="RGBA").transform(
             (size[0] * factor, size[1] * factor), PILImage.AFFINE,
             _affine_coefficients(big_matrix), resample=PILImage.NEAREST)
-        return _mode_downscale(np.array(moved, dtype=np.uint8), factor)
+        small, outvoted = _mode_downscale(np.array(moved, dtype=np.uint8),
+                                          factor, with_outvoted=True)
+        # The cheap half of the test first: nothing to repair unless the
+        # reduction actually split the layer, and that is one flood fill on the
+        # small image rather than two including the full-size source.
+        return _reconnect(small, outvoted, whole=lambda: _one_piece(layer))
 
     source = PILImage.fromarray(np.ascontiguousarray(layer), mode="RGBA")
     moved = source.transform(size, PILImage.AFFINE, _affine_coefficients(matrix),
@@ -158,21 +356,170 @@ def _transform_layer(layer, matrix, size, supersample=SUPERSAMPLE):
     return np.array(moved, dtype=np.uint8)
 
 
+# Whether a limb's pixels near its joint move less than its pixels at the free
+# end. Off, every pixel of a part gets the same matrix and a limb given the part
+# of the body it attaches to will tear that body -- see `skin.py`, and the three
+# refutations in HANDOFF that led to it.
+SKIN = True
+
+# Whether a child rides its parent's transform AT THE POINT IT ATTACHES rather
+# than all of it. See `skeleton._anchors` and `cutout.attachment_weights`.
+ANCHORED = False
+
+
+def _skinned(rig, cut, sprite, pixels, parts_local):
+    """(parent world, part, bands) for a part that should be skinned, else None."""
+    if not SKIN or sprite.name not in parts_local:
+        return None
+    part = rig.by_name(sprite.name)
+    if part is None:
+        return None
+    parent, part_pose = parts_local[sprite.name]
+    if part_pose is None:
+        return None
+    weight = cut.weights(sprite.name)
+    if weight is None:
+        return None
+    found = skin.bands(part, part_pose, pixels, sprite.origin, weight)
+    if not found:
+        return None
+    return parent, part, found
+
+
+def _whole_subject(cutout, pose, margin, width, height):
+    """One frame of a subject that moves AS ONE PIECE, or None.
+
+    A clip that drives the root and nothing else says the subject turns, bobs or
+    tumbles bodily -- a coin, a pickup, a crate. Drawn part by part that is a
+    lie the resampler exposes: `spin` narrows the sprite to 14% of its width, so
+    every part is reduced to under a pixel about its OWN pivot and they land
+    apart. Measured on a 23px character, 45% of it came loose; assembled first
+    and moved once, 0.00% does.
+
+    A GROUNDED part is left exactly where it was, which is the same promise
+    `world_transforms` makes: a baked ground shadow is the floor the subject
+    stands on, not part of the subject, and it must not spin with it.
+    """
+    rig = cutout.rig
+    root = rig.root
+    if root is None:
+        return None
+    body = img.blank(height, width)
+    floor = None
+    for sprite in cutout.sprites:
+        part = rig.by_name(sprite.name)
+        if part is not None and part.role in skeleton.GROUNDED:
+            if floor is None:
+                floor = img.blank(height, width)
+            img.paste(floor, sprite.pixels,
+                      sprite.origin[0] + margin, sprite.origin[1] + margin)
+            continue
+        img.paste(body, sprite.pixels,
+                  sprite.origin[0] + margin, sprite.origin[1] + margin)
+
+    matrix = (skeleton.translate(pose.dx, pose.dy)
+              @ skeleton.local(pose.get(root.name),
+                               (root.pivot[0] + margin, root.pivot[1] + margin)))
+    moved = _transform_layer(body, matrix, (width, height))
+    if pose.flip:
+        moved = moved[:, ::-1]
+    if floor is None:
+        return moved
+    frame = img.blank(height, width)
+    img.paste(frame, floor, 0, 0)
+    img.paste(frame, moved, 0, 0)
+    return frame
+
+
 def render_pose(cutout, pose, margin=0):
     """One frame: every part transformed by its world matrix and composited."""
     rig = cutout.rig
     width, height = canvas_size(rig, margin)
-    transforms = skeleton.world_transforms(rig, pose)
+    if getattr(pose, "whole", False):
+        one = _whole_subject(cutout, pose, margin, width, height)
+        if one is not None:
+            return one
+    # WHERE a child attaches to its parent, when the parent is skinned and so
+    # does not move as one thing. Off by default until it is measured across the
+    # corpus; with it off, `anchors` is None and every transform is what it has
+    # always been.
+    anchors = cutout.attachment_weights() if (SKIN and ANCHORED) else None
+    transforms = skeleton.world_transforms(rig, pose, anchors)
+    parts_local = (skeleton.world_and_local(rig, pose, anchors) if SKIN else {})
     shift = skeleton.translate(margin, margin)
 
     frame = img.blank(height, width)
     for sprite in cutout.sprites:
+        pixels = sprite.pixels
+        part_pose = pose.get(sprite.name)
+        if abs(part_pose.wave) >= 0.5:
+            # In the part's own space, before its transform, so a part the rig
+            # has turned on its side waves along its own length rather than
+            # along the screen's.
+            pixels = img.wave_columns(pixels, part_pose.wave, part_pose.wave_phase)
+        tall, wide = pixels.shape[:2]
+        # A FRACTION of the part's own box, not a count of pixels. That is what
+        # makes one clip close its loop on any subject: "one whole box down per
+        # cycle" is exact whether the box is 8 pixels or 800, and a clip written
+        # in pixels would have to be told the size of a part it has never met.
+        along, down = part_pose.scroll_x * wide, part_pose.scroll_y * tall
+        if abs(along) >= 0.5 or abs(down) >= 0.5:
+            # Also in the part's own space, and BEFORE the wave would have been
+            # a different animation: a wave of scrolled water is water flowing
+            # and then rippling, which is what water does. A wrap moves nothing
+            # out of the part, so this cannot detach anything from anything --
+            # the one deformation here that `shed` is structurally unable to
+            # register.
+            pixels = img.scroll(pixels, along, down)
+        step = int(round(part_pose.cycle))
+        if step:
+            # Before the transform, not after: the supersampled reduction votes
+            # on whatever colours the block holds, and it should be voting on
+            # the shaded ones. Doing it afterwards would also re-shade the
+            # transparent fringe the resampler leaves behind.
+            from . import palette as palette_module
+            pixels = palette_module.step_ramp(pixels, cutout.ramp_table(), step)
         layer = img.blank(height, width)
-        img.paste(layer, sprite.pixels,
+        img.paste(layer, pixels,
                   sprite.origin[0] + margin, sprite.origin[1] + margin)
-        matrix = shift @ transforms[sprite.name] @ np.linalg.inv(shift)
-        moved = _transform_layer(layer, matrix, (width, height))
-        img.paste(frame, moved, 0, 0)
+
+        rigid = shift @ transforms[sprite.name] @ np.linalg.inv(shift)
+        # The legibility guard judges the WHOLE PART, once, before it is cut
+        # into bands. A band is a fraction of a limb and so has a fraction of
+        # its spread; asking the guard about each one separately quantises them
+        # all to whole pixels independently, which both defeats the guard's own
+        # size argument and lets neighbouring bands round apart -- a limb with a
+        # step in it. If the part's own transform is too small to draw, there is
+        # nothing for skinning to protect either, so it takes the rigid path.
+        # Skinning is resolved FIRST because the guard needs to know whether
+        # this part has a held end and where that end is going: a pixel at
+        # weight 0 takes the parent's transform, so the differential travel the
+        # guard exists to measure is between the parent's and the part's own.
+        # Asked without that, a translation reads as zero spread on every part
+        # in the rig and skinning never sees one.
+        pieces = _skinned(rig, cutout, sprite, pixels, parts_local)
+        pinned = (None if pieces is None
+                  else shift @ pieces[0] @ np.linalg.inv(shift))
+        legible = _legible(layer, rigid, pinned=pinned)
+        if legible is not rigid:
+            pieces = None
+        if pieces is None:
+            moved = _transform_layer(layer, legible, (width, height))
+            img.paste(frame, moved, 0, 0)
+            continue
+
+        # From the joint outwards, so where two bands disagree by their
+        # sub-pixel step the freer one is on top -- a limb reads by its far end.
+        parent, part = pieces[0], pieces[1]
+        for band, damped in pieces[2]:
+            piece = img.blank(height, width)
+            window = np.zeros(layer.shape[:2], dtype=bool)
+            window[sprite.origin[1] + margin:sprite.origin[1] + margin + band.shape[0],
+                   sprite.origin[0] + margin:sprite.origin[0] + margin + band.shape[1]] = band
+            piece[window] = layer[window]
+            world = parent @ skeleton.local(damped, part.pivot)
+            matrix = shift @ world @ np.linalg.inv(shift)
+            img.paste(frame, _transform_layer(piece, matrix, (width, height)), 0, 0)
 
     if pose.flip:
         frame = frame[:, ::-1].copy()
@@ -193,3 +540,51 @@ def suggest_margin(rig):
     """
     width, height = rig.size
     return int(max(6, round(max(width, height) * 0.6)))
+
+
+def level_to_floor(cutout, poses, frames, margin=0):
+    """Nudge by whole pixels so the character's drawn feet share one row.
+
+    `skeleton.plant` does this exactly, in continuous space, and then the
+    rasteriser rounds: a foot computed at y=31.4 and one at y=31.6 land a pixel
+    apart. That last pixel is worth closing, because "the feet are on the same
+    row in every frame" is a guarantee a game can rely on and "within a pixel"
+    is not. Measured across the corpus's walks, the geometric pass leaves seven
+    characters one pixel out and this takes all seven to zero.
+
+    A `shadow` part is excluded from the measurement. It is the floor rather
+    than the character, it never moves, and it would otherwise report the same
+    row in every frame and make this a no-op on exactly the sprites that have
+    one.
+
+    Only the frames that are actually off are drawn again.
+    """
+    rig = cutout.rig
+    shadows = [sprite for sprite in cutout.sprites
+               if (rig.by_name(sprite.name) or rig.root).role == "shadow"]
+    ignore = None
+    if shadows:
+        ghost = copy.copy(cutout)
+        ghost.sprites = shadows
+        ignore = img.alpha_mask(render_pose(ghost, skeleton.Pose(), margin=margin))
+
+    lows = []
+    for frame in frames:
+        mask = img.alpha_mask(frame)
+        if ignore is not None:
+            mask = mask & ~ignore
+        rows = np.nonzero(mask)[0]
+        lows.append(int(rows.max()) if rows.size else None)
+    drawn = [low for low in lows if low is not None]
+    if len(set(drawn)) <= 1:
+        return frames
+
+    floor = max(drawn)
+    out = []
+    for pose, frame, low in zip(poses, frames, lows):
+        if low is None or low == floor:
+            out.append(frame)
+            continue
+        pose.dy += floor - low
+        out.append(render_pose(cutout, pose, margin=margin))
+    return out

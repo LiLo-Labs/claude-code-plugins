@@ -16,9 +16,14 @@ must agree, and the exit status is the answer:
   ANCHOR    every frame of a clip shares one anchor
   REST      the rig's rest pose reconstructs the source image exactly
 
-REST is the one that catches a bad rig rather than a bad export, and it is the
-strongest claim here: if the parts do not reassemble into the original, then
-some pixel of the user's art is in the wrong part and every frame is wrong.
+REST is the one that checks the CUT rather than the export: it proves that
+splitting the art into parts lost and duplicated nothing, so every frame is
+built from all of the user's pixels and only theirs.
+
+What it does not check is whether the parts are named correctly. A rig that
+calls the head a leg reassembles perfectly, because reassembly is about which
+pixels went where, not what they were called. Only the preview render answers
+that, which is why the skill insists on looking at it.
 """
 
 import io
@@ -92,7 +97,8 @@ def verify_directory(outdir, name=None, reference_path=None, rig_path=None):
 
     _check_rects(result, atlas, sheet)
     _check_zip(result, outdir, name, atlas, sheet)
-    _check_palette(result, sheet, reference_path)
+    _check_animation_zip(result, outdir, name, atlas, sheet)
+    _check_palette(result, sheet, reference_path, atlas)
     _check_engines(result, outdir, name, atlas, sheet)
     _check_anchors(result, atlas)
     _check_rest(result, rig_path, reference_path)
@@ -159,22 +165,120 @@ def _check_zip(result, outdir, name, atlas, sheet):
                       % len(expected))
 
 
-def _check_palette(result, sheet, reference_path):
-    if not reference_path or not os.path.exists(reference_path):
-        return result.add("PALETTE", True, "no reference given", skipped=True)
+def _check_animation_zip(result, outdir, name, atlas, sheet):
+    """Every frame in the folder-per-animation archive is the master sheet's own.
+
+    The per-animation download is a second copy of the same pixels, and a second
+    copy is exactly the thing that silently drifts. It only earns its place if
+    it is provably the same bytes, so check every frame against the master crop
+    and check each strip against its own frames.
+    """
+    zip_path = os.path.join(outdir, "%s-animations.zip" % name)
+    if not os.path.exists(zip_path):
+        return result.add("ANIMZIP", True, "no per-animation ZIP written", skipped=True)
+
+    def read(archive, entry):
+        with archive.open(entry) as handle:
+            return np.array(PILImage.open(io.BytesIO(handle.read())).convert("RGBA"),
+                            dtype=np.uint8)
+
+    problems, checked = [], 0
+    with zipfile.ZipFile(zip_path) as archive:
+        names = set(archive.namelist())
+        for clip in atlas["clips"]:
+            key = clip["key"]
+            strip_entry = "%s/spritesheet.png" % key
+            atlas_entry = "%s/atlas.json" % key
+            if strip_entry not in names or atlas_entry not in names:
+                problems.append("%s: missing spritesheet or atlas" % key)
+                continue
+            strip = read(archive, strip_entry)
+            local = json.loads(archive.read(atlas_entry).decode("utf-8"))
+            if len(local["frames"]) != len(clip["frames"]):
+                problems.append("%s: %d frames in the folder, %d in the sheet"
+                                % (key, len(local["frames"]), len(clip["frames"])))
+                continue
+            for entry, frame in zip(local["frames"], clip["frames"]):
+                master = sheet[frame["y"]:frame["y"] + frame["h"],
+                               frame["x"]:frame["x"] + frame["w"]]
+                path = "%s/frames/%s.png" % (key, entry["name"])
+                if path not in names:
+                    problems.append("%s: no %s" % (key, path))
+                    continue
+                if not img.equal(read(archive, path), master):
+                    problems.append("%s/%s differs from the sheet" % (key, entry["name"]))
+                cut = strip[entry["y"]:entry["y"] + entry["h"],
+                            entry["x"]:entry["x"] + entry["w"]]
+                if not img.equal(cut, master):
+                    problems.append("%s/%s differs from its own strip" % (key, entry["name"]))
+                checked += 1
+
+    if problems:
+        return result.add("ANIMZIP", False, "%d problem(s): %s"
+                          % (len(problems), "; ".join(problems[:4])))
+    return result.add("ANIMZIP", True,
+                      "%d frames across %d animations, byte-identical to the sheet"
+                      % (checked, len(atlas["clips"])))
+
+
+def _check_palette(result, sheet, reference_path, atlas=None):
+    """Every colour in the sheet came from an image the build declared.
+
+    The invariant was always "from the source art", and for one drawing that is
+    one file read with the defaults. It stops being one file the moment a build
+    has more than one: a `--front` reference is source art too, and so is an
+    attached item, and so is the composed image an outfitted build actually
+    rigged. Re-ingesting a single `--reference` at default parameters then fails
+    a build that is entirely correct -- reproduced on a front view carrying one
+    colour the side view does not have, which is what a front view is FOR.
+
+    So the atlas records every source with the tolerance and native-resolution
+    settings it was read at, and the allowed set is their union rebuilt at those
+    settings. `--tolerance 2` keys a different set of pixels and therefore locks
+    a different palette; checking it at the default is checking a palette the
+    build never used. A digest is recorded with each, so a source that has
+    changed on disk since the build is reported as changed rather than being
+    quietly treated as the truth.
+    """
     from . import ingest as ingest_module
-    reference = ingest_module.ingest(reference_path)
-    allowed = {tuple(int(v) for v in colour) for colour in reference.palette}
+
+    declared = (atlas or {}).get("sources") or []
+    paths, notes = [], []
+    for entry in declared:
+        path = entry.get("path")
+        if not path or not os.path.exists(path):
+            notes.append("%s is missing" % (path or entry.get("view")))
+            continue
+        recorded = entry.get("sha256")
+        if recorded and _digest(path) != recorded:
+            notes.append("%s has changed on disk since the build" % path)
+        paths.append((path, int(entry.get("tolerance", 12)),
+                      bool(entry.get("native", True))))
+    if not paths:
+        if not reference_path or not os.path.exists(reference_path):
+            return result.add("PALETTE", True, "no reference given", skipped=True)
+        paths = [(reference_path, 12, True)]
+
+    allowed = set()
+    for path, tolerance, native in paths:
+        reference = ingest_module.ingest(path, tolerance=tolerance, native=native)
+        allowed |= {tuple(int(v) for v in colour) for colour in reference.palette}
     present = img.unique_colors(sheet)
     escaped = [tuple(int(v) for v in colour) for colour in present
                if tuple(int(v) for v in colour) not in allowed]
+    trailer = ("; " + "; ".join(notes)) if notes else ""
     if escaped:
         return result.add("PALETTE", False,
-                          "%d colours in the sheet are not in the source art: %s"
-                          % (len(escaped), escaped[:4]))
+                          "%d colours in the sheet are not in the source art: %s%s"
+                          % (len(escaped), escaped[:4], trailer))
+    if notes:
+        return result.add("PALETTE", False,
+                          "every sheet colour is accounted for, but the sources "
+                          "cannot be trusted%s" % trailer)
     return result.add("PALETTE", True,
-                      "all %d sheet colours are drawn from the source's %d"
-                      % (len(present), len(allowed)))
+                      "all %d sheet colours are drawn from %d source image%s' %d"
+                      % (len(present), len(paths), "" if len(paths) == 1 else "s",
+                         len(allowed)))
 
 
 _UNITY_SPRITE = re.compile(
@@ -185,6 +289,15 @@ _GODOT_REGION = re.compile(r'id="AtlasTexture_(?P<id>[^"]+)"\]\s*\n'
                            r'atlas = ExtResource\("1_sheet"\)\s*\n'
                            r'region = Rect2\((?P<x>\d+), (?P<y>\d+), '
                            r'(?P<w>\d+), (?P<h>\d+)\)')
+
+
+def _digest(path):
+    import hashlib
+    try:
+        with open(path, "rb") as handle:
+            return hashlib.sha256(handle.read()).hexdigest()
+    except OSError:
+        return None
 
 
 def _check_engines(result, outdir, name, atlas, sheet):

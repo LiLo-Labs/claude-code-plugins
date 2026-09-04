@@ -83,12 +83,26 @@ def flood_background(array, tolerance=12):
     visited = np.zeros((height, width), dtype=bool)
     background = np.zeros((height, width), dtype=bool)
 
+    # A border pixel used to be marked background for WHERE it is, before any
+    # look at what colour it was -- and a sprite cropped flush to its own art has
+    # ART on the border. On a CC0 32x32 knight packed helmet-on-row-0 to
+    # boots-on-row-31 that silently deleted 37 pixels: the whole top of the
+    # helmet and the sole of each boot. Nothing downstream could tell, because
+    # every check in this plugin proves the parts reassemble into the INGESTED
+    # source, and the ingested source no longer had them.
+    #
+    # So a seed has to look like the background as well as sit on the border.
+    dominant, seen, edge = _border_colour(rgb, height, width)
+
     stack = []
     for y, x in _border_seeds(height, width):
-        if not visited[y, x]:
-            visited[y, x] = True
-            stack.append((y, x, rgb[y, x].copy()))
-            background[y, x] = True
+        if visited[y, x]:
+            continue
+        visited[y, x] = True
+        if int(np.abs(rgb[y, x] - dominant).max()) > tolerance:
+            continue
+        stack.append((y, x, rgb[y, x].copy()))
+        background[y, x] = True
 
     while stack:
         y, x, seed = stack.pop()
@@ -98,7 +112,21 @@ def flood_background(array, tolerance=12):
                 if int(np.abs(rgb[ny, nx] - seed).max()) <= tolerance:
                     background[ny, nx] = True
                     stack.append((ny, nx, seed))
+
     return background
+
+
+def _border_colour(rgb, height, width):
+    """The colour that dominates the border, which is what a background is.
+
+    A sprite sheet's background is one flat colour behind everything -- magenta,
+    white, black. Art that reaches the frame edge is a short run of some other
+    colour, and it is a run of ART.
+    """
+    edge = np.concatenate([rgb[0, :], rgb[height - 1, :],
+                           rgb[:, 0], rgb[:, width - 1]])
+    colours, counts = np.unique(edge, axis=0, return_counts=True)
+    return colours[counts.argmax()], int(counts.max()), len(edge)
 
 
 def remove_background(array, tolerance=12, min_transparent_fraction=0.02):

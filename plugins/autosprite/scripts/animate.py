@@ -16,8 +16,9 @@ import os
 import sys
 
 import _bootstrap  # noqa: F401
-from spritepipe import (cutout, ingest, motion, pack, palette, preview, props,
-                        render, rig as rig_module, stabilize)
+from spritepipe import (critic as critic_module, cutout, ingest, motion, pack,
+                        palette, preview, props, render, rig as rig_module,
+                        stabilize)
 
 
 def main():
@@ -32,6 +33,13 @@ def main():
     parser.add_argument("--fps", type=float, help="override the frame rate")
     parser.add_argument("--scale", type=int, default=0,
                         help="preview upscale; 0 picks one that fits a ~128px GIF")
+    parser.add_argument("--critic", default="none", choices=("none", "claude"),
+                        help="have a vision model look at the rendered clip and "
+                             "propose keyframe adjustments; every round is "
+                             "re-measured and one that breaks the character is "
+                             "thrown away")
+    parser.add_argument("--rounds", type=int, default=2,
+                        help="how many critique rounds to allow")
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
 
@@ -63,10 +71,18 @@ def main():
         animation.frames = args.frames
     if args.fps:
         animation.fps = args.fps
-    animation = motion.scale_motion([animation], built.size[1])[0]
-
     pieces = cutout.cut(built, reference.pixels)
     margin = render.suggest_margin(built)
+
+    critique_history = []
+    if args.critic != "none":
+        critic = critic_module.make_critic(
+            args.critic, os.path.join(args.out, ".critic"))
+        animation, critique_history = critic_module.refine(
+            pieces, built, animation, reference.pixels, critic,
+            os.path.join(args.out, ".critic"), rounds=args.rounds, margin=margin)
+
+    animation = motion.scale_motion([animation], built.size[1])[0]
     locked = palette.lock(reference.pixels)
     frames = [palette.enforce(render.render_pose(pieces, pose, margin=margin), locked)
               for pose in animation.poses(built)]
@@ -88,6 +104,7 @@ def main():
            "anchor": list(anchor), "holds": stabilize.duplicate_runs(frames),
            "drift": stabilize.anchor_drift(frames, anchor),
            "written": {"gif": gif, "contact_sheet": contact},
+           "critique": critique_history,
            "keyframes": animation.to_dict()}
     if args.json:
         print(json.dumps(out, indent=2))
@@ -98,6 +115,12 @@ def main():
                  out["size"][0], out["size"][1]))
         if animation.note:
             print("  %s" % animation.note)
+        for entry in critique_history:
+            print("  critic round %d: %s" % (entry["round"], entry["outcome"]))
+            for problem in entry["critique"].get("rig_problems", [])[:3]:
+                print("      RIG: %s" % problem)
+            for problem in entry["critique"]["problems"][:3]:
+                print("      %s" % problem)
         if out["holds"]:
             print("  ! frames repeat: %s -- the motion may be too small for this "
                   "character" % out["holds"])

@@ -1,9 +1,15 @@
 """Each engine file must be the thing that engine's importer actually reads."""
 
+import io
+import json
+import os
 import re
 import zipfile
 
+import numpy as np
 import pytest
+
+from PIL import Image as PILImage
 
 from spritepipe import atlas, image, pack
 
@@ -193,3 +199,161 @@ def test_the_web_set_writes_only_web_formats(sheet, tmp_path):
     written = atlas.write(sheet, str(tmp_path), "hero", engines=("web",))
     assert "unity" not in written and "godot" not in written
     assert "phaser" in written
+
+
+# -- the compressed sheet --------------------------------------------------
+
+def test_an_indexed_sheet_is_pixel_identical(sheet, tmp_path, clips):
+    """Lossless, not quantised: the sheet's palette is the source art's own."""
+    written = atlas.write(sheet, str(tmp_path), "hero", engines=("web",),
+                          clips=clips, compress=True)
+    assert image.equal(image.load(written["sheet"]), sheet.pixels)
+
+
+def test_an_indexed_sheet_is_only_kept_when_it_is_smaller(sheet, tmp_path, clips):
+    """A 256-entry palette table is a fixed cost that a tiny sheet loses on."""
+    plain_dir, small_dir = str(tmp_path / "a"), str(tmp_path / "b")
+    plain = atlas.write(sheet, plain_dir, "hero", engines=("web",), clips=clips)
+    packed = atlas.write(sheet, small_dir, "hero", engines=("web",), clips=clips,
+                         compress=True)
+    assert os.path.getsize(packed["sheet"]) <= os.path.getsize(plain["sheet"])
+    assert "indexed" in packed["sheet_format"] or "full RGBA" in packed["sheet_format"]
+
+
+def test_a_sheet_with_too_many_colours_stays_rgba(tmp_path):
+    rng = np.random.default_rng(11)
+    noisy = image.blank(40, 40)
+    noisy[:, :, :3] = rng.integers(0, 255, (40, 40, 3), dtype=np.uint8)
+    noisy[:, :, 3] = 255
+    assert not image.save_indexed(noisy, str(tmp_path / "x.png"))
+
+
+def test_save_indexed_keeps_transparency(tmp_path):
+    art = image.blank(8, 8)
+    art[2:6, 2:6] = [200, 40, 40, 255]
+    path = str(tmp_path / "x.png")
+    assert image.save_indexed(art, path)
+    assert image.equal(image.load(path), art)
+
+
+# -- the strip layout ------------------------------------------------------
+
+def test_a_strip_is_one_row_of_every_frame(clips):
+    strip = pack.pack(clips, layout="strip", padding=1, extrude=1)
+    total = sum(len(c.frames) for c in clips)
+    assert len(strip.placements) == total
+    assert len({p.y for p in strip.placements}) == 1, "a strip has exactly one row"
+    assert strip.size[1] < strip.size[0]
+
+
+def test_a_strip_keeps_the_grid_cell_and_anchor(clips):
+    grid = pack.pack(clips, layout="grid", padding=1, extrude=1)
+    strip = pack.pack(clips, layout="strip", padding=1, extrude=1)
+    assert strip.cell == grid.cell
+    assert {tuple(p.anchor) for p in strip.placements} == {tuple(p.anchor) for p in grid.placements}
+
+
+def test_a_strip_frame_matches_the_grid_frame(clips):
+    grid = pack.pack(clips, layout="grid", padding=1, extrude=1)
+    strip = pack.pack(clips, layout="strip", padding=1, extrude=1)
+    by_name = {p.name: p for p in grid.placements}
+    for placement in strip.placements:
+        other = by_name[placement.name]
+        assert image.equal(
+            strip.pixels[placement.y:placement.y + placement.height,
+                         placement.x:placement.x + placement.width],
+            grid.pixels[other.y:other.y + other.height,
+                        other.x:other.x + other.width])
+
+
+def test_an_unknown_layout_is_refused_by_name():
+    with pytest.raises(ValueError) as error:
+        pack.pack([pack.Clip("a", frames(2, 4, 4, [1, 2, 3, 255]))], layout="spiral")
+    assert "spiral" in str(error.value)
+
+
+# -- one folder per animation ---------------------------------------------
+
+def test_the_per_animation_zip_has_a_folder_for_each_clip(sheet, tmp_path):
+    path = tmp_path / "anim.zip"
+    count = atlas.write_animation_zip(sheet, str(path), "hero")
+    with zipfile.ZipFile(str(path)) as archive:
+        names = set(archive.namelist())
+    for clip_key in sheet.by_clip():
+        assert "%s/spritesheet.png" % clip_key in names
+        assert "%s/atlas.json" % clip_key in names
+        assert "%s/frames/01.png" % clip_key in names
+    assert count == sum(len(p) for p in sheet.by_clip().values())
+
+
+def test_each_animation_folder_carries_its_own_timing(sheet, tmp_path):
+    path = tmp_path / "anim.zip"
+    atlas.write_animation_zip(sheet, str(path), "hero")
+    with zipfile.ZipFile(str(path)) as archive:
+        for clip_key in sheet.by_clip():
+            local = json.loads(archive.read("%s/atlas.json" % clip_key).decode())
+            clip = sheet.clip(clip_key)
+            assert local["fps"] == clip.fps
+            assert local["loop"] == clip.loop
+            assert local["animation"] == clip.name
+            assert local["image"] == "spritesheet.png"
+
+
+def test_every_frame_in_the_folder_is_the_master_sheet_s_own_bytes(sheet, tmp_path):
+    """A second copy of the same pixels is exactly the thing that drifts, so it
+    only earns its place if it is provably the same bytes."""
+    path = tmp_path / "anim.zip"
+    atlas.write_animation_zip(sheet, str(path), "hero")
+    with zipfile.ZipFile(str(path)) as archive:
+        for clip_key, placements in sheet.by_clip().items():
+            for index, placement in enumerate(placements):
+                stored = np.array(PILImage.open(io.BytesIO(
+                    archive.read("%s/frames/%02d.png" % (clip_key, index + 1))
+                )).convert("RGBA"), dtype=np.uint8)
+                master = sheet.pixels[
+                    placement.y:placement.y + placement.height,
+                    placement.x:placement.x + placement.width]
+                assert image.equal(stored, master)
+
+
+def test_the_strip_is_its_own_frames_laid_side_by_side(sheet, tmp_path):
+    path = tmp_path / "anim.zip"
+    atlas.write_animation_zip(sheet, str(path), "hero")
+    with zipfile.ZipFile(str(path)) as archive:
+        for clip_key in sheet.by_clip():
+            strip = np.array(PILImage.open(io.BytesIO(
+                archive.read("%s/spritesheet.png" % clip_key))).convert("RGBA"),
+                dtype=np.uint8)
+            local = json.loads(archive.read("%s/atlas.json" % clip_key).decode())
+            assert strip.shape[1] == local["size"]["w"]
+            for entry in local["frames"]:
+                cut = strip[entry["y"]:entry["y"] + entry["h"],
+                            entry["x"]:entry["x"] + entry["w"]]
+                stored = np.array(PILImage.open(io.BytesIO(
+                    archive.read("%s/frames/%s.png" % (clip_key, entry["name"]))
+                )).convert("RGBA"), dtype=np.uint8)
+                assert image.equal(cut, stored)
+
+
+def test_a_held_clip_gets_a_second_tag_for_the_part_that_repeats(tmp_path):
+    """Aseprite has no in/out points on a tag, and two tags is what every
+    importer that reads them already understands."""
+    held = pack.Clip("block", frames(4, 8, 10, [90, 90, 200, 255]), 12, True,
+                     loop_start=2, anchor=(4, 10))
+    sheet = pack.pack([held], layout="grid", padding=1, extrude=1)
+    tags = atlas.aseprite(sheet, "hero")["meta"]["frameTags"]
+    assert [tag["name"] for tag in tags] == ["block", "block_loop"]
+    assert (tags[1]["from"], tags[1]["to"]) == (2, 3)
+
+
+def test_a_plain_loop_gets_one_tag():
+    plain = pack.Clip("walk", frames(4, 8, 10, [90, 90, 200, 255]), 12, True,
+                      anchor=(4, 10))
+    sheet = pack.pack([plain], layout="grid", padding=1, extrude=1)
+    assert len(atlas.aseprite(sheet, "hero")["meta"]["frameTags"]) == 1
+
+
+def test_the_native_atlas_always_states_the_loop_range(sheet):
+    for clip in atlas.native(sheet, "hero")["clips"]:
+        assert clip["loop_start"] == 0
+        assert clip["loop_end"] == len(clip["frames"]) - 1

@@ -1,14 +1,24 @@
-"""Props: weapons, pickups, coins, gems -- everything that is not a character.
+"""Everything that is not a character: props, buildings, plants, cloth, machines.
 
-A prop has no skeleton worth building, so it rigs as one piece and animates as
-one piece. That is not a lesser path: a spinning coin, a bobbing potion and a
-pulsing pickup are all whole-object transforms, and articulating them would make
-them worse.
+Two kinds of motion live here and they are not the same kind of thing.
 
-The one interesting case is the spin. A 2D object rotating about its vertical
-axis has no back face to draw, so it narrows to nothing and reappears mirrored.
-That is exactly how hand-drawn coin spins work, and `flip_from` in the animation
-is the instant it passes edge-on.
+**Whole-object clips** -- bob, spin, tumble, pulse, swing -- move the sprite as
+one piece. For a coin or a potion that is not a lesser path, it is the right
+answer: articulating a gem would make it worse. The interesting one is the spin.
+A 2D object turning about its vertical axis has no back face to draw, so it
+narrows to nothing and reappears mirrored; that is exactly how a hand-drawn coin
+spin works, and `flip_from` is the instant it passes edge-on.
+
+**Trait-addressed clips** -- turn, sway, gust, ripple, creak -- move the parts a
+subject actually has, and they are addressed by what those parts ARE rather than
+by a name. `trait:spinner` is "the thing that turns about a hub", which is a
+windmill's sails, a waterwheel, a cog and a fan; `trait:stalk` is "fixed at its
+base, free at its tip", which is a tree's canopy, a flag, a cape and a field of
+wheat. One clip, written once, drives all of them -- and drives nothing at all
+on a subject that has none, which the build reports rather than shipping a
+sheet of identical frames.
+
+That is the difference between this and offering a house that bobs.
 """
 
 from .motion import Animation
@@ -17,8 +27,17 @@ from .motion import Animation
 def _library():
     bob = Animation(
         "bob", frames=4, fps=6, loop=True,
-        note="a pickup breathing in place, so the player's eye finds it",
-        root=[{"t": 0.0, "dy": 0.0}, {"t": 0.5, "dy": -2.0}, {"t": 1.0, "dy": 0.0}])
+        note="a pickup breathing in place, so the player's eye finds it. Two "
+             "things about four numbers. It rises fast and sinks slowly rather "
+             "than bobbing evenly, because a symmetric rise and fall draws the "
+             "SAME picture going up and coming down and a four-frame clip "
+             "cannot afford to spend one on a repeat. And the keys sit exactly "
+             "on the four frame times at whole-pixel heights, because a clip "
+             "this short has nowhere to hide: a key between frames means the "
+             "renderer samples a height nobody chose and rounds two of them "
+             "together",
+        root=[{"t": 0.0, "dy": 0.0}, {"t": 0.25, "dy": -2.0},
+              {"t": 0.5, "dy": -3.0}, {"t": 0.75, "dy": -1.0}])
 
     spin = Animation(
         "spin", frames=8, fps=12, loop=True, flip_from=0.5,
@@ -50,15 +69,198 @@ def _library():
         root=[{"t": 0.0, "angle": 55.0}, {"t": 0.35, "angle": -70.0, "easing": "ease_in"},
               {"t": 0.5, "angle": -85.0}, {"t": 1.0, "angle": 0.0}])
 
-    return {animation.name: animation for animation in (bob, spin, tumble, pulse, swing)}
+    # --- addressed by trait, so they work on any subject that has one ------
+
+    turn = Animation(
+        "turn", frames=8, fps=10, loop=True,
+        note="every hub turns a full revolution at a constant rate: sails, a "
+             "waterwheel, a cog, a fan. Constant because a windmill does not "
+             "ease -- and a full turn per cycle so the loop closes with no "
+             "duplicate frame",
+        tracks={"trait:spinner": [{"t": 0.0, "angle": 0.0, "easing": "linear"},
+                                  {"t": 0.5, "angle": 180.0, "easing": "linear"},
+                                  {"t": 1.0, "angle": 360.0, "easing": "linear"}]})
+
+    sway = Animation(
+        "sway", frames=8, fps=8, loop=True,
+        note="anything fixed at its base and free at its tip rocks in the wind. "
+             "Two things stop it reading as a metronome. The spread means each "
+             "part starts after the ones upwind of it, so the motion travels "
+             "across a canopy or a field -- and it is `along` x that makes "
+             "\"upwind\" mean anything, because without an axis the order is "
+             "whatever order the rig listed its parts in. Measured on a "
+             "vision-rigged wheat field, that is not a technicality: the rig "
+             "returned four stalks left to right and THEN a full-width sheet "
+             "over all of them, which declaration order plays last, as though "
+             "it stood to the right of the field it covers. By position it "
+             "plays at the centre, where it is. A stalk hinges and a surface "
+             "RIPPLES "
+             "-- cloth has no joint to turn about and does not move as one "
+             "piece, so the surface half of this drives `wave`. And the stalk "
+             "curve is a gust and a drift "
+             "back rather than an even swing -- an even swing passes through "
+             "the same angles on the way out and the way back, so half its "
+             "frames are duplicates of the other half, which is what happened "
+             "on the first real cape this was run against: five different "
+             "pictures out of eight",
+        tracks={"trait:stalk": {"keys": [{"t": 0.0, "angle": 0.0},
+                                         {"t": 0.18, "angle": 8.0,
+                                          "easing": "ease_out"},
+                                         {"t": 0.42, "angle": 3.0},
+                                         {"t": 0.60, "angle": -5.0,
+                                          "easing": "ease_out"},
+                                         {"t": 0.84, "angle": -1.5}],
+                                "spread": 0.09, "along": "x"},
+                "trait:surface": {"keys": [{"t": step / 8.0, "wave": 2.0,
+                                            "wave_phase": step / 8.0}
+                                           for step in range(8)],
+                                  "easing": "linear", "spread": 0.09,
+                                  "along": "x"}})
+
+    gust = Animation(
+        "gust", frames=10, fps=12, loop=False,
+        note="a one-shot: the wind arrives, everything leans away from it, and "
+             "it settles back past the rest position before stopping. The "
+             "overshoot is what stops it reading as a slider being dragged",
+        tracks={"trait:stalk": {"keys": [{"t": 0.0, "angle": 0.0},
+                                         {"t": 0.25, "angle": 17.0,
+                                          "easing": "ease_out"},
+                                         {"t": 0.45, "angle": 13.0},
+                                         {"t": 0.75, "angle": -4.0},
+                                         {"t": 1.0, "angle": 0.0}],
+                                "spread": 0.06, "along": "x"},
+                "trait:crown": [{"t": 0.0, "angle": 0.0},
+                                {"t": 0.3, "angle": 6.0, "easing": "ease_out"},
+                                {"t": 1.0, "angle": 0.0}]})
+
+    ripple = Animation(
+        "ripple", frames=8, fps=10, loop=True,
+        note="a broad face that has no joint to hinge about -- water, a banner, "
+             "a curtain. Its INTERIOR moves: each column slides up or down and "
+             "the crest travels along it, which is `wave` and is the only "
+             "deformation here that is not a rigid transform of the whole part. "
+             "Measured on a CC0 flag against the artist\'s own sixteen frames of "
+             "the same wave, of the pixels this disturbs the artist never "
+             "touches 11.0%; leaning the same cloth rigidly with `shear` "
+             "instead gets 66.3%, and adding a lean ON TOP of the wave gets "
+             "59.2% while moving more than twice as many pixels -- so cloth is "
+             "not a thing that leans. The phase advances "
+             "linearly across the cycle, and `spread` starts each surface at a "
+             "different point in it -- along x, so it is the same wind "
+             "crossing every surface rather than each one starting wherever "
+             "the rig happened to mention it",
+        tracks={"trait:surface": {"keys": [{"t": step / 8.0, "wave": 4.0,
+                                            "wave_phase": step / 8.0}
+                                           for step in range(8)],
+                                  "easing": "linear", "spread": 0.15,
+                                  "along": "x"}})
+
+    creak = Animation(
+        "creak", frames=6, fps=8, loop=True,
+        note="the small idle motion of a thing hung on a building: a shutter, a "
+             "sign, a lantern, a door. Deliberately tiny -- it is meant to be "
+             "noticed only once the player stops moving",
+        tracks={"trait:socket": {"keys": [{"t": 0.0, "angle": 0.0},
+                                          {"t": 0.35, "angle": 3.0},
+                                          {"t": 0.7, "angle": -2.0}],
+                                 "spread": 0.15, "along": "x"}})
+
+    # --- palette-space: nothing moves, the shading does --------------------
+
+    flicker = Animation(
+        "flicker", frames=6, fps=12, loop=True,
+        note="a torch, a lantern, a forge, a rune. Nothing moves at all -- "
+             "every pixel stays exactly where the artist put it and steps along "
+             "its own shading ramp instead, so the light changes and the "
+             "silhouette does not. It STEPS rather than fading, and the steps "
+             "are uneven on purpose: an even brighten-and-dim reads as a pulse, "
+             "and a flame does not pulse. The step is a whole shade, because a "
+             "third of a shade is the same shade. Rest, a small dip and a big "
+             "one alternate rather than running together, because a shallow "
+             "ramp collapses several sizes of step onto the same picture: a "
+             "four-shade flame has three states however many numbers it is "
+             "given, so the order has to guarantee that consecutive frames land "
+             "on different ones. Alone among the spreading clips this one has "
+             "no axis, deliberately: two torches in a room are not a wave "
+             "crossing the room, and ordering them by position would make them "
+             "flicker in a choreographed sweep, which is the one thing "
+             "firelight never does",
+        tracks={"trait:glow": {"keys": [{"t": 0.0, "cycle": 0.0},
+                                        {"t": 1 / 6.0, "cycle": -1.0},
+                                        {"t": 2 / 6.0, "cycle": 0.0},
+                                        {"t": 3 / 6.0, "cycle": -2.0},
+                                        {"t": 4 / 6.0, "cycle": 1.0},
+                                        {"t": 5 / 6.0, "cycle": -3.0}],
+                               "spread": 1 / 6.0}},
+        ops=[{"op": "turbulence", "on": "trait:glow", "amount": 0.6,
+              "channels": ["cycle"], "rate": 3}])
+
+    shimmer = Animation(
+        "shimmer", frames=8, fps=8, loop=True,
+        note="light travelling across water or glass: a slow ramp step with a "
+             "big spread, so consecutive faces darken one after another rather "
+             "than the whole surface catching it at once",
+        tracks={"trait:surface": {"keys": [{"t": step / 8.0, "cycle": value}
+                                           for step, value in enumerate(
+                                               (0, 1, 2, 1, 0, -1, -2, -1))],
+                                  "spread": 0.25, "along": "x"}},
+        ops=[{"op": "turbulence", "on": "trait:surface", "amount": 0.6,
+              "channels": ["cycle"], "rate": 3}])
+
+    # --- passage: the thing stays put and something moves through it -------
+
+    fall = Animation(
+        "fall", frames=8, fps=12, loop=True,
+        note="rain, snow, a waterfall, sand through a glass. The sheet does "
+             "not move -- what is drawn on it travels down it and wraps, so "
+             "the part stays exactly where the artist put it and nothing can "
+             "come away from anything. The number is a FRACTION OF THE PART'S "
+             "OWN BOX rather than a count of pixels, which is what lets one "
+             "clip close its loop on a subject it has never met: one whole box "
+             "per cycle is exact whether the box is eight pixels or eight "
+             "hundred, and the last frame wraps to the first byte for byte. "
+             "Linear, because rain does not ease",
+        tracks={"trait:flow": {"keys": [{"t": 0.0, "scroll_y": 0.0,
+                                         "easing": "linear"},
+                                        {"t": 1.0, "scroll_y": 1.0,
+                                         "easing": "linear"}],
+                               "spread": 0.09, "along": "x"}})
+
+    current = Animation(
+        "current", frames=8, fps=10, loop=True,
+        note="a river, a conveyor, a belt, a treadmill of ground under a "
+             "runner, a marquee. The same wrap as `fall`, sideways. Two of "
+             "them at once is a diagonal, which is what wind-driven snow is",
+        tracks={"trait:flow": {"keys": [{"t": 0.0, "scroll_x": 0.0,
+                                         "easing": "linear"},
+                                        {"t": 1.0, "scroll_x": 1.0,
+                                         "easing": "linear"}],
+                               "spread": 0.11, "along": "y"}})
+
+    return {animation.name: animation for animation in
+            (bob, spin, tumble, pulse, swing, turn, sway, gust, ripple, creak,
+             flicker, shimmer, fall, current)}
 
 
 LIBRARY = _library()
+
+# Everything a whole-object clip can do, plus everything a subject's own parts
+# can. A subject that has none of a clip's traits does not get a sheet of
+# identical frames -- `pipeline` drops the clip and says why.
 PRESET_SETS = {
     "pickup": ["bob", "spin"],
     "coin": ["spin"],
     "weapon": ["swing", "bob"],
-    "all": ["bob", "spin", "tumble", "pulse", "swing"],
+    "building": ["turn", "creak", "sway", "flicker"],
+    "machine": ["turn", "creak"],
+    "plant": ["sway", "gust"],
+    "cloth": ["ripple", "sway", "gust"],
+    "water": ["ripple", "shimmer", "current"],
+    "weather": ["fall", "current", "sway", "ripple"],
+    "light": ["flicker"],
+    "all": ["bob", "spin", "tumble", "pulse", "swing",
+            "turn", "sway", "gust", "ripple", "creak", "flicker", "shimmer",
+            "fall", "current"],
 }
 
 
@@ -69,12 +271,11 @@ def get(name):
 
 
 def resolve(names):
-    wanted = []
-    for name in names:
-        wanted.extend(PRESET_SETS.get(name, [name]))
-    seen, out = set(), []
-    for name in wanted:
-        if name not in seen:
-            seen.add(name)
-            out.append(get(name))
-    return out
+    """The same fallthrough as `motion.resolve`, the other way round.
+
+    A subject build asking for `walk` gets the character walk, which will drive
+    nothing on a one-piece rig and be dropped with a reason -- which is a better
+    answer than a KeyError listing five prop clips.
+    """
+    from . import motion as motion_module
+    return motion_module._resolve(names, PRESET_SETS, LIBRARY, motion_module)

@@ -39,7 +39,7 @@ def _duration_ms(fps):
     return int(round(1000.0 / max(0.001, float(fps))))
 
 
-def native(sheet, name, reference_report=None, extra=None):
+def native(sheet, name, reference_report=None, extra=None, sources=None):
     """This pipeline's own atlas: the complete record, and the one `verify` reads."""
     clips = []
     for clip_key, placements in sorted(sheet.by_clip().items()):
@@ -50,6 +50,9 @@ def native(sheet, name, reference_report=None, extra=None):
             "direction": clip.direction,
             "fps": clip.fps,
             "loop": clip.loop,
+            "loop_start": clip.loop_start if clip.loop_start is not None else 0,
+            "loop_end": (clip.loop_end if clip.loop_end is not None
+                         else len(placements) - 1),
             "duration_ms": _duration_ms(clip.fps),
             "fidelity": clip.fidelity,
             "note": clip.note,
@@ -70,6 +73,14 @@ def native(sheet, name, reference_report=None, extra=None):
     }
     if reference_report:
         document["source"] = reference_report
+    if sources:
+        # Every image a pixel of this sheet is allowed to have come from, with
+        # the ingest parameters it was read at and a digest of the file. The
+        # PALETTE check rebuilds its allowed set from this rather than from one
+        # `--reference`, which is what a build with a front view or an attached
+        # item needs -- and it is a digest rather than a bare path so the check
+        # can tell "this file changed" from "this sheet is wrong".
+        document["sources"] = sources
     if extra:
         document.update(extra)
     return document
@@ -132,6 +143,16 @@ def aseprite(sheet, name):
                      "to": cursor + len(placements) - 1,
                      "direction": "forward",
                      "repeat": "0" if clip.loop else "1"})
+        # A clip that is raised once and then held is two tags, not one: the
+        # whole thing under its own name, and the part that actually repeats
+        # under "<name>_loop". Aseprite has no in/out points on a tag, and two
+        # tags is what every importer that reads them already understands.
+        if clip.loop and clip.loop_start:
+            tags.append({"name": "%s_loop" % clip_key,
+                         "from": cursor + clip.loop_start,
+                         "to": cursor + (clip.loop_end if clip.loop_end is not None
+                                         else len(placements) - 1),
+                         "direction": "forward", "repeat": "0"})
         cursor += len(placements)
     document["meta"]["app"] = "https://www.aseprite.org/"
     document["meta"]["frameTags"] = tags
@@ -423,6 +444,97 @@ def write_frames_zip(sheet, path):
     return count
 
 
+def write_animation_zip(sheet, path, name):
+    """One folder per animation: a strip, its own atlas, and its own frames.
+
+    autosprite.io's download is shaped this way -- `<anim>/spritesheet.png`,
+    `<anim>/atlas.json`, `<anim>/frames/01.png` -- and a user who wants only the
+    walk, or who is feeding an importer one animation at a time (GameMaker's
+    multi-select flow is exactly that), should not have to sort a flat archive
+    of every frame of every clip first.
+
+    Every frame is cut out of the finished sheet rather than kept from before
+    packing, and each strip is those crops laid side by side, so the bytes in
+    here and the bytes in the master sheet cannot disagree. `verify` checks that
+    they do not.
+    """
+    import io as _io
+    from PIL import Image as PILImage
+
+    def encode(pixels):
+        buffer = _io.BytesIO()
+        PILImage.fromarray(np.ascontiguousarray(pixels), mode="RGBA").save(buffer, "PNG")
+        return buffer.getvalue()
+
+    written = 0
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
+        for clip_key, placements in sorted(sheet.by_clip().items()):
+            clip = sheet.clip(clip_key)
+            crops = [sheet.pixels[p.y:p.y + p.height, p.x:p.x + p.width]
+                     for p in placements]
+            if not crops:
+                continue
+            width = sum(crop.shape[1] for crop in crops)
+            height = max(crop.shape[0] for crop in crops)
+            strip = img.blank(height, width)
+            frames, x = [], 0
+            for index, (crop, placement) in enumerate(zip(crops, placements)):
+                img.paste(strip, crop, x, 0)
+                frames.append({
+                    "name": "%02d" % (index + 1),
+                    "x": x, "y": 0,
+                    "w": crop.shape[1], "h": crop.shape[0],
+                    "anchor": list(placement.anchor),
+                })
+                archive.writestr("%s/frames/%02d.png" % (clip_key, index + 1),
+                                 encode(crop))
+                written += 1
+                x += crop.shape[1]
+            archive.writestr("%s/spritesheet.png" % clip_key, encode(strip))
+            archive.writestr("%s/atlas.json" % clip_key, json.dumps({
+                "format": "autosprite-atlas/1",
+                "generator": APP,
+                "image": "spritesheet.png",
+                "size": {"w": width, "h": height},
+                "layout": "strip",
+                "animation": clip.name,
+                "direction": clip.direction,
+                "fps": clip.fps,
+                "loop": clip.loop,
+                "duration_ms": _duration_ms(clip.fps),
+                "fidelity": clip.fidelity,
+                "note": clip.note,
+                "frames": frames,
+            }, indent=2))
+    return written
+
+
+def _compress_sheet(sheet, sheet_path):
+    """Rewrite the sheet as an indexed PNG when that is genuinely smaller.
+
+    Lossless here rather than "quantised", because the sheet's palette is
+    provably a subset of the source art's -- there is nothing to throw away.
+
+    But it is not always a win. A 256-entry palette table is a fixed cost, and
+    on a small sheet with four colours it outweighs what indexing saves: the
+    file comes back 36% BIGGER. So write both and keep the smaller one, and say
+    which happened rather than claiming a saving that did not occur.
+    """
+    candidate = sheet_path + ".indexed"
+    if not img.save_indexed(sheet.pixels, candidate):
+        return ("full RGBA: over 255 colours, so an indexed PNG could not hold "
+                "the palette losslessly")
+    plain = os.path.getsize(sheet_path)
+    indexed = os.path.getsize(candidate)
+    if indexed >= plain:
+        os.remove(candidate)
+        return ("full RGBA: the palette table costs more than indexing saves on a "
+                "sheet this small (%d bytes indexed against %d)" % (indexed, plain))
+    os.replace(candidate, sheet_path)
+    return ("indexed PNG, losslessly: %d bytes against %d, %.0f%% smaller"
+            % (indexed, plain, (1 - indexed / float(plain)) * 100))
+
+
 WRITERS = {
     "texturepacker-hash": (lambda sheet, name: texturepacker(sheet, name, "hash"),
                            "%s.texturepacker-hash.json", "json"),
@@ -443,18 +555,32 @@ ENGINE_SETS = {
 }
 
 
-def write(sheet, outdir, name, engines=("all",), clips=None, reference_report=None):
+def digest(path):
+    """A file's sha256, or None if it cannot be read."""
+    import hashlib
+    try:
+        with open(path, "rb") as handle:
+            return hashlib.sha256(handle.read()).hexdigest()
+    except OSError:
+        return None
+
+
+def write(sheet, outdir, name, engines=("all",), clips=None, reference_report=None,
+          compress=False, sources=None):
     """Write the sheet, the native atlas, and every requested engine format."""
     os.makedirs(outdir, exist_ok=True)
     written = {}
 
     sheet_path = os.path.join(outdir, "%s.png" % name)
     img.save(sheet.pixels, sheet_path)
+    if compress:
+        written["sheet_format"] = _compress_sheet(sheet, sheet_path)
     written["sheet"] = sheet_path
 
     atlas_path = os.path.join(outdir, "%s.autosprite.json" % name)
     with open(atlas_path, "w") as handle:
-        json.dump(native(sheet, name, reference_report), handle, indent=2)
+        json.dump(native(sheet, name, reference_report, sources=sources),
+                  handle, indent=2)
         handle.write("\n")
     written["atlas"] = atlas_path
 
@@ -491,4 +617,8 @@ def write(sheet, outdir, name, engines=("all",), clips=None, reference_report=No
     zip_path = os.path.join(outdir, "%s-frames.zip" % name)
     written["frames_zip"] = zip_path
     written["frames_zip_count"] = write_frames_zip(sheet, zip_path)
+
+    animations_path = os.path.join(outdir, "%s-animations.zip" % name)
+    written["animations_zip"] = animations_path
+    written["animations_zip_count"] = write_animation_zip(sheet, animations_path, name)
     return written

@@ -62,6 +62,28 @@ def stabilise(frames, anchor, padding=0):
     return cropped, box, moved, report
 
 
+def distinct_frames(frames, loop=True):
+    """How many of these frames are different pictures.
+
+    `duplicate_runs` only finds repeats that are ADJACENT, and the repeat that
+    matters most is not: a swing authored with one key at each end and one in
+    the middle is symmetric in time, so frame k and frame N-k are the same
+    image. The built-in walk had that for a long time and nothing noticed --
+    eight frames, five pictures, the second half retracing the first. A
+    character rocking rather than walking, and `--frames 24` on it produces
+    nineteen repeats.
+
+    A one-shot clip that starts and ends at rest is not repeating itself, so its
+    last frame is not counted against it.
+    """
+    if not frames:
+        return 0
+    counted = list(frames)
+    if not loop and len(counted) > 1 and counted[0].tobytes() == counted[-1].tobytes():
+        counted = counted[:-1]
+    return len({frame.tobytes() for frame in counted})
+
+
 def duplicate_runs(frames):
     """Consecutive identical frames, as [first_index, count] pairs.
 
@@ -98,3 +120,37 @@ def anchor_drift(frames, anchor):
         floor_x = (box[0] + box[2]) / 2.0
         drift.append([round(floor_x - anchor[0], 2), round(box[3] - anchor[1], 2)])
     return drift
+
+
+def fit_to_cell(frames, anchor, size):
+    """Put every frame in a `size` x `size` cell with the anchor in one place.
+
+    autosprite.io lets a user choose the frame size, and a game engine usually
+    wants one: a fixed cell is what a tile-based importer, a uniform atlas and a
+    character controller with a fixed collision box all expect. It is also
+    stricter than what the pipeline does by default, which is to trim each clip
+    to its own tight box.
+
+    The anchor -- bottom-centre of the character, the point that must not
+    wander -- goes to the bottom-centre of the cell, so every clip of every
+    character stands on the same floor at the same place.
+
+    Raises if the art does not fit. Cropping a character to make it fit is the
+    one thing that must not happen quietly.
+    """
+    size = int(size)
+    out = []
+    for index, frame in enumerate(frames):
+        height, width = frame.shape[:2]
+        dx = size // 2 - int(anchor[0])
+        dy = size - int(anchor[1])
+        if width + dx > size or dx < 0 or height + dy > size or dy < 0:
+            raise ValueError(
+                "frame %d is %dx%d anchored at %s and does not fit a %dpx cell; "
+                "use --frame-size %d or larger"
+                % (index, width, height, tuple(anchor), size,
+                   max(width, height, width + dx, height + dy)))
+        cell = img.blank(size, size)
+        img.paste(cell, frame, dx, dy)
+        out.append(cell)
+    return out, (size // 2, size)

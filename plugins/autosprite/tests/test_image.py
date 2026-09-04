@@ -1,5 +1,6 @@
 """The raster primitives everything else assumes are exact."""
 
+import numpy as np
 import pytest
 
 from spritepipe import image
@@ -89,3 +90,126 @@ def test_unique_colors_ignores_transparent_by_default():
     canvas[0, 0] = [1, 2, 3, 255]
     assert len(image.unique_colors(canvas)) == 1
     assert len(image.unique_colors(canvas, include_transparent=True)) == 2
+
+
+# ---------------------------------------------------------------------------
+# wave_columns: the one deformation here that is not a rigid transform.
+# ---------------------------------------------------------------------------
+
+def _striped(height=12, width=16):
+    art = image.blank(height, width)
+    for row in range(height):
+        art[row, :] = [10 + row * 15, 40, 200 - row * 10, 255]
+    return art
+
+
+def test_a_wave_invents_no_colour_because_it_is_a_permutation():
+    """The strongest palette claim in the vocabulary: every output pixel is an
+    input pixel moved by a whole number of rows. Nothing is sampled, averaged
+    or interpolated, so there is nothing for `enforce` to catch."""
+    art = _striped()
+    before = {tuple(int(v) for v in colour) for colour in image.unique_colors(art)}
+    waved = image.wave_columns(art, 4.0, 0.25)
+    after = {tuple(int(v) for v in colour) for colour in image.unique_colors(waved)}
+    assert after <= before
+
+
+def test_a_wave_moves_whole_pixels_only():
+    """A half-pixel slide would need a colour between two rows, which is the
+    one thing this pipeline may not make."""
+    art = _striped()
+    waved = image.wave_columns(art, 3.0, 0.0)
+    for column in range(art.shape[1]):
+        theirs = [tuple(int(v) for v in pixel) for pixel in waved[:, column]
+                  if pixel[3]]
+        ours = [tuple(int(v) for v in pixel) for pixel in art[:, column] if pixel[3]]
+        assert set(theirs) <= set(ours)
+
+
+def test_a_wave_too_small_to_reach_a_pixel_does_nothing_at_all():
+    art = _striped()
+    assert image.equal(image.wave_columns(art, 0.3, 0.0), art)
+    assert image.equal(image.wave_columns(art, 0.0, 0.5), art)
+
+
+def test_a_wave_displaces_different_columns_differently():
+    """Otherwise it is a translation, which the pipeline already had."""
+    art = _striped()
+    waved = image.wave_columns(art, 4.0, 0.0)
+    columns = {waved[:, x].tobytes() for x in range(art.shape[1])}
+    assert len(columns) > 1
+
+
+def test_advancing_the_phase_moves_the_crest_along():
+    """What makes the wave travel rather than stand still."""
+    art = _striped()
+    first = image.wave_columns(art, 4.0, 0.0)
+    later = image.wave_columns(art, 4.0, 0.25)
+    assert not image.equal(first, later)
+
+
+def test_a_whole_cycle_of_phase_returns_the_same_picture():
+    art = _striped()
+    assert image.equal(image.wave_columns(art, 4.0, 0.0),
+                       image.wave_columns(art, 4.0, 1.0))
+
+
+def test_what_slides_off_the_end_leaves_transparency_not_a_wrap():
+    """A column that wrapped would put the top of the flag at its bottom."""
+    art = _striped(height=6, width=4)
+    waved = image.wave_columns(art, 20.0, 0.0)
+    assert not image.alpha_mask(waved).all()
+
+
+# ---------------------------------------------------------------------------
+# scroll: the thing stays put and something moves through it
+# ---------------------------------------------------------------------------
+
+def _speckle(height=16, width=12, seed=3):
+    rng = np.random.RandomState(seed)
+    array = image.blank(height, width)
+    for _ in range(24):
+        y, x = rng.randint(0, height), rng.randint(0, width)
+        array[y, x] = [140 + (x % 3) * 20, 190, 235, 255]
+    return array
+
+
+def test_a_scroll_is_a_bijection_not_a_slide():
+    """The strongest palette claim in the pipeline, and a stronger one than
+    `wave_columns` makes: nothing falls off the end, so every colour keeps
+    exactly the count it started with."""
+    source = _speckle()
+    for dx, dy in ((0, 5), (3, 0), (7, 11), (-4, -9)):
+        moved = image.scroll(source, dx, dy)
+        assert moved.shape == source.shape
+        before = np.unique(source.reshape(-1, 4), axis=0, return_counts=True)
+        after = np.unique(moved.reshape(-1, 4), axis=0, return_counts=True)
+        assert np.array_equal(before[0], after[0])       # the same colours
+        assert np.array_equal(np.sort(before[1]), np.sort(after[1]))
+
+
+def test_a_scroll_of_a_whole_box_is_the_identity():
+    """Which is why a clip that ends on a whole multiple of the box cannot pop."""
+    source = _speckle()
+    height, width = source.shape[:2]
+    assert image.equal(image.scroll(source, 0, height), source)
+    assert image.equal(image.scroll(source, width, 0), source)
+    assert image.equal(image.scroll(source, width * 3, -height * 2), source)
+
+
+def test_a_scroll_moves_whole_pixels_only():
+    """A fraction of a pixel is not a pixel."""
+    source = _speckle()
+    assert image.equal(image.scroll(source, 0, 0.4), source)
+    assert image.equal(image.scroll(source, 0, 1.6), image.scroll(source, 0, 2))
+
+
+def test_a_scroll_wraps_rather_than_dropping():
+    """The row that leaves the bottom arrives at the top, which is what a slide
+    does not do."""
+    source = image.blank(4, 3)
+    source[3, :] = [10, 20, 30, 255]
+    moved = image.scroll(source, 0, 1)
+    assert (moved[0] == [10, 20, 30, 255]).all()
+    assert not (moved[3, :, 3] > 0).any()
+    assert not (moved[1, :, 3] > 0).any()
