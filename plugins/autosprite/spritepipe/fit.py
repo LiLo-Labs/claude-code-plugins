@@ -371,12 +371,30 @@ def split_part(rig, name, at=0.5):
     if cut <= (y0 if tall else x0) or cut >= (y1 if tall else x1):
         return None
 
+    # WHICH SEGMENT HOLDS THE JOINT. The axis is settled above; the direction
+    # along it is a second question and getting it wrong inverts the chain.
+    #
+    # A leg hangs DOWN from a hip, so the segment at the low end of the axis is
+    # the anchored one and the shin hangs off it. A quadruped's head-and-neck
+    # rises UP from the withers, and a stalk rises from its base: there the
+    # anchored segment is at the HIGH end and the skull hangs off it. Splitting
+    # a deer's head as though it were a leg produced `head` = the skull, keeping
+    # a pivot fifteen rows BELOW ITS OWN BOX, parented to the body, with the
+    # neck that actually touches the withers hanging off the skull.
+    #
+    # This is the same mistake as the one recorded above, one level down: that
+    # one chose the wrong AXIS, this one the wrong direction along it.
+    near_low = (py <= (y0 + y1) / 2.0) if tall else (px <= (x0 + x1) / 2.0)
     if tall:
-        upper_box, lower_box = (x0, y0, x1, cut), (x0, cut, x1, y1)
-        lower_pivot = ((x0 + x1) // 2, cut)
+        low_box, high_box = (x0, y0, x1, cut), (x0, cut, x1, y1)
+        low_far_pivot, high_far_pivot = ((x0 + x1) // 2, cut), ((x0 + x1) // 2, cut)
     else:
-        upper_box, lower_box = (x0, y0, cut, y1), (cut, y0, x1, y1)
-        lower_pivot = (cut, (y0 + y1) // 2)
+        low_box, high_box = (x0, y0, cut, y1), (cut, y0, x1, y1)
+        low_far_pivot, high_far_pivot = (cut, (y0 + y1) // 2), (cut, (y0 + y1) // 2)
+    if near_low:
+        upper_box, lower_box, lower_pivot = low_box, high_box, low_far_pivot
+    else:
+        upper_box, lower_box, lower_pivot = high_box, low_box, high_far_pivot
 
     lower_name = name + "_lower"
     parts = []

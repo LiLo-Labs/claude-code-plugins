@@ -352,3 +352,55 @@ def test_a_limb_too_short_for_its_cuts_to_differ_reports_no_best_cut():
     margin = render.suggest_margin(built)
     targets = [image.alpha_mask(render.render_pose(cut, skeleton.Pose(), margin=margin))]
     assert fit.better_split(cut, targets, "arm_near", margin=margin) is None
+
+
+def test_a_part_that_rises_from_its_base_keeps_the_joint_at_the_base():
+    """The axis is not enough; the DIRECTION along it decides the chain.
+
+    A leg hangs DOWN from a hip, so the segment at the low end of the axis is
+    the anchored one. A quadruped's head-and-neck RISES from the withers, and so
+    does a tail or a stalk: there the anchored segment is at the high end.
+
+    Split as though it were a leg, a 51px deer's head produced an upper segment
+    that was the SKULL, keeping a pivot fifteen rows below its own box, parented
+    to the body, with the neck that actually touches the withers hanging off the
+    skull. That is the same mistake as choosing the wrong axis, one level down.
+    """
+    from spritepipe import rig as R
+    built = R.Rig((20, 34), [
+        R.Part("body", "body", (0, 20, 20, 34), None, (10, 34)),
+        # head and neck as one part, rising from the withers at its BOTTOM edge
+        R.Part("head", "head", (2, 0, 10, 20), "body", (6, 20)),
+    ])
+    grown = fit.split_part(built, "head", 0.5)
+    assert grown is not None
+    near = grown.by_name("head")
+    far = grown.by_name("head_lower")
+
+    assert near.parent == "body", "the segment at the withers attaches to the body"
+    assert far.parent == "head", "the skull hangs off the neck"
+    # The retained segment must contain its own joint. The bug left the pivot
+    # outside the box entirely, which no amount of posing recovers from.
+    assert near.box[1] <= near.pivot[1] <= near.box[3], (near.box, near.pivot)
+    assert near.pivot == (6, 20), "and it is still the original joint"
+    # near is the LOW half of the picture in y terms? No -- it is the half that
+    # touches the body, which for a rising part is the high-y half.
+    assert near.box[1] > far.box[1], "the anchored half is the one nearer the body"
+    assert near.box[1] == far.box[3], "and the two are end to end"
+    assert R.validate(grown) == [], R.validate(grown)
+
+
+def test_a_limb_that_hangs_from_its_joint_is_unchanged_by_that_rule():
+    """The fix must not disturb the case that already worked."""
+    from spritepipe import rig as R
+    built = R.Rig((20, 34), [
+        R.Part("torso", "torso", (0, 0, 20, 14), None, (10, 14)),
+        R.Part("leg_near", "leg_near", (4, 14, 10, 34), "torso", (6, 14)),
+    ])
+    grown = fit.split_part(built, "leg_near", 0.5)
+    near = grown.by_name("leg_near")
+    far = grown.by_name("leg_near_lower")
+    assert near.parent == "torso" and far.parent == "leg_near"
+    assert near.pivot == (6, 14)
+    assert near.box[1] < far.box[1], "the thigh is above the shin"
+    assert near.box[3] == far.box[1]
