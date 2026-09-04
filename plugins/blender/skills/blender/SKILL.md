@@ -85,8 +85,19 @@ produces confident nonsense.
 3. **Look.** `render_views`, then **read the returned PNG paths**. The tool
    returns file paths; reading them is what actually puts the image in front of
    you. A turnaround you did not open told you nothing.
+
+   **Pass `focus` with the object you are working on.** Framing fits everything
+   visible, so one ground plane or a neighbouring building shrinks your subject
+   to a speck and the render stops being worth reading. `focus` is also what
+   makes an asset comparable between iterations.
 4. **Verify.** `verify_geometry` with the right preset. Blocking findings are not
    advisory — fix them and re-verify.
+
+   Passing is not the same as correct. `verify_geometry` measures whether the
+   mesh is *usable* — manifold, sane scale, sane topology. It cannot see that
+   the legs stop short of the platform, or that the roof floats. Clean geometry
+   in the wrong shape passes every check here. That is what step 3 is for, and
+   why neither step can be skipped on the strength of the other.
 5. **Report.** Show the user the render and the verdict together. If anything is
    still wrong, say what and why, rather than presenting it as finished.
 
