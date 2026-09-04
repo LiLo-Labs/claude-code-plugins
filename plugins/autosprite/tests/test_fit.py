@@ -6,6 +6,7 @@ finds a pose it was given, whether it degrades honestly when it cannot, and
 whether what comes back is a reusable clip.
 """
 
+import math
 import numpy as np
 import pytest
 
@@ -404,3 +405,66 @@ def test_a_limb_that_hangs_from_its_joint_is_unchanged_by_that_rule():
     assert near.pivot == (6, 14)
     assert near.box[1] < far.box[1], "the thigh is above the shin"
     assert near.box[3] == far.box[1]
+
+
+# -- splitting a part must not change what existing clips do to it ---------
+
+def test_the_far_half_of_a_split_takes_the_segment_role():
+    rig, _cut = rigged()
+    grown = fit.split_part(rig, "leg_near", 0.5)
+    assert grown is not None
+    assert grown.by_name("leg_near").role == "leg_near"
+    assert grown.by_name("leg_near_lower").role == "segment"
+
+
+def test_splitting_a_part_does_not_double_the_angle_a_role_track_asks_for():
+    """The bug this pins down: `motion.select` binds a bare selector by ROLE, so
+    while both halves of a split carried the original's role, a clip's
+    `leg_near` track matched the thigh AND the shin -- and the shin, being a
+    child of the thigh, composed the thigh's rotation on top of its own and came
+    out at TWICE the angle. Measured on this fixture at a 20 degree ask, the
+    shin composed to +40.00 degrees.
+
+    Splitting a part is a statement about the skeleton, not about the clips: an
+    existing clip must go on drawing what it drew before. The chain is the exact
+    invariant, so it is what this asserts; the silhouette is allowed a couple of
+    pixels because two half sprites rasterise and skin separately from one whole
+    one, and that is a difference in sampling rather than in pose.
+    """
+    rig, cut = rigged()
+    grown = fit.split_part(rig, "leg_near", 0.5)
+    assert grown is not None
+    grown_cut = cutout.cut(grown, cut.reference)
+
+    clip = motion.Animation(
+        "probe", frames=3, fps=6, loop=False,
+        tracks={"leg_near": [{"t": 0.0, "angle": 0.0}, {"t": 0.5, "angle": 20.0},
+                             {"t": 1.0, "angle": 0.0}]})
+
+    def composed(rig_in, cut_in, name):
+        poses = list(skeleton.posed(rig_in, clip, cut_in.ground_points()))
+        matrix = skeleton.world_transforms(rig_in, poses[1])[name]
+        return round(math.degrees(math.atan2(matrix[1][0], matrix[0][0])), 6)
+
+    asked = composed(rig, cut, "leg_near")
+    assert composed(grown, grown_cut, "leg_near") == asked
+    assert composed(grown, grown_cut, "leg_near_lower") == asked
+
+    margin = max(render.suggest_margin(rig), render.suggest_margin(grown))
+    before = [silhouette(cut, pose, margin)
+              for pose in skeleton.posed(rig, clip, cut.ground_points())]
+    after = [silhouette(grown_cut, pose, margin)
+             for pose in skeleton.posed(grown, clip, grown_cut.ground_points())]
+    for index, (a, b) in enumerate(zip(before, after)):
+        assert int((a ^ b).sum()) <= max(2, int(a.sum() * 0.03)), index
+
+
+def test_the_far_half_is_still_addressable_by_name():
+    """A clip that WANTS the bend asks for it explicitly."""
+    rig, _cut = rigged()
+    grown = fit.split_part(rig, "leg_near", 0.5)
+    named = motion.select(grown, "name:leg_near_lower")
+    assert [part.name for part in named] == ["leg_near_lower"]
+    # ... and the role selector no longer reaches it.
+    by_role = motion.select(grown, "leg_near")
+    assert [part.name for part in by_role] == ["leg_near"]

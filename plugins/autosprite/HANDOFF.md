@@ -2460,6 +2460,38 @@ already asks exactly that question -- or on a character big enough to draw it.
 Never by default. `fit.split_part` and `fit.better_split` stay; nothing calls
 them from `build`, and that is deliberate.
 
+## Splitting a part doubled the angle every existing clip asked of it
+
+`fit.split_part` gave both halves of a cut the original's role. Track selectors
+bind by ROLE -- `motion.select` falls through to `part.role == selector` for a
+bare name -- so a clip's `head` track matched the neck AND the skull, and the
+skull, being a child of the neck, composed the neck's rotation on top of its
+own. Measured on the humanoid fixture at a 20 degree ask:
+
+    leg_near        composed angle  +20.00 deg
+    leg_near_lower  composed angle  +40.00 deg
+
+This is how the grazing experiment above was measured wrong the first time. A
+sweep over how far the skull should COUNTER-rotate returned byte-identical
+numbers for shares of 0.0, 0.5 and 0.8, because the `head_lower` track was
+matching no part at all while the `head` track drove both segments. An invariant
+that cannot be varied is the loudest signal available that a knob is not
+connected, and it is worth reaching for deliberately: the numbers looked
+plausible and only their refusal to move gave the bug away.
+
+The far half now takes a new role, `segment`, and is addressed by name. A
+`head` track is back to meaning what it meant before the part was ever split --
+the anchored segment rotates and the rest of the chain rides it rigidly -- and a
+clip that wants the bend asks for `name:head_lower` explicitly. `segment` is
+deliberately absent from `rig.DECLARABLE`, the vocabulary offered to a vision
+rigger, because nothing NAMES a segment when describing a character; it stays in
+`ROLES` so a rig carrying one still validates.
+
+The test asserts the composed angles rather than the pixels. Two half sprites
+rasterise and skin separately from one whole one -- 3 differing pixels of 178 on
+the fixture -- and that is a difference in sampling, not in pose; the chain is
+the exact invariant, so the chain is what is pinned.
+
 ## The head pivot on a side-on creature — read off the art, and shipped
 
 `vision._creature` placed a quadruped's head pivot at the head box's x-CENTRE

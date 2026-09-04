@@ -1067,7 +1067,7 @@ class HeadlessBackend(Backend):
         height, width = reference.pixels.shape[:2]
         prompt = DESCRIBE_PROMPT % {
             "width": width, "height": height,
-            "roles": ", ".join(rig_module.ROLES),
+            "roles": ", ".join(rig_module.DECLARABLE),
             "traits": ", ".join(rig_module.TRAITS),
             "intent": ("The user says this is: %s\n" % intent) if intent else "",
         }

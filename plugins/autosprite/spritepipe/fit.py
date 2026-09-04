@@ -403,7 +403,15 @@ def split_part(rig, name, at=0.5):
             parts.append(rig_module.Part(name, part.role, upper_box, part.parent,
                                          part.pivot, part.z, part.confidence,
                                          part.tags))
-            parts.append(rig_module.Part(lower_name, part.role, lower_box, name,
+            # ROLE `segment`, not the original's role. Both halves sharing a
+            # role is not a naming nicety: `motion.select` binds a bare
+            # selector by role, so a clip's `head` track matched the neck AND
+            # the skull, each rotating by the full angle and the skull
+            # inheriting the neck's on top of its own. Splitting a part must
+            # not change what an existing clip does to it; with the far half
+            # held apart, `head` addresses the anchored segment alone and the
+            # rest of the chain rides it exactly as the whole part used to.
+            parts.append(rig_module.Part(lower_name, "segment", lower_box, name,
                                          lower_pivot, part.z, part.confidence,
                                          part.tags))
             continue

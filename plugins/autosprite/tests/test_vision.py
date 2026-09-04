@@ -870,3 +870,13 @@ def test_neck_row_takes_the_longest_run_not_the_first():
     mask[1:3, 2] = True                # an ear: two rows
     mask[8:15, 2] = True               # the neck: seven rows
     assert vision.neck_row(mask, 2, 0, 20) == 11
+
+
+def test_the_rigger_is_not_offered_the_internal_segment_role():
+    """`segment` exists so `fit.split_part` can cut a part in two without the
+    halves colliding on one role. Nothing NAMES a segment when describing a
+    character, so it does not belong in the vocabulary a rigger picks from --
+    but it stays in ROLES so a rig that already carries one still validates."""
+    assert "segment" in R.ROLES
+    assert "segment" not in R.DECLARABLE
+    assert set(R.DECLARABLE) < set(R.ROLES)

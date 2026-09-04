@@ -503,9 +503,14 @@ def test_every_role_in_the_vocabulary_is_driven_or_deliberately_not():
     for animation in motion.LIBRARY.values():
         driven |= set(animation.tracks)
     undriven = set(R.ROLES) - driven
-    # These four are right to be still: a shadow is the floor, and body, prop
-    # and accessory ride whatever they are parented to.
-    assert undriven == {"accessory", "body", "prop", "shadow"}
+    # These five are right to be still. A shadow is the floor; body, prop and
+    # accessory ride whatever they are parented to; and `segment` is never
+    # addressed by role AT ALL -- that is the entire reason it exists. Both
+    # halves of a split part used to share the original's role, so a `head`
+    # track drove the neck and the skull alike and the skull composed the
+    # neck's rotation on top of its own, coming out at twice the angle asked
+    # for. A clip that wants the far half asks for it by name.
+    assert undriven == {"accessory", "body", "prop", "segment", "shadow"}
 
 
 def test_fly_exists_and_is_not_planted():
