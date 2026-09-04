@@ -1,0 +1,298 @@
+"""End-to-end checks for the bridge, the gate evaluator and the MCP surface.
+
+Run: python3 tests/test_blendpipe.py
+No pytest, no network, no Blender — same constraint as the server itself.
+"""
+
+import json
+import os
+import subprocess
+import sys
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(HERE)
+sys.path.insert(0, ROOT)
+sys.path.insert(0, HERE)
+
+from fake_blender import FakeBlender, _MEASUREMENT  # noqa: E402
+
+from blendpipe import bridge, gates  # noqa: E402
+from blendpipe.backends import BackendError, resolve  # noqa: E402
+
+PASSED, FAILED = [], []
+
+
+def check(label, condition, detail=""):
+    (PASSED if condition else FAILED).append(label)
+    print("  %s %s%s" % ("ok  " if condition else "FAIL", label, ("  — " + detail) if detail and not condition else ""))
+
+
+def test_bridge_roundtrip():
+    print("\nbridge")
+    with FakeBlender() as fake:
+        info = bridge.call("ping", port=fake.port)
+        check("ping returns Blender version", info["blender"] == "4.2.0")
+        check("is_running true when served", bridge.is_running(port=fake.port))
+
+        # Framing: a payload containing newlines must survive, because every
+        # useful execute() call is multi-line Python.
+        code = "import bpy\nfor i in range(3):\n    print(i)\n"
+        out = bridge.call("execute", {"code": code}, port=fake.port)
+        check("multi-line payload survives framing", out["ok"])
+        sent = [p for c, p in fake.calls if c == "execute"][-1]
+        check("code arrives byte-identical", sent["code"] == code, repr(sent["code"]))
+
+
+def test_bridge_errors():
+    print("\nbridge errors")
+    try:
+        bridge.call("ping", port=1, timeout=2)
+        check("unreachable Blender raises", False)
+    except bridge.BridgeError as exc:
+        check("unreachable Blender raises BridgeError", True)
+        check("error explains how to start the addon", "BlendPipe Bridge" in str(exc))
+
+    with FakeBlender(scenario={"ping": lambda _r: {"ok": False, "error": "boom"}}) as fake:
+        try:
+            bridge.call("ping", port=fake.port)
+            check("addon-reported failure raises", False)
+        except bridge.BridgeError as exc:
+            check("addon-reported failure raises", "boom" in str(exc))
+
+
+def test_gates():
+    print("\ngates")
+    findings = gates.evaluate({"Goblin": _MEASUREMENT},
+                              gates.Budget(max_faces=100_000, require_uvs=True, min_quad_ratio=0.8))
+    v = gates.verdict(findings)
+    checks = {f["check"] for f in v["findings"]}
+    check("a generated mesh with no UVs fails", not v["passed"])
+    check("missing UVs is blocking", "no_uvs" in checks)
+    check("triangle soup is flagged", "topology" in checks)
+    check("duplicate verts are flagged", "duplicate_verts" in checks)
+    check("unapplied scale is flagged", "unapplied_scale" in checks)
+    check("blocking sorts before warnings",
+          [f["severity"] for f in v["findings"]] == sorted(
+              [f["severity"] for f in v["findings"]], key=lambda s: s != "blocking"))
+
+    clean = dict(_MEASUREMENT, uv_layers=["UVMap"], quad_ratio=0.94, quads=39000, tris=1000,
+                 faces=40000, duplicate_verts=0, unapplied_scale=False, scale=[1, 1, 1])
+    v2 = gates.verdict(gates.evaluate({"Goblin": clean},
+                                      gates.Budget(max_faces=100_000, require_uvs=True, min_quad_ratio=0.8)))
+    check("a clean mesh passes", v2["passed"], json.dumps(v2["findings"]))
+
+    v3 = gates.verdict(gates.evaluate({"X": dict(_MEASUREMENT, faces=0)}))
+    check("a mesh with no faces is blocking", not v3["passed"])
+
+    inverted = dict(_MEASUREMENT, boundary_edges=0, watertight=True, signed_volume=-2.0,
+                    inverted_normals=True, uv_layers=["UVMap"])
+    v4 = gates.verdict(gates.evaluate({"X": inverted}))
+    check("inside-out normals are blocking",
+          any(f["check"] == "inverted_normals" and f["severity"] == "blocking" for f in v4["findings"]))
+
+    check("probe binds its targets", '["A", "B"]' in gates.probe_code(["A", "B"]))
+    check("probe defaults to every mesh", "TARGETS = null" in gates.probe_code())
+
+
+def test_backend_resolution():
+    print("\nbackends")
+    saved = {k: os.environ.pop(k, None) for k in
+             ("BLENDPIPE_BACKEND", "BLENDPIPE_LOCAL_URL", "TRIPO_API_KEY", "MESHY_API_KEY",
+              "RODIN_API_KEY", "HYPER3D_API_KEY")}
+    try:
+        try:
+            resolve()
+            check("no backend configured raises", False)
+        except BackendError as exc:
+            check("no backend configured raises", True)
+            check("and says procedural needs no backend", "procedural" in str(exc))
+
+        os.environ["MESHY_API_KEY"] = "test-key"
+        check("a configured paid backend resolves", resolve().name == "meshy")
+
+        os.environ["BLENDPIPE_LOCAL_URL"] = "http://127.0.0.1:8000"
+        check("local wins over paid once configured", resolve().name == "local")
+
+        os.environ["BLENDPIPE_BACKEND"] = "meshy"
+        check("an explicit pin overrides preference", resolve().name == "meshy")
+
+        os.environ["BLENDPIPE_BACKEND"] = "nonesuch"
+        try:
+            resolve()
+            check("an unknown backend raises", False)
+        except BackendError:
+            check("an unknown backend raises", True)
+
+        os.environ["BLENDPIPE_BACKEND"] = "rodin"
+        try:
+            resolve()
+            check("pinning an unconfigured backend raises", False)
+        except BackendError as exc:
+            check("pinning an unconfigured backend says what is missing", "RODIN_API_KEY" in str(exc))
+    finally:
+        for k, v in saved.items():
+            os.environ.pop(k, None)
+            if v is not None:
+                os.environ[k] = v
+
+
+def mcp(requests, env=None):
+    proc = subprocess.run(
+        [sys.executable, os.path.join(ROOT, "blendpipe", "mcp_blender.py")],
+        input="\n".join(json.dumps(r) for r in requests),
+        capture_output=True, text=True, timeout=60,
+        env={**os.environ, **(env or {})})
+    return [json.loads(l) for l in proc.stdout.splitlines() if l.strip()]
+
+
+def test_mcp_surface():
+    print("\nmcp server")
+    replies = mcp([{"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
+                   {"jsonrpc": "2.0", "id": 2, "method": "tools/list"}])
+    check("initialize replies", replies[0]["result"]["serverInfo"]["name"] == "blender")
+    tools = replies[1]["result"]["tools"]
+    names = {t["name"] for t in tools}
+    check("all ten tools advertised", len(names) == 10, str(sorted(names)))
+    check("every tool has a schema", all("inputSchema" in t for t in tools))
+    check("every tool has a description over 80 chars",
+          all(len(t["description"]) > 80 for t in tools))
+
+    with FakeBlender() as fake:
+        env = {"BLENDPIPE_PORT": str(fake.port)}
+        replies = mcp([
+            {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
+            {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+             "params": {"name": "blender_status", "arguments": {}}},
+            {"jsonrpc": "2.0", "id": 3, "method": "tools/call",
+             "params": {"name": "scene_summary", "arguments": {}}},
+            {"jsonrpc": "2.0", "id": 4, "method": "tools/call",
+             "params": {"name": "object_info", "arguments": {"name": "Goblin"}}},
+            {"jsonrpc": "2.0", "id": 5, "method": "tools/call",
+             "params": {"name": "verify_geometry", "arguments": {"preset": "game"}}},
+            {"jsonrpc": "2.0", "id": 6, "method": "tools/call",
+             "params": {"name": "render_views", "arguments": {"angles": [0, 90]}}},
+            {"jsonrpc": "2.0", "id": 7, "method": "tools/call",
+             "params": {"name": "execute_python", "arguments": {"code": "print(1)"}}},
+        ], env=env)
+        text = {r["id"]: r["result"]["content"][0]["text"] for r in replies if r["id"] > 1}
+        check("status reports the connection", "Blender 4.2.0 connected" in text[2])
+        check("scene summary lists the mesh", "Goblin" in text[3] and "4180" in text[3])
+        check("object info shows unapplied scale", "not applied" in text[4])
+        check("verify fails a generated mesh", "VERDICT: FAIL" in text[5])
+        check("verify names the fix", "Smart UV Project" in text[5])
+        check("render returns one path per angle",
+              text[6].count("view_") == 2 and "READ these files" in text[6])
+        check("execute returns stdout", "ran" in text[7])
+
+
+def test_mcp_survives_no_blender():
+    print("\nmcp server without Blender")
+    replies = mcp([{"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
+                   {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+                    "params": {"name": "scene_summary", "arguments": {}}},
+                   {"jsonrpc": "2.0", "id": 3, "method": "tools/call",
+                    "params": {"name": "list_backends", "arguments": {}}}],
+                  env={"BLENDPIPE_PORT": "1"})
+    check("a missing Blender is tool output, not a crash",
+          replies[1]["result"]["content"][0]["text"].startswith("Cannot reach Blender"))
+    check("the server keeps serving afterwards",
+          "cheapest first" in replies[2]["result"]["content"][0]["text"])
+
+
+def test_addon_is_importable_shape():
+    print("\naddon")
+    src = open(os.path.join(ROOT, "blendpipe", "addon.py")).read()
+    check("declares bl_info", "bl_info = {" in src)
+    check("registers a main-thread pump", "bpy.app.timers.register(_pump" in src)
+    check("every handler name is routed",
+          all(("\"%s\":" % n) in src for n in
+              ("ping", "execute", "scene_summary", "object_info", "import_mesh",
+               "export_mesh", "render", "save")))
+    # The whole thread-safety argument rests on bpy never being touched from the
+    # socket threads, so assert the server class body stays clean of it.
+    server = src.split("class BridgeServer:")[1].split("# ---")[0]
+    offenders = [l.strip() for l in server.splitlines()
+                 if "bpy." in l and "bpy.app.timers" not in l]
+    check("BridgeServer never touches bpy off the main thread", not offenders, str(offenders))
+
+
+
+def hook(script, event, env=None):
+    proc = subprocess.run(
+        [sys.executable, os.path.join(ROOT, "hooks", script)],
+        input=json.dumps(event), capture_output=True, text=True, timeout=30,
+        env={**os.environ, **(env or {})})
+    return proc.returncode, proc.stderr
+
+
+def test_export_guard():
+    print("\nexport guard")
+    import tempfile
+    runs = tempfile.mkdtemp()
+    env = {"BLENDPIPE_RUNS": runs}
+    export = {"session_id": "t1", "tool_name": "mcp__blender__export_mesh",
+              "tool_input": {"path": "/tmp/x.glb"}}
+
+    code, err = hook("guard_export.py", export, env)
+    check("export blocked with no verify", code == 2)
+    check("and says to run verify_geometry", "verify_geometry" in err)
+
+    def verified(text):
+        return {"session_id": "t1", "hook_event_name": "PostToolUse",
+                "tool_name": "mcp__blender__verify_geometry", "tool_response": text}
+
+    hook("guard_export.py", verified("VERDICT: FAIL - 2 blocking"), env)
+    code, err = hook("guard_export.py", export, env)
+    check("export blocked after a failing verify", code == 2)
+    check("and refuses to export around the budget", "do not export around it" in err)
+
+    hook("guard_export.py", verified("VERDICT: PASS - 0 blocking"), env)
+    code, _ = hook("guard_export.py", export, env)
+    check("export allowed after a passing verify", code == 0)
+
+    code, err = hook("guard_export.py", export, dict(env, BLENDPIPE_VERIFY_MAX_AGE="0"))
+    check("a stale verify does not count", code == 2 and "Re-run verify_geometry" in err)
+
+    code, _ = hook("guard_export.py",
+                   {"session_id": "t1", "tool_name": "mcp__blender__execute_python",
+                    "tool_input": {"code": "print(1)"}}, env)
+    check("ordinary modelling is never blocked", code == 0)
+
+
+def test_spend_guard():
+    print("\nspend guard")
+    import tempfile
+    runs = tempfile.mkdtemp()
+    env = {"BLENDPIPE_RUNS": runs, "BLENDPIPE_MAX_GENERATIONS": "2"}
+    gen = {"session_id": "s1", "tool_name": "mcp__blender__generate_mesh",
+           "tool_input": {"prompt": "a goblin"}}
+
+    codes = [hook("guard_spend.py", gen, env)[0] for _ in range(3)]
+    check("the first two paid generations pass", codes[:2] == [0, 0])
+    code, err = hook("guard_spend.py", gen, env)
+    check("the ceiling blocks further spend", code == 2)
+    check("and points back at procedural", "execute_python" in err)
+    check("and says how to raise it", "BLENDPIPE_MAX_GENERATIONS" in err)
+
+    free = dict(env, BLENDPIPE_LOCAL_URL="http://127.0.0.1:8000")
+    codes = [hook("guard_spend.py", {**gen, "session_id": "s2"}, free)[0] for _ in range(5)]
+    check("local generation is free and uncapped", codes == [0] * 5)
+
+    explicit = [hook("guard_spend.py",
+                     {**gen, "session_id": "s3", "tool_input": {"prompt": "x", "backend": "local"}},
+                     env)[0] for _ in range(5)]
+    check("an explicit local backend is not counted", explicit == [0] * 5)
+
+    code, _ = hook("guard_spend.py",
+                   {"session_id": "s4", "tool_name": "Bash", "tool_input": {"command": "ls"}}, env)
+    check("unrelated tools are ignored", code == 0)
+
+if __name__ == "__main__":
+    for fn in (test_bridge_roundtrip, test_bridge_errors, test_gates, test_backend_resolution,
+               test_mcp_surface, test_mcp_survives_no_blender, test_addon_is_importable_shape,
+               test_export_guard, test_spend_guard):
+        fn()
+    print("\n%d passed, %d failed" % (len(PASSED), len(FAILED)))
+    if FAILED:
+        print("failed: " + ", ".join(FAILED))
+    sys.exit(1 if FAILED else 0)

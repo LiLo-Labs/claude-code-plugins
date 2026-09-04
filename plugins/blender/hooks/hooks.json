@@ -1,0 +1,40 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "mcp__blender__generate_mesh",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/guard_spend.py\"",
+            "timeout": 15,
+            "statusMessage": "Checking the generation against the session spend ceiling"
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__blender__export_mesh",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/guard_export.py\"",
+            "timeout": 15,
+            "statusMessage": "Confirming the geometry was verified before export"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "mcp__blender__verify_geometry",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/guard_export.py\"",
+            "timeout": 15
+          }
+        ]
+      }
+    ]
+  }
+}

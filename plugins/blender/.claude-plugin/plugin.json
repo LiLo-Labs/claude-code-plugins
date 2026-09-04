@@ -1,0 +1,11 @@
+{
+  "$schema": "https://anthropic.com/claude-code/plugin.schema.json",
+  "name": "blender",
+  "version": "0.1.0",
+  "description": "Drive a live Blender session from Claude Code. A socket bridge into Blender executes bpy on the main thread, a pluggable backend generates organic meshes, and every result is rendered, critiqued and gated on real geometry before it is allowed to leave.",
+  "author": {
+    "name": "LiLo Labs"
+  },
+  "license": "MIT",
+  "keywords": ["blender", "3d", "mcp", "modeling", "procedural", "text-to-3d", "topology"]
+}

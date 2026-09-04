@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "blender": {
+      "command": "python3",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/blendpipe/mcp_blender.py"],
+      "env": {}
+    }
+  }
+}
