@@ -33,12 +33,12 @@ def main():
     session = event.get("session_id")
 
     # PostToolUse on verify_geometry: remember that it happened, and whether it passed.
-    if tool == "mcp__blender__verify_geometry" and event.get("hook_event_name") == "PostToolUse":
+    if hook_state.is_tool(tool, "verify_geometry") and event.get("hook_event_name") == "PostToolUse":
         text = json.dumps(event.get("tool_response") or "")
         hook_state.record(session, verified_at=time.time(), verify_passed="VERDICT: PASS" in text)
         return 0
 
-    if tool != "mcp__blender__export_mesh":
+    if not hook_state.is_tool(tool, "export_mesh"):
         return 0
 
     state = hook_state.load(session)

@@ -2,7 +2,7 @@
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "mcp__blender__generate_mesh",
+        "matcher": "^mcp__(plugin_)?[^_]*blender[^_]*(_[^_]+)?__generate_mesh$",
         "hooks": [
           {
             "type": "command",
@@ -13,7 +13,7 @@
         ]
       },
       {
-        "matcher": "mcp__blender__export_mesh",
+        "matcher": "^mcp__(plugin_)?[^_]*blender[^_]*(_[^_]+)?__export_mesh$",
         "hooks": [
           {
             "type": "command",
@@ -26,7 +26,7 @@
     ],
     "PostToolUse": [
       {
-        "matcher": "mcp__blender__verify_geometry",
+        "matcher": "^mcp__(plugin_)?[^_]*blender[^_]*(_[^_]+)?__verify_geometry$",
         "hooks": [
           {
             "type": "command",

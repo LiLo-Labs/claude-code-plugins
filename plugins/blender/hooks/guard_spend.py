@@ -40,7 +40,7 @@ def main():
     except (ValueError, OSError):
         return 0
 
-    if event.get("tool_name") != "mcp__blender__generate_mesh":
+    if not hook_state.is_tool(event.get("tool_name"), "generate_mesh"):
         return 0
 
     tool_input = event.get("tool_input") or {}

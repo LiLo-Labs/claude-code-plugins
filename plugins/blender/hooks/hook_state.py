@@ -44,3 +44,18 @@ def record(session_id, **fields):
     state["updated"] = time.time()
     save(session_id, state)
     return state
+
+
+#: Claude Code namespaces a *plugin's* MCP tools as
+#: mcp__plugin_<plugin>_<server>__<tool>, while a user-configured server is just
+#: mcp__<server>__<tool>. These hooks originally matched only the second form,
+#: so in a real install neither guardrail ever fired -- no spend ceiling, and no
+#: verify-before-export -- while every unit test passed, because the tests fed
+#: the hooks the name the hooks expected. Accept both, and don't pin the exact
+#: namespacing scheme in three places.
+def is_tool(tool_name, suffix, server="blender"):
+    """True when tool_name is this plugin's `suffix` tool under any namespacing."""
+    if not isinstance(tool_name, str) or not tool_name.startswith("mcp__"):
+        return False
+    head, sep, tail = tool_name[len("mcp__"):].partition("__")
+    return bool(sep) and tail == suffix and server in head.split("_")

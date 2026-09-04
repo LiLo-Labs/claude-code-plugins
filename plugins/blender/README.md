@@ -85,7 +85,7 @@ moving to your own hardware later is one environment variable and nothing else.
 ## Tests
 
 ```
-python3 plugins/blender/tests/test_blendpipe.py      # 64 checks, no Blender needed
+python3 plugins/blender/tests/test_blendpipe.py      # 79 checks, no Blender needed
 python3 plugins/blender/tests/test_live_blender.py   # 57 checks against real Blender
 ```
 

@@ -5,6 +5,7 @@ No pytest, no network, no Blender — same constraint as the server itself.
 """
 
 import json
+import re
 import os
 import subprocess
 import sys
@@ -263,6 +264,49 @@ def hook(script, event, env=None):
     return proc.returncode, proc.stderr
 
 
+def test_hooks_match_the_names_claude_code_sends():
+    """The guardrails were inert in every real install.
+
+    Claude Code namespaces a plugin's MCP tools as
+    mcp__plugin_<plugin>_<server>__<tool>; a user-configured server is just
+    mcp__<server>__<tool>. The hooks matched only the second form, so neither
+    the spend ceiling nor verify-before-export ever fired -- while every check
+    below this one passed, because they fed the hooks the name the hooks
+    expected. Tests that supply the input under test cannot catch that; these
+    assert against both namespaces and against hooks.json itself.
+    """
+    print("\nhook tool naming")
+    sys.path.insert(0, os.path.join(ROOT, "hooks"))
+    import hook_state
+
+    plugin_form = "mcp__plugin_blender_blender__%s"
+    plain_form = "mcp__blender__%s"
+    for suffix in ("export_mesh", "verify_geometry", "generate_mesh"):
+        check("is_tool accepts the plugin namespace for %s" % suffix,
+              hook_state.is_tool(plugin_form % suffix, suffix))
+        check("is_tool accepts a bare server for %s" % suffix,
+              hook_state.is_tool(plain_form % suffix, suffix))
+    check("is_tool ignores another plugin's tool of the same name",
+          not hook_state.is_tool("mcp__plugin_gameassets_gameassets__export_mesh", "export_mesh"))
+    check("is_tool ignores a non-MCP tool", not hook_state.is_tool("Bash", "export_mesh"))
+
+    config = json.load(open(os.path.join(ROOT, "hooks", "hooks.json")))
+    matchers = {entry["matcher"].rsplit("__", 1)[-1].rstrip("$"): entry["matcher"]
+                for event in config["hooks"].values() for entry in event}
+    for suffix in ("export_mesh", "verify_geometry", "generate_mesh"):
+        pattern = matchers.get(suffix, "")
+        check("hooks.json matches the plugin namespace for %s" % suffix,
+              bool(re.match(pattern, plugin_form % suffix)), pattern)
+        check("hooks.json still matches a bare server for %s" % suffix,
+              bool(re.match(pattern, plain_form % suffix)), pattern)
+
+    # The guards must actually run, not just agree in the abstract.
+    code, err = hook("guard_export.py",
+                     {"session_id": "ns1", "tool_name": plugin_form % "export_mesh",
+                      "hook_event_name": "PreToolUse", "tool_input": {"path": "/tmp/x.glb"}})
+    check("an unverified export is blocked under the plugin namespace", code == 2, err[:80])
+
+
 def test_export_guard():
     print("\nexport guard")
     import tempfile
@@ -329,7 +373,7 @@ if __name__ == "__main__":
     for fn in (test_bridge_roundtrip, test_bridge_errors, test_gates, test_backend_resolution,
                test_probe_is_valid_python, test_mcp_surface, test_mcp_survives_no_blender,
                test_addon_is_importable_shape,
-               test_export_guard, test_spend_guard):
+               test_hooks_match_the_names_claude_code_sends, test_export_guard, test_spend_guard):
         fn()
     print("\n%d passed, %d failed" % (len(PASSED), len(FAILED)))
     if FAILED:
