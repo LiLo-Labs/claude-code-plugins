@@ -126,6 +126,25 @@
         "sqlite",
         "mcp"
       ]
+    },
+    {
+      "name": "blender",
+      "source": "./plugins/blender",
+      "description": "Drive a live Blender session from Claude Code. Model procedurally with Blender Python, generate organic meshes through a pluggable backend (your own GPU or a paid API), and gate every result on real geometry - non-manifold edges, topology, UVs, scale, polycount - before it can be exported.",
+      "version": "0.1.0",
+      "author": {
+        "name": "LiLo Labs"
+      },
+      "category": "3d",
+      "tags": [
+        "blender",
+        "3d",
+        "modeling",
+        "text-to-3d",
+        "topology",
+        "gamedev",
+        "mcp"
+      ]
     }
   ]
 }
