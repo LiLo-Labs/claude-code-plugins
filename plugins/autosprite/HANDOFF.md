@@ -2506,6 +2506,57 @@ the direction that `footprint` rewards by construction — because a clip that
 does nothing scores a span of zero. Over-travel shows up as a negative shortfall
 rather than being filtered away, since thrashing is also wrong.
 
+### What the measure found, and what each finding turned out to be
+
+Under-reach splits into two kinds, and telling them apart is what makes the
+number worth having.
+
+**Kind one: the artist draws pixels that are not in the rest art.** Not fixable
+by any amount of tuning, and the same ceiling the grazing deer hit.
+
+* `samurai attack`, 12px short on the right. Rendered, the artist's clip is a
+  sword DRAW: the katana is a short sheathed shape at the hip for four frames
+  and then a long white blade appears and sweeps through. The blade at full
+  extension is about fifteen pixels of art that the source frame does not
+  contain.
+* `shieldmaiden attack`, 10px short on the right. The same thing with a spear:
+  the artist lengthens the shaft frame by frame.
+
+Both score WELL on footprint -- 11.2% and 20.7%, the samurai second-best in the
+corpus -- because our small arm swing sits inside the region the artist's weapon
+sweeps. This is the clearest evidence yet that the two measures are answering
+different questions.
+
+**Kind two: the amplitude really is short, on an axis a cutout can serve.**
+
+* `forest run`, 7px short at the bottom. The artist's run has a real flight
+  phase: top travels 5 while bottom travels 12, so the body rises a little and
+  the feet rise a lot. Scaling ONLY the root's `dy`, leaving every leg angle
+  alone, lands almost exactly on the artist:
+
+  | root dy | footprint | coverage | top (artist 5) | bottom (artist 12) |
+  |---|---|---|---|---|
+  | x1 (shipped) | **4.6%** | 0.77 | 3 | 5 |
+  | x3 | 9.6% | 0.95 | **5** | **11** |
+
+  Travel says x3; footprint says x3 is twice as bad. Rendered at 4x, x3 reads as
+  running where x1 reads as shuffling. **Not shipped**, because it is
+  subject-specific: the samurai's artist bottom travel is 1 and ours is already
+  3, so a global multiplier makes small characters worse. What is needed is a
+  per-character flight arc, and that is the next piece of work this points to.
+
+**And one thing that is neutral.** With `split_part` now cutting at the right
+end and giving the far half its own role, a REAL knee -- the shin folding 45
+degrees at the passing pose instead of the `sy` 0.86 squash the run currently
+fakes it with -- was measured on the one clip whose artist reference demands a
+leg tuck. Bottom travel 4-5 either way against the artist's 12, footprint 4.6%
+against 4.7%, and at 4x the two are indistinguishable. The chain is confirmed
+connected (thigh +18 degrees, shin +63 composed), so this is a real negative:
+the shin is about ten pixels of art and folding it lifts the foot two or three,
+where the artist's twelve rows are mostly the whole body leaving the ground.
+Knees remain a thing nothing calls, now for a measured reason rather than an
+untested one.
+
 ### What was tried first and refuted
 
 The plan was structural invariants, on the theory that the eye had been applying
