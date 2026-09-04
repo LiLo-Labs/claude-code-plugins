@@ -9,6 +9,7 @@ import re
 import os
 import subprocess
 import sys
+import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -122,6 +123,59 @@ def test_probe_is_valid_python():
     first = gates.probe_code().splitlines()[0]
     check("no JSON literals in the binding",
           not any(tok in first for tok in ("null", "true", "false")), first)
+
+
+def test_uv_quality():
+    """A UV layer that exists and a UV layer that works are different claims.
+
+    The old check reported `uvs: UVMap` and passed. A watchtower built by
+    joining thirty boxes has that layer, has every island stacked in one corner,
+    scored 1053x texel density spread, and could not be textured at all.
+    """
+    print("\nuv quality")
+
+    def mesh(uv=None, **over):
+        m = {"faces": 100, "quads": 100, "tris": 0, "ngons": 0, "quad_ratio": 1.0,
+             "non_manifold_edges": 0, "boundary_edges": 0, "wire_edges": 0,
+             "loose_verts": 0, "zero_area_faces": 0, "duplicate_verts": 0,
+             "watertight": True, "signed_volume": 1.0, "inverted_normals": False,
+             "uv_layers": ["UVMap"], "material_slots": 1, "dimensions": [1, 1, 1],
+             "scale": [1, 1, 1], "unapplied_scale": False, "location": [0, 0, 0],
+             "modifiers": [], "uv": uv}
+        m.update(over)
+        return {"X": m}
+
+    def uvmap(**over):
+        u = {"layer": "UVMap", "area_sum": 0.52, "overlaps": False, "stacked_faces": 1,
+             "faces_outside_0_1": 0, "texel_density_min": 0.01,
+             "texel_density_max": 0.01, "texel_density_ratio": 1.0}
+        u.update(over)
+        return u
+
+    def checks(report):
+        return {f["check"]: f["severity"] for f in gates.verdict(gates.evaluate(report))["findings"]}
+
+    good = checks(mesh(uvmap()))
+    check("a packed, even layout raises nothing", not good, good)
+
+    # Area above 1.0 is a proof of overlap, not a heuristic: the unit square
+    # cannot hold more than 1.0 of area without islands sitting on each other.
+    piled = checks(mesh(uvmap(area_sum=6.4, overlaps=True, stacked_faces=81,
+                              texel_density_ratio=1052.9)))
+    check("stacked islands are reported", piled.get("uv_overlap") == "warning", piled)
+    check("and so is the density spread", piled.get("texel_density") == "warning", piled)
+    check("but neither blocks the export", "blocking" not in piled.values(), piled)
+
+    spread = checks(mesh(uvmap(texel_density_ratio=9.0)))
+    check("uneven density alone is reported", spread.get("texel_density") == "warning", spread)
+    check("4x is inside tolerance", "texel_density" not in checks(mesh(uvmap(texel_density_ratio=3.5))))
+
+    out = checks(mesh(uvmap(faces_outside_0_1=12)))
+    check("UVs outside 0-1 are reported", out.get("uv_out_of_bounds") == "warning", out)
+
+    check("a mesh with no UV data at all is not judged on UVs",
+          not any(k.startswith("uv") or k == "texel_density"
+                  for k in checks(mesh(None, uv_layers=[]))))
 
 
 def test_backend_resolution():
@@ -264,6 +318,60 @@ def hook(script, event, env=None):
     return proc.returncode, proc.stderr
 
 
+def test_headless_agent():
+    """The unattended runner. Its two load-bearing settings are easy to lose.
+
+    Pinning the model is not a preference: the headless default is Sonnet, and
+    both sibling plugins document it hallucinating about renders it was shown.
+    And without Read in the allowed tools, render_views hands back paths the
+    model cannot open -- the critique loop becomes a model describing an image
+    it has never seen, which is the exact failure the loop exists to prevent.
+    """
+    print("\nheadless agent")
+    from blendpipe import agent
+
+    check("pins a model rather than taking the headless default",
+          agent.MODEL.startswith("claude-opus"), agent.MODEL)
+    check("allows Read, so renders can actually be opened", "Read" in agent.TOOLS)
+    check("allows execute_python", "mcp__blender__execute_python" in agent.TOOLS)
+    check("allows render_views and verify_geometry",
+          {"mcp__blender__render_views", "mcp__blender__verify_geometry"} <= set(agent.TOOLS))
+
+    with tempfile.TemporaryDirectory() as tmp:
+        path = agent.mcp_config(os.path.join(tmp, "mcp.json"))
+        config = json.load(open(path))
+        server = config["mcpServers"]["blender"]
+        check("writes an MCP config naming one server", list(config["mcpServers"]) == ["blender"])
+        check("pointing at this plugin's server",
+              server["args"][0].endswith("mcp_blender.py"), server["args"])
+        check("with an interpreter that exists", os.path.exists(server["command"]))
+
+    # The guidance is the whole feature on this design, so assert it states the
+    # measurable targets rather than naming operators to call.
+    guidance = agent.GUIDANCE
+    check("guidance names the UV targets",
+          all(t in guidance for t in ("overlap", "texel density", "area_sum")))
+    check("guidance insists the render is opened", "Read" in guidance)
+    check("guidance keeps usable and right apart",
+          "USABLE" in guidance and "RIGHT" in guidance)
+    check("guidance does not prescribe an unwrap operator",
+          "smart_project" not in guidance.lower().replace(" ", "_"))
+
+    missing = agent.shutil.which
+    try:
+        agent.shutil.which = lambda _name: None
+        try:
+            agent.run("anything")
+            failed = ""
+        except RuntimeError as exc:
+            failed = str(exc)
+    finally:
+        agent.shutil.which = missing
+    check("says what to do when the claude CLI is absent",
+          "claude" in failed and "PATH" in failed and "subscription" in failed,
+          failed[:80])
+
+
 def test_hooks_match_the_names_claude_code_sends():
     """The guardrails were inert in every real install.
 
@@ -370,10 +478,11 @@ def test_spend_guard():
     check("unrelated tools are ignored", code == 0)
 
 if __name__ == "__main__":
-    for fn in (test_bridge_roundtrip, test_bridge_errors, test_gates, test_backend_resolution,
+    for fn in (test_bridge_roundtrip, test_bridge_errors, test_gates, test_uv_quality, test_backend_resolution,
                test_probe_is_valid_python, test_mcp_surface, test_mcp_survives_no_blender,
                test_addon_is_importable_shape,
-               test_hooks_match_the_names_claude_code_sends, test_export_guard, test_spend_guard):
+               test_headless_agent, test_hooks_match_the_names_claude_code_sends,
+               test_export_guard, test_spend_guard):
         fn()
     print("\n%d passed, %d failed" % (len(PASSED), len(FAILED)))
     if FAILED:

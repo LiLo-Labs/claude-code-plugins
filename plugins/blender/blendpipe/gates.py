@@ -63,6 +63,56 @@ for name in names:
     # A closed mesh whose signed volume is negative has its normals inside out.
     volume = bm.calc_volume(signed=True)
 
+    # --- UVs -------------------------------------------------------------
+    # Reporting that a UV layer *exists* is close to worthless: joining thirty
+    # boxes leaves thirty default cube unwraps stacked on the same corner, which
+    # is a layer, and is untexturable. These measure whether it is usable.
+    #
+    # uv_area_sum is the load-bearing one. UV space is the unit square, so a
+    # layout whose face areas sum above 1.0 cannot possibly fit without
+    # overlapping -- that is a proof, not a heuristic. Below 1.0 it doubles as
+    # packing efficiency.
+    uv_layer = bm.loops.layers.uv.active
+    uv = None
+    if uv_layer is not None and bm.faces:
+        GRID = 256
+        area_sum = 0.0
+        outside = 0
+        density_min, density_max = None, None
+        centroids = {}
+        for f in bm.faces:
+            pts = [l[uv_layer].uv for l in f.loops]
+            a = 0.0
+            for i in range(len(pts)):
+                q, r = pts[i], pts[(i + 1) % len(pts)]
+                a += q.x * r.y - r.x * q.y
+            a = abs(a) * 0.5
+            area_sum += a
+            if any(q.x < -1e-4 or q.x > 1.0001 or q.y < -1e-4 or q.y > 1.0001 for q in pts):
+                outside += 1
+            world = f.calc_area()
+            if world > 1e-9 and a > 0.0:
+                d = a / world
+                density_min = d if density_min is None else min(density_min, d)
+                density_max = d if density_max is None else max(density_max, d)
+            cx = sum(q.x for q in pts) / len(pts)
+            cy = sum(q.y for q in pts) / len(pts)
+            key = (int(cx * GRID), int(cy * GRID))
+            centroids[key] = centroids.get(key, 0) + 1
+
+        stacked = max(centroids.values()) if centroids else 0
+        uv = {
+            "layer": uv_layer.name if hasattr(uv_layer, "name") else mesh.uv_layers.active.name,
+            "area_sum": round(area_sum, 5),
+            "overlaps": area_sum > 1.0,
+            "stacked_faces": stacked,
+            "faces_outside_0_1": outside,
+            "texel_density_min": round(density_min, 8) if density_min else None,
+            "texel_density_max": round(density_max, 8) if density_max else None,
+            "texel_density_ratio": (round(density_max / density_min, 3)
+                                    if density_min and density_min > 1e-12 else None),
+        }
+
     report[name] = {
         "verts": len(bm.verts),
         "edges": len(bm.edges),
@@ -79,6 +129,7 @@ for name in names:
         "signed_volume": round(volume, 9),
         "inverted_normals": non_manifold == 0 and boundary == 0 and volume < 0,
         "uv_layers": [l.name for l in mesh.uv_layers],
+        "uv": uv,
         "material_slots": len([s for s in obj.material_slots if s.material]),
         "dimensions": [round(float(c), 5) for c in obj.dimensions],
         "scale": [round(float(c), 5) for c in obj.scale],
@@ -110,6 +161,11 @@ class Budget:
         self.min_dimension = kwargs.get("min_dimension")
         self.allow_ngons = kwargs.get("allow_ngons", True)
         self.allow_unapplied_scale = kwargs.get("allow_unapplied_scale", False)
+        # 4x is the point where one part is visibly softer than its neighbour at
+        # the same texture size. Stacked-face tolerance is small but non-zero:
+        # a couple of coincident centroids is a mirrored pair, not a pile.
+        self.max_texel_density_ratio = kwargs.get("max_texel_density_ratio", 4.0)
+        self.max_stacked_faces = kwargs.get("max_stacked_faces", 3)
 
     def as_dict(self):
         return {k: v for k, v in vars(self).items()}
@@ -204,6 +260,42 @@ def evaluate(report, budget=None):
                 name, "no_uvs", "blocking",
                 "no UV layer",
                 "Smart UV Project at minimum; nothing can be textured without one"))
+
+        # A UV layer that exists and a UV layer that works are different claims.
+        # These are warnings, never blocking: an unusable layout is worth saying
+        # loudly and is not worth refusing to export over, since plenty of assets
+        # are exported to be unwrapped elsewhere.
+        uv = m.get("uv")
+        if uv:
+            if uv["overlaps"]:
+                findings.append(Finding(
+                    name, "uv_overlap", "warning",
+                    "UV islands cover %.2f of the unit square, so they must overlap"
+                    % uv["area_sum"],
+                    "unwrap and pack properly — stacked islands mean every part sharing "
+                    "a shell takes the same texture, which is what a joined mesh of "
+                    "default cube unwraps looks like"))
+            elif uv["stacked_faces"] > budget.max_stacked_faces:
+                findings.append(Finding(
+                    name, "uv_stacked", "warning",
+                    "%d faces share one UV location" % uv["stacked_faces"],
+                    "islands are piled on each other; re-pack so they occupy "
+                    "distinct space"))
+
+            ratio = uv["texel_density_ratio"]
+            if ratio and ratio > budget.max_texel_density_ratio:
+                findings.append(Finding(
+                    name, "texel_density", "warning",
+                    "texel density varies %.0fx across the mesh" % ratio,
+                    "scale islands to a common density — otherwise one part renders "
+                    "sharp and another blurry at the same texture size"))
+
+            if uv["faces_outside_0_1"]:
+                findings.append(Finding(
+                    name, "uv_out_of_bounds", "warning",
+                    "%d faces have UVs outside 0-1" % uv["faces_outside_0_1"],
+                    "intentional for UDIM tiles; otherwise the texture wraps and "
+                    "repeats where you did not ask it to"))
 
         if not budget.allow_unapplied_scale and m["unapplied_scale"]:
             findings.append(Finding(

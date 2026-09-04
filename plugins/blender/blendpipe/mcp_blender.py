@@ -320,6 +320,29 @@ def t_render(args):
             % (len(out["images"]), out["engine"], "\n".join("  " + p for p in out["images"])))
 
 
+def _uv_phrase(m):
+    """Say whether the UVs are usable, not merely present.
+
+    "uvs: UVMap" was the old wording and it is the answer to a question nobody
+    asked. Thirty joined boxes have a UV layer and cannot be textured.
+    """
+    if not m.get("uv_layers"):
+        return "NONE"
+    names = ", ".join(m["uv_layers"])
+    uv = m.get("uv")
+    if not uv:
+        return names
+    if uv["overlaps"]:
+        return "%s OVERLAPPING (islands cover %.1fx the square)" % (names, uv["area_sum"])
+    bits = ["%.0f%% packed" % (uv["area_sum"] * 100)]
+    ratio = uv["texel_density_ratio"]
+    if ratio:
+        bits.append("density %.1fx" % ratio)
+    if uv["faces_outside_0_1"]:
+        bits.append("%d faces outside 0-1" % uv["faces_outside_0_1"])
+    return "%s (%s)" % (names, ", ".join(bits))
+
+
 def t_verify(args):
     report = bridge.call("execute", {"code": gates.probe_code(args.get("objects"))}, timeout=300)
     if not report.get("ok"):
@@ -343,7 +366,7 @@ def t_verify(args):
                      "%s, %s, size %s"
                      % (name, m["faces"], m["quads"], m["tris"], m["ngons"], m["quad_ratio"] * 100,
                         "watertight" if m["watertight"] else "%d boundary edges" % m["boundary_edges"],
-                        "uvs: " + (", ".join(m["uv_layers"]) or "NONE"),
+                        "uvs: " + _uv_phrase(m),
                         "x".join("%.2f" % d for d in m["dimensions"])))
     lines.append("")
     lines.append("VERDICT: %s — %d blocking, %d warnings (preset: %s)"

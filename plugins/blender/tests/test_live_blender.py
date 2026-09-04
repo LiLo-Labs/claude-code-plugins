@@ -185,6 +185,58 @@ bm.to_mesh(me); bm.free()
           any(f["check"] == "inverted_normals" for f in inv["findings"]))
 
 
+def test_uv_quality_on_real_geometry():
+    """Build the real failure case rather than a synthetic report.
+
+    Joining boxes is the ordinary way a procedural asset is assembled, and every
+    box brings its own default cube unwrap. The result has a UV layer, reports
+    `uvs: UVMap`, and cannot be textured -- which is exactly what the old check
+    called a pass.
+    """
+    print("\nuv quality on real geometry")
+    clear()
+    ex("""
+import bpy
+parts = []
+for i in range(12):
+    bpy.ops.mesh.primitive_cube_add(size=1, location=(i * 1.5, 0, 0))
+    parts.append(bpy.context.active_object)
+bpy.ops.object.select_all(action='DESELECT')
+for p in parts:
+    p.select_set(True)
+bpy.context.view_layer.objects.active = parts[0]
+bpy.ops.object.join()
+bpy.context.active_object.name = "Joined"
+""")
+    uv = ex(gates.probe_code(["Joined"]))["Joined"]["uv"]
+    check("joined boxes stack their unwraps", uv["overlaps"] is True, uv["area_sum"])
+    check("and the area proves it (>1.0 cannot fit)", uv["area_sum"] > 1.0, uv["area_sum"])
+    check("many faces share one UV spot", uv["stacked_faces"] > 3, uv["stacked_faces"])
+    findings = {f["check"]: f["severity"]
+                for f in gates.verdict(gates.evaluate(ex(gates.probe_code(["Joined"]))))["findings"]}
+    check("the gate reports it", findings.get("uv_overlap") == "warning", findings)
+    check("as a warning, not a block", "blocking" not in findings.values(), findings)
+
+    # Unwrapping it should clear the finding -- the measurement has to move when
+    # the thing it measures is fixed, or it is decoration.
+    ex("""
+import bpy
+o = bpy.data.objects["Joined"]
+bpy.ops.object.select_all(action='DESELECT')
+o.select_set(True); bpy.context.view_layer.objects.active = o
+bpy.ops.object.mode_set(mode='EDIT')
+bpy.ops.mesh.select_all(action='SELECT')
+bpy.ops.uv.smart_project(angle_limit=1.15, island_margin=0.02)
+bpy.ops.object.mode_set(mode='OBJECT')
+""")
+    after = ex(gates.probe_code(["Joined"]))["Joined"]["uv"]
+    check("a real unwrap clears the overlap", after["overlaps"] is False, after["area_sum"])
+    check("and packs into the square", after["area_sum"] <= 1.0, after["area_sum"])
+    check("and evens the texel density",
+          after["texel_density_ratio"] is not None and after["texel_density_ratio"] < 4.0,
+          after["texel_density_ratio"])
+
+
 def test_render_lights_an_unlit_scene(out):
     """Bug: a procedural session deletes the default light, so every render
     after it was a silhouette on near-black. The tool result says to go and look
@@ -365,7 +417,8 @@ def main():
             return 1
 
         for fn in (test_bridge_is_live, test_probe_runs_in_blender,
-                   test_gate_catches_broken_geometry, test_render_lights_an_unlit_scene,
+                   test_gate_catches_broken_geometry, test_uv_quality_on_real_geometry,
+                   test_render_lights_an_unlit_scene,
                    test_render_reports_the_engine_it_used, test_angle_zero_is_the_front,
                    test_framing_follows_the_lens,
                    test_render_leaves_the_camera_alone, test_exports_write_real_files):

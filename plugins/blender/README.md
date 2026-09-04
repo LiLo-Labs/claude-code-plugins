@@ -31,8 +31,9 @@ Claude Code ──MCP──> blendpipe ──socket──> BlendPipe addon ─�
   imported straight into the scene. Costs money on paid backends; free on yours.
 - **`render_views`** — a turnaround on disk to actually look at.
 - **`verify_geometry`** — non-manifold edges, degenerate and duplicate geometry,
-  inverted normals, quad ratio, polycount, UVs, unapplied scale, real-world size,
-  judged against a budget.
+  inverted normals, quad ratio, polycount, unapplied scale, real-world size, and
+  whether the UVs are *usable* — overlap, texel density spread, packing — rather
+  than merely present. Judged against a budget.
 - **`scene_summary` / `object_info` / `export_mesh` / `save_file`** — the rest.
 
 ## The two guardrails
@@ -81,12 +82,13 @@ moving to your own hardware later is one environment variable and nothing else.
 | `/blender-make` | model or generate, then render, verify and report |
 | `/blender-check` | measure the geometry and say what would fail downstream |
 | `/blender-export` | verify, then export to the right format for the target |
+| `/blender-agent` | hand a whole asset to a headless Claude and let it work unattended |
 
 ## Tests
 
 ```
-python3 plugins/blender/tests/test_blendpipe.py      # 79 checks, no Blender needed
-python3 plugins/blender/tests/test_live_blender.py   # 57 checks against real Blender
+python3 plugins/blender/tests/test_blendpipe.py      # 99 checks, no Blender needed
+python3 plugins/blender/tests/test_live_blender.py   # 65 checks against real Blender
 ```
 
 The first suite covers the bridge protocol, the gate evaluator, the backend
