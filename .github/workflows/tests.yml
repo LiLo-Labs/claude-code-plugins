@@ -35,3 +35,17 @@ jobs:
       - name: Run the test suite
         working-directory: plugins/autosprite
         run: python -m pytest tests -q
+
+  blender:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      # No install step: the suite runs a fake Blender over a local socket and
+      # speaks MCP by hand, so it needs neither pytest nor the network — the same
+      # constraint the MCP server itself is written under.
+      - name: Run the test suite
+        working-directory: plugins/blender
+        run: python3 tests/test_blendpipe.py
