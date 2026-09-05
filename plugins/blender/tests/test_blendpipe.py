@@ -367,6 +367,17 @@ def test_headless_agent():
     check("guidance does not prescribe an unwrap operator",
           "smart_project" not in guidance.lower().replace(" ", "_"))
 
+    # Both animation failures are silent and only surface on someone else's
+    # machine: drivers do not run in an untrusted file, and neither drivers nor
+    # lattices survive glTF. A rig built without knowing that measures correctly
+    # while it is authored and does nothing when it is opened or exported.
+    check("guidance warns that drivers do not run in an untrusted file",
+          "Auto Run Python Scripts" in guidance and "driver" in guidance.lower())
+    check("guidance names what actually survives glTF",
+          "morph target" in guidance.lower() and "armature" in guidance.lower())
+    check("guidance requires measuring the animation, not watching it",
+          "evaluated vertex positions" in guidance)
+
     # Preflight. An unattended agent pointed at a Blender that is not running
     # does not stop: it errors, reasons, retries, and burns every turn it was
     # given. Nine minutes of exactly that is why this check exists.

@@ -111,6 +111,27 @@ SCALE
   Real-world dimensions, scale applied. An unapplied scale breaks modifiers,
   physics and most exporters.
 
+ANIMATION
+  Two failure modes here are silent, produce correct-looking measurements at
+  authoring time, and only surface on someone else's machine.
+
+  Drivers do not run in an untrusted file. Blender refuses driver expressions
+  unless Auto Run Python Scripts is on, which is off by default everywhere. A rig
+  that routes custom properties through drivers into shape keys animates its
+  properties, leaves every shape key at zero, and renders a mesh that is
+  byte-identical on every frame. It works while you build it and dies when the
+  file is reopened. Key the shape keys directly in the Action instead.
+
+  Only morph targets and armature bones survive glTF. Drivers do not. Lattice
+  deformers do not. Modifier animation does not. So anything that must move in a
+  game engine has to be a shape key or a bone, and anything else has to be baked
+  into one before export.
+
+  Do not report an animation as working on the strength of the viewport. Sample
+  evaluated vertex positions across frames and report the displacement; confirm
+  the loop closes by measuring frame N+1 against frame 1; and if it is going to
+  an engine, export it and re-import it and measure the copy.
+
 WORK WHERE IT CAN BE SEEN
   Someone may have this Blender open in front of them. The workspace tab,
   shading mode, framing and status bar are driven for you from outside, so do
