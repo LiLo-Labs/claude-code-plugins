@@ -404,6 +404,15 @@ def test_headless_agent():
           'transcript_file = open(transcript_path, "w", buffering=1)' in body
           and 'transcript_file.write' in body)
 
+    # Killing the runner must not orphan `claude`. It did: pkill on the wrapper
+    # left the child driving Blender, and it carried on rebuilding the scene
+    # underneath the next run and overwrote that run's output mid-measurement.
+    check("the child is reaped on SIGTERM, SIGINT and SIGHUP",
+          all(s in body for s in ("SIGTERM", "SIGINT", "SIGHUP")))
+    check("and on ordinary exit too", "atexit.register(_reap)" in body)
+    check("reaping escalates to kill if terminate is ignored",
+          "process.kill()" in body.split("def _reap")[1].split("previous")[0])
+
     # Preflight. An unattended agent pointed at a Blender that is not running
     # does not stop: it errors, reasons, retries, and burns every turn it was
     # given. Nine minutes of exactly that is why this check exists.

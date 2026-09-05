@@ -24,9 +24,11 @@ attaches the MCP server with --mcp-config rather than loading the plugin, so
 nothing blocks an export. `verify_geometry` still measures -- it just reports.
 """
 
+import atexit
 import json
 import os
 import shutil
+import signal
 import socket
 import subprocess
 import sys
@@ -403,6 +405,29 @@ def run(task, run_dir=None, max_turns=80, model=MODEL, timeout=3600, extra="",
     process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                text=True, bufsize=1)
     watchdog = _Watchdog(process).start()
+
+    # Killing this runner must not leave `claude` behind still driving Blender.
+    # It happened: pkill on the wrapper orphaned the child, which carried on
+    # rebuilding the scene underneath the next run and overwrote its output
+    # while that run was measuring it. An orphan here is not a stray process,
+    # it is a second author of the same file.
+    def _reap(signum=None, _frame=None):
+        if process.poll() is None:
+            process.terminate()
+            try:
+                process.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                process.kill()
+        if signum is not None:
+            raise SystemExit(128 + signum)
+
+    previous = {}
+    for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+        try:
+            previous[sig] = signal.signal(sig, _reap)
+        except (ValueError, OSError):
+            pass          # not the main thread, or the platform disallows it
+    atexit.register(_reap)
 
     follower = None
     if follow:
