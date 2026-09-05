@@ -316,6 +316,13 @@ def _print_event(summary):
     kind = summary.get("kind")
     if kind == "start":
         line = "· connected, %d tools" % summary.get("tools", 0)
+    elif kind in ("think", "say"):
+        # Without this the log goes silent for minutes while the model plans,
+        # which is the exact "is it working or wedged" ambiguity this printer
+        # exists to remove. It was being extracted for the Blender panel and
+        # dropped here.
+        line = "· %-16s %s" % ("thinking" if kind == "think" else "says",
+                               summary["detail"])
     elif kind == "tool":
         line = "· %-16s %s" % (summary["tool"], summary["detail"])
     elif kind == "scene":
@@ -402,6 +409,12 @@ def run(task, run_dir=None, max_turns=80, model=MODEL, timeout=3600, extra="",
         follower = viewport.Follower(
             on_change=lambda state: on_event({"kind": "scene", **state})).start()
 
+    # Appended as events arrive, not written at the end. A transcript that only
+    # exists once the run finishes cannot tell you anything about a run that has
+    # not finished, which is the only time you need it.
+    transcript_path = os.path.join(run_dir, "transcript.jsonl")
+    transcript_file = open(transcript_path, "w", buffering=1)
+
     envelope, transcript = {}, []
     try:
         for line in process.stdout or ():
@@ -409,6 +422,7 @@ def run(task, run_dir=None, max_turns=80, model=MODEL, timeout=3600, extra="",
             if not line:
                 continue
             transcript.append(line)
+            transcript_file.write(line + "\n")
             try:
                 event = json.loads(line)
             except ValueError:
@@ -425,11 +439,10 @@ def run(task, run_dir=None, max_turns=80, model=MODEL, timeout=3600, extra="",
         watchdog.stop()
         if follower:
             follower.stop()
+        transcript_file.close()
 
     stderr = process.stderr.read() if process.stderr else ""
     finished = subprocess.CompletedProcess(command, process.returncode, "\n".join(transcript), stderr)
-    with open(os.path.join(run_dir, "transcript.jsonl"), "w") as handle:
-        handle.write("\n".join(transcript) + "\n")
 
     if watchdog.lost:
         failure = os.path.join(run_dir, "failed.txt")

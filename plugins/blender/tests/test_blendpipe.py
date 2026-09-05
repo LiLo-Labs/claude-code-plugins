@@ -378,6 +378,32 @@ def test_headless_agent():
     check("guidance requires measuring the animation, not watching it",
           "evaluated vertex positions" in guidance)
 
+    # Both of these made a working run look wedged. Reasoning was extracted for
+    # the Blender panel and dropped by the printer, so the terminal went silent
+    # for minutes at a time; and the transcript was written at the end, so a run
+    # in flight -- the only time you need it -- had nothing to inspect.
+    printed = []
+    real_stderr = agent.sys.stderr
+    class _Sink:
+        def write(self, text): printed.append(text)
+        def flush(self): pass
+    try:
+        agent.sys.stderr = _Sink()
+        agent._print_event({"kind": "think", "tool": "thinking", "detail": "weighing joinery"})
+        agent._print_event({"kind": "say", "tool": "says", "detail": "starting the crate"})
+        agent._print_event({"kind": "tool", "tool": "execute_python", "detail": "bpy..."})
+    finally:
+        agent.sys.stderr = real_stderr
+    check("reasoning is printed, not silently dropped",
+          any("weighing joinery" in t for t in printed), printed)
+    check("and so is what it says", any("starting the crate" in t for t in printed), printed)
+
+    source = pathlib.Path(agent.__file__).read_text()
+    body = source.split("def run(")[1]
+    check("the transcript is appended while the run is live, not at the end",
+          'transcript_file = open(transcript_path, "w", buffering=1)' in body
+          and 'transcript_file.write' in body)
+
     # Preflight. An unattended agent pointed at a Blender that is not running
     # does not stop: it errors, reasons, retries, and burns every turn it was
     # given. Nine minutes of exactly that is why this check exists.
