@@ -300,6 +300,15 @@ def test_addon_is_importable_shape():
                  if "bpy." in l and "bpy.app.timers" not in l]
     check("BridgeServer never touches bpy off the main thread", not offenders, str(offenders))
 
+    # An invisible panel is not a feature. The sidebar is closed by default and
+    # only toggles on N over a 3D viewport, so the Agent panel shipped populated
+    # and unseen.
+    check("starting the bridge opens the sidebar",
+          "_open_sidebar()" in src.split("class BLENDPIPE_OT_start")[1].split("class ")[0])
+    check("there is an activity handler for the panel to draw", '"activity": _h_activity' in src)
+    check("and it asks Blender to repaint",
+          "tag_redraw" in src.split("def _h_activity")[1].split("\ndef ")[0])
+
     # _h_render restores the caller's engine in a finally, so reading
     # scene.render.engine for the return value names the engine that did not
     # make the pixels -- CYCLES reported for an EEVEE critique render.

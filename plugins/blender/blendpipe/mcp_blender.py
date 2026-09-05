@@ -419,6 +419,48 @@ HANDLERS = {
 }
 
 
+#: Which sidebar icon a tool's activity gets.
+_ACTIVITY_KIND = {
+    "execute_python": "build", "render_views": "render", "verify_geometry": "verify",
+    "export_mesh": "verify", "save_file": "step", "generate_mesh": "build",
+    "scene_summary": "tool", "object_info": "tool", "blender_status": "tool",
+    "list_backends": "tool",
+}
+
+
+def _announce(tool, args, problem=None):
+    """Mirror this call into Blender's own Agent panel.
+
+    Fed from here rather than only from the headless runner, because otherwise
+    the panel is blank for the far more common case: a person driving Blender
+    from a Claude Code session. Whoever is at the wheel, the panel shows it.
+
+    Best-effort and silent on failure. A cosmetic panel must never be the reason
+    a tool call reports an error.
+    """
+    if not tool:
+        return
+    short = tool.rsplit("__", 1)[-1]
+    if problem:
+        entry, kind = "%s failed: %s" % (short, problem[:60]), "problem"
+    else:
+        detail = ""
+        if short == "execute_python":
+            body = [l.strip() for l in (args.get("code") or "").splitlines()
+                    if l.strip() and not l.strip().startswith(("#", "import ", "from "))]
+            detail = body[0][:60] if body else ""
+        elif short == "render_views":
+            detail = "angles %s" % (args.get("angles") or [0, 90, 180, 270])
+        elif short in ("verify_geometry", "export_mesh"):
+            detail = str(args.get("objects") or args.get("path") or "")[:50]
+        entry = (short + " " + detail).strip()
+        kind = _ACTIVITY_KIND.get(short, "tool")
+    try:
+        bridge.call("activity", {"kind": kind, "entry": entry}, timeout=5)
+    except Exception:
+        pass
+
+
 def main():
     for line in sys.stdin:
         line = line.strip()
@@ -446,8 +488,11 @@ def main():
                     # back as readable tool output so the model can act on them.
                     try:
                         text = fn(p.get("arguments") or {})
+                        _announce(p.get("name"), p.get("arguments") or {})
                     except (bridge.BridgeError, BackendError) as exc:
                         text = str(exc)
+                        _announce(p.get("name"), p.get("arguments") or {},
+                                  problem=str(exc).splitlines()[0])
                 res = {"content": [{"type": "text", "text": text}]}
             elif method in ("notifications/initialized", "initialized"):
                 continue

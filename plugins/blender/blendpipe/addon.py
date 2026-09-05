@@ -784,6 +784,26 @@ class BridgeServer:
 # UI
 # --------------------------------------------------------------------------
 
+def _open_sidebar():
+    """Show the N sidebar, because an invisible panel is not a feature.
+
+    The Agent panel lives in the sidebar, which is closed by default and is only
+    toggled by pressing N with the pointer over a 3D viewport. So the panel was
+    shipped, populated, and never seen -- and in a workspace like Shading, where
+    the viewport is one small pane, there is barely anywhere to press N. Starting
+    the bridge is the moment the user has opted into being driven, so that is the
+    moment to show them what is driving.
+    """
+    try:
+        for window in bpy.context.window_manager.windows:
+            for area in window.screen.areas:
+                if area.type == "VIEW_3D":
+                    area.spaces.active.show_region_ui = True
+                    area.tag_redraw()
+    except Exception:
+        pass
+
+
 class BLENDPIPE_OT_start(bpy.types.Operator):
     bl_idname = "blendpipe.start"
     bl_label = "Start BlendPipe Bridge"
@@ -801,6 +821,7 @@ class BLENDPIPE_OT_start(bpy.types.Operator):
             self.report({"ERROR"}, "could not bind port: %s" % exc)
             return {"CANCELLED"}
         context.scene.blendpipe_running = True
+        _open_sidebar()
         return {"FINISHED"}
 
 
