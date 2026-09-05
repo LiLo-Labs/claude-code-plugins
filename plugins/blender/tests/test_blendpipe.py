@@ -7,6 +7,7 @@ No pytest, no network, no Blender — same constraint as the server itself.
 import json
 import re
 import os
+import pathlib
 import subprocess
 import sys
 import tempfile
@@ -356,6 +357,31 @@ def test_headless_agent():
           "USABLE" in guidance and "RIGHT" in guidance)
     check("guidance does not prescribe an unwrap operator",
           "smart_project" not in guidance.lower().replace(" ", "_"))
+
+    # Preflight. An unattended agent pointed at a Blender that is not running
+    # does not stop: it errors, reasons, retries, and burns every turn it was
+    # given. Nine minutes of exactly that is why this check exists.
+    listening = agent.blender_listening
+    try:
+        agent.blender_listening = lambda **_kw: False
+        try:
+            agent.run("anything")
+            refused = ""
+        except RuntimeError as exc:
+            refused = str(exc)
+    finally:
+        agent.blender_listening = listening
+    check("refuses to start when Blender is not listening", "not reachable" in refused, refused[:70])
+    check("and names the address it tried", "9876" in refused, refused[:70])
+
+    # Connect-only, not a ping: the addon accepts on a background thread and
+    # answers on Blender's main thread, so a busy Blender still accepts. A ping
+    # round-trip would read "rendering" as "gone" and kill a healthy run.
+    source = pathlib.Path(agent.__file__).read_text()
+    watch = source.split("class _Watchdog")[1].split("def run(")[0]
+    check("the watchdog tests the socket, not a round-trip",
+          "create_connection" in source and "ping" not in watch.lower())
+    check("and tolerates a miss before killing", "tolerate" in watch)
 
     missing = agent.shutil.which
     try:

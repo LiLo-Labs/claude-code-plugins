@@ -315,9 +315,19 @@ def t_render(args):
         "samples": args.get("samples", 32),
         "output_dir": run_dir("render"),
     }, timeout=float(args.get("timeout", 900)))
-    return ("Rendered %d views on %s:\n%s\n\nNow READ these files. A turnaround you did not "
-            "look at tells you nothing."
-            % (len(out["images"]), out["engine"], "\n".join("  " + p for p in out["images"])))
+    # Say what lit it. The renderer uses the scene's own lights when it has any
+    # and only adds a studio rig to a scene with none — but that was invisible
+    # from here, and an agent that lit its scene badly blamed this tool for the
+    # result rather than its own two lamps.
+    lit = out.get("lit_by") or "the scene"
+    lighting = ("lit by the scene's own lights — if the result is flat or "
+                "colourless, that is your lighting, not the renderer"
+                if lit == "the scene" else
+                "lit by a temporary studio rig, because the scene has no lights")
+    return ("Rendered %d views on %s, %s:\n%s\n\nNow READ these files. A turnaround you did "
+            "not look at tells you nothing."
+            % (len(out["images"]), out["engine"], lighting,
+               "\n".join("  " + p for p in out["images"])))
 
 
 def _uv_phrase(m):

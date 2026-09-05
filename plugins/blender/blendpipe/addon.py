@@ -35,6 +35,7 @@ bl_info = {
 }
 
 import base64
+import collections
 import io
 import json
 import os
@@ -57,6 +58,13 @@ FRAMING_MARGIN = 1.08
 # Jobs waiting for the main thread. Each entry is a _Job.
 _jobs: "queue.Queue" = queue.Queue()
 _server = None
+
+# What the agent is doing, for the sidebar to draw. A ring buffer rather than a
+# log: an unattended run is otherwise completely opaque from inside Blender, and
+# a person watching the viewport has no way to tell thinking from wedged.
+ACTIVITY_LIMIT = 14
+_activity = collections.deque(maxlen=ACTIVITY_LIMIT)
+_status = {"stage": "", "turn": 0, "note": ""}
 
 
 class _Job:
@@ -114,6 +122,33 @@ def _h_execute(params):
         "stderr": err.getvalue(),
         "result": _jsonable(ns.get("result")),
     }
+
+
+def _h_activity(params):
+    """Record what the driving agent is up to, for the sidebar to show.
+
+    Kept deliberately dumb: the agent decides what is worth saying, this only
+    stores it and asks the UI to redraw. Redrawing matters — Blender will not
+    repaint a panel just because a Python list changed underneath it, so an
+    unattended run would fill this buffer and display none of it.
+    """
+    entry = params.get("entry")
+    if entry:
+        _activity.append({
+            "kind": str(params.get("kind", "step"))[:16],
+            "text": str(entry)[:200],
+        })
+    for key in ("stage", "turn", "note"):
+        if params.get(key) is not None:
+            _status[key] = params[key]
+    if params.get("clear"):
+        _activity.clear()
+
+    for window in bpy.context.window_manager.windows:
+        for area in window.screen.areas:
+            if area.type == "VIEW_3D":
+                area.tag_redraw()
+    return {"entries": len(_activity), "status": dict(_status)}
 
 
 def _jsonable(value, _depth=0):
@@ -623,6 +658,7 @@ HANDLERS = {
     "export_mesh": _h_export_mesh,
     "render": _h_render,
     "save": _h_save,
+    "activity": _h_activity,
 }
 
 
@@ -799,7 +835,64 @@ class BLENDPIPE_PT_panel(bpy.types.Panel):
             layout.label(text="Not connected", icon="UNLINKED")
 
 
-_CLASSES = (BLENDPIPE_OT_start, BLENDPIPE_OT_stop, BLENDPIPE_PT_panel)
+#: Icon per kind of activity, so the column is scannable without reading it.
+_ACTIVITY_ICONS = {
+    "think": "OUTLINER_OB_LIGHT",
+    "tool": "TOOL_SETTINGS",
+    "build": "MESH_DATA",
+    "uv": "UV",
+    "material": "MATERIAL",
+    "render": "RESTRICT_RENDER_OFF",
+    "verify": "CHECKMARK",
+    "problem": "ERROR",
+    "step": "DOT",
+}
+
+
+class BLENDPIPE_PT_activity(bpy.types.Panel):
+    """What the agent is doing, inside Blender.
+
+    An unattended run changes the scene and says nothing about why. From in
+    here, a model reasoning for two minutes and a model talking to a closed
+    socket look exactly the same — which has already wasted a session. This is
+    the cheapest possible fix: the driver pushes what it is doing, and the
+    person watching the viewport can see it without a terminal.
+    """
+
+    bl_label = "Agent"
+    bl_idname = "BLENDPIPE_PT_activity"
+    bl_parent_id = "BLENDPIPE_PT_panel"
+    bl_space_type = "VIEW_3D"
+    bl_region_type = "UI"
+    bl_category = "BlendPipe"
+
+    def draw(self, context):
+        layout = self.layout
+
+        if _status.get("stage") or _status.get("turn"):
+            header = layout.row()
+            header.label(text=_status.get("stage") or "working", icon="SEQUENCE")
+            if _status.get("turn"):
+                header.label(text="turn %d" % _status["turn"])
+        if _status.get("note"):
+            layout.label(text=_status["note"][:48], icon="INFO")
+
+        if not _activity:
+            layout.label(text="idle — nothing driving this session", icon="RADIOBUT_OFF")
+            return
+
+        column = layout.column(align=True)
+        # Newest last, so it reads downward like a transcript rather than
+        # jumping the eye to the top on every redraw.
+        for item in _activity:
+            row = column.row()
+            row.scale_y = 0.82
+            row.label(text=item["text"][:56],
+                      icon=_ACTIVITY_ICONS.get(item["kind"], "DOT"))
+
+
+_CLASSES = (BLENDPIPE_OT_start, BLENDPIPE_OT_stop, BLENDPIPE_PT_panel,
+            BLENDPIPE_PT_activity)
 
 
 def register():
