@@ -217,6 +217,71 @@ class _Watchdog:
                 return
 
 
+#: Every live run, so there is always something to point `--stop` at.
+REGISTRY = os.path.join(RUNS, "running.json")
+
+
+def _live():
+    """Runs that are actually still going, pruning any that have exited."""
+    try:
+        with open(REGISTRY) as handle:
+            entries = json.load(handle)
+    except (OSError, ValueError):
+        return []
+    alive = []
+    for entry in entries:
+        try:
+            os.kill(entry["pid"], 0)
+        except OSError:
+            continue
+        alive.append(entry)
+    return alive
+
+
+def _write_registry(entries):
+    os.makedirs(os.path.dirname(REGISTRY), exist_ok=True)
+    with open(REGISTRY, "w") as handle:
+        json.dump(entries, handle, indent=2)
+
+
+def _register(run_dir, pid):
+    entries = _live()
+    entries.append({"pid": pid, "run_dir": run_dir, "started": time.time()})
+    _write_registry(entries)
+    with open(os.path.join(run_dir, "agent.pid"), "w") as handle:
+        handle.write("%d\n" % pid)
+
+
+def stop_all():
+    """Kill every live run. The off switch that exists however one was launched."""
+    stopped = []
+    for entry in _live():
+        pid = entry["pid"]
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except OSError:
+            continue
+        for _ in range(20):
+            try:
+                os.kill(pid, 0)
+            except OSError:
+                break
+            time.sleep(0.25)
+        else:
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except OSError:
+                pass
+        stopped.append(entry)
+    _write_registry([])
+    return stopped
+
+
+def running():
+    """What is live right now, so 'is anything driving Blender?' has an answer."""
+    return _live()
+
+
 def _summarise(event):
     """Turn one stream-json event into at most one line worth printing.
 
@@ -429,6 +494,12 @@ def run(task, run_dir=None, max_turns=80, model=MODEL, timeout=3600, extra="",
             pass          # not the main thread, or the platform disallows it
     atexit.register(_reap)
 
+    # A run detached to survive the harness also survives a user pressing stop:
+    # the interrupt reaches whatever launched it, never the child. Two runs once
+    # drove one Blender for twenty minutes after being told to stop. So every
+    # run records where it is, and `--stop` is an off switch that always exists.
+    _register(run_dir, process.pid)
+
     follower = None
     if follow:
         follower = viewport.Follower(
@@ -520,6 +591,25 @@ def main(argv):
         print((__doc__ or "").strip())
         print("\nusage: python3 -m blendpipe.agent \"model a wooden watchtower, "
               "unwrap and texture it\" [--turns N] [--model M]")
+        print("       python3 -m blendpipe.agent --running")
+        print("       python3 -m blendpipe.agent --stop")
+        return 0
+
+    if argv[0] == "--running":
+        live = running()
+        for entry in live:
+            print("%d  %s  %.0fs" % (entry["pid"], entry["run_dir"],
+                                     time.time() - entry["started"]))
+        if not live:
+            print("nothing running")
+        return 0
+
+    if argv[0] == "--stop":
+        stopped = stop_all()
+        for entry in stopped:
+            print("stopped %d (%s)" % (entry["pid"], entry["run_dir"]))
+        if not stopped:
+            print("nothing running")
         return 0
 
     task, turns, model = argv[0], 80, MODEL

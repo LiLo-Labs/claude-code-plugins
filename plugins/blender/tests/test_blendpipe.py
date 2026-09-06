@@ -413,6 +413,18 @@ def test_headless_agent():
     check("reaping escalates to kill if terminate is ignored",
           "process.kill()" in body.split("def _reap")[1].split("previous")[0])
 
+    # A run detached to survive the harness also survives the user pressing stop:
+    # the interrupt reaches whatever launched it, never the child. Two runs once
+    # kept driving Blender for twenty minutes after being told to stop, and there
+    # was no command that could have ended them.
+    check("every run registers itself so there is something to stop",
+          "_register(run_dir, process.pid)" in body)
+    check("--stop exists and kills what is live",
+          all(t in source for t in ("def stop_all", "--stop", "SIGKILL")))
+    check("--running answers 'is anything driving Blender'",
+          "def running" in source and "--running" in source)
+    check("the registry prunes runs that already exited", "os.kill(entry[\"pid\"], 0)" in source)
+
     # Preflight. An unattended agent pointed at a Blender that is not running
     # does not stop: it errors, reasons, retries, and burns every turn it was
     # given. Nine minutes of exactly that is why this check exists.
