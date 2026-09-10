@@ -1,0 +1,329 @@
+<title>Review Desk</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,400;6..72,600&family=Public+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400&display=swap">
+<style>
+:root{
+  --paper:#f7f5f2; --card:#fffefc; --edge:#e3ded6; --rule:#ece7e0;
+  --ink:#22201d; --soft:#5f5a53; --faint:#948d84;
+  --mark:#9a4a2f; --good:#3f6b4a; --cool:#3d5a72;
+  --doc:"Newsreader",Georgia,serif;
+  --ui:"Public Sans",system-ui,sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,Menlo,monospace;
+}
+:root:not([data-theme="light"]){}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --paper:#15140f; --card:#1c1a16; --edge:#302c25; --rule:#2a2721;
+    --ink:#eee9e0; --soft:#a89f93; --faint:#7a7267;
+    --mark:#d4805f; --good:#7fb08c; --cool:#7fa5c4;
+  }
+}
+:root[data-theme="dark"]{
+  --paper:#15140f; --card:#1c1a16; --edge:#302c25; --rule:#2a2721;
+  --ink:#eee9e0; --soft:#a89f93; --faint:#7a7267;
+  --mark:#d4805f; --good:#7fb08c; --cool:#7fa5c4;
+}
+*{box-sizing:border-box}
+body{background:var(--paper);color:var(--ink);font-family:var(--ui);
+  font-size:16px;line-height:1.6;margin:0;padding:0 18px 60px;
+  -webkit-text-size-adjust:100%}
+.wrap{max-width:760px;margin:0 auto}
+
+header.top{padding:30px 0 18px}
+.tag{font-family:var(--mono);font-size:10.5px;letter-spacing:.16em;
+  text-transform:uppercase;color:var(--mark)}
+h1{font-family:var(--doc);font-weight:600;font-size:30px;line-height:1.15;
+  margin:8px 0 6px;letter-spacing:-.01em}
+.meta{font-family:var(--mono);font-size:11.5px;color:var(--faint)}
+.meta a{color:var(--cool)}
+
+.panel{background:var(--card);border:1px solid var(--edge);border-radius:6px;
+  margin:16px 0;overflow:hidden}
+.head{padding:13px 17px;border-bottom:1px solid var(--rule);
+  display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.head h2{font-family:var(--ui);font-weight:600;font-size:13.5px;margin:0;
+  letter-spacing:.01em}
+.head .note{font-family:var(--mono);font-size:10.5px;color:var(--faint);
+  margin-left:auto}
+.body{padding:17px}
+
+details.doc summary{list-style:none;cursor:pointer;padding:13px 17px;
+  font-family:var(--ui);font-weight:600;font-size:13.5px;
+  display:flex;align-items:center;gap:9px}
+details.doc summary::-webkit-details-marker{display:none}
+details.doc summary::before{content:"▸";color:var(--faint);font-size:11px}
+details.doc[open] summary::before{content:"▾"}
+details.doc[open] summary{border-bottom:1px solid var(--rule)}
+.md{font-family:var(--doc);font-size:16.5px;line-height:1.65;padding:6px 17px 17px}
+.md h1{font-size:22px;margin:20px 0 4px}
+.md h2{font-family:var(--doc);font-weight:600;font-size:18px;margin:24px 0 6px;
+  padding-top:14px;border-top:1px solid var(--rule)}
+.md h2:first-of-type{border-top:none;padding-top:0}
+.md p{margin:0 0 12px}
+.md strong{font-weight:600}
+.md em{font-style:italic}
+.md blockquote{margin:14px 0;padding:2px 0 2px 15px;
+  border-left:2px solid var(--mark);color:var(--soft)}
+.md code{font-family:var(--mono);font-size:14px;background:var(--rule);
+  padding:1px 4px;border-radius:3px}
+
+.chat{display:flex;flex-direction:column;gap:13px;padding:17px;
+  max-height:none}
+.turn{display:flex;flex-direction:column;gap:4px;max-width:92%}
+.turn.mine{align-self:flex-end;align-items:flex-end}
+.who{font-family:var(--mono);font-size:9.5px;letter-spacing:.11em;
+  text-transform:uppercase;color:var(--faint)}
+.said{padding:10px 13px;border-radius:9px;white-space:pre-wrap;
+  font-size:15px;line-height:1.55}
+.turn.mine .said{background:var(--cool);color:#fff;border-bottom-right-radius:2px}
+.turn.theirs .said{background:var(--rule);border-bottom-left-radius:2px}
+.empty{color:var(--faint);font-size:14.5px;padding:4px 0 0}
+
+.ask{display:flex;gap:9px;padding:13px 17px;border-top:1px solid var(--rule);
+  align-items:flex-end}
+textarea{flex:1;font-family:var(--ui);font-size:16px;line-height:1.5;
+  padding:10px 12px;border:1px solid var(--edge);border-radius:7px;
+  background:var(--paper);color:var(--ink);resize:none;min-height:44px;
+  max-height:160px}
+textarea:focus{outline:2px solid var(--cool);outline-offset:-1px;border-color:transparent}
+button{font-family:var(--ui);font-weight:600;font-size:14px;padding:11px 17px;
+  border-radius:7px;border:1px solid var(--edge);background:var(--card);
+  color:var(--ink);cursor:pointer;white-space:nowrap}
+button:hover{border-color:var(--faint)}
+button:disabled{opacity:.45;cursor:default}
+button.go{background:var(--cool);border-color:var(--cool);color:#fff}
+button.yes{background:var(--good);border-color:var(--good);color:#fff}
+
+.prompts{display:flex;gap:7px;flex-wrap:wrap;padding:0 17px 15px}
+.prompts button{font-size:12.5px;font-weight:400;padding:6px 11px;
+  color:var(--soft);border-radius:14px}
+
+.verdict{display:flex;gap:9px;flex-wrap:wrap;padding:17px;align-items:center}
+.verdict .said{margin-right:auto;font-size:13.5px;color:var(--soft);
+  background:none;padding:0}
+.done{padding:17px;font-size:15px;line-height:1.6}
+.done b{color:var(--good)}
+
+footer{padding:22px 0 0;font-size:12.5px;color:var(--faint);line-height:1.6}
+</style>
+
+<div class="wrap">
+<header class="top">
+  <div class="tag" id="repoTag"></div>
+  <h1 id="title"></h1>
+  <div class="meta" id="meta"></div>
+</header>
+
+<div class="panel">
+  <div class="head"><h2>What this is</h2></div>
+  <div class="md" id="prBody" style="padding-top:14px"></div>
+</div>
+
+<div id="docs"></div>
+
+<div class="panel">
+  <div class="head"><h2>Talk it through</h2><span class="note" id="chatNote"></span></div>
+  <div class="chat" id="chat"></div>
+  <div class="prompts" id="prompts"></div>
+  <div class="ask">
+    <textarea id="box" rows="1" placeholder="Ask anything about it&hellip;"></textarea>
+    <button class="go" id="send">Send</button>
+  </div>
+</div>
+
+<div class="panel" id="decide">
+  <div class="head"><h2>When you have made up your mind</h2></div>
+  <div class="verdict">
+    <span class="said">Recorded here. I pick it up, write the discussion into the pull request, and merge or revise accordingly.</span>
+    <button class="yes" id="ok">Approve</button>
+    <button id="changes">Needs changes</button>
+  </div>
+</div>
+
+<footer>
+  The Claude answering here is a fresh call that can see this document and this
+  conversation, and nothing else &mdash; it cannot run the tests or read the
+  wider repository. For anything needing that, say so and it will come back to me.
+</footer>
+</div>
+
+<script>
+const DATA = /*PAYLOAD*/;
+const $ = id => document.getElementById(id);
+
+/* --- the document, rendered --- */
+function markdown(src){
+  const esc = s => s.replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+  const inline = s => esc(s)
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*(.+?)\*/g, '<em>$1</em>')
+    .replace(/`(.+?)`/g, '<code>$1</code>');
+  const out = []; let para = [], quote = [];
+  const flushP = () => { if (para.length){ out.push('<p>'+inline(para.join(' '))+'</p>'); para=[]; } };
+  const flushQ = () => { if (quote.length){ out.push('<blockquote>'+inline(quote.join(' '))+'</blockquote>'); quote=[]; } };
+  for (const line of src.split('\n')){
+    if (line.startsWith('> ')){ flushP(); quote.push(line.slice(2)); continue; }
+    flushQ();
+    if (line.startsWith('## ')){ flushP(); out.push('<h2>'+inline(line.slice(3))+'</h2>'); }
+    else if (line.startsWith('# ')){ flushP(); out.push('<h1>'+inline(line.slice(2))+'</h1>'); }
+    else if (!line.trim()){ flushP(); }
+    else para.push(line);
+  }
+  flushP(); flushQ();
+  return out.join('');
+}
+$('title').textContent = DATA.title;
+$('repoTag').textContent = (DATA.repo || '') + ' \u00b7 review desk';
+$('meta').innerHTML = 'pull request <a href="' + DATA.url + '">#' + DATA.number
+  + '</a>' + (DATA.summary ? ' \u00b7 ' + DATA.summary : '');
+$('prBody').innerHTML = markdown(DATA.body || '');
+$('docs').innerHTML = (DATA.documents || []).map((d, i) =>
+  '<details class="doc panel"' + (DATA.documents.length === 1 ? ' open' : '') + '>'
+  + '<summary>' + d.name.replace(/[&<>]/g, '') + '</summary>'
+  + '<div class="md">' + markdown(d.text) + '</div></details>').join('');
+
+/* --- conversation --- */
+const turns = [];
+let sample = null, db = null, decided = false;
+
+function draw(){
+  const chat = $('chat');
+  chat.innerHTML = turns.length ? '' :
+    '<div class="empty">Nothing yet. Ask why something is the way it is, push on the exclusions, or say what you would change.</div>';
+  for (const t of turns){
+    const el = document.createElement('div');
+    el.className = 'turn ' + (t.role === 'user' ? 'mine' : 'theirs');
+    el.innerHTML = '<span class="who">' + (t.role === 'user' ? 'you' : 'claude') +
+      '</span><div class="said"></div>';
+    el.querySelector('.said').textContent = t.content;
+    chat.appendChild(el);
+  }
+  chat.scrollTop = chat.scrollHeight;
+}
+draw();
+
+const OPENERS = DATA.openers && DATA.openers.length ? DATA.openers : [
+  "What is the weakest part of this?",
+  "What did you consider and reject?",
+  "What would you challenge if you were me?",
+  "What breaks if I say no to this?",
+];
+$('prompts').innerHTML = OPENERS.map((q,i) =>
+  '<button data-q="'+i+'">'+q+'</button>').join('');
+$('prompts').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  $('box').value = OPENERS[+b.dataset.q]; ask();
+});
+
+function context(){
+  return "You are helping Mark review a design document for a project called "
+    + "forge. Answer his questions about it directly and briefly. Be honest "
+    + "about weaknesses. If something cannot be answered from the document "
+    + "alone — anything needing the code, the tests, or the wider "
+    + "repository — say so plainly and suggest he raise it with Claude in "
+    + "the working session rather than guessing.\n\n"
+    + "THE PULL REQUEST:\n\n" + (DATA.body || "")
+    + (DATA.documents || []).map(d =>
+        "\n\n--- " + d.name + " ---\n\n" + d.text).join("");
+}
+
+async function ask(){
+  const box = $('box');
+  const question = box.value.trim();
+  if (!question || !sample) return;
+  box.value = ''; box.style.height = 'auto';
+  turns.push({role:'user', content: question});
+  turns.push({role:'assistant', content: 'Thinking…'});
+  draw();
+  $('send').disabled = true;
+
+  const input = [{role:'user', content: context() + "\n\nHis question: " + question}];
+  for (let i = 0; i < turns.length - 2; i++){
+    if (i === 0) continue;
+    input.push({role: turns[i].role, content: turns[i].content});
+  }
+  // Keep it simple and correct: one turn carrying the document, the prior
+  // exchange, and the new question. `sample` has no memory of its own.
+  const history = turns.slice(0, -2).map(t =>
+    (t.role === 'user' ? 'Mark: ' : 'You: ') + t.content).join('\n\n');
+  const single = [{role:'user', content: context()
+    + (history ? "\n\nSO FAR:\n\n" + history : "")
+    + "\n\nHis question now: " + question}];
+
+  try {
+    const res = await sample(single, {
+      modelTier: 'complex',
+      cache: false,
+      onText: u => { turns[turns.length-1].content = u.text; draw(); },
+    });
+    turns[turns.length-1].content = res.text;
+  } catch (err) {
+    turns[turns.length-1].content =
+      err && err.code === 'rate_limited'
+        ? 'Rate limited — give it a moment and ask again.'
+        : 'That did not go through' + (err && err.message ? ': ' + err.message : '.');
+  }
+  draw();
+  $('send').disabled = false;
+  save();
+}
+
+$('send').addEventListener('click', ask);
+$('box').addEventListener('input', e => {
+  e.target.style.height = 'auto';
+  e.target.style.height = Math.min(e.target.scrollHeight, 160) + 'px';
+});
+$('box').addEventListener('keydown', e => {
+  if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); ask(); }
+});
+
+/* --- persistence, so I can read this back --- */
+async function save(){
+  if (!db) return;
+  try {
+    await db.doc('review/pr-' + DATA.number).set({
+      pr: DATA.number, title: DATA.title,
+      turns: turns.filter(t => t.content && t.content !== 'Thinking…'),
+      decision: decided || null,
+      updatedAt: new Date().toISOString(),
+    });
+  } catch (e) { /* the conversation still works unsaved */ }
+}
+
+async function decide(verdict){
+  decided = verdict;
+  await save();
+  $('decide').innerHTML = '<div class="head"><h2>Recorded</h2></div>'
+    + '<div class="done">You marked this <b>' + verdict + '</b>. '
+    + 'I will pick it up from here, write the discussion into pull request #'
+    + DATA.number + ', and '
+    + (verdict === 'approved' ? 'merge it.' : 'come back with a revision.')
+    + (db ? '' : ' <em>Note: saving is unavailable on this view, so tell me directly as well.</em>')
+    + '</div>';
+}
+$('ok').addEventListener('click', () => decide('approved'));
+$('changes').addEventListener('click', () => decide('needs changes'));
+
+/* --- light up when the capabilities arrive --- */
+(async () => {
+  sample = await claude.use('sample');
+  db = await claude.use('db');
+  if (!sample){
+    $('chatNote').textContent = 'conversation unavailable on this view';
+    $('send').disabled = true;
+    $('box').disabled = true;
+    $('box').placeholder = 'Not available here';
+  } else {
+    $('chatNote').textContent = db ? 'saved as you go' : 'not saved on this view';
+  }
+  if (db){
+    try {
+      const snap = await db.doc('review/pr-' + DATA.number).get();
+      const had = snap.exists && snap.data();
+      if (had && Array.isArray(had.turns) && had.turns.length){
+        turns.push(...had.turns); draw();
+      }
+      if (had && had.decision) decide(had.decision);
+    } catch (e) {}
+  }
+})();
+</script>

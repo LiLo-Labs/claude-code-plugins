@@ -145,6 +145,23 @@
         "gamedev",
         "mcp"
       ]
+    },
+    {
+      "name": "review-desk",
+      "source": "./plugins/review-desk",
+      "description": "Review a pull request as a conversation instead of a diff. Publishes the request as a page you can talk to Claude inside, then writes the discussion back to the PR and merges on your approval.",
+      "version": "0.1.0",
+      "author": {
+        "name": "LiLo Labs"
+      },
+      "category": "productivity",
+      "tags": [
+        "review",
+        "pull-request",
+        "github",
+        "artifact",
+        "conversation"
+      ]
     }
   ]
 }
