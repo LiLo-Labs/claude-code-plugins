@@ -84,8 +84,24 @@ the artifact, so setting it from JavaScript at load does not work.
 
 ## Publish
 
-Write the filled template to a file, then publish it with the **Artifact** tool,
-declaring exactly:
+**One request, one desk.** Before publishing, run `action: "list"` and look for
+a desk already built for this request. If one exists, publish to it — pass its
+URL as `url`, or republish the same local file path if this session built it.
+Never create a second page for a request that already has one.
+
+This is not tidiness. Each artifact carries its own database, so the discussion
+and the decision belong to the page they were made on. Publish a second desk and
+the reviewer gets a page with no history, while their verdict sits in a database
+attached to a page they are no longer looking at. Nothing warns either of you.
+It happened on the second day this plugin existed: two desks for one design
+document, the decision on the older, the newer empty.
+
+Titles are short and a reviewer may have several requests open, so when you
+cannot tell which page belongs to this request, read the candidates and find the
+one holding a document at `review/pr-<number>`. That document is the identity,
+not the title.
+
+Then publish with the **Artifact** tool, declaring exactly:
 
     capabilities: {sample: {}, db: {}}
 
