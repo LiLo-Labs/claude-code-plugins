@@ -1,6 +1,6 @@
 ---
 description: Read the review conversation back, write it into the PR, and merge on approval
-argument-hint: "[pr number]"
+argument-hint: "[number, owner/repo#number, or URL — defaults to what we are discussing]"
 ---
 
 Collect the discussion held on the review desk for pull request **$1**, put it
@@ -9,6 +9,21 @@ somewhere permanent, and act on the decision.
 A conversation that stays in a page is a conversation that is lost. The
 reasoning behind a decision is usually worth more than the decision, and it
 belongs with the code it was about.
+
+## Work out which request
+
+`$1` resolves the same way it does for `/review-desk`: a URL or
+`owner/repo#number` says it outright, a bare number means the request under
+discussion in this conversation rather than whatever the working directory
+points at, nothing at all means the current branch, and only silence in the
+conversation hands the decision to the directory's remote. Name the repository
+you resolved to before acting.
+
+This matters more here than it does there. `/review-desk` that guesses wrong
+publishes a page; this command writes a comment onto a pull request and can
+merge it. Guessing wrong is not recoverable by closing a tab.
+
+Pass `--repo` on every `gh` call.
 
 ## Read it back
 
