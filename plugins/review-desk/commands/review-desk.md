@@ -51,6 +51,14 @@ pointed at the actual decision in this request are what start the conversation.
 Write them for this request, and make at least one of them the question you
 would least like to be asked.
 
+Then name the page. Replace `<title>Review Desk</title>` with a short name for
+what this request is about — two to four words, the way a document is named:
+`<title>Design 0001 Review</title>`. Not the pull request title verbatim, which
+is a sentence, and not "Review Desk", which is what the template ships with. A
+reviewer accumulates these, and a gallery of pages all called "Review Desk"
+tells them nothing about which is which. The publisher reads this tag to name
+the artifact, so setting it from JavaScript at load does not work.
+
 ## Publish
 
 Write the filled template to a file, then publish it with the **Artifact** tool,
@@ -61,6 +69,11 @@ declaring exactly:
 `sample` is what lets the page ask Claude. `db` is what makes the conversation
 and the decision readable afterwards — without it the discussion evaporates and
 this is just a nicer diff.
+
+Pass a `favicon` — one emoji, required on a first publish and fixed for the life
+of the page — and a one-sentence `description`, which becomes the subtitle on
+the gallery card. Between the title, the icon and that sentence, the reviewer
+can find this desk again a month later.
 
 Give the reviewer the link and nothing else. Do not summarise the request in
 chat; the page is the summary, and repeating it there defeats the point.
