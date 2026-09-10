@@ -227,7 +227,14 @@ textarea:focus{outline:2px solid var(--cool);outline-offset:-1px;
 footer{padding:22px 0 0;font-size:12.5px;color:var(--faint);line-height:1.6}
 </style>
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<!-- Pinned by hash: without integrity, whatever cdnjs serves at this path
+     runs inside the page, and this page holds a review conversation and a
+     decision. The hash was computed from the downloaded file and checked
+     against the one cdnjs publishes; both are sha512 and they agree. A
+     changed file fails to load and the page loses colour, nothing more. -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"
+        integrity="sha512-D9gUyxqja7hBtkWpPWGt9wfbfaMGVt9gnyCvYa+jojwwPHLCzUm5i8rpk7vD7wNee9bA35eYIjobYPaQuKS1MQ=="
+        crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 
 <div class="page" id="page">
   <div class="tag" id="repoTag"></div>
