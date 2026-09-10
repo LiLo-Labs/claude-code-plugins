@@ -69,6 +69,12 @@ work, and say what you are going to do before doing it.
 
 ## Never
 
+When you have acted on a decision -- the comment posted, and merged or not --
+set `collectedAt` on that request's entry in `~/.review-desks.json` to the
+current UTC time. An entry that stays null is raised again at every session
+start, so leaving it means nagging; stamping one you did not act on means the
+decision is silently dropped.
+
 Do not merge on a decision you inferred rather than read. The whole arrangement
 exists because someone has to be able to say no, and a bot that merges on its
 own reading of the mood has removed them from it.

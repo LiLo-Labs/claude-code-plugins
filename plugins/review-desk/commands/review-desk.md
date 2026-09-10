@@ -84,8 +84,24 @@ the artifact, so setting it from JavaScript at load does not work.
 
 ## Publish
 
-Write the filled template to a file, then publish it with the **Artifact** tool,
-declaring exactly:
+**One request, one desk.** Before publishing, run `action: "list"` and look for
+a desk already built for this request. If one exists, publish to it — pass its
+URL as `url`, or republish the same local file path if this session built it.
+Never create a second page for a request that already has one.
+
+This is not tidiness. Each artifact carries its own database, so the discussion
+and the decision belong to the page they were made on. Publish a second desk and
+the reviewer gets a page with no history, while their verdict sits in a database
+attached to a page they are no longer looking at. Nothing warns either of you.
+It happened on the second day this plugin existed: two desks for one design
+document, the decision on the older, the newer empty.
+
+Titles are short and a reviewer may have several requests open, so when you
+cannot tell which page belongs to this request, read the candidates and find the
+one holding a document at `review/pr-<number>`. That document is the identity,
+not the title.
+
+Then publish with the **Artifact** tool, declaring exactly:
 
     capabilities: {sample: {}, db: {}}
 
@@ -97,6 +113,18 @@ Pass a `favicon` — one emoji, required on a first publish and fixed for the li
 of the page — and a one-sentence `description`, which becomes the subtitle on
 the gallery card. Between the title, the icon and that sentence, the reviewer
 can find this desk again a month later.
+
+## Write it down
+
+Append an entry to `~/.review-desks.json`, creating the file with an empty list
+if it is absent. Each entry is `{"repo": "owner/name", "pr": <number>, "url":
+"<artifact url>", "collectedAt": null}`. If an entry for this request already
+exists, leave it alone rather than adding a second.
+
+The reviewer decides on a page, often on a tablet, often when nothing is
+running here. This file is how a later session finds out. Without it the
+decision waits until somebody remembers to look, which is the failure this
+whole arrangement exists to prevent.
 
 Give the reviewer the link and nothing else. Do not summarise the request in
 chat; the page is the summary, and repeating it there defeats the point.
