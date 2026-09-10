@@ -421,11 +421,25 @@ const TONGUE = {py:'python', js:'javascript', ts:'typescript', sh:'bash',
   toml:'ini', ini:'ini', html:'xml', xml:'xml', css:'css', scss:'scss',
   dart:'dart', lua:'lua', r:'r', pl:'perl', ps1:'powershell'};
 
+// Named files with no extension are common and are usually scripts, not
+// prose: tools/bot-token, Makefile, a git hook. A shebang settles it, and
+// without one an extensionless file is far more likely to be a README than a
+// program.
+const SHEBANG = {python:'python', python3:'python', node:'javascript',
+  bash:'bash', sh:'bash', zsh:'bash', ruby:'ruby', perl:'perl'};
+
 function render(page){
   const name = page.full || page.name || '';
-  if (/\.(md|markdown)$/i.test(name) || !/\./.test(name)) return markdown(page.text);
+  const text = page.text || '';
+  if (/\.(md|markdown)$/i.test(name)) return markdown(text);
+  if (!/\./.test(name.split('/').pop())){
+    const first = text.split('\n', 1)[0];
+    if (!/^#!/.test(first)) return markdown(text);
+    const word = (first.match(/[\w.]+$/) || [''])[0].replace(/[0-9.]+$/, '');
+    return fenced(text, SHEBANG[word] || SHEBANG[word + '3'] || '');
+  }
   const ext = name.split('.').pop().toLowerCase();
-  return fenced(page.text, TONGUE[ext] || ext);
+  return fenced(text, TONGUE[ext] || ext);
 }
 
 // Highlighting is applied after render rather than baked into the markup, so
