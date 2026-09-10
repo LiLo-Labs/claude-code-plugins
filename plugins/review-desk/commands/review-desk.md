@@ -46,12 +46,22 @@ to be read rather than diffed:
 
     gh pr diff <n> --repo <owner/repo> --name-only
 
-For each `.md` file among them, fetch its content at the head of the branch and
-carry the whole text. Do not carry diffs of them — the reviewer wants the
-document as it will be, not as it changed.
+Fetch each changed file at the head of the branch and carry the whole text, not
+a diff — the reviewer wants the thing as it will be, not as it changed. That
+holds for source files as much as documents. The page renders markdown as prose
+and everything else as syntax-highlighted source, so a shell script arrives
+readable rather than as a paragraph describing it.
 
-For a request with no markdown in it, carry a short plain-English account of
-what the code does instead, written by you, in the `body` you pass through.
+Judgement on what to carry, since a page nobody can read is worse than a short
+one: carry every changed file when the request is small. When it is large, carry
+the files the decision actually turns on and say in the `body` which ones you
+left out. Skip generated files, lock files and anything over a few hundred
+lines, naming them rather than pasting them.
+
+Whatever you leave out, still write a short plain-English account of what the
+change does into the `body`. A reviewer away from a terminal cannot run it, and
+for a code-only request that account is the orientation the page exists to
+give.
 
 ## Build
 
