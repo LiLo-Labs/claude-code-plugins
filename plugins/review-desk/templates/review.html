@@ -286,15 +286,29 @@ const esc = s => String(s).replace(/[&<>"]/g, c =>
 /* ================= markdown ================= */
 function inline(s){
   let t = esc(s);
-  t = t.replace(/`([^`]+)`/g, (m,a) => '<code>'+a+'</code>');
+
+  // Code spans are lifted out before anything else runs and put back at the
+  // end. Emphasis used to run straight over them, so `/*PAYLOAD*/` -- the one
+  // string this plugin's own instructions talk about most -- rendered as
+  // /<em>PAYLOAD</em>/ and the reader saw /PAYLOAD/.
+  const kept = [];
+  t = t.replace(/`([^`]+)`/g, (m, a) => {
+    kept.push('<code>' + a + '</code>');
+    return '\u0000' + (kept.length - 1) + '\u0000';
+  });
+
   t = t.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g,
     (m,a,b) => '<a href="'+b+'" target="_blank" rel="noopener">'+a+'</a>');
   t = t.replace(/(^|[\s(])(https?:\/\/[^\s<)]+)/g,
     (m,pre,u) => pre+'<a href="'+u+'" target="_blank" rel="noopener">'+u+'</a>');
   t = t.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
-  t = t.replace(/(^|[^*])\*([^*]+)\*/g, '$1<em>$2</em>');
+  // Emphasis needs whitespace or a line start in front of it, so a bare
+  // asterisk inside a path or a glob is left alone.
+  t = t.replace(/(^|[\s(])\*([^*\s][^*]*)\*(?=[\s.,;:!?)]|$)/g,
+    (m,pre,body) => pre+'<em>'+body+'</em>');
   t = t.replace(/&lt;!--[\s\S]*?--&gt;/g, '');
-  return t;
+
+  return t.replace(/\u0000(\d+)\u0000/g, (m, i) => kept[+i]);
 }
 // A code block, with its language recorded for the highlighter. Every code
 // block on the page goes through here so a fenced snippet and a whole source
@@ -305,7 +319,9 @@ function fenced(body, lang){
 }
 
 function markdown(src){
-  const rows = String(src || '').replace(/\r/g,'').split('\n');
+  let raw = String(src || '').replace(/\r/g,'');
+  raw = raw.replace(/^---\n[\s\S]*?\n---\n/, '');   // front matter is not prose
+  const rows = raw.split('\n');
   const out = [];
   let para = [], quote = [], list = null, code = null, table = null, codeLang = '';
   const shutP = () => { if (para.length){ out.push('<p>'+inline(para.join(' '))+'</p>'); para=[]; } };
@@ -329,6 +345,18 @@ function markdown(src){
       continue;
     }
     if (/^```/.test(line)){ shutAll(); code = []; codeLang = line.replace(/^```/, '').trim(); continue; }
+    // An indented block, but only where one can legally start: after a blank
+    // line and outside a list, so a wrapped list item is not mistaken for code.
+    if (/^(?: {4}|\t)\S/.test(line) && !list && !para.length){
+      const body = [];
+      while (i < rows.length &&
+             (/^(?: {4}|\t)/.test(rows[i]) || !rows[i].trim())){
+        body.push(rows[i].replace(/^(?: {4}|\t)/, '')); i++;
+      }
+      i--;
+      while (body.length && !body[body.length-1].trim()) body.pop();
+      shutAll(); out.push(fenced(body.join('\n'), '')); continue;
+    }
     if (/^\s*\|.*\|\s*$/.test(line)){
       const next = rows[i+1] || '';
       if (!table && /^\s*\|[\s:|-]+\|\s*$/.test(next)){
