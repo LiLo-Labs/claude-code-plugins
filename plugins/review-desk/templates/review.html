@@ -206,6 +206,12 @@ textarea:focus{outline:2px solid var(--cool);outline-offset:-1px;
   color:var(--ink);cursor:pointer}
 .btn.yes{background:var(--good);border-color:var(--good);color:#fff}
 .done{padding:16px 18px;font-size:15px;line-height:1.6}
+.done textarea{flex:none;width:100%;display:block;background:var(--paper);
+  border:1px solid var(--edge);border-radius:5px;padding:10px 12px;
+  color:var(--ink);resize:vertical}
+.done blockquote{margin:12px 0 0;padding:3px 0 3px 13px;
+  border-left:2px solid var(--mark);color:var(--soft)}
+.done .verdict{padding:14px 0 0}
 .done b{color:var(--good)}
 footer{padding:22px 0 0;font-size:12.5px;color:var(--faint);line-height:1.6}
 </style>
@@ -405,7 +411,7 @@ function watchHeadings(){
 let threads = [{id: 't1', name: 'Thread 1', turns: [], busy: false}];
 let live = 0;
 let carried = null;
-let sample = null, db = null, decided = null;
+let sample = null, db = null, decided = null, reason = null;
 
 const short = s => s.length > 42 ? s.slice(0, 40).trim() + '…' : s;
 
@@ -640,24 +646,65 @@ async function save(){
         pr: DATA.number, title: DATA.title,
         threads: threads.map(tidy),
         decision: decided,
+        reason: reason,
         updatedAt: new Date().toISOString(),
       });
     } catch (e) {}
   }, 400);
 }
 
-async function decide(v, quiet){
+// "Needs changes" without saying what to change is the one verdict nobody can
+// act on. Approving needs no reason -- the request already says what it wants --
+// so only this branch asks, and it asks before recording, because the panel is
+// replaced once a decision is in and there is no way back to it.
+function askReason(existing){
+  $('decide').innerHTML = '<div class="cap">What needs changing</div>'
+    + '<div class="done"><textarea id="why" rows="4" placeholder="The part that is '
+    + 'wrong, and what would make it right."></textarea>'
+    + '<div class="verdict"><span class="note">This goes into the pull request '
+    + 'with the discussion.</span>'
+    + '<button class="btn" id="back">Back</button>'
+    + '<button class="btn yes" id="send">Record it</button></div></div>';
+  const why = $('why');
+  why.value = existing || '';
+  why.focus();
+  $('back').addEventListener('click', offerDecision);
+  $('send').addEventListener('click', () => {
+    if (!why.value.trim()){ why.focus(); return; }
+    decide('needs changes', false, why.value.trim());
+  });
+}
+
+function offerDecision(){
+  $('decide').innerHTML = '<div class="cap">When you have made up your mind</div>'
+    + '<div class="verdict"><span class="note">Recorded here. I pick it up, write '
+    + 'the discussion into the pull request, and merge or revise accordingly.</span>'
+    + '<button class="btn yes" id="ok">Approve</button>'
+    + '<button class="btn" id="changes">Needs changes</button></div>';
+  $('ok').addEventListener('click', () => decide('approved'));
+  $('changes').addEventListener('click', () => askReason(reason));
+}
+
+async function decide(v, quiet, why){
+  // A verdict restored from the store with no reason on it was recorded before
+  // there was anywhere to put one. Ask now rather than stranding it.
+  if (v === 'needs changes' && !why){ decided = v; return askReason(reason); }
+
   decided = v;
+  reason = why || null;
   if (!quiet) await save();
   $('decide').innerHTML = '<div class="cap">Recorded</div><div class="done">'
     + 'You marked this <b>'+esc(v)+'</b>. I will pick it up from here, write the '
     + 'discussion into pull request #'+DATA.number+', and '
     + (v === 'approved' ? 'merge it.' : 'come back with a revision.')
+    + (reason ? '<blockquote>'+esc(reason)+'</blockquote>' : '')
     + (db ? '' : ' <em>Saving is unavailable on this view, so tell me directly too.</em>')
+    + '<div class="verdict"><button class="btn" id="redo">Change this</button></div>'
     + '</div>';
+  $('redo').addEventListener('click', offerDecision);
 }
-$('ok').addEventListener('click', () => decide('approved'));
-$('changes').addEventListener('click', () => decide('needs changes'));
+
+offerDecision();
 
 paint(); draw();
 
@@ -679,7 +726,8 @@ paint(); draw();
         threads = had.threads.map(t => ({...t, busy:false}));
         live = 0;
       }
-      if (had.decision) decide(had.decision, true);
+      reason = had.reason || null;
+      if (had.decision) decide(had.decision, true, had.reason);
     }
   } catch (e) {}
   draw();

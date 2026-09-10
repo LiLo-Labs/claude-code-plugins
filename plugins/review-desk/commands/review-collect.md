@@ -17,8 +17,14 @@ tool if the URL is not to hand), then read the stored conversation:
 
     action: "read_db", db_op: "get", collection: "review", doc_id: "pr-<n>"
 
-The document holds `turns` — the exchange, in order — and `decision`, which is
-`approved`, `needs changes`, or absent if they have not finished.
+The document holds `threads` — the conversations, each with its `turns` in order
+and the passage it was started from — and `decision`, which is `approved`,
+`needs changes`, or absent if they have not finished. A `needs changes` decision
+also carries `reason`: what the reviewer said has to change, in their words.
+
+That `reason` is the request. Quote it in the comment rather than paraphrasing
+it, and act on it — the conversation is context for why they asked, but the
+reason is what they actually asked for.
 
 If there is no document, the discussion was never saved. Say so rather than
 inventing one.
