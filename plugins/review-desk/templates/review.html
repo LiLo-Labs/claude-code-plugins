@@ -68,6 +68,17 @@ h1.doctitle{font-family:var(--doc);font-weight:600;font-size:30px;
 .md pre{background:var(--rule);padding:12px 14px;border-radius:5px;
   overflow-x:auto;margin:0 0 13px}
 .md pre code{background:none;padding:0;font-size:13px;line-height:1.5}
+
+/* Syntax colours drawn from the page's own palette rather than a downloaded
+   theme: the artifact CSP blocks third-party stylesheets, and a theme picked
+   for a light background is unreadable on the dark one. */
+.hljs-keyword,.hljs-selector-tag,.hljs-literal,.hljs-section{color:var(--mark)}
+.hljs-string,.hljs-attr,.hljs-addition,.hljs-symbol{color:var(--good)}
+.hljs-comment,.hljs-quote,.hljs-meta{color:var(--faint);font-style:italic}
+.hljs-number,.hljs-built_in,.hljs-type,.hljs-class .hljs-title{color:var(--cool)}
+.hljs-title,.hljs-name,.hljs-function .hljs-title{color:var(--ink);font-weight:600}
+.hljs-variable,.hljs-template-variable,.hljs-params{color:var(--soft)}
+.hljs-deletion{color:var(--mark);text-decoration:line-through}
 .md hr{border:none;border-top:1px solid var(--rule);margin:20px 0}
 .md .tw{overflow-x:auto;margin:0 0 14px}
 .md table{border-collapse:collapse;font-family:var(--ui);font-size:14px;
@@ -216,6 +227,8 @@ textarea:focus{outline:2px solid var(--cool);outline-offset:-1px;
 footer{padding:22px 0 0;font-size:12.5px;color:var(--faint);line-height:1.6}
 </style>
 
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+
 <div class="page" id="page">
   <div class="tag" id="repoTag"></div>
   <h1 class="doctitle" id="title"></h1>
@@ -283,10 +296,18 @@ function inline(s){
   t = t.replace(/&lt;!--[\s\S]*?--&gt;/g, '');
   return t;
 }
+// A code block, with its language recorded for the highlighter. Every code
+// block on the page goes through here so a fenced snippet and a whole source
+// file are marked up the same way.
+function fenced(body, lang){
+  const cls = lang ? ' class="language-' + esc(lang.split(/\s+/)[0]) + '"' : '';
+  return '<pre><code' + cls + '>' + esc(body) + '</code></pre>';
+}
+
 function markdown(src){
   const rows = String(src || '').replace(/\r/g,'').split('\n');
   const out = [];
-  let para = [], quote = [], list = null, code = null, table = null;
+  let para = [], quote = [], list = null, code = null, table = null, codeLang = '';
   const shutP = () => { if (para.length){ out.push('<p>'+inline(para.join(' '))+'</p>'); para=[]; } };
   const shutQ = () => { if (quote.length){ out.push('<blockquote>'+inline(quote.join(' '))+'</blockquote>'); quote=[]; } };
   const shutL = () => { if (list){ out.push('<'+list.tag+'>'+list.items.map(i=>'<li>'+inline(i)+'</li>').join('')+'</'+list.tag+'>'); list=null; } };
@@ -303,11 +324,11 @@ function markdown(src){
   for (let i = 0; i < rows.length; i++){
     const line = rows[i];
     if (code !== null){
-      if (/^```/.test(line)){ out.push('<pre><code>'+esc(code.join('\n'))+'</code></pre>'); code=null; }
+      if (/^```/.test(line)){ out.push(fenced(code.join('\n'), codeLang)); code=null; codeLang=''; }
       else code.push(line);
       continue;
     }
-    if (/^```/.test(line)){ shutAll(); code = []; continue; }
+    if (/^```/.test(line)){ shutAll(); code = []; codeLang = line.replace(/^```/, '').trim(); continue; }
     if (/^\s*\|.*\|\s*$/.test(line)){
       const next = rows[i+1] || '';
       if (!table && /^\s*\|[\s:|-]+\|\s*$/.test(next)){
@@ -339,7 +360,7 @@ function markdown(src){
     para.push(line);
   }
   shutAll();
-  if (code) out.push('<pre><code>'+esc(code.join('\n'))+'</code></pre>');
+  if (code) out.push(fenced(code.join('\n'), codeLang));
   return out.join('');
 }
 
@@ -354,6 +375,33 @@ function pages(){
     documents.map(d => ({name: d.name.split('/').pop(), full: d.name, text: d.text})));
 }
 
+// Markdown is prose and gets parsed; anything else is source and gets shown as
+// source. Running a .py file through a markdown parser eats its indentation,
+// turns its comments into headings, and silently changes what the reviewer is
+// being asked to judge.
+const TONGUE = {py:'python', js:'javascript', ts:'typescript', sh:'bash',
+  bash:'bash', zsh:'bash', rb:'ruby', go:'go', rs:'rust', java:'java',
+  c:'c', h:'c', cpp:'cpp', hpp:'cpp', cs:'csharp', swift:'swift',
+  kt:'kotlin', php:'php', sql:'sql', json:'json', yml:'yaml', yaml:'yaml',
+  toml:'ini', ini:'ini', html:'xml', xml:'xml', css:'css', scss:'scss',
+  dart:'dart', lua:'lua', r:'r', pl:'perl', ps1:'powershell'};
+
+function render(page){
+  const name = page.full || page.name || '';
+  if (/\.(md|markdown)$/i.test(name) || !/\./.test(name)) return markdown(page.text);
+  const ext = name.split('.').pop().toLowerCase();
+  return fenced(page.text, TONGUE[ext] || ext);
+}
+
+// Highlighting is applied after render rather than baked into the markup, so
+// the parser stays a parser and a missing library costs nothing but colour.
+function paintCode(){
+  if (!window.hljs) return;
+  document.querySelectorAll('.md pre code').forEach(el => {
+    try { hljs.highlightElement(el); } catch (e) {}
+  });
+}
+
 function paint(){
   $('title').textContent = DATA.title || 'Review';
   $('repoTag').textContent = (DATA.repo ? DATA.repo + ' · ' : '') + 'review desk';
@@ -365,7 +413,8 @@ function paint(){
     '<button class="leaf'+(i===leaf?' on':'')+'" data-leaf="'+i+'" title="'+esc(p.full||p.name)+'">'
     + esc(p.name)
     + '<span class="fresh'+(freshOn[i]?' show':'')+'"></span></button>').join('');
-  $('sheet').innerHTML = markdown(all[leaf].text);
+  $('sheet').innerHTML = render(all[leaf]);
+  paintCode();
   watchHeadings();
 }
 
