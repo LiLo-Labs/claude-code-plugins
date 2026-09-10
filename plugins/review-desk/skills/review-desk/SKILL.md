@@ -32,6 +32,19 @@ asked for.
 3. `/review-collect <pr>` — read the discussion, summarise it into the pull
    request, merge or revise.
 
+## Writing the page
+
+Invoke `elements-of-style:writing-clearly-and-concisely` if it is available
+before composing any prose that lands on the page — the summary, the openers,
+the plain-English account of a code-only request. There is no way for a plugin
+to require another plugin; this is the same soft reference
+`superpowers:brainstorming` uses, and it does nothing when the skill is absent.
+
+That governs what YOU write. It cannot govern what the page's Claude writes,
+because a `sample` call has no skills — so the style directive for it is carried
+in the prompt the template builds, and is deliberately short. A handful of named
+tics beats a style guide the model has to summarise before it can answer.
+
 ## What it is honest about
 
 **The Claude inside the page is not the session that wrote the code.** It is a
