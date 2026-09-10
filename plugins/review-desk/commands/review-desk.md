@@ -1,6 +1,6 @@
 ---
 description: Publish a pull request as a page the reviewer can talk to Claude inside
-argument-hint: "[pr number] (defaults to the PR for the current branch)"
+argument-hint: "[number, owner/repo#number, or URL — defaults to what we are discussing]"
 ---
 
 Publish pull request **$1** as a review desk: a page carrying everything needed
@@ -11,17 +11,40 @@ This exists because a diff is the wrong surface for a decision. Reading a patch
 tells you what changed; it does not let you ask why, and asking why is most of
 what a reviewer actually wants to do.
 
+## Work out which request
+
+`$1` may be a number, an `owner/repo#number`, a pull request URL, or nothing at
+all. Resolve it in this order, and name the repository you landed on before you
+gather anything — one line, so a wrong guess is visible immediately.
+
+1. **A URL or `owner/repo#number` says it outright.** Use exactly that.
+2. **A bare number means the request under discussion here.** You are running
+   inside a conversation that has been talking about specific pull requests in
+   specific repositories. That context is better evidence than the working
+   directory, and it is what the reviewer meant when they typed a number and
+   nothing else.
+3. **Nothing at all means the current branch's request** — `gh pr view` with no
+   argument.
+4. **Only when the conversation settles nothing** does the current directory's
+   remote decide.
+
+If a bare number exists in more than one repository in play and the conversation
+does not settle which, stop and ask. A desk built for the wrong request looks
+completely correct — right title, real diff, plausible questions — and nothing
+on the finished page reveals the mistake. Asking costs a sentence; guessing
+costs the reviewer their trust in every desk after it.
+
 ## Gather
 
-Use `gh` for everything. If no number was given, take the pull request for the
-current branch.
+Use `gh` for everything, passing `--repo` explicitly once you have resolved it,
+so the answer does not change with the working directory:
 
-    gh pr view <n> --json number,title,url,body,additions,deletions,changedFiles,headRefName,baseRefName
+    gh pr view <n> --repo <owner/repo> --json number,title,url,body,additions,deletions,changedFiles,headRefName,baseRefName
 
 Then the markdown files the request touches, because those are documents meant
 to be read rather than diffed:
 
-    gh pr diff <n> --name-only
+    gh pr diff <n> --repo <owner/repo> --name-only
 
 For each `.md` file among them, fetch its content at the head of the branch and
 carry the whole text. Do not carry diffs of them — the reviewer wants the

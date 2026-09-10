@@ -1,6 +1,6 @@
 ---
 description: Read the review conversation back, write it into the PR, and merge on approval
-argument-hint: "[pr number]"
+argument-hint: "[number, owner/repo#number, or URL — defaults to what we are discussing]"
 ---
 
 Collect the discussion held on the review desk for pull request **$1**, put it
@@ -10,6 +10,21 @@ A conversation that stays in a page is a conversation that is lost. The
 reasoning behind a decision is usually worth more than the decision, and it
 belongs with the code it was about.
 
+## Work out which request
+
+`$1` resolves the same way it does for `/review-desk`: a URL or
+`owner/repo#number` says it outright, a bare number means the request under
+discussion in this conversation rather than whatever the working directory
+points at, nothing at all means the current branch, and only silence in the
+conversation hands the decision to the directory's remote. Name the repository
+you resolved to before acting.
+
+This matters more here than it does there. `/review-desk` that guesses wrong
+publishes a page; this command writes a comment onto a pull request and can
+merge it. Guessing wrong is not recoverable by closing a tab.
+
+Pass `--repo` on every `gh` call.
+
 ## Read it back
 
 Find the artifact published for this request (`action: "list"` on the Artifact
@@ -17,8 +32,14 @@ tool if the URL is not to hand), then read the stored conversation:
 
     action: "read_db", db_op: "get", collection: "review", doc_id: "pr-<n>"
 
-The document holds `turns` — the exchange, in order — and `decision`, which is
-`approved`, `needs changes`, or absent if they have not finished.
+The document holds `threads` — the conversations, each with its `turns` in order
+and the passage it was started from — and `decision`, which is `approved`,
+`needs changes`, or absent if they have not finished. A `needs changes` decision
+also carries `reason`: what the reviewer said has to change, in their words.
+
+That `reason` is the request. Quote it in the comment rather than paraphrasing
+it, and act on it — the conversation is context for why they asked, but the
+reason is what they actually asked for.
 
 If there is no document, the discussion was never saved. Say so rather than
 inventing one.
