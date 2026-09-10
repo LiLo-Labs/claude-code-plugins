@@ -114,6 +114,18 @@ of the page — and a one-sentence `description`, which becomes the subtitle on
 the gallery card. Between the title, the icon and that sentence, the reviewer
 can find this desk again a month later.
 
+## Write it down
+
+Append an entry to `~/.review-desks.json`, creating the file with an empty list
+if it is absent. Each entry is `{"repo": "owner/name", "pr": <number>, "url":
+"<artifact url>", "collectedAt": null}`. If an entry for this request already
+exists, leave it alone rather than adding a second.
+
+The reviewer decides on a page, often on a tablet, often when nothing is
+running here. This file is how a later session finds out. Without it the
+decision waits until somebody remembers to look, which is the failure this
+whole arrangement exists to prevent.
+
 Give the reviewer the link and nothing else. Do not summarise the request in
 chat; the page is the summary, and repeating it there defeats the point.
 
