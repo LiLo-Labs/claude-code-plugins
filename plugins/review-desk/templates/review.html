@@ -543,7 +543,7 @@ function drawStream(){
   }
   el.scrollTop = el.scrollHeight;
   $('seed').style.display = t.turns.length ? 'none' : 'flex';
-  $('send').disabled = !sample || t.busy;
+  $('send').disabled = t.busy;
 }
 function drawCarry(){
   $('carrySlot').innerHTML = carried
@@ -693,9 +693,23 @@ async function ask(){
   const t = threads[live];
   const box = $('box');
   const q = box.value.trim();
-  if ((!q && !carried) || !sample || t.busy) return;
+  if ((!q && !carried) || t.busy) return;
   const quote = carried; carried = null; unlight();
   box.value = ''; box.style.height = 'auto';
+
+  // With no Claude on this view the message is still worth keeping: it goes to
+  // the store as a note, and the working session reads it there. A reviewer
+  // typing into a dead box and watching it vanish is the worst outcome
+  // available -- they said the thing, and nobody will ever see it.
+  if (!sample){
+    t.turns.push({role:'user', content: q || 'What do you make of this?', quote});
+    t.turns.push({role:'assistant', content:
+      'Claude cannot be reached from this view, so nothing answered you here. '
+      + 'Your message is saved for the working session to read.'});
+    if (t.turns.length === 2) t.name = short(q || 'Note');
+    draw(); save();
+    return;
+  }
 
   t.turns.push({role:'user', content: q || 'What do you make of this?', quote});
   t.turns.push({role:'assistant', content:'Thinking…'});
@@ -854,10 +868,10 @@ paint(); draw();
   // A greyed-out button is not an explanation. Someone types a question, presses
   // send, and nothing happens -- no message, no error, no clue. Say it.
   if (!sample){
-    $('box').disabled = true;
-    $('box').placeholder = 'Claude is unavailable on this view';
-    sayLost('Claude cannot be reached from this view, so questions here go '
-      + 'nowhere. The document and the decision buttons still work');
+    $('box').placeholder = 'Leave a note for the working session\u2026';
+    sayLost('Claude cannot be reached from this view, so nothing will answer '
+      + 'you here. What you type is still saved for the working session to '
+      + 'read, and the decision buttons still work');
   }
   draw();
 
