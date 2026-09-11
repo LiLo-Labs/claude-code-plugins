@@ -514,6 +514,7 @@ let threads = [{id: 't1', name: 'Thread 1', turns: [], busy: false}];
 let live = 0;
 let carried = null;
 let sample = null, db = null, decided = null, reason = null;
+let briefing = DATA.briefing || '';
 
 const short = s => s.length > 42 ? s.slice(0, 40).trim() + '…' : s;
 
@@ -673,6 +674,18 @@ function frame(){
     + "adjective. Two honest sentences beat six padded ones.\n\n"
     + "THE PULL REQUEST:\n\n" + (DATA.body || '');
   for (const d of documents) s += "\n\n--- " + d.name + " ---\n\n" + d.text;
+
+  // Everything above is what a stranger could read off the repository. This is
+  // the part only the session that did the work knows: why it exists, what was
+  // rejected, what was measured against what was assumed. Without it the page
+  // answers questions about the diff while the reviewer asks questions about
+  // the decision.
+  if (briefing) s += "\n\nWHAT THE WORKING SESSION KNOWS. This is an account "
+    + "written by the Claude that made this change, passed to you because it is "
+    + "not visible in the files. Treat it as a colleague's testimony: usually "
+    + "right, occasionally self-serving, and not something you checked "
+    + "yourself. Where it claims something was verified, you may say so. Where "
+    + "it is an opinion, say whose.\n\n" + briefing;
   return s;
 }
 
@@ -858,6 +871,14 @@ paint(); draw();
   // The document, live. Revised from the working session with write_db, this
   // page shows the new text without anyone reloading -- which is the point:
   // you say what is wrong, it changes under you, and you confirm.
+  try {
+    db.doc('review/pr-' + DATA.number + '/context/briefing')
+      .onSnapshot(snap => {
+        const row = snap.exists && snap.data();
+        if (row && typeof row.text === 'string') briefing = row.text;
+      });
+  } catch (e) {}
+
   try {
     db.collection('review/pr-' + DATA.number + '/documents')
       .onSnapshot(snap => {

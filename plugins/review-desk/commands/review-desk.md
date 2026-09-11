@@ -76,8 +76,35 @@ Read `${CLAUDE_PLUGIN_ROOT}/templates/review.html` and replace the single
       "summary":   "34 files, no code" — a short honest size,
       "body":      "the pull request description, markdown",
       "documents": [{"name": "docs/design/0002-x.md", "text": "…"}],
+      "briefing":  "what this session knows that the files do not say",
       "openers":   ["four questions worth asking about THIS request"]
     }
+
+The **briefing** is the part that makes the page worth talking to. Everything
+else in the payload is what any stranger could read off the repository; this is
+what only the session that did the work knows, and without it the page answers
+questions about the diff while the reviewer asks questions about the decision.
+
+Write it from the conversation you are running inside. Cover:
+
+- **Why this exists** — the thing that went wrong, the request that prompted it,
+  the failure it is meant to prevent. Name the trigger.
+- **What was tried and rejected**, with the reason. A reviewer arguing for an
+  approach you already discarded deserves to know it was discarded and why.
+- **What you verified against what you assumed.** Say which commands you ran and
+  what they printed, and mark the rest as inference. This is the single most
+  useful thing in the briefing and the easiest to fudge.
+- **What you are least sure about.** The reviewer will find it anyway; finding
+  it themselves after you hid it is worse.
+- **Anything decided in conversation** that the diff cannot show.
+
+Write it as an account, in prose, a few hundred words. Not a changelog — the
+commit message is already the changelog. It is testimony from the person who did
+the work, and the page tells its Claude to treat it that way: usually right,
+occasionally self-serving, and not independently checked.
+
+Never put anything in the briefing the reviewer should not see. It is sent to
+the page's Claude verbatim and the reviewer can ask it to repeat any of it.
 
 The openers matter more than they look. Generic ones get ignored; questions
 pointed at the actual decision in this request are what start the conversation.
@@ -142,6 +169,18 @@ chat; the page is the summary, and repeating it there defeats the point.
 Say plainly that the Claude inside the page is a fresh call which can see the
 request and the conversation and nothing more — it cannot run tests or read the
 wider repository.
+
+## While they read
+
+The briefing is not frozen at publish. Write it to
+`review/pr-<number>/context/briefing` as `{"text": "..."}` with the Artifact
+tool's `write_db`, and the open page picks it up without a reload.
+
+Use it when the conversation here moves on while they are still reading: a claim
+you made turns out to be wrong, a test you cited now fails, they ask you
+something in the terminal that the page should also know. A reviewer who is told
+something in chat and contradicted by the page has been given two answers and no
+way to choose.
 
 ## Afterwards
 
