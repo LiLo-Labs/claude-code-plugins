@@ -193,6 +193,9 @@ body.open #panel{display:flex}
   -webkit-box-orient:vertical;line-height:1.45}
 .carry button{border:none;background:none;color:var(--soft);cursor:pointer;
   font-size:15px;padding:0 2px;line-height:1}
+.lost{margin:0 13px 8px;padding:9px 11px;border:1px solid var(--mark);
+  border-radius:7px;font-size:13px;line-height:1.45;color:var(--mark);
+  flex-shrink:0}
 
 .compose{display:flex;gap:8px;padding:11px 13px;border-top:1px solid var(--rule);
   align-items:flex-end;flex-shrink:0}
@@ -277,6 +280,7 @@ footer{padding:22px 0 0;font-size:12.5px;color:var(--faint);line-height:1.6}
   <div class="tabs" id="tabs"></div>
   <div class="stream" id="stream"></div>
   <div class="seed" id="seed"></div>
+  <div id="lostSlot"></div>
   <div id="carrySlot"></div>
   <div class="compose">
     <textarea id="box" rows="1" placeholder="Ask anything&hellip;"></textarea>
@@ -421,11 +425,25 @@ const TONGUE = {py:'python', js:'javascript', ts:'typescript', sh:'bash',
   toml:'ini', ini:'ini', html:'xml', xml:'xml', css:'css', scss:'scss',
   dart:'dart', lua:'lua', r:'r', pl:'perl', ps1:'powershell'};
 
+// Named files with no extension are common and are usually scripts, not
+// prose: tools/bot-token, Makefile, a git hook. A shebang settles it, and
+// without one an extensionless file is far more likely to be a README than a
+// program.
+const SHEBANG = {python:'python', python3:'python', node:'javascript',
+  bash:'bash', sh:'bash', zsh:'bash', ruby:'ruby', perl:'perl'};
+
 function render(page){
   const name = page.full || page.name || '';
-  if (/\.(md|markdown)$/i.test(name) || !/\./.test(name)) return markdown(page.text);
+  const text = page.text || '';
+  if (/\.(md|markdown)$/i.test(name)) return markdown(text);
+  if (!/\./.test(name.split('/').pop())){
+    const first = text.split('\n', 1)[0];
+    if (!/^#!/.test(first)) return markdown(text);
+    const word = (first.match(/[\w.]+$/) || [''])[0].replace(/[0-9.]+$/, '');
+    return fenced(text, SHEBANG[word] || SHEBANG[word + '3'] || '');
+  }
   const ext = name.split('.').pop().toLowerCase();
-  return fenced(page.text, TONGUE[ext] || ext);
+  return fenced(text, TONGUE[ext] || ext);
 }
 
 // Highlighting is applied after render rather than baked into the markup, so
@@ -496,6 +514,7 @@ let threads = [{id: 't1', name: 'Thread 1', turns: [], busy: false}];
 let live = 0;
 let carried = null;
 let sample = null, db = null, decided = null, reason = null;
+let briefing = DATA.briefing || '';
 
 const short = s => s.length > 42 ? s.slice(0, 40).trim() + '…' : s;
 
@@ -524,7 +543,7 @@ function drawStream(){
   }
   el.scrollTop = el.scrollHeight;
   $('seed').style.display = t.turns.length ? 'none' : 'flex';
-  $('send').disabled = !sample || t.busy;
+  $('send').disabled = t.busy;
 }
 function drawCarry(){
   $('carrySlot').innerHTML = carried
@@ -655,6 +674,18 @@ function frame(){
     + "adjective. Two honest sentences beat six padded ones.\n\n"
     + "THE PULL REQUEST:\n\n" + (DATA.body || '');
   for (const d of documents) s += "\n\n--- " + d.name + " ---\n\n" + d.text;
+
+  // Everything above is what a stranger could read off the repository. This is
+  // the part only the session that did the work knows: why it exists, what was
+  // rejected, what was measured against what was assumed. Without it the page
+  // answers questions about the diff while the reviewer asks questions about
+  // the decision.
+  if (briefing) s += "\n\nWHAT THE WORKING SESSION KNOWS. This is an account "
+    + "written by the Claude that made this change, passed to you because it is "
+    + "not visible in the files. Treat it as a colleague's testimony: usually "
+    + "right, occasionally self-serving, and not something you checked "
+    + "yourself. Where it claims something was verified, you may say so. Where "
+    + "it is an opinion, say whose.\n\n" + briefing;
   return s;
 }
 
@@ -662,9 +693,23 @@ async function ask(){
   const t = threads[live];
   const box = $('box');
   const q = box.value.trim();
-  if ((!q && !carried) || !sample || t.busy) return;
+  if ((!q && !carried) || t.busy) return;
   const quote = carried; carried = null; unlight();
   box.value = ''; box.style.height = 'auto';
+
+  // With no Claude on this view the message is still worth keeping: it goes to
+  // the store as a note, and the working session reads it there. A reviewer
+  // typing into a dead box and watching it vanish is the worst outcome
+  // available -- they said the thing, and nobody will ever see it.
+  if (!sample){
+    t.turns.push({role:'user', content: q || 'What do you make of this?', quote});
+    t.turns.push({role:'assistant', content:
+      'Claude cannot be reached from this view, so nothing answered you here. '
+      + 'Your message is saved for the working session to read.'});
+    if (t.turns.length === 2) t.name = short(q || 'Note');
+    draw(); save();
+    return;
+  }
 
   t.turns.push({role:'user', content: q || 'What do you make of this?', quote});
   t.turns.push({role:'assistant', content:'Thinking…'});
@@ -720,9 +765,27 @@ function tidy(t){
   return {id:t.id, name:t.name,
           turns:t.turns.filter(m => m.content && m.content !== 'Thinking…')};
 }
-let saving = null;
+let saving = null, lost = null;
+
+// A conversation the reviewer can see but which was never stored is worse than
+// no conversation: they argue a point, close the tab, and it is gone with no
+// sign it was ever at risk. This used to swallow every write error.
+function sayLost(why){
+  if (lost === why) return;
+  lost = why;
+  const el = $('lostSlot');
+  if (el) el.innerHTML = '<div class="lost">Not saved \u2014 ' + esc(why)
+    + '. Copy anything here you want to keep; reloading will lose it.</div>';
+}
+function sayKept(){
+  if (lost === null) return;
+  lost = null;
+  const el = $('lostSlot');
+  if (el) el.innerHTML = '';
+}
+
 async function save(){
-  if (!db) return;
+  if (!db){ sayLost('this view cannot reach the store'); return; }
   clearTimeout(saving);
   saving = setTimeout(async () => {
     try {
@@ -733,7 +796,10 @@ async function save(){
         reason: reason,
         updatedAt: new Date().toISOString(),
       });
-    } catch (e) {}
+      sayKept();
+    } catch (e) {
+      sayLost((e && (e.code || e.message)) || 'the write was refused');
+    }
   }, 400);
 }
 
@@ -793,15 +859,23 @@ offerDecision();
 paint(); draw();
 
 (async () => {
-  sample = await claude.use('sample');
-  db = await claude.use('db');
+  // Reaching the runtime at all can fail, and an unhandled rejection here used
+  // to kill the rest of this block silently -- leaving a page that looked
+  // fine, answered nothing, and stored nothing.
+  try { sample = await claude.use('sample'); } catch (e) { sample = null; }
+  try { db = await claude.use('db'); } catch (e) { db = null; }
+
+  // A greyed-out button is not an explanation. Someone types a question, presses
+  // send, and nothing happens -- no message, no error, no clue. Say it.
   if (!sample){
-    $('box').disabled = true;
-    $('box').placeholder = 'Conversation unavailable on this view';
+    $('box').placeholder = 'Leave a note for the working session\u2026';
+    sayLost('Claude cannot be reached from this view, so nothing will answer '
+      + 'you here. What you type is still saved for the working session to '
+      + 'read, and the decision buttons still work');
   }
   draw();
 
-  if (!db) return;
+  if (!db){ sayLost('this view cannot reach the store'); return; }
   try {
     const snap = await db.doc('review/pr-' + DATA.number).get();
     const had = snap.exists && snap.data();
@@ -819,6 +893,14 @@ paint(); draw();
   // The document, live. Revised from the working session with write_db, this
   // page shows the new text without anyone reloading -- which is the point:
   // you say what is wrong, it changes under you, and you confirm.
+  try {
+    db.doc('review/pr-' + DATA.number + '/context/briefing')
+      .onSnapshot(snap => {
+        const row = snap.exists && snap.data();
+        if (row && typeof row.text === 'string') briefing = row.text;
+      });
+  } catch (e) {}
+
   try {
     db.collection('review/pr-' + DATA.number + '/documents')
       .onSnapshot(snap => {
