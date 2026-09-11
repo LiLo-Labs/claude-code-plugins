@@ -193,6 +193,9 @@ body.open #panel{display:flex}
   -webkit-box-orient:vertical;line-height:1.45}
 .carry button{border:none;background:none;color:var(--soft);cursor:pointer;
   font-size:15px;padding:0 2px;line-height:1}
+.lost{margin:0 13px 8px;padding:9px 11px;border:1px solid var(--mark);
+  border-radius:7px;font-size:13px;line-height:1.45;color:var(--mark);
+  flex-shrink:0}
 
 .compose{display:flex;gap:8px;padding:11px 13px;border-top:1px solid var(--rule);
   align-items:flex-end;flex-shrink:0}
@@ -277,6 +280,7 @@ footer{padding:22px 0 0;font-size:12.5px;color:var(--faint);line-height:1.6}
   <div class="tabs" id="tabs"></div>
   <div class="stream" id="stream"></div>
   <div class="seed" id="seed"></div>
+  <div id="lostSlot"></div>
   <div id="carrySlot"></div>
   <div class="compose">
     <textarea id="box" rows="1" placeholder="Ask anything&hellip;"></textarea>
@@ -734,9 +738,27 @@ function tidy(t){
   return {id:t.id, name:t.name,
           turns:t.turns.filter(m => m.content && m.content !== 'Thinking…')};
 }
-let saving = null;
+let saving = null, lost = null;
+
+// A conversation the reviewer can see but which was never stored is worse than
+// no conversation: they argue a point, close the tab, and it is gone with no
+// sign it was ever at risk. This used to swallow every write error.
+function sayLost(why){
+  if (lost === why) return;
+  lost = why;
+  const el = $('lostSlot');
+  if (el) el.innerHTML = '<div class="lost">Not saved \u2014 ' + esc(why)
+    + '. Copy anything here you want to keep; reloading will lose it.</div>';
+}
+function sayKept(){
+  if (lost === null) return;
+  lost = null;
+  const el = $('lostSlot');
+  if (el) el.innerHTML = '';
+}
+
 async function save(){
-  if (!db) return;
+  if (!db){ sayLost('this view cannot reach the store'); return; }
   clearTimeout(saving);
   saving = setTimeout(async () => {
     try {
@@ -747,7 +769,10 @@ async function save(){
         reason: reason,
         updatedAt: new Date().toISOString(),
       });
-    } catch (e) {}
+      sayKept();
+    } catch (e) {
+      sayLost((e && (e.code || e.message)) || 'the write was refused');
+    }
   }, 400);
 }
 
@@ -815,7 +840,7 @@ paint(); draw();
   }
   draw();
 
-  if (!db) return;
+  if (!db){ sayLost('this view cannot reach the store'); return; }
   try {
     const snap = await db.doc('review/pr-' + DATA.number).get();
     const had = snap.exists && snap.data();
