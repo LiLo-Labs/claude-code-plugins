@@ -845,11 +845,19 @@ offerDecision();
 paint(); draw();
 
 (async () => {
-  sample = await claude.use('sample');
-  db = await claude.use('db');
+  // Reaching the runtime at all can fail, and an unhandled rejection here used
+  // to kill the rest of this block silently -- leaving a page that looked
+  // fine, answered nothing, and stored nothing.
+  try { sample = await claude.use('sample'); } catch (e) { sample = null; }
+  try { db = await claude.use('db'); } catch (e) { db = null; }
+
+  // A greyed-out button is not an explanation. Someone types a question, presses
+  // send, and nothing happens -- no message, no error, no clue. Say it.
   if (!sample){
     $('box').disabled = true;
-    $('box').placeholder = 'Conversation unavailable on this view';
+    $('box').placeholder = 'Claude is unavailable on this view';
+    sayLost('Claude cannot be reached from this view, so questions here go '
+      + 'nowhere. The document and the decision buttons still work');
   }
   draw();
 
