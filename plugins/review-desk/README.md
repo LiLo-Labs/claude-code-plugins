@@ -25,6 +25,13 @@ to the pull request while you watch. Whatever you highlight goes along with the
 question, with the tab and section you were reading. A message sent while no
 session is running is answered by the next one to start.
 
+The panel says when the working session last answered, and has a **Check**
+button that rings it and waits. If nothing answers, the page shows the command
+that brings that session back (`claude --resume …`), for someone at the computer
+to run; a page cannot start a session by itself. After any `git push`, a hook
+lists the open desks for that repository, so the session rewrites whatever the
+push made out of date.
+
 The page draws mermaid diagrams: the ones Claude writes into the description,
 fenced `mermaid` blocks in any markdown file the request carries, and `.mmd`
 files. A diagram that does not parse shows its source and the error instead.
