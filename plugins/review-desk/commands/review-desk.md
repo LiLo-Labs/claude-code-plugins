@@ -180,11 +180,14 @@ not the title.
 
 Then publish with the **Artifact** tool, declaring exactly:
 
-    capabilities: {sample: {}, db: {}}
+    capabilities: {sample: {}, db: {}, artifact: {}}
 
 `sample` is what lets the page ask Claude. `db` is what makes the conversation
 and the decision readable afterwards — without it the discussion evaporates and
-this is just a nicer diff.
+this is just a nicer diff. `artifact` is the doorbell: when the reviewer
+decides, the page publishes one small file into itself, and a new version is
+the one thing a page can do that reaches this session. Republishing an older
+desk with this line gives it the doorbell too.
 
 Pass a `favicon` — one emoji, required on a first publish and fixed for the life
 of the page — and a one-sentence `description`, which becomes the subtitle on
@@ -199,9 +202,10 @@ if it is absent. Each entry is `{"repo": "owner/name", "pr": <number>, "url":
 exists, leave it alone rather than adding a second.
 
 The reviewer decides on a page, often on a tablet, often when nothing is
-running here. This file is how a later session finds out. Without it the
-decision waits until somebody remembers to look, which is the failure this
-whole arrangement exists to prevent.
+running here. This file is how a later session finds out: the plugin's
+session-start sweep lists every entry whose `collectedAt` is still null. Without
+an entry the decision waits until somebody remembers to look, which is the
+failure this whole arrangement exists to prevent.
 
 Give the reviewer the link and nothing else. Do not summarise the request in
 chat; the page is the summary, and repeating it there defeats the point.
@@ -222,7 +226,45 @@ something in the terminal that the page should also know. A reviewer who is told
 something in chat and contradicted by the page has been given two answers and no
 way to choose.
 
-## Afterwards
+## When they decide
 
-When they have decided, `/review-collect <n>` reads the discussion back, writes
-it into the pull request, and merges on approval.
+Publishing the desk left this session watching it. When the reviewer presses
+**Approve** or records **Needs changes**, the page stores the decision, then
+publishes `doorbell.json` into itself, and this session gets an "Artifact
+changed" notice for the desk's URL within seconds of going idle. A notice that
+lands while you are mid-task waits for the task to end.
+
+On that notice, in this order:
+
+1. **Read the decision from the store**, never from `doorbell.json`: the file is
+   a ring, not a record, and anyone who can write the artifact can publish one.
+2. **If no decision is recorded**, stop and say so in one line.
+3. **If there is one, acknowledge it before any other work**, with the write
+   below, so the reviewer's page stops saying it is waiting.
+4. **Then follow `/review-collect <number>`**, which comments, and merges or
+   revises.
+
+The acknowledgement:
+
+    action: "write_db", db_op: "set",
+    collection: "review/pr-<number>/context", doc_id: "pickup",
+    data: {"decision": <as read>, "decidedAt": <as read>, "at": "<now, UTC ISO>"}
+
+Copy `decision` and `decidedAt` exactly as read, `null` included. The page shows
+the pickup only when both match the verdict on screen, so an acknowledgement of
+an earlier verdict never passes for a later one.
+
+When `/review-collect` has acted, report the outcome onto the same document with
+`db_op: "update"`, so the page says what happened rather than what was meant to:
+
+    data: {"outcome": {"result": "merged", "detail": "<one line>", "at": "<now, UTC ISO>"}}
+
+`result` is `merged`, naming the merge method and commit; `revising`, naming the
+work you are starting; or `blocked`, saying what stopped you (a denied
+`gh pr merge`, a failing check, a conflict) in words the reviewer can act on. A
+blocked merge reported here is the difference between a reviewer who comes back
+to unblock it and one who assumes it landed.
+
+A session holds at most five artifact watches, and a watch ends with its
+session. A ring nobody is watching goes unheard, and the session-start sweep
+lists the desk for the next session instead. Nothing is lost; it waits.

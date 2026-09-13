@@ -27,8 +27,10 @@ asked for.
 ## How it goes
 
 1. `/review-desk <pr>` — gather the request, build the page, publish it with the
-   `sample` and `db` capabilities, hand over the link.
-2. They read, ask, argue, and press **Approve** or **Needs changes**.
+   `sample`, `db` and `artifact` capabilities, hand over the link.
+2. They read, ask, argue, and press **Approve** or **Needs changes**. The page
+   rings the session watching it; with no session watching, the next session
+   start picks the desk up.
 3. `/review-collect <pr>` — read the discussion, summarise it into the pull
    request, merge or revise.
 

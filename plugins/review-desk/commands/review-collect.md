@@ -44,6 +44,11 @@ reason is what they actually asked for.
 If there is no document, the discussion was never saved. Say so rather than
 inventing one.
 
+If there is a decision, and `review/pr-<n>/context/pickup` does not already hold
+the same `decision` and `decidedAt`, write the pickup before anything else, as
+`/review-desk` describes under "When they decide". Until one lands, the
+reviewer's page says it is still waiting.
+
 ## Write it into the request
 
 Post one comment on the pull request summarising the exchange. Not a transcript
@@ -67,13 +72,19 @@ work, and say what you are going to do before doing it.
 
 **Undecided** — say so and stop. Do not interpret silence as either.
 
+After acting on a decision, report what happened as the pickup's `outcome`, as
+`/review-desk` describes under "When they decide": `merged` with the method and
+commit, `revising` with the work, or `blocked` with what stopped you. A merge
+that auto mode or branch protection refuses is `blocked`, never silence; the
+reviewer's page otherwise goes on saying the decision was picked up.
+
 ## Never
 
 When you have acted on a decision -- the comment posted, and merged or not --
 set `collectedAt` on that request's entry in `~/.review-desks.json` to the
-current UTC time. An entry that stays null is raised again at every session
-start, so leaving it means nagging; stamping one you did not act on means the
-decision is silently dropped.
+current UTC time. An entry that stays null is listed again by the plugin's
+session-start sweep every time a session starts, so leaving it means nagging;
+stamping one you did not act on means the decision is silently dropped.
 
 Do not merge on a decision you inferred rather than read. The whole arrangement
 exists because someone has to be able to say no, and a bot that merges on its
