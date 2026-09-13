@@ -747,6 +747,15 @@ function drawBadge(){
   d.textContent = waiting || '';
   d.classList.toggle('show', waiting > 0 && !document.body.classList.contains('open'));
 }
+// The resume command is offered for the reviewer to copy and run on their own
+// computer, and the presence stamp it can come from is a document anyone who can
+// write this desk's store can set. So only the exact shape the session writes is
+// shown: cd into a plain path, then claude --resume with a session id. Anything
+// else -- a second command, a pipe, a substitution -- is not shown at all. A path
+// with spaces is refused too; that costs the command on such a machine, not safety.
+const RESUME_SHAPE = /^cd [\w.~\/-]+ && claude --resume [0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+const safeResume = cmd => typeof cmd === 'string' && RESUME_SHAPE.test(cmd);
+
 function drawPresence(){
   const el = $('presence');
   if (!db){ el.hidden = true; return; }
@@ -766,7 +775,7 @@ function drawPresence(){
   } else {
     line = 'The working session has not answered on this desk yet.';
   }
-  const resume = (presence && presence.resume) || DATA.resume || '';
+  const resume = [presence && presence.resume, DATA.resume].find(safeResume) || '';
   el.innerHTML = '<span class="'+(gone ? 'gone' : '')+'">'+esc(line)+'</span>'
     + (bellOn ? '<button class="check" id="check">Check</button>' : '')
     + (gone && resume
