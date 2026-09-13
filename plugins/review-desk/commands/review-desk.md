@@ -244,6 +244,11 @@ A document whose `name` matches a carried file replaces that tab; a new name add
 one. Rewrite the description whenever a change makes it wrong, diagrams
 included.
 
+Change a desk through these writes, never by republishing it. Every doorbell
+ring is a new version saved from inside the page, so once the reviewer has sent
+a message or decided, a republish is refused until you have read the page's
+latest version in full. Republish only to change the page's code, and read first.
+
 A reviewer told one thing in a reply and shown another on the page has been
 given two answers and no way to choose. Keep them the same.
 
