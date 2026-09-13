@@ -74,7 +74,7 @@ Read `${CLAUDE_PLUGIN_ROOT}/templates/review.html` and replace the single
       "title":     "…",
       "url":       "https://github.com/…",
       "summary":   "34 files, no code" — a short honest size,
-      "body":      "the pull request description, markdown",
+      "body":      "the pull request description, markdown, with its diagrams",
       "documents": [{"name": "docs/design/0002-x.md", "text": "…"}],
       "briefing":  "what this session knows that the files do not say",
       "openers":   ["four questions worth asking about THIS request"]
@@ -118,6 +118,46 @@ is a sentence, and not "Review Desk", which is what the template ships with. A
 reviewer accumulates these, and a gallery of pages all called "Review Desk"
 tells them nothing about which is which. The publisher reads this tag to name
 the artifact, so setting it from JavaScript at load does not work.
+
+## Draw it
+
+The `body` carries diagrams, written as fenced code blocks tagged `mermaid`, and
+the page draws them. A reviewer on a tablet cannot trace a path through six files.
+A drawing of the path gives them the orientation they are missing, and it is
+the quickest way for them to notice the path is not what they expected.
+
+Draw at least one for every request that changes how something behaves or how
+its parts connect, which is nearly all of them. Leave it out only when there is
+nothing to draw, such as a typo or a version bump, and never fill the gap with a
+generic architecture picture.
+
+Choose the kind from what changed:
+
+- **Messages between parts:** a `sequenceDiagram` of the new path.
+- **Control flow or a pipeline:** a `flowchart`.
+- **A lifecycle:** a `stateDiagram-v2`.
+- **A restructuring:** two flowcharts, before and after, under headings that
+  say which is which.
+
+A diagram reads as fact, so these rules keep it honest:
+
+- **Draw this change, not the whole system.** A dozen nodes showing where the
+  change sits beat forty showing everything. In a flowchart, give the changed
+  nodes their own class so they stand out: `classDef changed stroke-width:3px`
+  then `class Retry,Backoff changed`.
+- **Solid edges for what the diff shows, dotted (`-.->`) for what you
+  inferred**, such as a caller you assume exists or a consumer you did not read.
+  Put one line under the diagram saying which edges are inferred.
+- **Label edges with what passes along them**, such as the message, the argument
+  or the condition. Do not just write "calls".
+- **Quote every node label**, as in `A["parse (strict)"]`. Parentheses and
+  brackets in an unquoted label break the parse. A diagram that does not parse
+  appears on the page as its source with the error above it, not as a drawing.
+
+Diagrams inside the request's own files are drawn too: a fenced `mermaid` block
+in any carried markdown file, and any `.mmd` or `.mermaid` file, each with its
+source one click away. Carry those files even when you would otherwise leave
+them out. A changed diagram is exactly the thing a reviewer should see drawn.
 
 ## Publish
 
