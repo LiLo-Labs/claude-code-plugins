@@ -280,6 +280,7 @@ footer{padding:22px 0 0;font-size:12.5px;color:var(--faint);line-height:1.6}
   <div class="tabs" id="tabs"></div>
   <div class="stream" id="stream"></div>
   <div class="seed" id="seed"></div>
+  <div id="aloneSlot"></div>
   <div id="lostSlot"></div>
   <div id="carrySlot"></div>
   <div class="compose">
@@ -705,7 +706,8 @@ async function ask(){
     t.turns.push({role:'user', content: q || 'What do you make of this?', quote});
     t.turns.push({role:'assistant', content:
       'Claude cannot be reached from this view, so nothing answered you here. '
-      + 'Your message is saved for the working session to read.'});
+      + (db ? 'Your message is saved for the working session to read.'
+            : 'This view cannot save it either, so tell the working session directly.')});
     if (t.turns.length === 2) t.name = short(q || 'Note');
     draw(); save();
     return;
@@ -867,11 +869,17 @@ paint(); draw();
 
   // A greyed-out button is not an explanation. Someone types a question, presses
   // send, and nothing happens -- no message, no error, no clue. Say it.
+  // This lives in its own slot, not the not-saved banner: that one clears on the
+  // first successful write, which would take this explanation with it, and its
+  // "Not saved" prefix contradicted the "still saved" said here.
   if (!sample){
     $('box').placeholder = 'Leave a note for the working session\u2026';
-    sayLost('Claude cannot be reached from this view, so nothing will answer '
-      + 'you here. What you type is still saved for the working session to '
-      + 'read, and the decision buttons still work');
+    $('aloneSlot').innerHTML = '<div class="lost">Claude cannot be reached from '
+      + 'this view, so nothing will answer you here. '
+      + (db ? 'What you type is still saved for the working session to read, '
+            + 'and the decision buttons still work.'
+            : 'The decision buttons still work.')
+      + '</div>';
   }
   draw();
 
