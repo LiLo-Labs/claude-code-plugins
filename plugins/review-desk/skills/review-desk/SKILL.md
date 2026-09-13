@@ -27,7 +27,7 @@ asked for.
 ## How it goes
 
 1. `/review-desk <pr>` — gather the request, build the page, publish it with the
-   `sample`, `db` and `artifact` capabilities, hand over the link.
+   `db` and `artifact` capabilities, hand over the link.
 2. They read, ask, argue, and press **Approve** or **Needs changes**. The page
    rings the session watching it; with no session watching, the next session
    start picks the desk up.
@@ -42,11 +42,6 @@ the plain-English account of a code-only request. There is no way for a plugin
 to require another plugin; this is the same soft reference
 `superpowers:brainstorming` uses, and it does nothing when the skill is absent.
 
-That governs what YOU write. It cannot govern what the page's Claude writes,
-because a `sample` call has no skills — so the style directive for it is carried
-in the prompt the template builds, and is deliberately short. A handful of named
-tics beats a style guide the model has to summarise before it can answer.
-
 **Draw the change.** The page renders mermaid diagrams, and the request is
 described with them: a sequence, flow or state diagram of what this change
 does, with inferred edges dotted. The command's "Draw it" section has the rules.
@@ -55,18 +50,13 @@ in place.
 
 ## What it is honest about
 
-**The page's chat reaches two different Claudes.** Messages to the working
-session come to the session that opened the pull request, which answers with its
-tools and can change the desk and the pull request, but only while it is
-running. "Here, no tools" is a fresh call that sees the request and the
-conversation and nothing else. Say which is which at handover, and make sure the
-page carries enough material that the fresh call can answer well from what it
-has.
+**The page's chat is the working session.** Messages go to the session that
+opened the pull request, which answers with its tools and can change the desk
+and the pull request. While no session is running, a message waits for the next
+one to start, and the page says so. Say that at handover.
 
-**The reviewer pays for the calls**, and the first one asks their consent.
-
-**Without `db` the conversation is not saved.** The page still works and the
-discussion still happens, but nothing comes back. Declare both capabilities.
+**Without `db` nothing reaches the session.** The page still renders, but
+neither a message nor a decision can be stored. Declare both capabilities.
 
 ## The rule that matters
 

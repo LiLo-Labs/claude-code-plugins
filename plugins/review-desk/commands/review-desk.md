@@ -76,35 +76,12 @@ Read `${CLAUDE_PLUGIN_ROOT}/templates/review.html` and replace the single
       "summary":   "34 files, no code" — a short honest size,
       "body":      "the pull request description, markdown, with its diagrams",
       "documents": [{"name": "docs/design/0002-x.md", "text": "…"}],
-      "briefing":  "what this session knows that the files do not say",
       "openers":   ["four questions worth asking about THIS request"]
     }
 
-The **briefing** is the part that makes the page worth talking to. Everything
-else in the payload is what any stranger could read off the repository; this is
-what only the session that did the work knows, and without it the page answers
-questions about the diff while the reviewer asks questions about the decision.
-
-Write it from the conversation you are running inside. Cover:
-
-- **Why this exists** — the thing that went wrong, the request that prompted it,
-  the failure it is meant to prevent. Name the trigger.
-- **What was tried and rejected**, with the reason. A reviewer arguing for an
-  approach you already discarded deserves to know it was discarded and why.
-- **What you verified against what you assumed.** Say which commands you ran and
-  what they printed, and mark the rest as inference. This is the single most
-  useful thing in the briefing and the easiest to fudge.
-- **What you are least sure about.** The reviewer will find it anyway; finding
-  it themselves after you hid it is worse.
-- **Anything decided in conversation** that the diff cannot show.
-
-Write it as an account, in prose, a few hundred words. Not a changelog — the
-commit message is already the changelog. It is testimony from the person who did
-the work, and the page tells its Claude to treat it that way: usually right,
-occasionally self-serving, and not independently checked.
-
-Never put anything in the briefing the reviewer should not see. It is sent to
-the page's Claude verbatim and the reviewer can ask it to repeat any of it.
+There is no briefing field. The page's chat reaches this session, which already
+knows why the change exists, what was rejected, and what was verified; say it in
+the replies instead.
 
 The openers matter more than they look. Generic ones get ignored; questions
 pointed at the actual decision in this request are what start the conversation.
@@ -180,14 +157,15 @@ not the title.
 
 Then publish with the **Artifact** tool, declaring exactly:
 
-    capabilities: {sample: {}, db: {}, artifact: {}}
+    capabilities: {db: {}, artifact: {}}
 
-`sample` is what lets the page ask Claude. `db` is what makes the conversation
-and the decision readable afterwards — without it the discussion evaporates and
-this is just a nicer diff. `artifact` is the doorbell: when the reviewer
-decides, the page publishes one small file into itself, and a new version is
-the one thing a page can do that reaches this session. Republishing an older
-desk with this line gives it the doorbell too.
+`db` holds the conversation and the decision, where this session reads them and
+writes its replies. `artifact` is the doorbell: when the reviewer sends a
+message or decides, the page publishes one small file into itself, and a new
+version is the one thing a page can do that reaches this session. There is no
+`sample`: the chat goes to this session, not to a call the page makes itself,
+so the reviewer is never asked to consent to or pay for one. Republishing an
+older desk with this line gives it the new chat too.
 
 Pass a `favicon` — one emoji, required on a first publish and fixed for the life
 of the page — and a one-sentence `description`, which becomes the subtitle on
@@ -210,10 +188,9 @@ failure this whole arrangement exists to prevent.
 Give the reviewer the link and nothing else. Do not summarise the request in
 chat; the page is the summary, and repeating it there defeats the point.
 
-Say plainly how the page's chat works. Messages to **the working session** come
-to this session, which answers with its tools and can change the desk and the
-pull request, but only while a session is running. **Here, no tools** is a fresh
-call that sees only the page and answers straight away.
+Say plainly how the page's chat works: it reaches this session, which answers
+with its tools and can change the desk and the pull request. While no session
+is running, a message waits for the next one to start.
 
 ## While they read
 
@@ -222,11 +199,10 @@ and what you write reaches their open page without a reload.
 
 ### When they ask the working session
 
-The page's chat goes one of two ways, and the reviewer picks in the composer.
-**The working session** is the default, and it is you: this conversation, the
-repository and every tool. **Here, no tools** is the page's own fresh call. A
-message to the working session is stored, then rings the same doorbell a
-decision does, so it arrives as an "Artifact changed" notice for the desk.
+The page's chat goes to you: this conversation, the repository and every tool.
+There is nothing for the reviewer to choose. A message is stored, then rings the
+same doorbell a decision does, so it arrives as an "Artifact changed" notice for
+the desk.
 
 On that notice, after checking for a decision as described under "When they
 decide", answer every message still waiting:
@@ -263,12 +239,10 @@ lands on the open page without a reload, and a changed tab is marked:
 
     review/pr-<number>/context/body         {"text": "<the description>"}
     review/pr-<number>/documents/<any id>   {"name": "<path as carried>", "text": "..."}
-    review/pr-<number>/context/briefing     {"text": "<what this session knows>"}
 
 A document whose `name` matches a carried file replaces that tab; a new name adds
 one. Rewrite the description whenever a change makes it wrong, diagrams
-included, and the briefing whenever something you told it turns out not to be
-true.
+included.
 
 A reviewer told one thing in a reply and shown another on the page has been
 given two answers and no way to choose. Keep them the same.
