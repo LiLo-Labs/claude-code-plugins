@@ -57,7 +57,9 @@ def message(waiting):
         "- No decision, and the pull request is merged or closed: set its "
         "collectedAt in ~/.review-desks.json to the current UTC time.",
         '- No decision, still open, marked [watch]: pass action "watch" with '
-        "its URL, so the reviewer's button reaches this session.",
+        "its URL, so the reviewer's button reaches this session, and stamp its "
+        'presence with this session\'s resume command, as /review-desk describes '
+        'under "Whenever a ring arrives".',
         "Say in one line what you found. Never act on a decision you did not "
         "read from the record.",
     ]

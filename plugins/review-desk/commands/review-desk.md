@@ -76,12 +76,18 @@ Read `${CLAUDE_PLUGIN_ROOT}/templates/review.html` and replace the single
       "summary":   "34 files, no code" — a short honest size,
       "body":      "the pull request description, markdown, with its diagrams",
       "documents": [{"name": "docs/design/0002-x.md", "text": "…"}],
-      "openers":   ["four questions worth asking about THIS request"]
+      "openers":   ["four questions worth asking about THIS request"],
+      "resume":    "cd <repository path> && claude --resume <this session's id>"
     }
 
 There is no briefing field. The page's chat reaches this session, which already
 knows why the change exists, what was rejected, and what was verified; say it in
 the replies instead.
+
+`resume` is the command that brings this session back. The page shows it when
+the reviewer presses **Check** and nothing answers. Build it from the directory
+you run git in and `$CLAUDE_CODE_SESSION_ID`, and leave it out when that
+variable is empty rather than guessing an id.
 
 The openers matter more than they look. Generic ones get ignored; questions
 pointed at the actual decision in this request are what start the conversation.
@@ -190,12 +196,26 @@ chat; the page is the summary, and repeating it there defeats the point.
 
 Say plainly how the page's chat works: it reaches this session, which answers
 with its tools and can change the desk and the pull request. While no session
-is running, a message waits for the next one to start.
+is running, a message waits for the next one to start, and the panel's **Check**
+button shows the command that resumes this session.
 
 ## While they read
 
 The desk is live in both directions. The reviewer's messages reach this session,
 and what you write reaches their open page without a reload.
+
+### Whenever a ring arrives
+
+Before anything else, stamp the desk so its panel can say you are there:
+
+    action: "write_db", db_op: "set",
+    collection: "review/pr-<number>/context", doc_id: "presence",
+    data: {"at": "<now, UTC ISO>", "resume": "<the resume command>"}
+
+A ring with no new message and no new decision is the reviewer pressing
+**Check**, and this stamp is the whole answer. A session that picks a desk up at
+session start stamps it too, with its own resume command, because the one in
+the payload resumes a session that may have ended.
 
 ### When they ask the working session
 
@@ -232,7 +252,9 @@ as inference.
 
 When a message asks for a change, or the conversation here settles one, change
 the pull request first. Make the change, run what verifies it, commit and push,
-and name the commit in your reply.
+and name the commit in your reply. After every `git push` the plugin's hook
+lists the open desks for that repository, so a change made from the terminal
+does not leave a desk out of date.
 
 Then rewrite the desk so it shows the pull request as it now is. Each of these
 lands on the open page without a reload, and a changed tab is marked:

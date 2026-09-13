@@ -60,3 +60,6 @@ jobs:
       - name: Run the session-start sweep tests
         working-directory: plugins/review-desk
         run: python3 tests/test_sweep.py
+      - name: Run the after-push reminder tests
+        working-directory: plugins/review-desk
+        run: python3 tests/test_after_push.py

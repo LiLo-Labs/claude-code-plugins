@@ -46,6 +46,8 @@ class Sweep(unittest.TestCase):
         self.assertIn('doc_id "pr-<number>"', text)
         # Messages left for the working session are answered, not only decisions.
         self.assertIn("While they read", text)
+        # A desk watched by a new session gets that session's resume command.
+        self.assertIn("Whenever a ring arrives", text)
 
     def test_watch_marks_only_the_newest_five(self):
         text = said(run([desk(n) for n in range(1, 8)]))
