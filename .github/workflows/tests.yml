@@ -49,3 +49,14 @@ jobs:
       - name: Run the test suite
         working-directory: plugins/blender
         run: python3 tests/test_blendpipe.py
+
+  review-desk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Run the session-start sweep tests
+        working-directory: plugins/review-desk
+        run: python3 tests/test_sweep.py

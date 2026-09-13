@@ -237,6 +237,7 @@ textarea:focus{outline:2px solid var(--cool);outline-offset:-1px;
   border-left:2px solid var(--mark);color:var(--soft)}
 .done .verdict{padding:14px 0 0}
 .done b{color:var(--good)}
+.done .pickup{margin:12px 0 0;font-size:13.5px;color:var(--soft)}
 footer{padding:22px 0 0;font-size:12.5px;color:var(--faint);line-height:1.6}
 </style>
 
@@ -913,18 +914,28 @@ function sayKept(){
   if (el) el.innerHTML = '';
 }
 
+// decidedAt is stamped when the reviewer decides and stored with the decision.
+// The session's pickup copies it back, so an acknowledgement of an earlier
+// verdict never reads as one for the verdict on screen.
+let decidedAt = null, pickup = null, rang = null, showingDecided = false;
+
+function record(){
+  return db.doc('review/pr-' + DATA.number).set({
+    pr: DATA.number, title: DATA.title,
+    threads: threads.map(tidy),
+    decision: decided,
+    reason: reason,
+    decidedAt: decidedAt,
+    updatedAt: new Date().toISOString(),
+  });
+}
+
 async function save(){
   if (!db){ sayLost('this view cannot reach the store'); return; }
   clearTimeout(saving);
   saving = setTimeout(async () => {
     try {
-      await db.doc('review/pr-' + DATA.number).set({
-        pr: DATA.number, title: DATA.title,
-        threads: threads.map(tidy),
-        decision: decided,
-        reason: reason,
-        updatedAt: new Date().toISOString(),
-      });
+      await record();
       sayKept();
     } catch (e) {
       sayLost((e && (e.code || e.message)) || 'the write was refused');
@@ -932,11 +943,51 @@ async function save(){
   }, 400);
 }
 
+// A decision cannot sit out the debounce: the doorbell rings straight after it,
+// and a session answering the bell must find the decision already stored.
+async function saveNow(){
+  if (!db){ sayLost('this view cannot reach the store'); return false; }
+  clearTimeout(saving);
+  try {
+    await record();
+    sayKept();
+    return true;
+  } catch (e) {
+    sayLost((e && (e.code || e.message)) || 'the write was refused');
+    return false;
+  }
+}
+
+/* The doorbell. A store write reaches no Claude Code session; a new version of
+   this artifact does -- the session that published the desk is watching it, and
+   hears within seconds of going idle. So once a decision is stored the page also
+   publishes one small file into itself.
+   The file carries nothing the session acts on. It reads the decision from the
+   store, so a lost ring costs only speed (the session-start sweep still finds
+   the desk) and a stray one changes nothing. The files form keeps this view
+   running; the page form would reload it under the reviewer. */
+const bellReady = (async () => {
+  try { return await claude.use('artifact'); } catch (e) { return null; }
+})();
+
+async function ring(){
+  const bell = await bellReady;
+  if (!bell) return 'unavailable';
+  try {
+    await bell.publish({'doorbell.json': JSON.stringify(
+      {pr: DATA.number, decision: decided, decidedAt: decidedAt})});
+    return 'rung';
+  } catch (e) {
+    return (e && e.code) || 'failed';
+  }
+}
+
 // "Needs changes" without saying what to change is the one verdict nobody can
 // act on. Approving needs no reason -- the request already says what it wants --
 // so only this branch asks, and it asks before recording, because the panel is
 // replaced once a decision is in and there is no way back to it.
 function askReason(existing){
+  showingDecided = false;
   $('decide').innerHTML = '<div class="cap">What needs changing</div>'
     + '<div class="done"><textarea id="why" rows="4" placeholder="The part that is '
     + 'wrong, and what would make it right."></textarea>'
@@ -955,9 +1006,11 @@ function askReason(existing){
 }
 
 function offerDecision(){
+  showingDecided = false;
   $('decide').innerHTML = '<div class="cap">When you have made up your mind</div>'
-    + '<div class="verdict"><span class="note">Recorded here. I pick it up, write '
-    + 'the discussion into the pull request, and merge or revise accordingly.</span>'
+    + '<div class="verdict"><span class="note">Recorded here and sent to the '
+    + 'working session, which writes the discussion into the pull request and '
+    + 'merges or revises accordingly.</span>'
     + '<button class="btn yes" id="ok">Approve</button>'
     + '<button class="btn" id="changes">Needs changes</button></div>';
   $('ok').addEventListener('click', () => decide('approved'));
@@ -971,13 +1024,44 @@ async function decide(v, quiet, why){
 
   decided = v;
   reason = why || null;
-  if (!quiet) await save();
+  rang = null;
+  if (!quiet){
+    decidedAt = new Date().toISOString();
+    rang = 'sending';
+    drawDecided();
+    rang = (await saveNow()) ? await ring() : 'unsaved';
+  }
+  drawDecided();
+}
+
+// The page cannot see whether a session is running, so it says only what it
+// knows: saved, rung, or picked up. "I will merge it" was a promise nothing
+// on this side could keep.
+function pickupLine(){
+  if (!db) return 'Saving is unavailable on this view, so no session will see '
+    + 'this. Tell the working session directly.';
+  if (pickup && pickup.decision === decided && pickup.decidedAt === decidedAt){
+    const at = new Date(pickup.at);
+    return 'Picked up by the working session' + (isNaN(at) ? '' : ' at '
+      + at.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})) + '.';
+  }
+  if (rang === 'sending') return 'Saving…';
+  if (rang === 'unsaved') return 'Not saved, so no session will see this. '
+    + 'Tell the working session directly.';
+  const later = ' If no session is running, the next one to start picks it up.';
+  if (rang === 'rung' || rang === null) return 'Waiting for the working session.' + later;
+  return 'Saved, but this view could not notify the working session ('
+    + rang + ').' + later;
+}
+
+function drawDecided(){
+  showingDecided = true;
   $('decide').innerHTML = '<div class="cap">Recorded</div><div class="done">'
-    + 'You marked this <b>'+esc(v)+'</b>. I will pick it up from here, write the '
-    + 'discussion into pull request #'+DATA.number+', and '
-    + (v === 'approved' ? 'merge it.' : 'come back with a revision.')
+    + 'You marked this <b>'+esc(decided)+'</b>. The working session writes the '
+    + 'discussion into pull request #'+DATA.number+' and '
+    + (decided === 'approved' ? 'merges it.' : 'comes back with a revision.')
     + (reason ? '<blockquote>'+esc(reason)+'</blockquote>' : '')
-    + (db ? '' : ' <em>Saving is unavailable on this view, so tell me directly too.</em>')
+    + '<p class="pickup">'+esc(pickupLine())+'</p>'
     + '<div class="verdict"><button class="btn" id="redo">Change this</button></div>'
     + '</div>';
   $('redo').addEventListener('click', offerDecision);
@@ -1020,10 +1104,21 @@ paint(); draw();
         live = 0;
       }
       reason = had.reason || null;
+      decidedAt = had.decidedAt || null;
       if (had.decision) decide(had.decision, true, had.reason);
     }
   } catch (e) {}
   draw();
+
+  // The session's acknowledgement, written when it answers the doorbell or
+  // finds this desk in its session-start sweep.
+  try {
+    db.doc('review/pr-' + DATA.number + '/context/pickup')
+      .onSnapshot(snap => {
+        pickup = (snap.exists && snap.data()) || null;
+        if (showingDecided) drawDecided();
+      });
+  } catch (e) {}
 
   // The document, live. Revised from the working session with write_db, this
   // page shows the new text without anyone reloading -- which is the point:

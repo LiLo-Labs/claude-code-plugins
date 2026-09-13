@@ -31,8 +31,16 @@ files. A diagram that does not parse shows its source and the error instead.
 The library (mermaid 11.15.0, pinned by hash) loads only on pages that have a
 diagram.
 
-The page needs the `sample` and `db` capabilities. Without `db` the conversation
-still happens but nothing comes back, which defeats the point.
+The page needs the `sample`, `db` and `artifact` capabilities. Without `db` the
+conversation still happens but nothing comes back, which defeats the point.
+
+Pressing **Approve** or **Needs changes** reaches the session two ways. The page
+stores the decision and publishes a small file into itself, which wakes the
+Claude Code session watching the desk within seconds of it going idle; that
+session writes back a pickup, and the page shows when it landed. If no session
+is watching, a session-start hook lists every desk in `~/.review-desks.json`
+that has not been collected, so the next session picks it up. A session can
+watch at most five desks at once.
 
 ## Why it exists
 
