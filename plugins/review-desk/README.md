@@ -25,6 +25,12 @@ link.
 
 The reviewer pays for those calls and is asked for consent on the first one.
 
+The page draws mermaid diagrams: the ones Claude writes into the description,
+fenced `mermaid` blocks in any markdown file the request carries, and `.mmd`
+files. A diagram that does not parse shows its source and the error instead.
+The library (mermaid 11.15.0, pinned by hash) loads only on pages that have a
+diagram.
+
 The page needs the `sample` and `db` capabilities. Without `db` the conversation
 still happens but nothing comes back, which defeats the point.
 

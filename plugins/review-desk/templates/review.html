@@ -79,6 +79,16 @@ h1.doctitle{font-family:var(--doc);font-weight:600;font-size:30px;
 .hljs-title,.hljs-name,.hljs-function .hljs-title{color:var(--ink);font-weight:600}
 .hljs-variable,.hljs-template-variable,.hljs-params{color:var(--soft)}
 .hljs-deletion{color:var(--mark);text-decoration:line-through}
+
+/* A wide diagram scrolls inside its own frame rather than pushing the page
+   sideways on a phone. */
+.md figure.diagram{margin:4px 0 16px;overflow-x:auto}
+.md figure.diagram svg{display:block;margin:0 auto;height:auto}
+.md figure.diagram details{margin-top:4px;font-family:var(--ui);font-size:12.5px;
+  color:var(--faint)}
+.md figure.diagram summary{cursor:pointer}
+.md figure.diagram details pre{margin:6px 0 0}
+.md .unparsed{font-family:var(--ui);font-size:13px;color:var(--mark);margin:0 0 6px}
 .md hr{border:none;border-top:1px solid var(--rule);margin:20px 0}
 .md .tw{overflow-x:auto;margin:0 0 14px}
 .md table{border-collapse:collapse;font-family:var(--ui);font-size:14px;
@@ -424,7 +434,8 @@ const TONGUE = {py:'python', js:'javascript', ts:'typescript', sh:'bash',
   c:'c', h:'c', cpp:'cpp', hpp:'cpp', cs:'csharp', swift:'swift',
   kt:'kotlin', php:'php', sql:'sql', json:'json', yml:'yaml', yaml:'yaml',
   toml:'ini', ini:'ini', html:'xml', xml:'xml', css:'css', scss:'scss',
-  dart:'dart', lua:'lua', r:'r', pl:'perl', ps1:'powershell'};
+  dart:'dart', lua:'lua', r:'r', pl:'perl', ps1:'powershell',
+  mmd:'mermaid', mermaid:'mermaid'};
 
 // Named files with no extension are common and are usually scripts, not
 // prose: tools/bot-token, Makefile, a git hook. A shebang settles it, and
@@ -451,10 +462,122 @@ function render(page){
 // the parser stays a parser and a missing library costs nothing but colour.
 function paintCode(){
   if (!window.hljs) return;
-  document.querySelectorAll('.md pre code').forEach(el => {
+  document.querySelectorAll('.md pre code:not(.language-mermaid)').forEach(el => {
     try { hljs.highlightElement(el); } catch (e) {}
   });
 }
+
+/* ================= diagrams ================= */
+// Drawn after render, like highlighting, and the source block stays on the page
+// until a drawing replaces it -- so a diagram that fails to load or parse still
+// shows the reviewer what the file says, with the reason above it.
+//
+// Mermaid is 3 MB, so it is fetched only when a page carries a diagram. Pinned
+// by hash for the same reason as highlight.js: the hash was computed from the
+// downloaded file and agrees with the sha512 cdnjs publishes for 11.15.0.
+//
+// The page draws its own rather than leaning on the host's built-in handling of
+// pre.mermaid, which cannot be themed from these tokens and was never shown to
+// pick up blocks this script inserts after load.
+const MERMAID_SRC = 'https://cdnjs.cloudflare.com/ajax/libs/mermaid/11.15.0/mermaid.min.js';
+const MERMAID_SRI = 'sha512-HH52omhHpZF6RfVnGiQwYgYm4H/ya2xsZYLl5xJ4+tLfX+rN4+8zF7V/H/KLeicPrKZYi1g6iBmVkk2AhXTGlg==';
+let mermaidLoad = null, diagramSeq = 0;
+
+function loadMermaid(){
+  if (!mermaidLoad) mermaidLoad = new Promise((ok, fail) => {
+    const s = document.createElement('script');
+    s.src = MERMAID_SRC; s.integrity = MERMAID_SRI;
+    s.crossOrigin = 'anonymous'; s.referrerPolicy = 'no-referrer';
+    s.onload = () => window.mermaid ? ok(window.mermaid)
+                                    : fail(new Error('the diagram library did not start'));
+    // Forget the failure so the next repaint tries again.
+    s.onerror = () => { mermaidLoad = null; s.remove();
+                        fail(new Error('the diagram library could not be loaded')); };
+    document.head.appendChild(s);
+  });
+  return mermaidLoad;
+}
+
+// Mermaid derives its shades by doing arithmetic on hex values, so it gets the
+// page's resolved tokens, not var() references, and is redrawn when the theme
+// flips. securityLevel strict because a pull request can come from anyone, and
+// this page holds the conversation and the store.
+function diagramConfig(){
+  const css = getComputedStyle(document.documentElement);
+  const v = n => css.getPropertyValue(n).trim();
+  const stamped = document.documentElement.dataset.theme;
+  const dark = stamped ? stamped === 'dark'
+                       : matchMedia('(prefers-color-scheme: dark)').matches;
+  return {startOnLoad: false, securityLevel: 'strict', theme: 'base',
+    fontFamily: v('--ui'),
+    themeVariables: {darkMode: dark, fontFamily: v('--ui'), background: v('--card'),
+      primaryColor: v('--paper'), primaryTextColor: v('--ink'),
+      primaryBorderColor: v('--soft'), secondaryColor: v('--lit'),
+      tertiaryColor: v('--rule'), lineColor: v('--soft'), textColor: v('--ink'),
+      edgeLabelBackground: v('--card'), clusterBkg: v('--paper'),
+      clusterBorder: v('--edge'), noteBkgColor: v('--lit'),
+      noteTextColor: v('--ink'), noteBorderColor: v('--edge'),
+      actorBkg: v('--paper'), actorBorder: v('--soft'), actorTextColor: v('--ink'),
+      signalColor: v('--soft'), signalTextColor: v('--ink')}};
+}
+
+function unparsed(el, why){
+  const prev = el.previousElementSibling;
+  if (prev && prev.classList.contains('unparsed')) prev.remove();
+  const note = document.createElement('div');
+  note.className = 'unparsed';
+  note.textContent = 'Diagram not drawn: ' + why + '. Its source is below.';
+  el.before(note);
+}
+
+async function drawOne(mermaid, el, src){
+  const id = 'diagram-' + (++diagramSeq);
+  try {
+    const {svg} = await mermaid.render(id, src);
+    if (!el.isConnected) return;               // the sheet was repainted meanwhile
+    const fig = document.createElement('figure');
+    fig.className = 'diagram';
+    fig.dataset.src = src;
+    fig.innerHTML = svg + '<details><summary>Source</summary><pre><code>'
+      + esc(src) + '</code></pre></details>';
+    el.replaceWith(fig);
+  } catch (e){
+    // A failed render leaves mermaid's own error drawing attached to the body.
+    ['d' + id, id].forEach(x => { const n = document.getElementById(x); if (n) n.remove(); });
+    // A parse error arrives as "Parse error on line 2:", a window of source cut
+    // mid-word, a caret drawing, then the grammar tokens it expected. The line
+    // number is the usable part, so the line is quoted from the source itself.
+    const first = String((e && e.message) || e).split('\n')[0];
+    let why = first.replace(/:\s*$/, '');
+    const at = first.match(/^Parse error on line (\d+)/);
+    const bad = at && src.split('\n')[+at[1] - 1];
+    if (bad && bad.trim()) why += ', “' + bad.trim() + '”';
+    if (el.isConnected) unparsed(el, why);
+  }
+}
+
+async function paintDiagrams(){
+  const blocks = Array.from(document.querySelectorAll('.md pre > code.language-mermaid'))
+    .map(c => c.parentNode);
+  if (!blocks.length) return;
+  let mermaid;
+  try { mermaid = await loadMermaid(); }
+  catch (e){ blocks.forEach(pre => pre.isConnected && unparsed(pre, e.message)); return; }
+  mermaid.initialize(diagramConfig());
+  for (const pre of blocks){
+    if (pre.isConnected) await drawOne(mermaid, pre, pre.textContent);
+  }
+}
+
+async function redrawDiagrams(){
+  const figs = document.querySelectorAll('.md figure.diagram');
+  if (!figs.length || !window.mermaid) return;
+  window.mermaid.initialize(diagramConfig());
+  for (const f of figs) await drawOne(window.mermaid, f, f.dataset.src);
+}
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', redrawDiagrams);
+new MutationObserver(redrawDiagrams).observe(document.documentElement,
+  {attributes: true, attributeFilter: ['data-theme']});
 
 function paint(){
   $('title').textContent = DATA.title || 'Review';
@@ -469,6 +592,7 @@ function paint(){
     + '<span class="fresh'+(freshOn[i]?' show':'')+'"></span></button>').join('');
   $('sheet').innerHTML = render(all[leaf]);
   paintCode();
+  paintDiagrams();
   watchHeadings();
 }
 
@@ -673,6 +797,9 @@ function frame(){
     + "only for genuinely parallel items, never for chopped-up prose. Do not "
     + "end by summarising what you just said. Prefer a number to an "
     + "adjective. Two honest sentences beat six padded ones.\n\n"
+    + "DIAGRAMS. Blocks fenced as mermaid, and .mmd files, are diagram source "
+    + "that the reader sees drawn. Refer to their boxes and arrows by label. "
+    + "Your answer is shown as plain text, so do not draw one yourself.\n\n"
     + "THE PULL REQUEST:\n\n" + (DATA.body || '');
   for (const d of documents) s += "\n\n--- " + d.name + " ---\n\n" + d.text;
 

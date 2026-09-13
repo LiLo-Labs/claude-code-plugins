@@ -45,6 +45,12 @@ because a `sample` call has no skills — so the style directive for it is carri
 in the prompt the template builds, and is deliberately short. A handful of named
 tics beats a style guide the model has to summarise before it can answer.
 
+**Draw the change.** The page renders mermaid diagrams, and the request is
+described with them: a sequence, flow or state diagram of what this change
+does, with inferred edges dotted. The command's "Draw it" section has the rules.
+Mermaid already in the request's files (fenced in markdown, or `.mmd`) is drawn
+in place.
+
 ## What it is honest about
 
 **The Claude inside the page is not the session that wrote the code.** It is a
