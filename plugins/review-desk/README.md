@@ -18,10 +18,13 @@ reasoning lives with the code rather than evaporating.
 
 ## Worth knowing
 
-The Claude answering inside the page is a **fresh call** that can see the pull
-request and the conversation and nothing else. It cannot run tests or read the
-wider repository. The page says so, and so should you when you hand over the
-link.
+The chat in the page reaches either of two Claudes, and the reviewer picks.
+**The working session** is the Claude Code session that opened the pull request:
+it has the conversation, the repository and its tools, answers while it is
+running, and can rewrite the desk and push changes to the pull request while you
+watch. **Here, no tools** is a fresh call that sees only the page and answers
+straight away. If the working session has not picked a message up after 45
+seconds, the page offers the quick answer instead.
 
 The reviewer pays for those calls and is asked for consent on the first one.
 

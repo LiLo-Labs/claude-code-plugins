@@ -55,10 +55,12 @@ in place.
 
 ## What it is honest about
 
-**The Claude inside the page is not the session that wrote the code.** It is a
-fresh call that can see the request and the conversation and nothing else. It
-cannot run tests, read other files, or check anything. Say so at handover, and
-make sure the page carries enough material that it can answer well from what it
+**The page's chat reaches two different Claudes.** Messages to the working
+session come to the session that opened the pull request, which answers with its
+tools and can change the desk and the pull request, but only while it is
+running. "Here, no tools" is a fresh call that sees the request and the
+conversation and nothing else. Say which is which at handover, and make sure the
+page carries enough material that the fresh call can answer well from what it
 has.
 
 **The reviewer pays for the calls**, and the first one asks their consent.

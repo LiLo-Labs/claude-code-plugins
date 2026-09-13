@@ -52,6 +52,8 @@ def message(waiting):
         'Artifact tool (action "read_db", db_op "get", collection "review", '
         'doc_id "pr-<number>"). Then, for each:',
         "- A recorded decision: follow /review-collect for that request.",
+        "- Messages sent to the working session with no reply yet: answer them "
+        'as /review-desk describes under "While they read".',
         "- No decision, and the pull request is merged or closed: set its "
         "collectedAt in ~/.review-desks.json to the current UTC time.",
         '- No decision, still open, marked [watch]: pass action "watch" with '

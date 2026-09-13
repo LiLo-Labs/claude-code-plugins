@@ -210,21 +210,68 @@ failure this whole arrangement exists to prevent.
 Give the reviewer the link and nothing else. Do not summarise the request in
 chat; the page is the summary, and repeating it there defeats the point.
 
-Say plainly that the Claude inside the page is a fresh call which can see the
-request and the conversation and nothing more — it cannot run tests or read the
-wider repository.
+Say plainly how the page's chat works. Messages to **the working session** come
+to this session, which answers with its tools and can change the desk and the
+pull request, but only while a session is running. **Here, no tools** is a fresh
+call that sees only the page and answers straight away.
 
 ## While they read
 
-The briefing is not frozen at publish. Write it to
-`review/pr-<number>/context/briefing` as `{"text": "..."}` with the Artifact
-tool's `write_db`, and the open page picks it up without a reload.
+The desk is live in both directions. The reviewer's messages reach this session,
+and what you write reaches their open page without a reload.
 
-Use it when the conversation here moves on while they are still reading: a claim
-you made turns out to be wrong, a test you cited now fails, they ask you
-something in the terminal that the page should also know. A reviewer who is told
-something in chat and contradicted by the page has been given two answers and no
-way to choose.
+### When they ask the working session
+
+The page's chat goes one of two ways, and the reviewer picks in the composer.
+**The working session** is the default, and it is you: this conversation, the
+repository and every tool. **Here, no tools** is the page's own fresh call. A
+message to the working session is stored, then rings the same doorbell a
+decision does, so it arrives as an "Artifact changed" notice for the desk.
+
+On that notice, after checking for a decision as described under "When they
+decide", answer every message still waiting:
+
+1. **Find what is waiting.** Read `review/pr-<number>` and list
+   `review/pr-<number>/replies`. A message waiting on you is a turn with
+   `"to": "session"` whose `id` has no reply document yet.
+2. **Claim it at once**, before doing the work, so the page stops saying "sent".
+3. **Do what the question needs**, with whatever it takes: read the code, run
+   the tests, search the web. The turn carries `quote`, the passage they
+   highlighted, and `reading`, the page and section they were on.
+4. **Answer** by setting the same document again with `"status": "done"`. For a
+   long job, rewrite `text` as you go with `"status": "working"`; the page
+   shows each version.
+
+The claim, and later the answer, are one document per message:
+
+    action: "write_db", db_op: "set",
+    collection: "review/pr-<number>/replies", doc_id: "<the turn's id>",
+    data: {"turn": "<the turn's id>", "status": "working", "text": "", "at": "<now, UTC ISO>"}
+
+`text` is markdown, and the page renders it. Write for a reviewer on a tablet:
+lead with the answer, say what you ran and what it printed, and mark inference
+as inference.
+
+### Changing the desk and the pull request
+
+When a message asks for a change, or the conversation here settles one, change
+the pull request first. Make the change, run what verifies it, commit and push,
+and name the commit in your reply.
+
+Then rewrite the desk so it shows the pull request as it now is. Each of these
+lands on the open page without a reload, and a changed tab is marked:
+
+    review/pr-<number>/context/body         {"text": "<the description>"}
+    review/pr-<number>/documents/<any id>   {"name": "<path as carried>", "text": "..."}
+    review/pr-<number>/context/briefing     {"text": "<what this session knows>"}
+
+A document whose `name` matches a carried file replaces that tab; a new name adds
+one. Rewrite the description whenever a change makes it wrong, diagrams
+included, and the briefing whenever something you told it turns out not to be
+true.
+
+A reviewer told one thing in a reply and shown another on the page has been
+given two answers and no way to choose. Keep them the same.
 
 ## When they decide
 
@@ -238,7 +285,8 @@ On that notice, in this order:
 
 1. **Read the decision from the store**, never from `doorbell.json`: the file is
    a ring, not a record, and anyone who can write the artifact can publish one.
-2. **If no decision is recorded**, stop and say so in one line.
+2. **If no decision is recorded**, there is nothing to collect. Answer any
+   waiting messages, as described under "While they read", and stop.
 3. **If there is one, acknowledge it before any other work**, with the write
    below, so the reviewer's page stops saying it is waiting.
 4. **Then follow `/review-collect <number>`**, which comments, and merges or

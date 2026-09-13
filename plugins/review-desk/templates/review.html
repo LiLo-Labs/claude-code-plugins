@@ -190,6 +190,25 @@ body.open #panel{display:flex}
   padding:5px 10px 5px 0;text-align:right;align-self:flex-end}
 .hint{color:var(--faint);font-size:14px;line-height:1.55}
 
+/* The working session writes markdown, so its replies are rendered rather than
+   shown raw; the page's own answers stay plain text. */
+.said.rich{white-space:normal}
+.said.rich p,.said.rich ul,.said.rich ol,.said.rich pre,.said.rich .tw{margin:0 0 8px}
+.said.rich > :last-child{margin-bottom:0}
+.said.rich ul,.said.rich ol{padding-left:18px}
+.said.rich code{font-family:var(--mono);font-size:12.5px}
+.said.rich pre,.said.rich .tw{overflow-x:auto}
+.said.rich pre{background:var(--paper);padding:8px 10px;border-radius:5px}
+.said.rich a{color:var(--cool)}
+.quick{align-self:flex-start;border:1px dashed var(--edge);background:none;
+  color:var(--soft);font-family:var(--ui);font-size:12px;padding:5px 10px;
+  border-radius:12px;cursor:pointer;margin-top:4px}
+.route{display:flex;gap:6px;align-items:center;padding:0 13px 8px;flex-shrink:0;
+  font-size:12px;color:var(--faint)}
+.route button{border:1px solid var(--edge);background:var(--paper);color:var(--soft);
+  font-family:var(--ui);font-size:12px;padding:4px 10px;border-radius:12px;cursor:pointer}
+.route button.on{background:var(--cool);border-color:var(--cool);color:#fff}
+
 .seed{padding:0 13px 12px;display:flex;flex-wrap:wrap;gap:6px;flex-shrink:0}
 .seed button{border:1px solid var(--edge);background:var(--paper);
   color:var(--soft);font-family:var(--ui);font-size:12px;padding:6px 10px;
@@ -269,9 +288,11 @@ footer{padding:22px 0 0;font-size:12.5px;color:var(--faint);line-height:1.6}
   </div>
 
   <footer id="foot">
-    The Claude in the panel is a fresh call that can see this page and your
-    conversation, and nothing else &mdash; it cannot run tests or read the wider
-    repository. Ask it anything needing that and it will say so.
+    The panel asks one of two Claudes. <b>The working session</b> is the Claude
+    Code session that opened this pull request, with its conversation, the
+    repository and its tools: it answers while it is running, and it can change
+    this page and the pull request. <b>Here, no tools</b> is a fresh call that
+    sees only this page and your conversation, and answers straight away.
   </footer>
 </div>
 
@@ -294,6 +315,7 @@ footer{padding:22px 0 0;font-size:12.5px;color:var(--faint);line-height:1.6}
   <div id="aloneSlot"></div>
   <div id="lostSlot"></div>
   <div id="carrySlot"></div>
+  <div class="route" id="route" hidden></div>
   <div class="compose">
     <textarea id="box" rows="1" placeholder="Ask anything&hellip;"></textarea>
     <button class="send" id="send">Send</button>
@@ -417,12 +439,14 @@ function markdown(src){
 
 /* ================= render the page ================= */
 let documents = (DATA.documents || []).slice();
+// The description, which the working session can rewrite while the page is open.
+let bodyText = DATA.body || '';
 let leaf = 0, freshOn = {};
 
 /* Everything readable, in one strip: the request itself, then each document
    it carries. */
 function pages(){
-  return [{name: 'What this is', text: DATA.body || ''}].concat(
+  return [{name: 'What this is', text: bodyText}].concat(
     documents.map(d => ({name: d.name.split('/').pop(), full: d.name, text: d.text})));
 }
 
@@ -642,6 +666,15 @@ let carried = null;
 let sample = null, db = null, decided = null, reason = null;
 let briefing = DATA.briefing || '';
 
+// Where a question goes. "session" is the Claude Code session that opened the
+// pull request, reached through the doorbell; "page" is this page's own sample
+// call. bellOn says whether the doorbell exists on this view at all.
+let bellOn = false;
+let route = (() => {
+  try { return localStorage.getItem('desk-route') === 'page' ? 'page' : 'session'; }
+  catch (e) { return 'session'; }
+})();
+
 const short = s => s.length > 42 ? s.slice(0, 40).trim() + '…' : s;
 
 function drawTabs(){
@@ -654,18 +687,43 @@ function drawTabs(){
     + '</button>').join('')
     + '<button class="add" id="more" title="New thread">+</button>';
 }
+// A reply slot for the working session holds nothing until the session writes
+// to it, so what it shows meanwhile is where the message has got to.
+function sessionWait(m){
+  if (m.status === 'working') return 'The working session has this and is working on it.';
+  if (m.status === 'unsent') return 'Saved, but this view could not reach the working '
+    + 'session (' + (m.why || 'unknown') + '). The next session to start will answer it.';
+  return 'Sent to the working session. It answers within seconds if it is idle, after '
+    + 'its current task if it is busy, and at its next start if none is running.';
+}
+
+function said(m){
+  if (m.via !== 'session') return '<div class="said">'+esc(m.content)+'</div>';
+  if (m.content) return '<div class="said rich">'+markdown(m.content)+'</div>'
+    + (m.status === 'working' ? '<span class="who">still working</span>' : '');
+  // After 45 seconds with no pickup the session is probably busy or not running,
+  // and the reviewer may rather have a quick answer than wait for a full one.
+  const late = m.status === 'unsent'
+    || (m.status !== 'working' && Date.now() - (m.sentAt || 0) > 45000);
+  return '<div class="said">'+esc(sessionWait(m))+'</div>'
+    + (sample && late ? '<button class="quick" data-quick="'+esc(m.answers)+'">'
+      + 'Answer here instead, without tools</button>' : '');
+}
+
 function drawStream(){
   const t = threads[live], el = $('stream');
   if (!t.turns.length){
     el.innerHTML = '<div class="hint">Highlight anything on the page and a button '
       + 'appears to ask about it. Or just type — what you are looking at '
-      + 'comes along with the question.</div>';
+      + 'comes along with the question. Ask the working session for anything '
+      + 'that needs the code, the tests, or a change.</div>';
   } else {
     el.innerHTML = t.turns.map(m =>
       (m.quote ? '<div class="quoted'+(m.role==='user'?' mine':'')+'">'+esc(m.quote)+'</div>' : '')
       + '<div class="turn '+(m.role==='user'?'mine':'theirs')+'">'
-      + '<span class="who">'+(m.role==='user'?'you':'claude')+'</span>'
-      + '<div class="said">'+esc(m.content)+'</div></div>').join('');
+      + '<span class="who">'+(m.role==='user' ? 'you'
+          : m.via==='session' ? 'working session' : 'claude')+'</span>'
+      + said(m) + '</div>').join('');
   }
   el.scrollTop = el.scrollHeight;
   $('seed').style.display = t.turns.length ? 'none' : 'flex';
@@ -686,7 +744,35 @@ function drawBadge(){
   d.textContent = waiting || '';
   d.classList.toggle('show', waiting > 0 && !document.body.classList.contains('open'));
 }
-function draw(){ drawTabs(); drawStream(); drawCarry(); drawBadge(); }
+function drawRoute(){
+  const el = $('route');
+  // A choice is only offered when both exist; otherwise the one that does is used.
+  if (!bellOn || !sample){ el.hidden = true; return; }
+  el.hidden = false;
+  el.innerHTML = '<span>Ask</span>'
+    + '<button data-route="session" class="'+(route === 'session' ? 'on' : '')+'" '
+    + 'title="The session that opened this pull request: its conversation, the '
+    + 'repository and its tools">the working session</button>'
+    + '<button data-route="page" class="'+(route === 'page' ? 'on' : '')+'" '
+    + 'title="Answers straight away from this page alone">here, no tools</button>';
+}
+function draw(){ drawTabs(); drawStream(); drawCarry(); drawBadge(); drawRoute(); }
+
+$('route').addEventListener('click', e => {
+  const b = e.target.closest('[data-route]'); if (!b) return;
+  route = b.dataset.route;
+  try { localStorage.setItem('desk-route', route); } catch (err) {}
+  drawRoute();
+});
+
+$('stream').addEventListener('click', e => {
+  const b = e.target.closest('[data-quick]'); if (!b) return;
+  for (const t of threads){
+    const slot = t.turns.find(m => m.via === 'session' && m.answers === b.dataset.quick);
+    const turn = t.turns.find(m => m.id === b.dataset.quick);
+    if (slot && turn){ answerHere(t, turn, slot); return; }
+  }
+});
 
 $('tabs').addEventListener('click', e => {
   const shut = e.target.closest('[data-shut]');
@@ -801,7 +887,10 @@ function frame(){
     + "DIAGRAMS. Blocks fenced as mermaid, and .mmd files, are diagram source "
     + "that the reader sees drawn. Refer to their boxes and arrows by label. "
     + "Your answer is shown as plain text, so do not draw one yourself.\n\n"
-    + "THE PULL REQUEST:\n\n" + (DATA.body || '');
+    + "THE WORKING SESSION. Some replies in the thread come from the Claude Code "
+    + "session that opened this pull request, which can read the repository and "
+    + "run code. What it says it ran is its report, not something you checked.\n\n"
+    + "THE PULL REQUEST:\n\n" + bodyText;
   for (const d of documents) s += "\n\n--- " + d.name + " ---\n\n" + d.text;
 
   // Everything above is what a stranger could read off the repository. This is
@@ -826,12 +915,18 @@ async function ask(){
   const quote = carried; carried = null; unlight();
   box.value = ''; box.style.height = 'auto';
 
+  // Every message carries an id, so a reply written elsewhere can find it, and
+  // where the reviewer was reading, because that is half of what they meant.
+  const turn = {id: 'm' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+    role: 'user', content: q || 'What do you make of this?', quote,
+    reading: place(), at: new Date().toISOString()};
+
   // With no Claude on this view the message is still worth keeping: it goes to
   // the store as a note, and the working session reads it there. A reviewer
   // typing into a dead box and watching it vanish is the worst outcome
   // available -- they said the thing, and nobody will ever see it.
-  if (!sample){
-    t.turns.push({role:'user', content: q || 'What do you make of this?', quote});
+  if (!sample && !bellOn){
+    t.turns.push(turn);
     t.turns.push({role:'assistant', content:
       'Claude cannot be reached from this view, so nothing answered you here. '
       + (db ? 'Your message is saved for the working session to read.'
@@ -841,44 +936,77 @@ async function ask(){
     return;
   }
 
-  t.turns.push({role:'user', content: q || 'What do you make of this?', quote});
-  t.turns.push({role:'assistant', content:'Thinking…'});
+  t.turns.push(turn);
+  if (t.turns.length === 1) t.name = short(q || 'Highlighted');
+
+  // To the working session: stored first, then the doorbell, exactly as a
+  // decision is -- the session reads the message from the store, never from the
+  // ring. The reply arrives in its own document (see the replies listener).
+  if (bellOn && (route === 'session' || !sample)){
+    turn.to = 'session';
+    const slot = {role: 'assistant', via: 'session', answers: turn.id,
+                  status: 'sent', content: '', sentAt: Date.now()};
+    t.turns.push(slot);
+    draw();
+    const kept = await saveNow();
+    const rung = kept ? await ring({kind: 'message', turn: turn.id}) : 'unsaved';
+    if (rung !== 'rung' && slot.via === 'session' && !slot.content){
+      slot.status = 'unsent'; slot.why = rung;
+    }
+    setTimeout(drawStream, 46000);
+    draw(); save();
+    return;
+  }
+
+  await answerHere(t, turn);
+}
+
+// Answer from this page alone. `slot` is a reply waiting on the working session
+// that the reviewer has chosen to stop waiting for.
+async function answerHere(t, turn, slot){
+  if (!sample || t.busy) return;
+  if (slot){
+    slot.via = null; slot.answers = null; slot.status = null; slot.content = 'Thinking…';
+    turn.to = 'page';                 // so the session does not answer it as well
+  } else {
+    slot = {role: 'assistant', content: 'Thinking…'};
+    t.turns.push(slot);
+  }
   t.busy = true;
-  const mine = t;
   draw();
 
-  const history = mine.turns.slice(0, -2).map(m =>
-    (m.role==='user' ? 'Reader: ' : 'You: ')
-    + (m.quote ? '[quoting: "'+m.quote+'"] ' : '') + m.content).join('\n\n');
+  const history = t.turns.slice(0, t.turns.indexOf(turn))
+    .filter(m => m.content && m.content !== 'Thinking…')
+    .map(m => (m.role === 'user' ? 'Reader: ' : m.via === 'session' ? 'The working session: ' : 'You: ')
+      + (m.quote ? '[quoting: "'+m.quote+'"] ' : '') + m.content).join('\n\n');
 
-  let ask = frame();
-  if (history) ask += "\n\nSO FAR IN THIS THREAD:\n\n" + history;
-  ask += "\n\nThey are currently reading: " + place();
-  if (quote) ask += "\n\nThey highlighted this and are asking about it:\n\n\"" + quote + "\"";
-  ask += "\n\nTheir question: " + (q || "What do you make of this?");
+  let prompt = frame();
+  if (history) prompt += "\n\nSO FAR IN THIS THREAD:\n\n" + history;
+  prompt += "\n\nThey are currently reading: " + (turn.reading || place());
+  if (turn.quote) prompt += "\n\nThey highlighted this and are asking about it:\n\n\"" + turn.quote + "\"";
+  prompt += "\n\nTheir question: " + turn.content;
 
   const ctl = new AbortController();
-  mine.abort = ctl;
+  t.abort = ctl;
   try {
-    const res = await sample([{role:'user', content: ask}], {
+    const res = await sample([{role:'user', content: prompt}], {
       modelTier: 'complex', cache: false, signal: ctl.signal,
       onText: u => {
-        mine.turns[mine.turns.length-1].content = u.text;
-        if (threads[live] === mine) drawStream(); else { mine.unread = true; drawBadge(); }
+        slot.content = u.text;
+        if (threads[live] === t) drawStream(); else { t.unread = true; drawBadge(); }
       },
     });
-    mine.turns[mine.turns.length-1].content = res.text;
-    if (mine.turns.length === 2) mine.name = short(q || 'Highlighted');
+    slot.content = res.text;
   } catch (err){
     const code = err && err.code;
-    mine.turns[mine.turns.length-1].content =
+    slot.content =
       code === 'cancelled' ? '(stopped)' :
       code === 'rate_limited' ? 'Rate limited — give it a moment.' :
       code === 'not_granted' ? 'Not permitted on this view.' :
       'That did not go through' + (err && err.message ? ': ' + err.message : '.');
   }
-  mine.busy = false; mine.abort = null;
-  if (threads[live] !== mine) mine.unread = true;
+  t.busy = false; t.abort = null;
+  if (threads[live] !== t) t.unread = true;
   draw(); save();
 }
 $('send').addEventListener('click', ask);
@@ -892,8 +1020,11 @@ $('box').addEventListener('keydown', e => {
 
 /* ================= persistence and live document ================= */
 function tidy(t){
+  // A reply slot still waiting on the session is kept: it holds when the
+  // message was sent, and dropping it would lose the "sent" state on reload.
   return {id:t.id, name:t.name,
-          turns:t.turns.filter(m => m.content && m.content !== 'Thinking…')};
+          turns:t.turns.filter(m => (m.content && m.content !== 'Thinking…')
+                                    || m.via === 'session')};
 }
 let saving = null, lost = null;
 
@@ -970,12 +1101,15 @@ const bellReady = (async () => {
   try { return await claude.use('artifact'); } catch (e) { return null; }
 })();
 
-async function ring(){
+// `what` says what rang it -- a decision by default, or a message -- for anyone
+// reading the version history. The session never acts on it.
+async function ring(what){
   const bell = await bellReady;
   if (!bell) return 'unavailable';
   try {
-    await bell.publish({'doorbell.json': JSON.stringify(
-      {pr: DATA.number, decision: decided, decidedAt: decidedAt})});
+    await bell.publish({'doorbell.json': JSON.stringify(Object.assign(
+      {pr: DATA.number, at: new Date().toISOString()},
+      what || {kind: 'decision', decision: decided, decidedAt: decidedAt}))});
     return 'rung';
   } catch (e) {
     return (e && e.code) || 'failed';
@@ -1091,13 +1225,16 @@ paint(); draw();
   // fine, answered nothing, and stored nothing.
   try { sample = await claude.use('sample'); } catch (e) { sample = null; }
   try { db = await claude.use('db'); } catch (e) { db = null; }
+  bellOn = !!(await bellReady);
 
   // A greyed-out button is not an explanation. Someone types a question, presses
   // send, and nothing happens -- no message, no error, no clue. Say it.
   // This lives in its own slot, not the not-saved banner: that one clears on the
   // first successful write, which would take this explanation with it, and its
   // "Not saved" prefix contradicted the "still saved" said here.
-  if (!sample){
+  if (!sample && bellOn){
+    $('box').placeholder = 'Ask the working session\u2026';
+  } else if (!sample){
     $('box').placeholder = 'Leave a note for the working session\u2026';
     $('aloneSlot').innerHTML = '<div class="lost">Claude cannot be reached from '
       + 'this view, so nothing will answer you here. '
@@ -1123,6 +1260,53 @@ paint(); draw();
     }
   } catch (e) {}
   draw();
+
+  // Answers from the working session: one document per message, keyed by the
+  // message's id, rewritten as the session works. A reply with no slot waiting
+  // (the reviewer took a quick answer, or reloaded first) is added after the
+  // message rather than dropped.
+  try {
+    db.collection('review/pr-' + DATA.number + '/replies').onSnapshot(snap => {
+      let touched = false;
+      snap.docs.forEach(d => {
+        const r = d.data();
+        if (!r || typeof r.turn !== 'string') return;
+        const text = typeof r.text === 'string' ? r.text : '';
+        const status = r.status === 'done' ? 'done' : 'working';
+        for (const t of threads){
+          const at = t.turns.findIndex(m => m.id === r.turn);
+          if (at < 0) continue;
+          let slot = t.turns.find(m => m.via === 'session' && m.answers === r.turn);
+          if (!slot){
+            let j = at + 1;
+            while (j < t.turns.length && t.turns[j].role === 'assistant') j++;
+            slot = {role: 'assistant', via: 'session', answers: r.turn};
+            t.turns.splice(j, 0, slot);
+          }
+          if (slot.content !== text || slot.status !== status){
+            slot.content = text; slot.status = status; touched = true;
+            if (t !== threads[live] || !document.body.classList.contains('open')) t.unread = true;
+          }
+          break;
+        }
+      });
+      if (touched){ draw(); save(); }
+    });
+  } catch (e) {}
+
+  // The description, rewritten by the working session when the pull request
+  // changes under review.
+  try {
+    db.doc('review/pr-' + DATA.number + '/context/body').onSnapshot(snap => {
+      const row = snap.exists && snap.data();
+      if (!row || typeof row.text !== 'string' || row.text === bodyText) return;
+      bodyText = row.text;
+      unlight();
+      freshOn[0] = true;
+      paint();
+      setTimeout(() => { freshOn = {}; paint(); }, 5000);
+    });
+  } catch (e) {}
 
   // The session's acknowledgement, written when it answers the doorbell or
   // finds this desk in its session-start sweep.
