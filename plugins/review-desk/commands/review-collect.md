@@ -72,6 +72,12 @@ work, and say what you are going to do before doing it.
 
 **Undecided** — say so and stop. Do not interpret silence as either.
 
+After acting on a decision, report what happened as the pickup's `outcome`, as
+`/review-desk` describes under "When they decide": `merged` with the method and
+commit, `revising` with the work, or `blocked` with what stopped you. A merge
+that auto mode or branch protection refuses is `blocked`, never silence; the
+reviewer's page otherwise goes on saying the decision was picked up.
+
 ## Never
 
 When you have acted on a decision -- the comment posted, and merged or not --

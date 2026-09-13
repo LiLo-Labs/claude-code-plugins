@@ -254,6 +254,17 @@ Copy `decision` and `decidedAt` exactly as read, `null` included. The page shows
 the pickup only when both match the verdict on screen, so an acknowledgement of
 an earlier verdict never passes for a later one.
 
+When `/review-collect` has acted, report the outcome onto the same document with
+`db_op: "update"`, so the page says what happened rather than what was meant to:
+
+    data: {"outcome": {"result": "merged", "detail": "<one line>", "at": "<now, UTC ISO>"}}
+
+`result` is `merged`, naming the merge method and commit; `revising`, naming the
+work you are starting; or `blocked`, saying what stopped you (a denied
+`gh pr merge`, a failing check, a conflict) in words the reviewer can act on. A
+blocked merge reported here is the difference between a reviewer who comes back
+to unblock it and one who assumes it landed.
+
 A session holds at most five artifact watches, and a watch ends with its
 session. A ring nobody is watching goes unheard, and the session-start sweep
 lists the desk for the next session instead. Nothing is lost; it waits.

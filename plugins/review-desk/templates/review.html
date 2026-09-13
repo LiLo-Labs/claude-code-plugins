@@ -1037,13 +1037,26 @@ async function decide(v, quiet, why){
 // The page cannot see whether a session is running, so it says only what it
 // knows: saved, rung, or picked up. "I will merge it" was a promise nothing
 // on this side could keep.
+const when = iso => {
+  const t = new Date(iso);
+  return isNaN(t) ? '' : ' at ' + t.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
+};
+
 function pickupLine(){
   if (!db) return 'Saving is unavailable on this view, so no session will see '
     + 'this. Tell the working session directly.';
   if (pickup && pickup.decision === decided && pickup.decidedAt === decidedAt){
-    const at = new Date(pickup.at);
-    return 'Picked up by the working session' + (isNaN(at) ? '' : ' at '
-      + at.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})) + '.';
+    // The outcome is what actually happened after pickup. Without it a blocked
+    // merge and a finished one look identical from here.
+    const o = pickup.outcome;
+    if (o && o.result){
+      const said = o.detail ? ': ' + String(o.detail).replace(/[.\s]+$/, '') : '';
+      if (o.result === 'merged') return 'Merged by the working session' + when(o.at) + said + '.';
+      if (o.result === 'revising') return 'The working session is revising' + said + '.';
+      return 'The working session could not finish' + said + '.';
+    }
+    return 'Picked up by the working session' + when(pickup.at)
+      + '. What it did shows here once it has acted.';
   }
   if (rang === 'sending') return 'Saving…';
   if (rang === 'unsaved') return 'Not saved, so no session will see this. '
@@ -1058,8 +1071,9 @@ function drawDecided(){
   showingDecided = true;
   $('decide').innerHTML = '<div class="cap">Recorded</div><div class="done">'
     + 'You marked this <b>'+esc(decided)+'</b>. The working session writes the '
-    + 'discussion into pull request #'+DATA.number+' and '
-    + (decided === 'approved' ? 'merges it.' : 'comes back with a revision.')
+    + 'discussion into pull request #'+DATA.number+', '
+    + (decided === 'approved' ? 'merges it' : 'starts the revision')
+    + ', and reports back here.'
     + (reason ? '<blockquote>'+esc(reason)+'</blockquote>' : '')
     + '<p class="pickup">'+esc(pickupLine())+'</p>'
     + '<div class="verdict"><button class="btn" id="redo">Change this</button></div>'
