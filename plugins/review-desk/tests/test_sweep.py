@@ -44,6 +44,8 @@ class Sweep(unittest.TestCase):
         self.assertIn("o/r#2 https://x/2", text)
         self.assertNotIn("o/r#1 ", text)
         self.assertIn('doc_id "pr-<number>"', text)
+        # Messages left for the working session are answered, not only decisions.
+        self.assertIn("While they read", text)
 
     def test_watch_marks_only_the_newest_five(self):
         text = said(run([desk(n) for n in range(1, 8)]))

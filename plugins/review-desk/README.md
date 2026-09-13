@@ -18,12 +18,12 @@ reasoning lives with the code rather than evaporating.
 
 ## Worth knowing
 
-The Claude answering inside the page is a **fresh call** that can see the pull
-request and the conversation and nothing else. It cannot run tests or read the
-wider repository. The page says so, and so should you when you hand over the
-link.
-
-The reviewer pays for those calls and is asked for consent on the first one.
+The chat in the page goes to **the working session**: the Claude Code session
+that opened the pull request, with the conversation, the repository and its
+tools. It answers while it is running, and can rewrite the desk and push changes
+to the pull request while you watch. Whatever you highlight goes along with the
+question, with the tab and section you were reading. A message sent while no
+session is running is answered by the next one to start.
 
 The page draws mermaid diagrams: the ones Claude writes into the description,
 fenced `mermaid` blocks in any markdown file the request carries, and `.mmd`
@@ -31,8 +31,8 @@ files. A diagram that does not parse shows its source and the error instead.
 The library (mermaid 11.15.0, pinned by hash) loads only on pages that have a
 diagram.
 
-The page needs the `sample`, `db` and `artifact` capabilities. Without `db` the
-conversation still happens but nothing comes back, which defeats the point.
+The page needs the `db` and `artifact` capabilities. Without `db` neither a
+message nor a decision can reach the session.
 
 Pressing **Approve** or **Needs changes** reaches the session two ways. The page
 stores the decision and publishes a small file into itself, which wakes the
