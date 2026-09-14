@@ -202,6 +202,13 @@ the reviewer's next **Approve** would store the old commit and block again.
   compare fails, as it can after a force-push, rewrite every carried document
   from the head.
 
+  This is a head sync, so once `context/body` has landed, set the ledger entry's
+  `head` to `headRefOid` in the same step, before anything else, as
+  `/review-desk` describes under "Changing the desk and the pull request". The
+  entry's `head` is where the next push's `git log <head>..origin/<branch>`
+  starts, and an entry left on the old head lists these commits on the desk a
+  second time.
+
   Report the outcome only once `context/body` has landed with the new `head`,
   not in the same batch: a reviewer who reads "decide again" and taps
   **Approve** before it lands stores the old commit. Report it onto the pickup

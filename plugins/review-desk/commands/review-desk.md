@@ -201,7 +201,9 @@ Then, in one batch with the publish:
 - set `context/body` to `{"text": "<the new body>", "head": "<the payload's headRefOid>"}`, pinned with `if_version`
   from that read, or with no `if_version` when it was not found. When the ledger
   entry's `head` is not the payload's, open the text with the `## Changed since
-  you opened this` section "Changing the desk and the pull request" describes;
+  you opened this` section "Changing the desk and the pull request" describes.
+  This is a head sync: once it lands, set the ledger entry's `head` to the
+  payload's `headRefOid` in the same step, as "Write it down" records it;
 - set each carried file's document to `{"name", "text", "at": "<now, UTC ISO>"}`,
   under the id "Changing the desk and the pull request" describes, pinned with
   `if_version` when the list held it;
@@ -573,6 +575,14 @@ when it brings the desk to a new head. Once the write has landed, set the
 entry's `head` to the `headRefOid` it wrote, and its `branch` to `headRefName`
 when the entry has none. Not before: a ledger `head` ahead of the desk drops
 those commits from the next section.
+
+**Every head sync moves the ledger entry's `head` in the same step.** A head
+sync is any write that puts a new `head` into `context/body`: this rewrite after
+a push, a republish under "Publish", and `/review-collect` bringing the desk to a
+head that moved after an approval. Each one sets the ledger entry's `head` to
+the head it wrote as soon as that write lands, before its reply, its outcome or
+anything else. Not later either: an entry left on the old `head` makes the next
+push's `git log <head>..origin/<branch>` list the same commits again.
 
 After every `git push` the plugin's hook lists the open desks for every
 repository the checkout's remotes name, so a push to a fork reaches the
