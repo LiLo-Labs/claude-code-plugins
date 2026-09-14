@@ -3,7 +3,7 @@
 // is still that commit, so these pin what the page stores and shows.
 import {test, before, after, afterEach} from 'node:test';
 import assert from 'node:assert/strict';
-import {launch, open, payload} from './harness.mjs';
+import {launch, open, payload, approve} from './harness.mjs';
 
 const PR = 'review/pr-42';
 const A = 'a1'.repeat(20), B = 'b2'.repeat(20);
@@ -25,7 +25,7 @@ const turnsIn = doc => ((doc && doc.threads) || []).flatMap(t => t.turns);
 test('Approve stores the head the page shows as decidedOn, and the repo', async () => {
   desk = await open(browser, {data: payload({headRefOid: A})});
   assert.match(await desk.page.textContent('#meta'), /commit a1a1a1a/);
-  await desk.page.click('#ok');
+  await approve(desk);
   const doc = (await desk.until(s => s[PR] && s[PR].decision === 'approved'))[PR];
   assert.equal(doc.decidedOn, A);
   assert.equal(doc.repo, 'LiLo-Labs/claude-code-plugins');
@@ -35,7 +35,7 @@ test('Approve stores the head the page shows as decidedOn, and the repo', async 
 
 test('a head written with the description moves what a later decision stores', async () => {
   desk = await open(browser, {data: payload({headRefOid: A})});
-  await desk.page.click('#ok');
+  await approve(desk);
   const first = (await desk.until(s => s[PR] && s[PR].decidedOn === A))[PR];
 
   // The session pushes a fixup and rewrites the description with the new head.
@@ -56,7 +56,7 @@ test('a head written with the description moves what a later decision stores', a
 
   // Deciding again stores the head the page was showing at the new decidedAt.
   await desk.page.click('#redo');
-  await desk.page.click('#ok');
+  await approve(desk);
   const again = (await desk.until(s => s[PR] && s[PR].decidedAt !== first.decidedAt
     && s[PR].decision === 'approved'))[PR];
   assert.equal(again.decidedOn, B);
@@ -69,7 +69,7 @@ test('a head written with the description moves what a later decision stores', a
 // half of this test), and every collection blocked it again.
 test('a head block clears once the collector writes the head, and not before', async () => {
   desk = await open(browser, {data: payload({headRefOid: A})});
-  await desk.page.click('#ok');
+  await approve(desk);
   const first = (await desk.until(s => s[PR] && s[PR].decidedOn === A))[PR];
   const blocked = decidedAt => ({decision: 'approved', decidedAt, session: 's', at: new Date().toISOString(),
     outcome: {result: 'blocked', at: new Date().toISOString(),
@@ -81,7 +81,7 @@ test('a head block clears once the collector writes the head, and not before', a
   await desk.page.waitForSelector('text=could not finish');
   assert.match(await desk.page.textContent('#meta'), /commit a1a1a1a/);
   await desk.page.click('#redo');
-  await desk.page.click('#ok');
+  await approve(desk);
   const stuck = (await desk.until(s => s[PR] && s[PR].decidedAt !== first.decidedAt
     && s[PR].decision === 'approved'))[PR];
   assert.equal(stuck.decidedOn, A, 'with no head in context/body the page can only store the old commit');
@@ -92,7 +92,7 @@ test('a head block clears once the collector writes the head, and not before', a
   await desk.page.waitForSelector('#newerHead');
   assert.match(await desk.page.textContent('#meta'), /commit b2b2b2b/);
   await desk.page.click('#redo');
-  await desk.page.click('#ok');
+  await approve(desk);
   const again = (await desk.until(s => s[PR] && s[PR].decidedAt !== stuck.decidedAt
     && s[PR].decision === 'approved'))[PR];
   assert.equal(again.decidedOn, B);
@@ -105,13 +105,13 @@ test('a body without a well-formed head leaves the head alone', async () => {
   await desk.context('body', {text: 'Rewritten again', head: B.toUpperCase()});
   await desk.page.waitForSelector('text=Rewritten again');
   assert.equal(await desk.page.locator('#newerHead').count(), 0);
-  await desk.page.click('#ok');
+  await approve(desk);
   assert.equal((await desk.until(s => s[PR] && s[PR].decision === 'approved'))[PR].decidedOn, A);
 });
 
 test('a page built without a head stores no decidedOn', async () => {
   desk = await open(browser);
-  await desk.page.click('#ok');
+  await approve(desk);
   const doc = (await desk.until(s => s[PR] && s[PR].decision === 'approved'))[PR];
   assert.equal('decidedOn' in doc, false);
   assert.doesNotMatch(await desk.page.textContent('#meta'), /commit/);

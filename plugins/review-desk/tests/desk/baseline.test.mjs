@@ -1,7 +1,7 @@
 // Behaviour the desk has today, locked in before later changes touch it.
 import {test, before, after, afterEach} from 'node:test';
 import assert from 'node:assert/strict';
-import {launch, open, payload} from './harness.mjs';
+import {launch, open, payload, approve} from './harness.mjs';
 
 let browser, desk;
 before(async () => { browser = await launch(); });
@@ -49,7 +49,7 @@ test('a page write to a session path is refused under the desk rules, and the pa
   desk = await open(browser);
   await desk.page.waitForFunction('restore === "done"');
   assert.deepEqual(Object.values(await tryWrites(desk)), Array(4).fill('invalid_argument'));
-  await desk.page.click('#ok');
+  await approve(desk);
   const store = await desk.until((s, pr) => s[pr] && s[pr].decision === 'approved', desk.pr);
   assert.deepEqual(Object.keys(store), [desk.pr]);
   await desk.close();
@@ -199,7 +199,7 @@ test('a send rings kind message, after the message is stored', async () => {
 
 test('Approve rings kind decision, after the decision is stored', async () => {
   desk = await open(browser);
-  await desk.page.click('#ok');
+  await approve(desk);
   await desk.page.waitForFunction(() => window.__desk.rings().length === 1);
   const [ring] = await desk.rings();
   const doc = (await desk.store())[desk.pr];

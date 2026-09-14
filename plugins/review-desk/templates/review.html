@@ -307,6 +307,8 @@ textarea:focus{outline:2px solid var(--cool);outline-offset:-1px;
 .done .verdict{padding:14px 0 0}
 .done b{color:var(--good)}
 .done .pickup{margin:12px 0 0;font-size:13.5px;color:var(--soft)}
+.done .ask{margin:0}
+.confirming .btn{min-width:44px;min-height:44px}
 footer{padding:22px 0 0;font-size:12.5px;color:var(--faint);line-height:1.6}
 </style>
 
@@ -1028,7 +1030,7 @@ function drawStream(toEnd){
 }
 function gate(){
   sendBtn.disabled = blocked() || threads[live].busy;
-  document.querySelectorAll('#seed button, #ok, #changes')
+  document.querySelectorAll('#seed button, #ok, #changes, #approveConfirm')
     .forEach(b => { b.disabled = blocked(); });
   gateRetry();
   drawDecideState();
@@ -1118,7 +1120,7 @@ function drawPresence(){
         + 'this desk, and anything you sent meanwhile, as it starts.</span>'
       : '');
 }
-function draw(toEnd){ drawTabs(); drawStream(toEnd); drawCarry(); drawBadge(); drawPresence(); }
+function draw(toEnd){ drawTabs(); drawStream(toEnd); drawCarry(); drawBadge(); drawPresence(); drawApproveAsk(); }
 
 $('presence').addEventListener('click', async e => {
   if (e.target.id === 'check'){
@@ -1694,6 +1696,72 @@ function askReason(existing){
   });
 }
 
+// Approving starts a merge that nothing on this page can undo, so it asks once,
+// in the slab rather than with confirm(): in a frame sandboxed without
+// allow-modals confirm() returns false at once and Approve would never work.
+// The step adds a line above the buttons, so neither Confirm nor Back is under
+// the spot Approve was: a second tap there lands on no button.
+function askApprove(){
+  showingDecided = false;
+  $('decide').innerHTML = '<div class="cap">Before it merges</div>'
+    + '<div class="done confirming"><p class="ask" id="approveAsk"></p>'
+    + '<p class="pickup" id="approvePending" hidden></p>'
+    + '<div class="verdict"><span class="note">A merge cannot be undone from this '
+    + 'page.</span>'
+    + '<button class="btn" id="approveBack">Back</button>'
+    + '<button class="btn yes" id="approveConfirm">Confirm</button></div></div>';
+  drawApproveAsk();
+  $('approveBack').addEventListener('click', backToChoice);
+  $('approveConfirm').addEventListener('click', () => decide('approved'));
+  gate();
+  $('approveConfirm').focus();
+}
+function backToChoice(){
+  offerDecision();
+  $('ok').focus();
+}
+// Enter activates a button on keydown, and focus moves to Confirm as the step
+// opens, so the auto-repeat of one held Enter pressed Confirm too: measured in
+// Chromium and WebKit, one held key recorded the approval. Repeats are dropped
+// while the step is up; a fresh press still confirms.
+$('decide').addEventListener('keydown', e => {
+  if (!$('approveAsk')) return;
+  if (e.repeat){ e.preventDefault(); return; }
+  if (e.key === 'Escape'){ e.preventDefault(); backToChoice(); }
+});
+
+// Messages the working session has not finished with: a reply it is still
+// writing, and a saved message with no reply yet. A message whose save failed
+// never reached the session, and says so in its own thread.
+function outstanding(){
+  const slots = threads.flatMap(t => t.turns).filter(m => m.via === 'session' && !unsaved(m));
+  const rf = FEEDS.replies;
+  if (slots.length && (!repliesIn || (rf && rf.dead))) return null;
+  const writing = slots.filter(m => (sessionReplies.get(m.answers) || {}).status === 'working').length;
+  const waiting = slots.filter(m => !sessionReplies.has(m.answers)
+    && m.status !== 'working' && m.status !== 'done').length;
+  return {writing, waiting};
+}
+// Redrawn in place, so a reply finishing or a new head while the step is open
+// changes what it says without moving focus off Confirm.
+function drawApproveAsk(){
+  const ask = $('approveAsk');
+  if (!ask) return;
+  ask.textContent = 'Approve and merge ' + (typeof DATA.repo === 'string' ? DATA.repo : '')
+    + '#' + DATA.number + (head ? ' at ' + head.slice(0, 7) : '') + '?';
+  const o = outstanding(), el = $('approvePending');
+  const parts = !o ? [] : [
+    o.writing && (o.writing === 1 ? '1 answer is' : o.writing + ' answers are') + ' still being written',
+    o.waiting && (o.waiting === 1 ? '1 message is' : o.waiting + ' messages are')
+      + ' still waiting for the working session'].filter(Boolean);
+  const n = o ? o.writing + o.waiting : 0;
+  el.textContent = !o ? 'The working session’s replies have not loaded on this view, so it '
+      + 'cannot tell whether an answer is still coming.'
+    : parts.length ? parts.join(' and ') + '. Confirm does not wait for ' + (n === 1 ? 'it' : 'them') + '.'
+    : '';
+  el.hidden = !el.textContent;
+}
+
 function offerDecision(){
   showingDecided = false;
   $('decide').innerHTML = '<div class="cap">When you have made up your mind</div>'
@@ -1703,7 +1771,7 @@ function offerDecision(){
     + 'merges or revises accordingly.</span>'
     + '<button class="btn yes" id="ok">Approve</button>'
     + '<button class="btn" id="changes">Needs changes</button></div>';
-  $('ok').addEventListener('click', () => decide('approved'));
+  $('ok').addEventListener('click', askApprove);
   $('changes').addEventListener('click', () => askReason(reason));
   gate();
 }
@@ -2027,7 +2095,7 @@ function listenReplies(){
         }
       });
       if (liveShown) draw();
-      else if (shown){ drawTabs(); drawBadge(); }
+      else if (shown){ drawTabs(); drawBadge(); drawApproveAsk(); }
       if (!reringStarted){ reringStarted = true; rering(); }
     });
 }
@@ -2241,6 +2309,7 @@ function followPage(){
         head = row.head;
         drawMeta();
         if (showingDecided) drawDecided();
+        drawApproveAsk();
       }
       if (typeof row.text !== 'string' || row.text === bodyText) return;
       bodyText = row.text;

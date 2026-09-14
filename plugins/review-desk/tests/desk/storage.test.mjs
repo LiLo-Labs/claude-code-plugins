@@ -5,7 +5,7 @@
 // says so when it dies, instead of leaving the panel waiting for good.
 import {test, before, after, afterEach} from 'node:test';
 import assert from 'node:assert/strict';
-import {launch, open, openPair} from './harness.mjs';
+import {launch, open, openPair, approve} from './harness.mjs';
 
 let browser, desk, pair;
 before(async () => { browser = await launch(); });
@@ -581,7 +581,7 @@ test('Approve whose first save is refused as unavailable is stored on the retry 
   desk = await open(browser, {setFailures: {[PR]: ['unavailable']}});
   await ready(desk);
   for (const sel of ['#decide', '#lostSlot']) await watchFor(desk, sel, 'Not saved');
-  await desk.page.click('#ok');
+  await approve(desk);
   await desk.until(s => s[PR] && s[PR].decision === 'approved', null, 3000);
   await desk.page.waitForFunction(() => window.__desk.rings().length === 1, null, {timeout: 3000});
   const [ring] = await desk.rings();
@@ -596,7 +596,7 @@ test('Approve whose first save is refused as unavailable is stored on the retry 
 test('a decision refused twice is rung, and stops saying not saved, once a later save stores it', async () => {
   desk = await open(browser, {setFailures: {[PR]: ['unavailable', 'unavailable']}});
   await ready(desk);
-  await desk.page.click('#ok');
+  await approve(desk);
   await desk.page.waitForSelector('#decide .pickup >> text=Not saved, so no session will see this', {timeout: 3000});
   assert.deepEqual(await desk.rings(), []);
 
