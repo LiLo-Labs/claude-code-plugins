@@ -224,7 +224,7 @@ test('a view refused as not_writer or not_granted stops ringing: the banner show
 });
 
 // Records every pickup line the decision slab is drawn with, at the moment it is
-// written, with how many rings this view had made by then. A MutationObserver read
+// written, with the page's clock then. A MutationObserver read
 // the text only when its callback ran, after the stub had loaded, rung and redrawn
 // in one burst of microtasks, so an intermediate line was never seen.
 const recordLines = () => {
@@ -232,13 +232,14 @@ const recordLines = () => {
   const html = Object.getOwnPropertyDescriptor(Element.prototype, 'innerHTML');
   Object.defineProperty(Element.prototype, 'innerHTML', {...html, set(v){
     const m = this.id === 'decide' && /<p class="pickup">([^<]*)<\/p>/.exec(String(v));
-    if (m) window.__lines.push({text: m[1], rung: window.__desk.rings().length});
+    if (m) window.__lines.push({text: m[1], at: Date.now()});
     return html.set.call(this, v);
   }});
 };
 const decisionPublishes = log => log.filter(e => e.op === 'publish' && e.ring.doorbell && e.ring.doorbell.kind === 'decision');
-// Lines that said the view was waiting while this view had rung nothing.
-const waitingBefore = lines => lines.filter(l => /Waiting for the working session/.test(l.text) && l.rung === 0);
+// Lines that said the view was waiting, drawn before `until` (a publish's `at`,
+// which the stub stamps with the same page clock, or Infinity for any at all).
+const waitingBefore = (lines, until) => lines.filter(l => /Waiting for the working session/.test(l.text) && l.at < until);
 const pollFor = async (what, fn, timeout) => {
   for (const end = Date.now() + timeout;;){
     if (await fn()) return;
@@ -284,43 +285,41 @@ test('a decision whose ring failed twice as upstream_error is rung once by the r
   assert.deepEqual(await b.missing(), []);
 });
 
-test('a stored decision with no recorded ring and no pickup is rung once at load, and not on the next load', async () => {
-  const seed = {[PR]: {pr: 42, title: 'Harness desk', decision: 'approved', reason: null,
-    decidedAt: '2026-09-12T10:00:00.000Z', threads: []}};
-  desk = await open(browser, {seed, init: recordLines});
-  await pollFor('the stored decision was never rung', async () => (await decisionRings()).length === 1, 5000);
-  const [ring] = decisionPublishes(await desk.log());
-  const stored = await desk.until(s => s[PR].decisionRing && s[PR].decisionRing.rungAt);
-  await lineSays('Waiting for the working session');
-  const lines = await desk.page.evaluate('window.__lines');
-  assert.deepEqual(waitingBefore(lines, ring.at), []);
-  assert.ok(lines.some(l => /^Saved\. No ring is recorded for it yet/.test(l.text)), JSON.stringify(lines));
-  assert.deepEqual(await desk.missing(), []);
-  await desk.close();
+// A desk an older page wrote has no decisionRing. From before pickup stamps it has
+// no pickup either, though its decision was collected long ago: a ring would make a
+// session treat it as new and comment on the pull request a second time. So it is
+// never rung, and its line claims neither that a session is waiting nor that none
+// was told.
+const NEUTRAL = 'Saved. What the working session did with it shows here once it reports back.';
+test('a stored decision with no recorded ring is never rung on load, pickup or not, and never says it is waiting', async () => {
+  const decidedAt = '2026-09-12T10:00:00.000Z';
+  const seed = {[PR]: {pr: 42, title: 'Harness desk', decision: 'approved', reason: null, decidedAt, threads: []}};
+  const earlierPickup = {[PR + '/context/pickup']: {decision: 'needs changes',
+    decidedAt: '2026-09-11T10:00:00.000Z', session: 's', at: '2026-09-11T10:01:00.000Z'}};
+  for (const [name, s, capabilities] of [['no pickup', seed], ['an earlier decision\'s pickup', {...seed, ...earlierPickup}],
+      ['a view that cannot ring', seed, ['db']]]){
+    desk = await open(browser, {seed: s, init: recordLines, ...(capabilities ? {capabilities} : {})});
+    await ready(desk);
+    // A page that rang it did so at once: decidedAt is two days old, well past
+    // RERING_AFTER and RING_BACKOFF.
+    await desk.page.waitForTimeout(3000);
+    assert.deepEqual(await desk.rings(), [], name);
+    assert.deepEqual((await desk.log()).filter(e => e.op === 'publish refused' || e.op === 'acquire'), [], name);
+    assert.equal(await line(), NEUTRAL, name);
+    assert.deepEqual(waitingBefore(await desk.page.evaluate('window.__lines'), Infinity), [], name);
+    assert.equal((await desk.store())[PR].decisionRing, undefined, name + ': nothing is written for it');
+    assert.deepEqual(await desk.missing(), []);
+    assert.deepEqual(desk.errors, []);
+    await desk.close();
+  }
 
-  desk = await open(browser, {seed: stored});
-  await ready(desk);
-  await lineSays('Waiting for the working session');
-  await desk.page.waitForTimeout(1500);
-  assert.deepEqual(await desk.rings(), []);
-  assert.deepEqual(await desk.missing(), []);
-  await desk.close();
-
-  // The same decision picked up already: nothing rings.
+  // The same decision picked up already: nothing rings, and the pickup line shows.
   desk = await open(browser, {seed: {...seed, [PR + '/context/pickup']: {decision: 'approved',
-    decidedAt: seed[PR].decidedAt, session: 's', at: '2026-09-12T10:01:00.000Z'}}});
+    decidedAt, session: 's', at: '2026-09-12T10:01:00.000Z'}}});
   await lineSays('Picked up by the working session');
   await desk.page.waitForTimeout(1500);
   assert.deepEqual(await desk.rings(), []);
   assert.deepEqual(await desk.missing(), []);
-  await desk.close();
-
-  // A view that cannot ring says so, and never that it is waiting.
-  desk = await open(browser, {seed, capabilities: ['db'], init: recordLines});
-  await lineSays('cannot notify');
-  await desk.page.waitForTimeout(1000);
-  assert.equal(await line(), 'Saved. This view cannot notify the working session, so the next session to start picks it up.');
-  assert.deepEqual(waitingBefore(await desk.page.evaluate('window.__lines'), Infinity), []);
 });
 
 test('a view that cannot ring records a decision and says it could not notify the working session', async () => {

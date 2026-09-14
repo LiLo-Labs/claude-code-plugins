@@ -27,11 +27,7 @@ const decidedDesk = () => ({[PR]: {pr: 42, title: 'Harness desk',
   threads: [{id: 't1', name: 'Earlier', turns: [
     {id: 'm-old', role: 'user', content: 'Asked yesterday', to: 'session'},
     {role: 'assistant', via: 'session', answers: 'm-old', status: 'done',
-     content: 'Answered yesterday', sentAt: 1}]}]},
-  // Collected yesterday too. A decision with no recorded ring and no pickup is rung
-  // again on load (decision.test.mjs), and these tests count reads and writes.
-  [PR + '/context/pickup']: {decision: 'approved', decidedAt: '2026-09-12T10:00:00.000Z', session: 's',
-    at: '2026-09-12T10:01:00.000Z', outcome: {result: 'merged', at: '2026-09-12T10:02:00.000Z'}}});
+     content: 'Answered yesterday', sentAt: 1}]}]}});
 
 test('a restore that fails twice writes nothing, and says so', async () => {
   const seed = decidedDesk();

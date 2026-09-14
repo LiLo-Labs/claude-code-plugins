@@ -813,6 +813,22 @@ test('a message ring refused as rate_limited is rung again after the backoff, on
   assert.deepEqual(a.errors, []);
 });
 
+// artifact.d.ts allows a failed publish one retry. The send's ring and its retry are
+// two; rering's one more try must not retry inside itself, which made four.
+test('a message whose ring always fails as upstream_error makes at most 3 publish attempts over 15 s', async () => {
+  desk = await open(browser, {publishError: 'upstream_error'});
+  await ready(desk);
+  await desk.page.click('#fab');
+  await sendText(desk, 'Anyone?');
+  await desk.until(s => slots(s).some(m => m.why === 'upstream_error' && m.again), null, 12000);
+  await desk.page.waitForSelector('#stream >> text=Check, at the top of this panel, rings it again');
+  await desk.page.waitForTimeout(15000 - RING_BACKOFF);
+  const log = await desk.log();
+  assert.equal(refusedPublishes(log).length, 3);
+  assert.deepEqual(publishes(log), []);
+  assert.deepEqual(desk.errors, []);
+});
+
 test('a message whose re-ring is refused as rate_limited again is not rung a third time, and its line points at Check', async () => {
   pair = await openPair(browser, {publishError: ['rate_limited', 'rate_limited']});
   const [a] = pair;

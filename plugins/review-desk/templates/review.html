@@ -1551,8 +1551,10 @@ let decidedOn = null;
 // {decidedAt, rungAt} once a ring went out, or {decidedAt, why} when it did not,
 // with `again` once a view has spent the one re-ring (see rering). Keyed by
 // decidedAt, so a record left over from an earlier decision never counts. Null
-// while nothing is recorded, which is every decision stored before 0.14: rering
-// treats that like a message slot with no rungAt, and rings once it is old enough.
+// while nothing is recorded, which is every decision an older page stored. Such a
+// decision is never rung: a desk from before pickup stamps holds a decision that
+// was collected long ago with no pickup to show it, and a ring would make a session
+// treat it as new and comment on the pull request again.
 let decisionRing = null;
 // What `rang` a recorded ring outcome restores to.
 const rangFrom = r => !r ? null : r.rungAt ? 'rung' : String(r.why || 'upstream_error');
@@ -1723,16 +1725,19 @@ const bellReady = (async () => {
 // never retried here: rering tries once more after RING_BACKOFF. The read-only
 // codes are permanent for the view, and the first one turns ringing off, so the
 // view never publishes again and returns 'readonly' from then on.
+// rering passes retry false: its ring is already the one more try a failed ring
+// gets, and a second retry inside it would make four publishes where artifact.d.ts
+// allows the first and one retry.
 const READ_ONLY = new Set(['not_writer', 'not_granted', 'not_declared', 'consent_required',
   'capability_disabled', 'capability_removed']);
 const NOT_TRANSIENT = new Set([...READ_ONLY, 'conflict', 'too_large', 'invalid_content',
   'read_only_path', 'rate_limited', 'transform_error']);
-async function ring(what){
+async function ring(what, retry = true){
   const bell = await bellReady;
   if (!bell) return 'unavailable';
   const says = what || {kind: 'decision', decision: decided, decidedAt: decidedAt};
   let code = null;
-  for (let tries = 0; tries < 2; tries++){
+  for (let tries = 0; tries < (retry ? 2 : 1); tries++){
     if (tries) await new Promise(r => setTimeout(r, 300 + Math.random() * 700));
     if (readOnly) return 'readonly';
     try {
@@ -1917,17 +1922,17 @@ function pickupLine(){
     + 'so no session will see this. Close a thread you no longer need and decide '
     + 'again, or tell the working session directly.';
   const later = ' If no session is running, the next one to start picks it up.';
-  // Waiting only once a ring is recorded. A decision with none may never have been
-  // told to anyone: the tab closed during the ring, or a page before 0.14 stored it.
+  // Waiting only once a ring is recorded.
   if (rang === 'rung') return 'Waiting for the working session.' + later;
-  const retry = decisionDueAt() !== null;
-  if (bellOn && retry && rang === null) return 'Saved. No ring is recorded for it yet, so this '
-    + 'view rings the working session.' + later;
+  // No record: an older page stored it, or a tab closed between the save and the
+  // ring. The page cannot tell whether a session was told or has collected it
+  // already, so it claims neither.
+  if (rang === null) return 'Saved. What the working session did with it shows here '
+    + 'once it reports back.';
   // 'readonly' is this page's word, not an artifact.d.ts code, so it is never shown.
-  if (bellOn && retry) return 'Saved, but the working session was not notified'
+  if (bellOn && decisionDueAt() !== null) return 'Saved, but the working session was not notified'
     + (rang === 'readonly' ? '' : ' (' + rang + ')') + '. This view tries again in a few seconds.' + later;
-  if (rang === null && bellOn) return 'Saved. No ring is recorded for it.' + later;
-  if (rang === null || rang === 'readonly') return 'Saved. This view cannot notify the working '
+  if (rang === 'readonly') return 'Saved. This view cannot notify the working '
     + 'session, so the next session to start picks it up.';
   return 'Saved, but this view could not notify the working session ('
     + rang + ').' + (bellOn ? ' Check in the panel rings it again.' : '') + later;
@@ -2260,18 +2265,18 @@ const ringsLater = m => unrung(m) && m.status === 'unsent' && m.why !== 'conflic
 const dueAt = m => m.status === 'unsent'
   ? (ringsLater(m) ? (m.sentAt || 0) + RING_BACKOFF : 0)
   : lateStored.has(m.answers) ? 0 : (m.sentAt || 0) + RERING_AFTER;
-// When the decision on screen is due a ring from rering, or null when it is not:
-// it has none recorded (a tab closed during the ring, or a page before 0.14 stored
-// it), or its ring failed and the one re-ring is not spent. Never while this view
-// is saving or ringing for it, and never once the pickup shows it was collected.
+// When the decision on screen is due a ring from rering, or null when it is not.
+// Due only when this page's own record says its ring failed and the one re-ring is
+// not spent. A decision with no record is left alone (see decisionRing). Never
+// while this view is saving or ringing for it, and never once the pickup shows it
+// was collected.
 function decisionDueAt(){
   if (!decided || typeof decidedAt !== 'string' || ringing.has(DECISION)) return null;
   if (decided === 'needs changes' && !reason) return null;
   if (rang === 'sending' || rang === 'unsaved' || rang === 'too large') return null;
   if (pickup && pickup.decision === decided && pickup.decidedAt === decidedAt) return null;
   const r = decisionRing, at = Date.parse(decidedAt) || 0;
-  if (!r) return at + RERING_AFTER;
-  if (r.rungAt || r.again) return null;
+  if (!r || r.decidedAt !== decidedAt || r.rungAt || r.again) return null;
   return r.why === 'conflict' ? at : at + RING_BACKOFF;
 }
 const sessionSlots = doc => new Map(((doc && Array.isArray(doc.threads)) ? doc.threads : [])
@@ -2336,22 +2341,27 @@ async function rering(){
       lateStored.delete(m.answers);
       return false;
     });
-    // Rung only when the store still holds this decision, with no ring recorded for
-    // it or a failed one whose re-ring is not spent, and no pickup for it. A record
-    // another view stored is taken, so this view stops saying it will ring.
+    // Rung only when the store still holds this decision, with a failed ring
+    // recorded for it whose re-ring is not spent, and no pickup for it. A record
+    // another view stored is taken, so this view stops saying it will ring. This
+    // view's own failed record stands in only when the store has none, as when the
+    // save that carried it was refused: no other view can ring a decision the store
+    // holds no record for, so there is no second ring to race.
     let ringTheDecision = false;
     if (decisionDue && stillHeld()){
       const same = isRow(fresh) && fresh.decision === held.decision && fresh.decidedAt === held.decidedAt;
       const rec = same && isRow(fresh.decisionRing) && fresh.decisionRing.decidedAt === held.decidedAt
         ? fresh.decisionRing : null;
+      const mine = decisionRing && decisionRing.decidedAt === held.decidedAt ? decisionRing : null;
+      const known = rec || mine;
       const collected = isRow(picked) && picked.decision === held.decision && picked.decidedAt === held.decidedAt;
-      if (same && !collected && !(rec && (rec.rungAt || rec.again))) ringTheDecision = true;
+      if (same && !collected && known && !known.rungAt && !known.again) ringTheDecision = true;
       else if (rec){ decisionRing = {...rec}; rang = rangFrom(decisionRing); }
     }
     if (!toRing.length && !ringTheDecision){ draw(); if (showingDecided) drawDecided(); return; }
 
     if (toRing.length){
-      const rung = await ring({kind: 'message', turns: toRing.map(m => m.answers), again: true});
+      const rung = await ring({kind: 'message', turns: toRing.map(m => m.answers), again: true}, false);
       toRing.forEach(m => {
         lateStored.delete(m.answers);
         // A reply that landed during the ring has taken over this slot.
@@ -2366,7 +2376,7 @@ async function rering(){
     }
     let decisionOutcome = null;
     if (ringTheDecision && stillHeld()){
-      const r = await ring({kind: 'decision', decision: held.decision, decidedAt: held.decidedAt, again: true});
+      const r = await ring({kind: 'decision', decision: held.decision, decidedAt: held.decidedAt, again: true}, false);
       if (r !== 'readonly' && stillHeld()){
         decisionRing = decisionOutcome = r === 'rung'
           ? {decidedAt: held.decidedAt, rungAt: Date.now(), again: Date.now()}
