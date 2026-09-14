@@ -5,6 +5,10 @@
   --paper:#f7f5f2; --card:#fffefc; --edge:#e3ded6; --rule:#ece7e0;
   --ink:#22201d; --soft:#5f5a53; --faint:#948d84;
   --mark:#9a4a2f; --good:#3f6b4a; --cool:#3d5a72; --lit:#f5e3b8;
+  /* Text and glyphs drawn on --cool, --good or --mark. White suits the dark light-mode
+     accents; the dark theme's accents are pastel, where white measured 2.6:1 on
+     --cool and 2.47:1 on --good, so it takes the dark paper instead (7.1 and 7.46). */
+  --on-accent:#fff;
   --doc:"Newsreader",Georgia,serif;
   --ui:"Public Sans",system-ui,sans-serif;
   --mono:"JetBrains Mono",ui-monospace,Menlo,monospace;
@@ -15,12 +19,14 @@
     --paper:#15140f; --card:#1c1a16; --edge:#302c25; --rule:#2a2721;
     --ink:#eee9e0; --soft:#a89f93; --faint:#7a7267;
     --mark:#d4805f; --good:#7fb08c; --cool:#7fa5c4; --lit:#4a3c1c;
+    --on-accent:#15140f;
   }
 }
 :root[data-theme="dark"]{
   --paper:#15140f; --card:#1c1a16; --edge:#302c25; --rule:#2a2721;
   --ink:#eee9e0; --soft:#a89f93; --faint:#7a7267;
   --mark:#d4805f; --good:#7fb08c; --cool:#7fa5c4; --lit:#4a3c1c;
+  --on-accent:#15140f;
 }
 *{box-sizing:border-box}
 body{background:var(--paper);color:var(--ink);font-family:var(--ui);
@@ -130,12 +136,12 @@ h1.doctitle{font-family:var(--doc);font-weight:600;font-size:30px;
 
 /* ---------- the FAB ---------- */
 #fab{position:fixed;right:20px;bottom:20px;z-index:70;width:56px;height:56px;
-  border-radius:28px;border:none;background:var(--cool);color:#fff;
+  border-radius:28px;border:none;background:var(--cool);color:var(--on-accent);
   font-size:21px;cursor:pointer;box-shadow:0 4px 18px #0003;
   display:flex;align-items:center;justify-content:center;padding:0}
 #fab:hover{filter:brightness(1.08)}
 #fab .dot{position:absolute;top:2px;right:2px;min-width:19px;height:19px;
-  border-radius:10px;background:var(--mark);color:#fff;font-size:11px;
+  border-radius:10px;background:var(--mark);color:var(--on-accent);font-size:11px;
   font-weight:600;font-family:var(--ui);display:none;
   align-items:center;justify-content:center;padding:0 5px}
 #fab .dot.show{display:flex}
@@ -178,10 +184,10 @@ body.open #panel{display:flex}
 .tab{border:1px solid var(--edge);background:var(--paper);color:var(--soft);
   font-family:var(--ui);font-size:12px;padding:5px 10px;border-radius:13px;
   cursor:pointer;white-space:nowrap;display:flex;align-items:center;gap:6px}
-.tab.on{background:var(--cool);border-color:var(--cool);color:#fff}
+.tab.on{background:var(--cool);border-color:var(--cool);color:var(--on-accent)}
 .tab .spin{width:7px;height:7px;border-radius:4px;background:var(--mark);
   animation:pulse 1.1s ease-in-out infinite}
-.tab.on .spin{background:#fff}
+.tab.on .spin{background:var(--on-accent)}
 @keyframes pulse{0%,100%{opacity:.3}50%{opacity:1}}
 .tabpair{display:flex;align-items:center;flex-shrink:0}
 /* Its own button beside the tab, 44px square by its box rather than its glyph.
@@ -204,7 +210,7 @@ body.open #panel{display:flex}
   text-transform:uppercase;color:var(--faint)}
 .said{padding:9px 12px;border-radius:9px;font-size:14.5px;line-height:1.56;
   white-space:pre-wrap;overflow-wrap:anywhere}
-.turn.mine .said{background:var(--cool);color:#fff;border-bottom-right-radius:2px}
+.turn.mine .said{background:var(--cool);color:var(--on-accent);border-bottom-right-radius:2px}
 .turn.theirs .said{background:var(--rule);border-bottom-left-radius:2px}
 .quoted{border-left:2px solid var(--mark);padding:5px 0 5px 10px;
   font-family:var(--doc);font-size:13.5px;color:var(--soft);
@@ -253,7 +259,7 @@ textarea{flex:1;font-family:var(--ui);font-size:16px;line-height:1.45;
   max-height:150px}
 textarea:focus{outline:2px solid var(--cool);outline-offset:-1px;
   border-color:transparent}
-.send{border:none;background:var(--cool);color:#fff;font-family:var(--ui);
+.send{border:none;background:var(--cool);color:var(--on-accent);font-family:var(--ui);
   font-weight:600;font-size:14px;padding:10px 15px;border-radius:8px;
   cursor:pointer}
 .send:disabled{opacity:.4;cursor:default}
@@ -266,7 +272,7 @@ textarea:focus{outline:2px solid var(--cool);outline-offset:-1px;
 .btn{font-family:var(--ui);font-weight:600;font-size:14px;padding:10px 17px;
   border-radius:7px;border:1px solid var(--edge);background:var(--card);
   color:var(--ink);cursor:pointer}
-.btn.yes{background:var(--good);border-color:var(--good);color:#fff}
+.btn.yes{background:var(--good);border-color:var(--good);color:var(--on-accent)}
 .done{padding:16px 18px;font-size:15px;line-height:1.6}
 .done textarea{flex:none;width:100%;display:block;background:var(--paper);
   border:1px solid var(--edge);border-radius:5px;padding:10px 12px;
@@ -671,7 +677,19 @@ function place(){
   const name = p ? (p.full || p.name) : '';
   return here ? name + ' — ' + here : name;
 }
+// The observer and scroll handler for the headings on screen now. Each paint
+// replaces them. Left in place, the old handlers kept the old page's headings,
+// which a repaint had detached; a detached heading measures top 0, always "above
+// the fold", so on a page with no headings of its own (a source file) the last
+// old handler set `here` to the old page's heading, and a message sent from
+// a.py said the reviewer was reading a section of the description.
+let headingWatch = null;
 function watchHeadings(){
+  if (headingWatch){
+    headingWatch.io.disconnect();
+    window.removeEventListener('scroll', headingWatch.onScroll);
+    headingWatch = null;
+  }
   const hs = Array.from(document.querySelectorAll('.md h1, .md h2, .md h3'));
   here = '';
   $('where').textContent = pages()[leaf] ? pages()[leaf].name : '';
@@ -682,14 +700,16 @@ function watchHeadings(){
     $('where').textContent = here ? '¶ ' + here : pages()[leaf].name;
   }, {rootMargin: '-120px 0px 0px 0px', threshold: [0, 1]});
   hs.forEach(h => io.observe(h));
-  window.addEventListener('scroll', () => {
+  const onScroll = () => {
     const top = hs.filter(h => h.getBoundingClientRect().top < 130);
     const now = top.length ? top[top.length-1].textContent.trim() : '';
     if (now !== here){
       here = now;
       $('where').textContent = here ? '¶ '+here : pages()[leaf].name;
     }
-  }, {passive:true});
+  };
+  window.addEventListener('scroll', onScroll, {passive:true});
+  headingWatch = {io, onScroll};
 }
 
 /* ================= threads ================= */
@@ -757,7 +777,7 @@ function closeThread(id){
   // thread under the reviewer.
   if (i < live) live--;
   if (live >= threads.length) live = threads.length - 1;
-  draw(); save();
+  draw(true); save();
 }
 // What the working session has said, by the id of the message it answers, taken
 // only from review/pr-N/replies. Under the desk's rules only the owner writes
@@ -817,8 +837,15 @@ function said(m){
   return '<div class="said">'+esc(sessionWait(m, r))+'</div>';
 }
 
-function drawStream(){
+// The stream follows new text only for a reader already at its end. A reply is
+// rewritten several times while the session works, and each rewrite used to
+// jump the stream to the bottom, away from whatever earlier answer the reviewer
+// had scrolled up to read. `toEnd` is for the reviewer's own moves: opening the
+// panel, switching or closing a thread, sending. A closed panel's stream has no
+// box, so every measure is 0 and it counts as at the end.
+function drawStream(toEnd){
   const t = threads[live], el = $('stream');
+  const atEnd = toEnd || el.scrollHeight - el.scrollTop - el.clientHeight < 40;
   if (!t.turns.length && restore === 'pending'){
     el.innerHTML = '<div class="hint">Loading the saved discussion…</div>';
   } else if (!t.turns.length){
@@ -834,7 +861,7 @@ function drawStream(){
           : m.via==='session' ? 'working session' : 'claude')+'</span>'
       + said(m) + '</div>').join('');
   }
-  el.scrollTop = el.scrollHeight;
+  if (atEnd) el.scrollTop = el.scrollHeight;
   $('seed').style.display = t.turns.length ? 'none' : 'flex';
   gate();
 }
@@ -851,12 +878,16 @@ function drawCarry(){
     carried = null; unlight(); drawCarry();
   };
 }
+// The open thread counts too while the panel is closed. Skipping it left the
+// badge dark for the usual review, a single thread: ask, close the panel to keep
+// reading, and the answer arrived with nothing on screen saying so.
 function drawBadge(){
+  const open = document.body.classList.contains('open');
   const waiting = threads.reduce((n, t, i) =>
-    n + (i !== live && t.unread ? 1 : 0), 0);
+    n + (t.unread && (i !== live || !open) ? 1 : 0), 0);
   const d = $('dot');
   d.textContent = waiting || '';
-  d.classList.toggle('show', waiting > 0 && !document.body.classList.contains('open'));
+  d.classList.toggle('show', waiting > 0 && !open);
 }
 // The resume command is offered for the reviewer to copy and run on their own
 // computer, and the presence stamp it can come from is a document anyone who can
@@ -897,7 +928,7 @@ function drawPresence(){
         + 'this desk, and anything you sent meanwhile, as it starts.</span>'
       : '');
 }
-function draw(){ drawTabs(); drawStream(); drawCarry(); drawBadge(); drawPresence(); }
+function draw(toEnd){ drawTabs(); drawStream(toEnd); drawCarry(); drawBadge(); drawPresence(); }
 
 $('presence').addEventListener('click', async e => {
   if (e.target.id === 'check'){
@@ -944,10 +975,10 @@ $('tabs').addEventListener('click', e => {
   if (e.target.closest('#more')){
     threads.push({id:'t'+(threads.length+1)+'-'+Date.now(),
                   name:'Thread '+(threads.length+1), turns:[], busy:false});
-    live = threads.length - 1; draw(); $('box').focus(); return;
+    live = threads.length - 1; draw(true); $('box').focus(); return;
   }
   const go = e.target.closest('[data-go]');
-  if (go){ live = +go.dataset.go; threads[live].unread = false; draw(); }
+  if (go){ live = +go.dataset.go; threads[live].unread = false; draw(true); }
 });
 
 const SEEDS = DATA.openers && DATA.openers.length ? DATA.openers : [
@@ -1038,11 +1069,17 @@ document.addEventListener('selectionchange', () => {
   pop.style.display = 'block';
   // Above the selection with a mouse. On a touch screen iPadOS puts its own
   // Copy / Look Up menu above the selection, so the pop goes below instead,
-  // clear of the lower selection handle, and kept inside the window.
+  // clear of the lower selection handle. Each falls back to the other side when
+  // its own has no room: clamping into the window instead put the pop over the
+  // selection it was offering to carry, or, with a mouse, off the top.
   const w = pop.offsetWidth, h = pop.offsetHeight;
+  const above = r.top - h - 10, below = r.bottom + 16;
+  const fitsAbove = above >= 10, fitsBelow = below + h <= innerHeight - 10;
   const top = matchMedia('(pointer: coarse)').matches
-    ? Math.min(r.bottom + 16, innerHeight - h - 10) : r.top - h - 10;
-  pop.style.top = (window.scrollY + top) + 'px';
+    ? (fitsBelow || !fitsAbove ? below : above)
+    : (fitsAbove || !fitsBelow ? above : below);
+  // A selection taller than the window has no clear side; stay on screen.
+  pop.style.top = (window.scrollY + Math.max(10, Math.min(top, innerHeight - h - 10))) + 'px';
   pop.style.left = (window.scrollX
     + Math.max(10, Math.min(r.left + r.width/2 - w/2, innerWidth - w - 10))) + 'px';
 });
@@ -1062,7 +1099,7 @@ function openPanel(){
   if (!carried && pending) take();
   document.body.classList.add('open');
   threads[live].unread = false;
-  draw();
+  draw(true);
 }
 $('fab').addEventListener('click', openPanel);
 $('shut').addEventListener('click', () => {
@@ -1095,7 +1132,7 @@ async function ask(){
   if (!db){
     t.turns.push({role: 'assistant', content: 'This view cannot save messages, so this '
       + 'one will not reach the working session. Tell it directly.'});
-    draw();
+    draw(true);
     return;
   }
 
@@ -1105,7 +1142,7 @@ async function ask(){
   const slot = {role: 'assistant', via: 'session', answers: turn.id,
                 status: 'sent', sentAt: Date.now()};
   t.turns.push(slot);
-  draw();
+  draw(true);
   // rering must not ring for a slot this view is still ringing for.
   ringing.add(turn.id);
   try {
@@ -1331,7 +1368,9 @@ async function decide(v, quiet, why){
     decidedAt = new Date().toISOString();
     rang = 'sending';
     drawDecided();
-    rang = (await saveNow()) ? await ring() : 'unsaved';
+    // Read `lost` straight after the refusal: a later save that succeeds clears
+    // it, and the line under the buttons must keep saying why this one failed.
+    rang = (await saveNow()) ? await ring() : lost === 'too large' ? 'too large' : 'unsaved';
   }
   drawDecided();
 }
@@ -1365,6 +1404,9 @@ function pickupLine(){
   if (rang === 'sending') return 'Saving…';
   if (rang === 'unsaved') return 'Not saved, so no session will see this. '
     + 'Tell the working session directly.';
+  if (rang === 'too large') return 'Not saved: this conversation is too large to store, '
+    + 'so no session will see this. Close a thread you no longer need and decide '
+    + 'again, or tell the working session directly.';
   const later = ' If no session is running, the next one to start picks it up.';
   if (rang === 'rung' || rang === null) return 'Waiting for the working session.' + later;
   return 'Saved, but this view could not notify the working session ('
@@ -1456,15 +1498,21 @@ async function restoreStored(){
 // session's reply…" for good. So every listener goes through follow(), which
 // says on the page which feed stopped and with what code, and subscribes again
 // once after a short randomized wait. It never retries a code that db.d.ts says
-// cannot succeed on a retry, and never more than once on its own, so a store
-// that refuses every subscribe is not asked again for the life of the tab. After
-// that the reviewer gets Try again.
+// cannot succeed on a retry. Each outage gets one automatic resubscribe: a
+// delivery ends the outage and earns the next one, so a feed that drops twice in
+// a long review comes back twice on its own. A store that refuses every
+// subscribe never delivers, so it is not asked again on its own; the reviewer
+// gets Try again. A store that delivers and then drops every time would
+// otherwise be resubscribed every few seconds for as long as that goes on, and
+// db.d.ts names a per-viewer call rate that answers resource_exhausted, so the
+// wait doubles for each automatic resubscribe that follows the last one within
+// RESUBSCRIBE_MAX, and never exceeds it.
 const NO_RESUBSCRIBE = new Set(['invalid_argument', 'revoked', 'not_granted',
   'capability_disabled', 'capability_removed', 'transform_error']);
-const RESUBSCRIBE_AFTER = 1500;
+const RESUBSCRIBE_AFTER = 1500, RESUBSCRIBE_MAX = 60000;
 function follow(name, label, where, ref, next){
   const feed = FEEDS[name] = {name, label, where, dead: null, retrying: false,
-    retried: false, ever: false, gen: 0};
+    retried: false, ever: false, gen: 0, streak: 0, lastAuto: 0, wait: 0};
   feed.start = () => {
     const gen = ++feed.gen;
     let over = false;
@@ -1475,7 +1523,12 @@ function follow(name, label, where, ref, next){
       feed.retrying = !feed.retried && !NO_RESUBSCRIBE.has(feed.dead);
       if (feed.retrying){
         feed.retried = true;
-        setTimeout(feed.start, RESUBSCRIBE_AFTER * (1 + Math.random()));
+        const now = Date.now();
+        feed.streak = now - feed.lastAuto < RESUBSCRIBE_MAX ? feed.streak + 1 : 0;
+        feed.lastAuto = now;
+        feed.wait = Math.min(RESUBSCRIBE_AFTER * 2 ** feed.streak * (1 + Math.random()),
+          RESUBSCRIBE_MAX);
+        setTimeout(feed.start, feed.wait);
       }
       drawFeeds(feed);
     };
@@ -1483,6 +1536,7 @@ function follow(name, label, where, ref, next){
       ref().onSnapshot(snap => {
         if (over || gen !== feed.gen) return;
         feed.ever = true;
+        feed.retried = false;
         if (feed.dead){ feed.dead = null; feed.retrying = false; drawFeeds(feed); }
         next(snap);
       }, died);
@@ -1531,8 +1585,12 @@ function listenReplies(){
     () => db.collection('review/pr-' + DATA.number + '/replies'), snap => {
       // The first delivery is what was already there at load, which the reviewer
       // is about to see anyway, so it flags no thread unread.
+      // A change confined to threads the reviewer is not looking at redraws only
+      // the tabs and the badge. The open thread's stream is left alone, nodes and
+      // all, so a selection in it survives and its text is not re-parsed. Any
+      // change touching the open thread still redraws that stream in full.
       const history = !repliesIn;
-      let shown = history;
+      let shown = history, liveShown = history;
       repliesIn = true;
       snap.docs.forEach(d => {
         const r = d.data();
@@ -1542,22 +1600,25 @@ function listenReplies(){
         const status = r.status === 'done' ? 'done' : 'working';
         const was = sessionReplies.get(r.turn);
         const changed = !was || was.text !== text || was.status !== status;
-        if (changed){ sessionReplies.set(r.turn, {text, status}); shown = true; }
+        if (changed) sessionReplies.set(r.turn, {text, status});
         for (const t of threads){
           const at = t.turns.findIndex(m => m.id === r.turn);
           if (at < 0) continue;
+          let hit = changed;
           if (!t.turns.some(m => m.via === 'session' && m.answers === r.turn)){
             let j = at + 1;
             while (j < t.turns.length && t.turns[j].role === 'assistant') j++;
             t.turns.splice(j, 0, {role: 'assistant', via: 'session', answers: r.turn});
-            shown = true;
+            hit = true;
           }
+          if (hit){ shown = true; if (t === threads[live]) liveShown = true; }
           if (changed && !history
               && (t !== threads[live] || !document.body.classList.contains('open'))) t.unread = true;
           break;
         }
       });
-      if (shown) draw();
+      if (liveShown) draw();
+      else if (shown){ drawTabs(); drawBadge(); }
       if (!reringStarted){ reringStarted = true; rering(); }
     });
 }
@@ -1770,7 +1831,7 @@ paint(); draw();
       lastHeard = Math.max(lastHeard, newest);
       drawPresence();
       // A stamp can turn a waiting "Saved and rung" into "Sent". Only then is the
-      // stream redrawn, since a redraw scrolls it to the bottom.
+      // stream redrawn, since a redraw replaces its nodes and any selection in them.
       if (threads[live].turns.some(m => m.via === 'session' && m.status === 'sent'
                                      && !replied.has(m.answers)))
         drawStream();

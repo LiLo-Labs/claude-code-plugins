@@ -229,13 +229,115 @@ test('the description, documents, pickup and presence listeners each show a dead
   await desk.page.waitForSelector('.leaf:nth-child(2)');
   assert.match(await desk.page.textContent('#sheet'), /Rewritten after the reconnect/);
 
-  // A second death waits for the reviewer.
+  // The feed delivered after coming back, so a second outage is a new one and
+  // gets its own automatic resubscribe.
   await desk.kill(BODY);
-  await desk.page.waitForSelector('#pageFeeds button');
-  await desk.page.waitForTimeout(3500);
-  assert.equal(await desk.subscribes(BODY), 2);
-  await desk.page.click('#pageFeeds button');
-  await desk.page.waitForFunction(() => !document.querySelector('#pageFeeds .lost'));
+  await desk.page.waitForSelector('#pageFeeds .lost');
+  await desk.page.waitForFunction(() => !document.querySelector('#pageFeeds .lost'), null, {timeout: 8000});
   assert.equal(await desk.subscribes(BODY), 3);
+  assert.deepEqual(desk.errors, []);
+});
+
+const subscribedTimes = async (p, n) => {
+  for (const end = Date.now() + 8000;;){
+    if (await desk.subscribes(p) === n) return;
+    if (Date.now() > end) throw new Error(p + ' never reached ' + n + ' subscribes: ' + await desk.subscribes(p));
+    await desk.page.waitForTimeout(50);
+  }
+};
+
+test('each outage after a delivery gets one automatic resubscribe; a revoked feed never does', async () => {
+  desk = await open(browser, {seed: leanDesk()});
+  await desk.page.click('#fab');
+  await desk.page.waitForSelector('.said.rich strong >> text=two views');
+
+  for (const n of [2, 3]){
+    await desk.kill(REPLIES);
+    await desk.page.waitForSelector('#feedSlot .lost');
+    assert.match(await desk.page.textContent('#feedSlot'), /Trying again/);
+    await subscribedTimes(REPLIES, n);
+    await desk.page.waitForFunction(() => !document.querySelector('#feedSlot .lost'), null, {timeout: 8000});
+  }
+  // Still delivering after the second recovery.
+  await desk.reply('u1', 'Rewritten after two outages.');
+  await desk.page.waitForSelector('text=Rewritten after two outages.');
+
+  await desk.kill(REPLIES, 'revoked');
+  await desk.page.waitForSelector('#feedSlot .lost');
+  await desk.page.waitForTimeout(3500);             // longer than a first automatic wait
+  assert.equal(await desk.subscribes(REPLIES), 3);
+  assert.equal(await desk.page.locator('#feedSlot button').count(), 0);
+  assert.match(await desk.page.textContent('#feedSlot'), /stopped receiving the working session’s replies \(revoked\)/);
+  assert.deepEqual(desk.errors, []);
+});
+
+test('a feed that keeps delivering and dropping waits longer each time, up to a minute', async () => {
+  desk = await open(browser, {seed: leanDesk()});
+  await desk.page.click('#fab');
+  await desk.page.waitForSelector('.said.rich strong >> text=two views');
+
+  const waits = [];
+  for (const n of [2, 3, 4]){
+    await desk.kill(REPLIES);
+    await desk.page.waitForSelector('#feedSlot .lost');
+    waits.push(await desk.page.evaluate('FEEDS.replies.wait'));
+    if (n < 4){
+      await subscribedTimes(REPLIES, n);
+      await desk.page.waitForFunction(() => !document.querySelector('#feedSlot .lost'), null, {timeout: 8000});
+    }
+  }
+  assert.ok(waits[0] >= 1500 && waits[0] <= 3000, 'first wait ' + waits[0]);
+  assert.ok(waits[1] >= 3000 && waits[1] <= 6000, 'second wait ' + waits[1]);
+  assert.ok(waits[2] >= 6000 && waits[2] <= 12000, 'third wait ' + waits[2]);
+  assert.equal(await desk.page.evaluate('RESUBSCRIBE_MAX'), 60000);
+  assert.deepEqual(desk.errors, []);
+});
+
+test('a replies listener killed after it has delivered says the view stopped receiving', async () => {
+  const seed = leanDesk();
+  delete seed[REPLIES + '/u2'];                     // u2 waits on an answer this view may miss
+  desk = await open(browser, {seed});
+  await desk.page.click('#fab');
+  await desk.page.waitForSelector('.said.rich strong >> text=two views');
+  await desk.page.click('.tab[data-go="1"]');
+  await desk.page.waitForSelector('text=Saved and rung');
+
+  // not_granted is never retried on its own, so the state holds still to be read.
+  await desk.kill(REPLIES, 'not_granted');
+  await desk.page.waitForSelector('#feedSlot .lost');
+  assert.match(await desk.page.textContent('#feedSlot'),
+    /This view stopped receiving the working session’s replies \(not_granted\)\. What shows here may be out of date\./);
+  assert.match(await desk.page.textContent('#stream'),
+    /This view stopped receiving the working session’s replies \(not_granted\), so an answer may be waiting/);
+  assert.doesNotMatch(await desk.page.textContent('#stream'), /Saved and rung|could not be loaded/);
+  await desk.page.waitForTimeout(3500);
+  assert.equal(await desk.subscribes(REPLIES), 1);
+
+  // Try again brings the feed, and the waiting line, back.
+  await desk.page.click('#feedSlot button');
+  await desk.page.waitForSelector('#stream >> text=Saved and rung');
+  assert.equal(await desk.page.textContent('#feedSlot'), '');
+  assert.deepEqual(desk.errors, []);
+});
+
+test('Approve refused as too large says so on the decision, not only in the panel', async () => {
+  desk = await open(browser);
+  await desk.page.click('#fab');
+  // Over the store's 256 KiB body cap, so every whole-document set after it is
+  // refused invalid_argument, the decision's included.
+  await desk.page.fill('#box', 'x'.repeat(270 * 1024));
+  await desk.page.press('#box', 'Enter');
+  await desk.page.waitForSelector('#lostSlot .lost');
+  await desk.page.click('#shut');
+  await desk.page.click('#ok');
+  await desk.page.waitForFunction(() => {
+    const p = document.querySelector('#decide .pickup');
+    return p && !/Saving/.test(p.textContent);
+  });
+  const line = await desk.page.textContent('#decide .pickup');
+  assert.match(line, /too large/);
+  assert.doesNotMatch(line, /^Not saved, so no session will see this/);
+  assert.equal((await desk.store())[PR], undefined);
+  assert.deepEqual(await desk.rings(), []);
   assert.deepEqual(desk.errors, []);
 });

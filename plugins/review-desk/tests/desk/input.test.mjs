@@ -231,6 +231,58 @@ test('desktop: the pop sits above the selection', async () => {
   assert.ok(popBottom <= selTop, `pop bottom ${popBottom} overlaps the selection top ${selTop}`);
 });
 
+// The passage between two long runs of filler, so the page can scroll it to
+// either edge of the window before it is selected.
+const filler = n => Array.from({length: n}, (_, i) => 'Filler paragraph ' + (i + 1)
+  + ' takes up a line of the sheet so that the page has room to scroll.').join('\n\n');
+const scrollingPassage = () => payload({body: '## What it does\n\n' + filler(30) + '\n\n'
+  + PASSAGE + '\n\n' + filler(30) + '\n'});
+
+// Scrolls the passage to the top or bottom edge of the window, selects it, and
+// returns the pop's and the selection's rectangles and the window height.
+async function selectAtEdge(d, edge){
+  await d.page.evaluate(edge => {
+    const p = [...document.querySelectorAll('#sheet p')].find(x => x.textContent.startsWith('The retry loop'));
+    const r = p.getBoundingClientRect();
+    const want = edge === 'bottom' ? innerHeight - 8 - r.height : 4;
+    window.scrollTo(0, scrollY + r.top - want);
+    const range = document.createRange();
+    range.selectNodeContents(p);
+    const s = getSelection(); s.removeAllRanges(); s.addRange(range);
+  }, edge);
+  await d.page.waitForSelector('#pop', {state: 'visible'});
+  await d.page.waitForTimeout(100);
+  return d.page.evaluate(() => {
+    const box = r => ({top: r.top, bottom: r.bottom, left: r.left, right: r.right});
+    return {pop: box(document.getElementById('pop').getBoundingClientRect()),
+      sel: box(getSelection().getRangeAt(0).getBoundingClientRect()), height: innerHeight, width: innerWidth};
+  });
+}
+const apart = (a, b) => a.bottom <= b.top || a.top >= b.bottom;
+
+test('touch: with no room below the selection, the pop goes above it rather than over it', async () => {
+  desk = await open(browser, {data: scrollingPassage(), context: IPAD});
+  const {pop, sel, height} = await selectAtEdge(desk, 'bottom');
+  assert.ok(height - sel.bottom < 40, `the selection is not near the bottom (${sel.bottom} of ${height})`);
+  assert.ok(apart(pop, sel), `pop ${JSON.stringify(pop)} overlaps selection ${JSON.stringify(sel)}`);
+  assert.ok(pop.bottom <= sel.top, 'the pop is above the selection');
+  assert.ok(pop.top >= 0 && pop.bottom <= height, `pop ${JSON.stringify(pop)} leaves the window`);
+  await desk.page.tap('#pop');
+  await desk.page.waitForSelector('#carrySlot .carry');
+  assert.equal(await desk.page.textContent('#carrySlot .carry span'), PASSAGE);
+  assert.deepEqual(desk.errors, []);
+});
+
+test('desktop: a selection at the top of the window keeps the pop inside it, clear of the selection', async () => {
+  desk = await open(browser, {data: scrollingPassage()});
+  const {pop, sel, height, width} = await selectAtEdge(desk, 'top');
+  assert.ok(sel.top < 40, `the selection is not near the top (${sel.top})`);
+  assert.ok(pop.top >= 0 && pop.bottom <= height, `pop ${JSON.stringify(pop)} leaves the window`);
+  assert.ok(pop.left >= 0 && pop.right <= width, `pop ${JSON.stringify(pop)} leaves the window sideways`);
+  assert.ok(apart(pop, sel), `pop ${JSON.stringify(pop)} overlaps selection ${JSON.stringify(sel)}`);
+  assert.deepEqual(desk.errors, []);
+});
+
 /* ---------------- closing a thread ---------------- */
 
 const twoThreads = () => ({[PR]: {pr: 42, title: 'Harness desk', decision: null, reason: null,
@@ -287,4 +339,24 @@ test('closing an empty thread needs no confirmation, and the open thread stays o
   assert.equal(await desk.page.textContent('.tab.on'), 'The argument');
   const store = await desk.until(s => s[PR].threads.length === 2);
   assert.deepEqual(store[PR].threads.map(t => t.id)[0], 't1');
+});
+
+test('closing a thread before the open one keeps the same thread open', async () => {
+  // Three threads, so an index left undecremented lands on a different thread
+  // rather than being clamped back onto the right one.
+  const seed = {[PR]: {pr: 42, title: 'Harness desk', decision: null, reason: null, decidedAt: null,
+    threads: [{id: 't0', name: 'Empty before', turns: []},
+      {id: 't1', name: 'The argument', turns: [
+        {id: 'm-old', role: 'user', content: 'The important argument', to: 'session'}]},
+      {id: 't2', name: 'Empty after', turns: []}]}};
+  desk = await open(browser, {seed});
+  await desk.page.click('#fab');
+  await desk.page.click('.tab[data-go="1"]');
+  await desk.page.waitForSelector('text=The important argument');
+  await desk.page.click('[data-shut="0"]');            // empty, so no confirmation
+  const store = await desk.until(s => s[PR].threads.length === 2);
+  assert.deepEqual(store[PR].threads.map(t => t.id), ['t1', 't2']);
+  assert.equal(await desk.page.textContent('.tab.on'), 'The argument');
+  assert.match(await desk.page.textContent('#stream'), /The important argument/);
+  assert.deepEqual(desk.errors, []);
 });

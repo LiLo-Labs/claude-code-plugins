@@ -269,7 +269,10 @@ function deskFor(frame, {page, errors, pr, html, close}){
 
 // Opens a desk. `seed` is the store as it stands before the page loads.
 // `context` is passed to browser.newContext: {hasTouch: true} is a touch screen,
-// and makes (pointer: coarse) match in both Chromium and WebKit.
+// and makes (pointer: coarse) match in both Chromium and WebKit; {colorScheme:
+// 'dark'} is a reviewer in dark mode. `init` is a function run in the page before
+// any of its scripts, after the stub, for a test that wraps a browser API to
+// count what the page does with it.
 export async function open(browser, options = {}){
   const data = options.data || payload();
   const html = build(data, options.title);
@@ -278,6 +281,7 @@ export async function open(browser, options = {}){
   const errors = [];
   page.on('pageerror', e => errors.push(e.message));
   await page.addInitScript(installStub, stubOptions(options));
+  if (options.init) await page.addInitScript(options.init);
   // Nothing leaves the machine: fonts, highlight.js and mermaid are refused, which
   // the page is built to survive (it loses colour and drawings, nothing else).
   await page.route('**/*', route => {
