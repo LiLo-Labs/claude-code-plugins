@@ -1368,7 +1368,9 @@ async function decide(v, quiet, why){
     decidedAt = new Date().toISOString();
     rang = 'sending';
     drawDecided();
-    rang = (await saveNow()) ? await ring() : 'unsaved';
+    // Read `lost` straight after the refusal: a later save that succeeds clears
+    // it, and the line under the buttons must keep saying why this one failed.
+    rang = (await saveNow()) ? await ring() : lost === 'too large' ? 'too large' : 'unsaved';
   }
   drawDecided();
 }
@@ -1402,6 +1404,9 @@ function pickupLine(){
   if (rang === 'sending') return 'Saving…';
   if (rang === 'unsaved') return 'Not saved, so no session will see this. '
     + 'Tell the working session directly.';
+  if (rang === 'too large') return 'Not saved: this conversation is too large to store, '
+    + 'so no session will see this. Close a thread you no longer need and decide '
+    + 'again, or tell the working session directly.';
   const later = ' If no session is running, the next one to start picks it up.';
   if (rang === 'rung' || rang === null) return 'Waiting for the working session.' + later;
   return 'Saved, but this view could not notify the working session ('

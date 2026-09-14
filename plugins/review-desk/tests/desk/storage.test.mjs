@@ -297,3 +297,25 @@ test('a replies listener killed after it has delivered says the view stopped rec
   assert.equal(await desk.page.textContent('#feedSlot'), '');
   assert.deepEqual(desk.errors, []);
 });
+
+test('Approve refused as too large says so on the decision, not only in the panel', async () => {
+  desk = await open(browser);
+  await desk.page.click('#fab');
+  // Over the store's 256 KiB body cap, so every whole-document set after it is
+  // refused invalid_argument, the decision's included.
+  await desk.page.fill('#box', 'x'.repeat(270 * 1024));
+  await desk.page.press('#box', 'Enter');
+  await desk.page.waitForSelector('#lostSlot .lost');
+  await desk.page.click('#shut');
+  await desk.page.click('#ok');
+  await desk.page.waitForFunction(() => {
+    const p = document.querySelector('#decide .pickup');
+    return p && !/Saving/.test(p.textContent);
+  });
+  const line = await desk.page.textContent('#decide .pickup');
+  assert.match(line, /too large/);
+  assert.doesNotMatch(line, /^Not saved, so no session will see this/);
+  assert.equal((await desk.store())[PR], undefined);
+  assert.deepEqual(await desk.rings(), []);
+  assert.deepEqual(desk.errors, []);
+});
