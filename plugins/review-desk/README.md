@@ -45,9 +45,10 @@ Pressing **Approve** or **Needs changes** reaches the session two ways. The page
 stores the decision and publishes a small file into itself, which wakes the
 Claude Code session watching the desk within seconds of it going idle; that
 session writes back a pickup, and the page shows when it landed. If no session
-is watching, a session-start hook lists every desk in `~/.review-desks.json`
-that has not been collected, so the next session picks it up. A session can
-watch at most five desks at once.
+is watching, a session-start hook lists the desks in `~/.review-desks.json` that
+have not been collected for the repository a session starts or resumes in, and
+counts the ones waiting elsewhere, so the next session there picks it up. A
+session can watch at most five desks at once.
 
 ## Why it exists
 

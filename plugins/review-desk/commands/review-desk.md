@@ -196,10 +196,12 @@ if it is absent. Each entry is `{"repo": "owner/name", "pr": <number>, "url":
 exists, leave it alone rather than adding a second.
 
 The reviewer decides on a page, often on a tablet, often when nothing is
-running here. This file is how a later session finds out: the plugin's
-session-start sweep lists every entry whose `collectedAt` is still null. Without
-an entry the decision waits until somebody remembers to look, which is the
-failure this whole arrangement exists to prevent.
+running here. This file is how a later session finds out: when a session starts
+or resumes in a repository, the plugin's session-start sweep lists that
+repository's entries whose `collectedAt` is still null, and counts the ones
+waiting in other repositories. Without an entry the decision waits until
+somebody remembers to look, which is the failure this whole arrangement exists
+to prevent.
 
 Give the reviewer the link and nothing else. Do not summarise the request in
 chat; the page is the summary, and repeating it there defeats the point.
@@ -352,4 +354,5 @@ to unblock it and one who assumes it landed.
 
 A session holds at most five artifact watches, and a watch ends with its
 session. A ring nobody is watching goes unheard, and the session-start sweep
-lists the desk for the next session instead. Nothing is lost; it waits.
+lists the desk for the next session started in its repository instead. Nothing
+is lost; it waits.
