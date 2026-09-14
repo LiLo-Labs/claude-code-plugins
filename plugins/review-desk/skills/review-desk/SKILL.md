@@ -33,7 +33,11 @@ asked for.
    rings the session watching it; with no session watching, the next session
    start picks the desk up.
 3. `/review-collect <pr>` — read the discussion, summarise it into the pull
-   request, merge or revise.
+   request, merge or revise. Each decision is collected once: a pickup already
+   holding it and its outcome means later rings only answer messages, and a
+   pickup left without an outcome by a session that stopped is taken over. The desk stays open,
+   listed at session start and after pushes, until the request is merged or
+   closed.
 
 ## Writing the page
 

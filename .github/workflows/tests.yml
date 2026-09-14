@@ -69,6 +69,9 @@ jobs:
       - name: Check the hooks name real sections of the command doc
         working-directory: plugins/review-desk
         run: python3 tests/test_doc_links.py
+      - name: Check the command docs state the session lifecycle rules
+        working-directory: plugins/review-desk
+        run: python3 tests/test_protocol_docs.py
 
   # The desk page itself, in Chromium, with window.claude stubbed. Real-host
   # behaviour still needs a person: automation cannot click inside the

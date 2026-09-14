@@ -84,11 +84,62 @@ class Sweep(unittest.TestCase):
         self.assertIn("1 more review desk waits in other repositories", text)
         self.assertNotIn("read_db", text)
 
-    def test_watch_marks_only_the_newest_five(self):
+    def test_watch_marks_only_the_newest_four(self):
+        # Five is the host's cap, and a watch the session asked for is never
+        # evicted, so marking five left no slot for a desk published afterwards.
         text = said(run([desk(n) for n in range(1, 8)]))
-        self.assertNotIn("[watch]", next(l for l in text.splitlines() if "#2 " in l))
-        for n in range(3, 8):
+        for n in (1, 2, 3):
+            self.assertNotIn("[watch]", next(l for l in text.splitlines() if f"#{n} " in l))
+        for n in range(4, 8):
             self.assertIn("[watch]", next(l for l in text.splitlines() if f"#{n} " in l))
+
+    def test_six_open_desks_ask_for_at_most_four_watches(self):
+        text = said(run([desk(n) for n in range(1, 7)]))
+        listed = [l for l in text.splitlines() if l.startswith("- o/r#")]
+        self.assertEqual(len(listed), 6)
+        self.assertEqual(sum(l.endswith(" [watch]") for l in listed), 4)
+
+    def test_revising_desk_stays_open_even_when_stamped(self):
+        # The outcome decides, not the stamp: a stamp next to a revising or
+        # blocked outcome (a hand edit, or a session that stamped too early)
+        # must not hide a desk still under review. Only merged and closed end a
+        # review; a stamp with no outcome predates recorded outcomes and stays
+        # closed.
+        stamped = "2026-09-10T00:00:00Z"
+        entries = [dict(desk(n, stamped), outcome=o) for n, o in
+                   ((1, "revising"), (2, "blocked"), (3, "merged"), (4, "closed"), (5, None))]
+        text = said(run(entries))
+        self.assertIn("o/r#1 https://x/1", text)
+        self.assertIn("o/r#2 https://x/2", text)
+        for n in (3, 4, 5):
+            self.assertNotIn(f"https://x/{n}", text)
+
+    def test_a_handled_decision_is_not_collected_again(self):
+        text = said(run([desk(1)]))
+        self.assertIn('doc_id "pickup"', text)
+        self.assertIn("decidedAt", text)
+        self.assertIn("do not collect it again", text)
+        self.assertIn("and an outcome", text)
+
+    def test_a_pickup_without_an_outcome_is_a_claim_that_can_go_stale(self):
+        # A session that acknowledged a decision and stopped before merging left
+        # a matching pickup; treating that as handled stranded the approval.
+        text = said(run([desk(1)]))
+        self.assertIn("matching pickup with no outcome is a claim", text)
+        self.assertIn("take it over", text)
+
+    def test_a_stale_claim_counts_as_waiting(self):
+        text = said(run([desk(1)]))
+        self.assertIn('"working"', text)
+        self.assertIn("more than 5 minutes old", text)
+        self.assertIn('"session" is another session\'s', text)
+
+    def test_own_claim_is_waiting_after_resume(self):
+        # claude --resume keeps the session id, so a rule that skipped this
+        # session's own claims left the resumed session unable to answer them.
+        text = said(run([desk(1)]))
+        self.assertIn('"session" is this session\'s own, whatever its age', text)
+        self.assertIn("claude --resume keeps the session id", text)
 
     def test_unreadable_ledger_is_reported_not_swallowed(self):
         done = run("{not json")

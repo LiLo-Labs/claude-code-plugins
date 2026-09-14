@@ -51,11 +51,27 @@ before 0.7.0 has no rules until it is republished.
 Pressing **Approve** or **Needs changes** reaches the session two ways. The page
 stores the decision and publishes a small file into itself, which wakes the
 Claude Code session watching the desk within seconds of it going idle; that
-session writes back a pickup, and the page shows when it landed. If no session
-is watching, a session-start hook lists the desks in `~/.review-desks.json` that
-have not been collected for the repository a session starts or resumes in, and
-counts the ones waiting elsewhere, so the next session there picks it up. A
-session can watch at most five desks at once.
+session writes back a pickup, and the page shows when it landed. A decision is
+acted on once: later messages and **Check** presses ring the same desk, and a
+pickup already holding that decision and its outcome tells the session to answer
+the messages rather than comment or merge again. A pickup with no outcome is a
+claim; if the session that wrote it stops, another takes it over after 5
+minutes, and reads the pull request first so it neither comments nor merges
+twice. If no session is watching, a session-start
+hook lists the open desks in `~/.review-desks.json` for the repository a session
+starts or resumes in, and counts the ones open elsewhere, so the next session
+there picks it up. A desk stays open until it is merged or closed, so a desk
+sent back with **Needs changes** is still listed, and still rewritten after a
+push, while it is revised.
+
+A session can watch at most five desks at once. The sweep asks for at most four,
+so a desk published afterwards still gets a watch, and the session checks the
+publish result rather than assuming one. A message a session claimed and never
+answered, because that session stopped, is taken over by another session once
+the claim has sat at "working" for 5 minutes, and at once by the same session
+brought back with `claude --resume`, which keeps its id. The page itself still
+shows such a claim as working until then; showing a stalled claim differently on the page is
+left to a later release.
 
 ## Why it exists
 

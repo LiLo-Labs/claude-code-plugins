@@ -28,20 +28,24 @@ Pass `--repo` on every `gh` call.
 ## Read it back
 
 Find the artifact published for this request (`action: "list"` on the Artifact
-tool if the URL is not to hand), then read the stored conversation and the
-working session's answers together, as two calls in one batch:
+tool if the URL is not to hand), then read the stored conversation, the working
+session's answers and the pickup together, as three calls in one batch:
 
     action: "read_db", db_op: "get",  collection: "review", doc_id: "pr-<n>"
     action: "read_db", db_op: "list", collection: "review/pr-<n>/replies"
+    action: "read_db", db_op: "get",  collection: "review/pr-<n>/context", doc_id: "pickup"
 
 If the list result carries `next_cursor`, read on with it before going further.
+A pickup that does not exist yet comes back as not found; that is an answer, not
+an error.
 
 The document holds `threads`, the conversations, each with its `turns` in order,
 and `decision`, which is `approved`, `needs changes`, or absent if they have not
-finished. A reviewer's turn (`"role": "user"`) carries its `id`, the `content`
-they wrote and, when they highlighted something, `quote` (the passage) and
-`reading` (the page and section they were on). A `needs changes` decision also
-carries `reason`: what the reviewer said has to change, in their words.
+finished, with `decidedAt`, when they recorded it. A reviewer's turn (`"role":
+"user"`) carries its `id`, the `content` they wrote and, when they highlighted
+something, `quote` (the passage) and `reading` (the page and section they were
+on). A `needs changes` decision also carries `reason`: what the reviewer said
+has to change, in their words.
 
 The answers are the `replies` documents, one per answered message. Join them to
 the conversation by id: a reply answers the reviewer's turn whose `id` equals the
@@ -61,15 +65,66 @@ reason is what they actually asked for.
 If there is no document, the discussion was never saved. Say so rather than
 inventing one.
 
-If there is a decision, and `review/pr-<n>/context/pickup` does not already hold
-the same `decision` and `decidedAt`, write the pickup before anything else, as
-`/review-desk` describes under "When they decide". Until one lands, the
-reviewer's page says it is still waiting.
+## Is it already handled
+
+The page keeps a decision in `review/pr-<n>` after it has been collected, and
+every later message and **Check** rings the desk again, so a decision in the
+store is not by itself a reason to act. Compare it with the pickup:
+
+- **No decision recorded:** there is nothing to collect and nothing to pick up.
+  Answer any waiting messages, say the reviewer has not decided, and stop.
+- **The pickup holds the same `decision` and the same `decidedAt`, and an
+  `outcome`** (both compared exactly as stored, `null` included): this decision
+  was already collected. Do not write the pickup, do not post another comment,
+  do not merge or start the revision again, and do not touch its `outcome`.
+  Answer any waiting messages, as `/review-desk` describes under "While they
+  read", and stop.
+- **The pickup holds the same `decision` and `decidedAt` but no `outcome`:** a
+  session claimed this decision and has not said what it did. Which session
+  decides what you do, as `/review-desk` defines under "When they decide":
+  - **Your own claim, written in this turn.** This is the usual case: a ring
+    acknowledged a new decision under "When they decide" and then sent you
+    here. You are the session collecting it. Do not write the pickup again;
+    carry on below.
+  - **Another session's claim that is not stale** (its `session` is not this
+    session's id, or it has none, and its `at` is 5 minutes old or less): that
+    session is collecting it. Leave it, answer any waiting messages, and stop.
+  - **A stale claim**: another session's whose `at` is more than 5 minutes old,
+    or your own from an earlier turn (`claude --resume` keeps the session id,
+    and the turn that wrote it has stopped). Take it over: write the pickup
+    again with your own `session` and a fresh `at`, pinned with `if_version`
+    from your read. A write refused for its version means another session took
+    it first; leave it and stop. Then carry on below. The session before you may
+    have commented, merged or started the revision before it stopped, and the
+    steps below check for each before doing it.
+- **A decision, and no pickup or one holding a different `decision` or
+  `decidedAt`:** this is a new decision. Write the pickup before anything else,
+  as `/review-desk` describes under "When they decide". Until one lands, the
+  reviewer's page says it is still waiting. Then carry on below.
+
+A reviewer who presses **Change this** and decides again gets a new `decidedAt`,
+so a second verdict on the same request is collected like the first.
+
+The one exception is a matching pickup whose `outcome` is `blocked`, when the
+user typed this command themselves after clearing what blocked it. Retry the
+action under "Act on it" and report its new outcome, but do not post the comment
+a second time. A ring or the session-start sweep never counts as the user asking.
 
 ## Write it into the request
 
-Post one comment on the pull request summarising the exchange. Not a transcript
-— a summary that would be useful to someone finding this in five years:
+First read the pull request as it stands, since a session that stopped halfway
+may already have commented or merged:
+
+    gh pr view <n> --repo <owner/repo> --json state,mergeCommit,comments,commits
+
+Post one comment on the pull request summarising the exchange, opening with this
+line, which is how a later session recognises it:
+
+    **Review desk decision:** <decision>, recorded <decidedAt>
+
+If a comment already opens with that exact line, the summary for this decision
+is posted: do not post another. Otherwise write a summary, not a transcript, one
+that would be useful to someone finding this in five years:
 
 - **What was asked, and what it turned on.** The question behind the question.
 - **What changed as a result** — a claim withdrawn, a decision reversed, a gap
@@ -83,27 +138,57 @@ exact wording carries the point.
 
 ## Act on it
 
-**Approved** — merge it. Say which merge you used and confirm it landed.
+**Approved** — merge it. Say which merge you used and confirm it landed. If the
+`state` you read is already `MERGED`, do not run `gh pr merge` again: the
+outcome is `merged`, naming `mergeCommit`. If it is `CLOSED`, do not reopen it:
+the outcome is `closed`.
 
 **Needs changes** — do not merge. Turn what they asked for into the specific
-work, and say what you are going to do before doing it.
+work, and say what you are going to do before doing it. When you took over a
+stale claim, look at the `commits` pushed after `decidedAt` first: the revision
+may already be under way, and it continues from there rather than starting
+over.
 
 **Undecided** — say so and stop. Do not interpret silence as either.
 
-After acting on a decision, report what happened as the pickup's `outcome`, as
-`/review-desk` describes under "When they decide": `merged` with the method and
+After acting on a decision, report what happened as the pickup's `outcome` at
+once, before any revision work, as `/review-desk` describes under "When they
+decide": `merged` with the method and
 commit, `revising` with the work, or `blocked` with what stopped you. A merge
 that auto mode or branch protection refuses is `blocked`, never silence; the
 reviewer's page otherwise goes on saying the decision was picked up.
 
+## Record it in the ledger
+
+Then record the same result on this request's entry in `~/.review-desks.json`,
+as `"outcome"`: `merged`, `revising`, `blocked`, or `closed` for a pull request
+closed without merging.
+
+Stamp `collectedAt` with the current UTC time only when the outcome is `merged`
+or `closed`. Those are the only outcomes that end a review. For `revising` and
+`blocked`, leave `collectedAt` null: the reviewer can still send a message or
+press **Change this**, the revision's pushes still need the desk rewritten, and
+both hooks list a desk only while it is open. The hooks go by the outcome, so an
+entry that carries a stamp next to a `revising` or `blocked` outcome, for
+example one edited by hand, is still treated as open.
+
+Once `collectedAt` is stamped, the desk needs no watch. Pass `action: "unwatch"`
+with its URL, so the slot is free for the next desk this session publishes.
+
 ## Never
 
-When you have acted on a decision -- the comment posted, and merged or not --
-set `collectedAt` on that request's entry in `~/.review-desks.json` to the
-current UTC time. An entry that stays null is listed again by the plugin's
-session-start sweep every time a session starts in that repository, so leaving
-it means nagging;
-stamping one you did not act on means the decision is silently dropped.
+Never stamp `collectedAt` on a decision you did not act on, or on a desk that is
+still being revised. Stamping it drops the desk from the session-start sweep and
+the after-push reminder, so a later decision or message on it is never picked
+up. Leaving a finished desk unstamped only means it is listed again at the next
+session start.
+
+Never act on a decision twice. A matching pickup with an `outcome` is the
+record that it was handled, and a second comment or a second `gh pr merge` on a
+merged request turns a clean outcome into a false `blocked`. A matching pickup
+without one is a claim, not a record: a stale one is taken over, and the pull
+request is read before commenting or merging, so the takeover finishes the
+collection instead of repeating it.
 
 Do not merge on a decision you inferred rather than read. The whole arrangement
 exists because someone has to be able to say no, and a bot that merges on its

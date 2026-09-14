@@ -121,6 +121,21 @@ class AfterPush(unittest.TestCase):
         self.remote("git@github.com:o/r.git")
         self.assertIn("#7", self.said(self.run_hook("git push")))
 
+    def test_revising_desk_is_listed_as_open(self):
+        # A revision's pushes are exactly the ones that make a desk out of date.
+        self.ledger([
+            {"repo": "o/r", "pr": 3, "url": "https://x/3",
+             "collectedAt": "2026-09-01T00:00:00Z", "outcome": "revising"},
+            {"repo": "o/r", "pr": 4, "url": "https://x/4",
+             "collectedAt": "2026-09-01T00:00:00Z", "outcome": "merged"},
+            {"repo": "o/r", "pr": 6, "url": "https://x/6",
+             "collectedAt": "2026-09-01T00:00:00Z", "outcome": "closed"},
+        ])
+        text = self.said(self.run_hook("git push"))
+        self.assertIn("#3 https://x/3", text)
+        self.assertNotIn("#4", text)
+        self.assertNotIn("#6", text)
+
     def test_repo_without_open_desks_says_nothing(self):
         self.remote("https://github.com/o/quiet.git")
         self.assertEqual(self.run_hook("git push"), "")

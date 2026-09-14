@@ -22,28 +22,25 @@ import json
 import os
 import sys
 
-from after_push import repo_of
+from after_push import is_open, repo_of
 
 LEDGER = os.path.join(os.path.expanduser("~"), ".review-desks.json")
 
-# A session holds at most five artifact watches, so only the newest five
-# undecided desks for this repository can have their doorbell heard live.
-# Older ones wait for the next session start.
-WATCH_CAP = 5
+# A session holds at most five artifact watches, and a watch the session asked
+# for is never evicted to make room. Filling all five here left a desk the
+# session then published with no watch, so the sweep asks for four and keeps
+# one slot for /review-desk. Older desks wait for the next session start.
+WATCH_CAP = 4
+
+# How long a claimed message may sit at "working" before another session takes
+# it over. /review-desk states the same age; tests/test_protocol_docs.py holds
+# the two together.
+STALE_CLAIM_MINUTES = 5
 
 
 def pending(entries):
-    """Entries with no collectedAt, in ledger order (oldest first)."""
-    found = []
-    for e in entries:
-        if not isinstance(e, dict):
-            continue
-        if e.get("collectedAt"):
-            continue
-        if not (e.get("repo") and e.get("pr") and e.get("url")):
-            continue
-        found.append(e)
-    return found
+    """Open entries, in ledger order (oldest first)."""
+    return [e for e in entries if is_open(e)]
 
 
 def message(waiting, here):
@@ -58,8 +55,7 @@ def message(waiting, here):
     if mine:
         watch = {id(e) for e in mine[-WATCH_CAP:]}
         lines += [
-            f"Review desks for {here} still waiting to be collected "
-            "(from ~/.review-desks.json):",
+            f"Review desks for {here} still open (from ~/.review-desks.json):",
             "",
         ]
         for e in mine:
@@ -67,18 +63,33 @@ def message(waiting, here):
             lines.append(f"- {e['repo']}#{e['pr']} {e['url']}{mark}")
         lines += [
             "",
-            "Before the user's first request, read each desk's decision with the "
-            'Artifact tool (action "read_db", db_op "get", collection "review", '
-            'doc_id "pr-<number>"). Then, for each:',
-            "- A recorded decision: follow /review-collect for that request.",
-            "- Messages sent to the working session with no reply yet: answer them "
-            'as /review-desk describes under "While they read".',
-            "- No decision, and the pull request is merged or closed: set its "
-            "collectedAt in ~/.review-desks.json to the current UTC time.",
-            '- No decision, still open, marked [watch]: pass action "watch" with '
-            "its URL, so the reviewer's button reaches this session, and stamp its "
-            'presence with this session\'s resume command, as /review-desk describes '
-            'under "Whenever a ring arrives".',
+            "Before the user's first request, read each desk with the Artifact "
+            'tool, in one batch per desk: action "read_db", db_op "get", '
+            'collection "review", doc_id "pr-<number>"; db_op "get", collection '
+            '"review/pr-<number>/context", doc_id "pickup"; and db_op "list", '
+            'collection "review/pr-<number>/replies". Then, for each:',
+            "- A recorded decision the pickup holds with the same decision and "
+            "decidedAt and an outcome was handled; do not collect it again. A "
+            "matching pickup with no outcome is a claim on the decision: when its "
+            f'"session" is another session\'s (or it has none) and its "at" is more than '
+            f"{STALE_CLAIM_MINUTES} minutes old, or its \"session\" is this "
+            "session's own, it is stale, so take it over as /review-desk "
+            'describes under "When they decide", then follow /review-collect. Any '
+            "other recorded decision: follow /review-collect for that request.",
+            "- Messages still waiting, meaning no reply document, or a reply at "
+            '"working" that is a stale claim: its "session" is another '
+            f'session\'s (or it has none) and its "at" is more than {STALE_CLAIM_MINUTES} minutes '
+            'old, or its "session" is this session\'s own, whatever its age. '
+            "claude --resume keeps the session id, and the turn that was "
+            "answering it has stopped. Answer them as /review-desk describes "
+            'under "While they read".',
+            "- Nothing left to collect, and the pull request is merged or closed: "
+            'set its outcome ("merged" or "closed") and collectedAt in '
+            "~/.review-desks.json, the time in UTC.",
+            '- Nothing left to collect, still open, marked [watch]: pass action '
+            '"watch" with its URL, so the reviewer\'s button reaches this session, '
+            "and stamp its presence with this session's resume command, as "
+            '/review-desk describes under "Whenever a ring arrives".',
             "Say in one line what you found. Never act on a decision you did not "
             "read from the record.",
         ]
