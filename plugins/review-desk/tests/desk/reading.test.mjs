@@ -135,6 +135,40 @@ test('a reply for another thread leaves the open thread\'s stream nodes in place
   assert.deepEqual(desk.errors, []);
 });
 
+/* ---------------- a page that changed ---------------- */
+
+test('a change to a page the reviewer is not reading leaves the sheet alone, and its mark stays until that page is opened', async () => {
+  desk = await open(browser, {data: payload({documents: [{name: 'docs/a.md', text: '# A\n\nAlpha'}]})});
+  await desk.page.waitForSelector('#sheet h2');
+  const hold = sel => desk.page.evaluate(sel => { window.__held = document.querySelector(sel); }, sel);
+  const held = sel => desk.page.evaluate(sel =>
+    window.__held.isConnected && document.querySelector(sel) === window.__held, sel);
+
+  await hold('#sheet h2');
+  await desk.document('docs~a.md', 'docs/a.md', '# A\n\nAlpha revised', {at: new Date().toISOString()});
+  await desk.page.waitForSelector('.leaf:nth-child(2) .fresh.show');
+  assert.equal(await held('#sheet h2'), true, 'the description was repainted for a change to docs/a.md');
+
+  // Past the 5 s after which the mark used to go, reviewer or no reviewer.
+  await desk.page.waitForTimeout(6000);
+  assert.equal(await desk.page.locator('.leaf:nth-child(2) .fresh.show').count(), 1, 'the mark went before the page was opened');
+  assert.equal(await held('#sheet h2'), true);
+
+  await desk.page.click('.leaf:nth-child(2)');
+  await desk.page.waitForSelector('#sheet >> text=Alpha revised');
+  assert.equal(await desk.page.locator('.leaf .fresh.show').count(), 0);
+
+  // The same the other way: the description rewritten while docs/a.md is on screen.
+  await hold('#sheet h1');
+  await desk.context('body', {text: '## Revised\n\nNew words.'});
+  await desk.page.waitForSelector('.leaf:nth-child(1) .fresh.show');
+  assert.equal(await held('#sheet h1'), true, 'docs/a.md was repainted for a change to the description');
+  await desk.page.click('.leaf:nth-child(1)');
+  await desk.page.waitForSelector('#sheet >> text=New words.');
+  assert.equal(await desk.page.locator('.leaf .fresh.show').count(), 0);
+  assert.deepEqual(desk.errors, []);
+});
+
 /* ---------------- where the reviewer is reading ---------------- */
 
 // Counts, from inside the page, the IntersectionObservers made and not yet
@@ -170,16 +204,15 @@ test('after many repaints the message says the section of the page on screen, an
   await desk.page.waitForSelector('#sheet h2');
   const PAGE = '#sheet';
 
-  // Ten rewrites of the description, each a repaint, and each followed 5 s later
-  // by another one that clears the fresh mark.
+  // Ten rewrites of the description on screen, each a repaint.
   for (let i = 1; i <= 10; i++){
     await desk.context('body', {text: sections('Section', 10) + '\nRevision ' + i + '\n'});
     await desk.page.waitForFunction(([sel, i]) =>
       document.querySelector(sel).textContent.includes('Revision ' + i), [PAGE, i]);
   }
-  await desk.page.waitForTimeout(5400);
+  await desk.page.waitForTimeout(300);
   const made = await desk.page.evaluate(() => window.__watch.made);
-  assert.ok(made >= 20, 'the wrapped constructor saw the page\'s repaints (' + made + ')');
+  assert.ok(made >= 10, 'the wrapped constructor saw the page\'s repaints (' + made + ')');
 
   const scrollTo = y => desk.page.evaluate(y => new Promise(done => {
     addEventListener('scroll', () => requestAnimationFrame(() => done()), {once: true});
