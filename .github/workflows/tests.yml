@@ -89,4 +89,4 @@ jobs:
       - run: npm ci
       - run: npx playwright install --with-deps chromium
       - name: Run the page tests
-        run: node --test tests/desk
+        run: npm test

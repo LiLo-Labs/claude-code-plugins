@@ -80,7 +80,7 @@ def check_payload(payload):
 
 
 def main(argv=None):
-    ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    ap = argparse.ArgumentParser(description=(__doc__ or "").split("\n\n")[0])
     ap.add_argument("payload", help="the payload JSON file")
     ap.add_argument("title", help="the page's name, two to four words")
     ap.add_argument("--out", required=True, help="where to write the page")
