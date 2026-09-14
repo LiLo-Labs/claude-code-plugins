@@ -84,11 +84,48 @@ class Sweep(unittest.TestCase):
         self.assertIn("1 more review desk waits in other repositories", text)
         self.assertNotIn("read_db", text)
 
-    def test_watch_marks_only_the_newest_five(self):
+    def test_watch_marks_only_the_newest_four(self):
+        # Five is the host's cap, and a watch the session asked for is never
+        # evicted, so marking five left no slot for a desk published afterwards.
         text = said(run([desk(n) for n in range(1, 8)]))
-        self.assertNotIn("[watch]", next(l for l in text.splitlines() if "#2 " in l))
-        for n in range(3, 8):
+        for n in (1, 2, 3):
+            self.assertNotIn("[watch]", next(l for l in text.splitlines() if f"#{n} " in l))
+        for n in range(4, 8):
             self.assertIn("[watch]", next(l for l in text.splitlines() if f"#{n} " in l))
+
+    def test_six_open_desks_ask_for_at_most_four_watches(self):
+        text = said(run([desk(n) for n in range(1, 7)]))
+        listed = [l for l in text.splitlines() if l.startswith("- o/r#")]
+        self.assertEqual(len(listed), 6)
+        self.assertEqual(sum(l.endswith(" [watch]") for l in listed), 4)
+
+    def test_revising_desk_stays_open_even_when_stamped(self):
+        # A ledger from before 0.9.0 stamped collectedAt on a Needs-changes
+        # pickup too, which hid the desk while the revision was under review.
+        revising = dict(desk(1, "2026-09-10T00:00:00Z"), outcome="revising")
+        blocked = dict(desk(2, "2026-09-10T00:00:00Z"), outcome="blocked")
+        text = said(run([revising, blocked]))
+        self.assertIn("o/r#1 https://x/1", text)
+        self.assertIn("o/r#2 https://x/2", text)
+
+    def test_terminal_outcomes_close_a_desk(self):
+        for outcome in ("merged", "closed", None):
+            with self.subTest(outcome=outcome):
+                entry = dict(desk(1, "2026-09-10T00:00:00Z"), outcome=outcome)
+                done = run([entry])
+                self.assertEqual((done.returncode, done.stdout), (0, ""))
+
+    def test_a_handled_decision_is_not_collected_again(self):
+        text = said(run([desk(1)]))
+        self.assertIn('doc_id "pickup"', text)
+        self.assertIn("decidedAt", text)
+        self.assertIn("do not collect it again", text)
+
+    def test_a_stale_claim_counts_as_waiting(self):
+        text = said(run([desk(1)]))
+        self.assertIn('"working"', text)
+        self.assertIn("more than 5 minutes old", text)
+        self.assertIn('"session" is not this session', text)
 
     def test_unreadable_ledger_is_reported_not_swallowed(self):
         done = run("{not json")

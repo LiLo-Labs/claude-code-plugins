@@ -37,6 +37,27 @@ GIT_VALUE_OPTIONS = {"-C", "-c", "--git-dir", "--work-tree", "--namespace",
                      "--super-prefix", "--config-env"}
 ASSIGNMENT = re.compile(r"[A-Za-z_]\w*=")
 
+# The only ledger outcomes that close a desk. A `revising` or `blocked` desk is
+# still under review: the reviewer can change their decision or send a message,
+# and the revision's pushes still need the desk rewritten.
+TERMINAL = ("merged", "closed")
+
+
+def is_open(entry):
+    """A well-formed ledger entry nobody has closed. collectedAt alone is not
+    enough: a ledger written before 0.9.0 stamped it on a revising desk too, so
+    an entry whose recorded outcome is not terminal stays open. An entry stamped
+    with no outcome at all predates outcomes and is left closed, since nothing
+    here can tell a merged one from a revising one."""
+    if not isinstance(entry, dict):
+        return False
+    if not (entry.get("repo") and entry.get("pr") and entry.get("url")):
+        return False
+    if not entry.get("collectedAt"):
+        return True
+    outcome = entry.get("outcome")
+    return bool(outcome) and outcome not in TERMINAL
+
 
 def segments(command):
     """The simple commands in `command` as word lists, quoting resolved, split at
@@ -140,9 +161,7 @@ def main():
         return 0
     if not isinstance(entries, list):
         return 0
-    open_desks = [e for e in entries if isinstance(e, dict)
-                  and e.get("repo") == repo and not e.get("collectedAt")
-                  and e.get("pr") and e.get("url")]
+    open_desks = [e for e in entries if is_open(e) and e["repo"] == repo]
     if not open_desks:
         return 0
     lines = [f"You just pushed to {repo}, which has open review desks:"]
