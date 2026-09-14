@@ -1305,8 +1305,11 @@ function drawPresence(){
     + (gone && resume && !closedOutcome()
       ? '<div class="resume"><code id="resumeCmd">'+esc(resume)+'</code>'
         + '<button class="check" id="copyResume">Copy</button></div>'
-        + '<span>Run this on the computer to bring that session back. It picks up '
-        + 'this desk, and anything you sent meanwhile, as it starts.</span>'
+        // A resumed session only has this desk in its context; its first turn, and
+        // with it the pickup, starts when someone types.
+        + '<span>Run this on the computer to bring that session back, then send it any '
+        + 'message: a resumed session does nothing until someone types. That first '
+        + 'turn picks up this desk and anything you sent meanwhile.</span>'
       : ''));
 }
 function draw(toEnd){ drawTabs(); drawStream(toEnd); drawCarry(); drawBadge(); drawPresence(); drawApproveAsk(); }

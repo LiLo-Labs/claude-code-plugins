@@ -383,6 +383,19 @@ test('Check with no answer inside the wait says so, and offers the resume comman
     assert.equal(await desk.page.evaluate(() => String(getSelection())), RESUME);
 });
 
+test('the resume copy after an unanswered Check tells the person to send the resumed session a message', async () => {
+  const stamp = String(Math.floor(Date.now() / 1000) - 60);
+  desk = await open(browser, {clock: true, seed: {[PR + '/presence/' + stamp]: {resume: RESUME}}});
+  await ready(desk);
+  await desk.page.click('#fab');
+  await desk.page.click('#check');
+  await desk.page.clock.fastForward(76000);
+  await desk.page.waitForSelector('#resumeCmd');
+  const said = await desk.page.textContent('#presence');
+  assert.match(said, /bring that session back, then send it any message: a resumed session does nothing until someone types/);
+  assert.doesNotMatch(said, /as it starts/);
+});
+
 test('a desk that closes after an unanswered Check stops offering the resume command', async () => {
   const stamp = String(Math.floor(Date.now() / 1000) - 60);
   desk = await open(browser, {clock: true, seed: {[PR + '/presence/' + stamp]: {resume: RESUME}}});

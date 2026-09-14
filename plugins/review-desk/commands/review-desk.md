@@ -87,7 +87,7 @@ the same path. The payload is a JSON object:
       "body":      "the pull request description, markdown, with its diagrams",
       "documents": [{"name": "docs/design/0002-x.md", "text": "…"}],
       "openers":   ["four questions worth asking about THIS request"],
-      "resume":    "cd <repository path> && claude --resume <this session's id>"
+      "resume":    "cd <launch directory> && claude --resume <this session's id>"
     }
 
 `headRefOid` is the commit the reviewer is reading. Copy it as `gh` printed it:
@@ -102,8 +102,16 @@ the replies instead.
 
 `resume` is the command that brings this session back. The page shows it when
 the reviewer presses **Check** and nothing answers. Build it from the directory
-you run git in and `$CLAUDE_CODE_SESSION_ID`, and leave it out when that
-variable is empty rather than guessing an id.
+this session was launched in, the same absolute path the ledger entry records as
+`cwd`, and `$CLAUDE_CODE_SESSION_ID`. Not the directory you run git in: Claude
+Code files a session under the directory it was launched from, and
+`claude --resume` run anywhere else does not find it. Leave `resume` out when
+that variable is empty rather than guessing an id.
+
+The page shows only `cd <path> && claude --resume <id>` with a path made of
+letters, digits and `_ . ~ / -`. A launch directory with any other character, a
+space included, cannot be offered: leave `resume` out, and tell the user in the
+terminal the command that resumes this session, since the page will show none.
 
 The openers matter more than they look. Generic ones get ignored; questions
 pointed at the actual decision in this request are what start the conversation.
@@ -360,7 +368,9 @@ chat; the page is the summary, and repeating it there defeats the point.
 Say plainly how the page's chat works: it reaches this session, which answers
 with its tools and can change the desk and the pull request. While no session
 is running, a message waits for the next one to start, and the panel's **Check**
-button shows the command that resumes this session. When the watch line said
+button shows the command that resumes this session. Whoever runs it then sends
+the resumed session any message: a resumed session does nothing until someone
+types. When the watch line said
 this session is not watching the desk, say that instead of "it reaches this
 session".
 
