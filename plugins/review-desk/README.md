@@ -42,8 +42,10 @@ The page needs the `db` and `artifact` capabilities. Without `db` neither a
 message nor a decision can reach the session. The build script prints the exact
 object to publish with: `db` carries write rules, so only the desk's owner (the
 session) can write replies, presence, context and documents, while anyone the
-desk is shared with can still write the discussion and the decision. A desk
-published before 0.7.0 has no rules until it is republished.
+desk is shared with can still write the discussion and the decision. The page
+shows the session's words only from its replies, never from the copy kept in the
+discussion, which any of those viewers could have written. A desk published
+before 0.7.0 has no rules until it is republished.
 
 Pressing **Approve** or **Needs changes** reaches the session two ways. The page
 stores the decision and publishes a small file into itself, which wakes the
