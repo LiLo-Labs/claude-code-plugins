@@ -336,6 +336,10 @@ const UNSAFE = [
   ['a', 'javascript:alert(1)'], ['b', 'JavaScript:alert(1)'], ['c', '  javascript:alert(1)'],
   ['d', 'java&#x09;script:alert(1)'], ['g', 'javascript&colon;alert(1)'], ['h', '&#106;avascript:alert(1)'],
   ['e', 'data:text/html;base64,PHNjcmlwdD4='], ['f', 'vbscript:msgbox'],
+  // An HTML comment with a / ? or # in it makes the target look scheme-less to
+  // the check; the renderer used to strip the comment out of the finished href.
+  ['i', 'javascript<!--/-->:window.__ran=1'], ['j', '<!--#-->javascript:window.__ran=1'],
+  ['k', '<!--?-->JavaScript:window.__ran=1'], ['l', 'data<!--?-->:text/html,hi'],
 ];
 const unsafeText = UNSAFE.map(([label, url]) => '- [' + label + '](' + url + ') after').join('\n');
 const links = sel => desk.page.$$eval(sel + ' a', as => as.map(a => ({href: a.getAttribute('href'),
@@ -426,6 +430,27 @@ test('safeHref, called directly, allows only http, https, mailto and scheme-less
   // The blocked ones include the forms the browser would really run.
   assert.equal(got.find(g => g.attr === 'java\tscript:alert(1)').protocol, 'javascript:');
   assert.equal(got.find(g => g.attr === 'javascript&colon;alert(1)').protocol, 'javascript:');
+});
+
+test('no rewrite after the link check changes an href: comments, bold markers and code spans', async () => {
+  desk = await open(browser);
+  const got = await desk.page.evaluate(srcs => srcs.map(src => {
+    const t = document.createElement('template');
+    t.innerHTML = markdown(src);
+    return [...t.content.querySelectorAll('a')].map(a =>
+      [a.getAttribute('href'), new URL(a.getAttribute('href'), location.href).protocol]);
+  }), [
+    '[x](javascript<!--/-->:window.__ran=1)', 'see [x](data<!--?-->:text/html,hi) ok',
+    '- [x](<!--#-->javascript:alert(1))', 'bare https://e.com/<!--x-->javascript:1',
+    '**[y](https://e.com/**z)', 'a `code` [x](docs/`a:b`.md)', 'x\u00000\u0000 [x](https://e.com/\u00000\u0000)',
+  ]);
+  assert.deepEqual(got, [
+    [], [], [],
+    [['https://e.com/javascript:1', 'https:']],
+    [['https://e.com/**z', 'https:']],
+    [],
+    [['https://e.com/0', 'https:']],
+  ]);
 });
 
 // One thread whose one question has an answer stored; the quote is what the
