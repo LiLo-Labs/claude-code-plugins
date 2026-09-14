@@ -879,7 +879,13 @@ $('leaves').addEventListener('click', e => {
   const b = e.target.closest('[data-leaf]'); if (!b) return;
   const i = +b.dataset.leaf;
   wantLeaf = null;
-  if (i === leaf) return;
+  // A change to the page on screen marks its own tab, and leaving the page clears
+  // that. With no documents there is no other page to leave for, so the mark
+  // stayed for good; a press on the tab itself clears it.
+  if (i === leaf){
+    if (freshOn[i]){ delete freshOn[i]; drawLeaves(); }
+    return;
+  }
   delete freshOn[leaf]; leaf = i; delete freshOn[i];
   keepDraft('leaf', i ? pages()[i].full : null);
   unlight();                       // the painted range belonged to the old page
@@ -2170,6 +2176,21 @@ const when = at => {
   return ' on ' + t.toLocaleDateString([], {weekday: 'short', day: 'numeric', month: 'short',
     ...(t.getFullYear() === now.getFullYear() ? {} : {year: 'numeric'})}) + ' at ' + time;
 };
+// when() is worked out as a line is drawn, so a page left open past midnight kept
+// "at 14:05" for yesterday until something else redrew it. At each local midnight
+// the lines that carry a time are drawn again. A second late, so the new day has
+// begun; a timer held back by a sleeping tab fires late, which is still the new day.
+// Nothing is redrawn while the reviewer is in the reason form or the confirm step.
+function atMidnight(){
+  const now = new Date();
+  const next = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1).getTime();
+  setTimeout(() => {
+    drawPresence();
+    drawOutcome();
+    if (showingDecided || showingRevised) drawDecided();
+    atMidnight();
+  }, next - now.getTime() + 1000);
+}
 
 // The session's report of what it did, when the pickup carries one.
 const outcomeOf = p => isRow(p) && isRow(p.outcome) && typeof p.outcome.result === 'string'
@@ -2225,11 +2246,17 @@ function pickupLine(){
   // No record: an older page stored it, or a tab closed between the save and the
   // ring. The page cannot tell whether a session was told or has collected it
   // already, so it claims neither.
+  // Neither of the next two knows a ring went out, and a decision in the store with
+  // no ring wakes nothing until a session starts. Check in the panel is a ring any
+  // session handles by collecting a waiting decision, so the line points at it
+  // wherever the view has Check to press.
   if (rang === null) return 'Saved. What the working session did with it shows here '
-    + 'once it reports back.';
+    + 'once it reports back.' + (bellOn ? ' If nothing shows here soon, Check in the panel rings '
+    + 'the working session.' : '');
   // 'readonly' is this page's word, not an artifact.d.ts code, so it is never shown.
   if (bellOn && decisionDueAt() !== null) return 'Saved, but the working session was not notified'
-    + (rang === 'readonly' ? '' : ' (' + rang + ')') + '. This view tries again in a few seconds.' + later;
+    + (rang === 'readonly' ? '' : ' (' + rang + ')') + '. This view tries again in a few seconds, '
+    + 'and Check in the panel rings it too.' + later;
   if (rang === 'readonly') return 'Saved. This view cannot notify the working '
     + 'session, so the next session to start picks it up.';
   return 'Saved, but this view could not notify the working session ('
@@ -2884,6 +2911,7 @@ function resumeDrafts(){
 }
 
 paint(); draw();
+atMidnight();
 
 (async () => {
   // Reaching the runtime at all can fail, and an unhandled rejection here used

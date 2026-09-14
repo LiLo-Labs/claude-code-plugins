@@ -169,6 +169,35 @@ test('a change to a page the reviewer is not reading leaves the sheet alone, and
   assert.deepEqual(desk.errors, []);
 });
 
+test('on a desk with no documents, a description rewrite leaves no changed dot that survives clicking the only tab', async () => {
+  desk = await open(browser);
+  await desk.page.waitForSelector('#sheet h2');
+  assert.equal(await desk.page.locator('.leaf').count(), 1);
+  await desk.context('body', {text: '## Revised\n\nNew words.'});
+  await desk.page.waitForSelector('#sheet >> text=New words.');
+  await desk.page.click('.leaf[data-leaf="0"]');
+  await desk.page.waitForTimeout(300);
+  assert.equal(await desk.page.locator('.leaf .fresh.show').count(), 0, 'the only tab kept a dot nothing can clear');
+  assert.deepEqual(desk.errors, []);
+});
+
+/* ---------------- day wording across midnight ---------------- */
+
+test('a stamp from 23:50 reads at 23:50, and once the clock passes midnight with nothing else happening, reads yesterday', async () => {
+  const now = Date.UTC(2026, 8, 13, 23, 55);
+  desk = await open(browser, {context: {locale: 'en-GB', timezoneId: 'UTC'}, clock: {time: now},
+    seed: {[PR + '/presence/' + Math.floor((now - 5 * 60000) / 1000)]: {}}});
+  const line = () => desk.page.textContent('#presence > span');
+  await desk.page.waitForSelector('#presence >> text=Working session last answered', {state: 'attached'});
+  assert.equal(await line(), 'Working session last answered at 23:50.');
+
+  await desk.page.clock.fastForward(6 * 60000);
+  await desk.page.waitForFunction(() => /yesterday at 23:50/.test(document.querySelector('#presence > span').textContent),
+    null, {timeout: 3000});
+  assert.equal(await line(), 'Working session last answered yesterday at 23:50.');
+  assert.deepEqual(desk.errors, []);
+});
+
 /* ---------------- where the reviewer is reading ---------------- */
 
 // Counts, from inside the page, the IntersectionObservers made and not yet
