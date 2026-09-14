@@ -984,8 +984,11 @@ $('seed').addEventListener('click', e => {
 let pending = '', pendingRange = null;
 // A press on the pop or the panel button can itself dismiss the selection before
 // its click arrives, as a tap on an iPad does. A collapse within PRESS_GRACE of
-// such a press keeps the passage for that click; any other collapse drops it.
-let pressedAt = 0;
+// such a press keeps the passage, and the pop, for that click until the grace
+// runs out; any other collapse drops it at once. A press that never becomes a
+// click (a drag, a scroll) must not leave the passage waiting for the next
+// time the panel opens.
+let pressedAt = 0, graceTimer = 0;
 const PRESS_GRACE = 1000;
 function forget(){
   pending = ''; pendingRange = null;
@@ -1021,7 +1024,13 @@ document.addEventListener('selectionchange', () => {
   if (!r || (!r.width && !r.height)){
     // A selection the reviewer dismissed is dropped. Kept, it was attached to
     // the next question whenever the panel was next opened, however much later.
-    if (Date.now() - pressedAt > PRESS_GRACE) forget(); else pop.style.display = 'none';
+    const left = PRESS_GRACE - (Date.now() - pressedAt);
+    if (left <= 0 || !pending){ forget(); return; }
+    // The pop stays up: hidden, the tap that collapsed the selection would
+    // have nothing to land its click on.
+    const held = pendingRange;
+    clearTimeout(graceTimer);
+    graceTimer = setTimeout(() => { if (pendingRange === held) forget(); }, left);
     return;
   }
   pending = text.length > 700 ? text.slice(0, 700) + '…' : text;

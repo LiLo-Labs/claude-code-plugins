@@ -163,15 +163,48 @@ test('a live selection is still carried by the panel button', async () => {
 // Neither headless engine does that on its own (a press on the button leaves
 // the selection alone), so the order is replayed from script. Inferred from how
 // iOS is described to behave, not observed on a device.
+const press = (d, id) => d.page.$eval('#' + id,
+  b => b.dispatchEvent(new PointerEvent('pointerdown', {bubbles: true})));
+// Resolves after the page's own selectionchange handler has run.
+const collapse = d => d.page.evaluate(() => new Promise(done => {
+  document.addEventListener('selectionchange', done, {once: true});
+  getSelection().removeAllRanges();
+}));
+
 test('a selection collapsed by the press on the panel button itself is still carried', async () => {
   desk = await open(browser, {data: withPassage()});
   await selectPassage(desk);
-  await desk.page.$eval('#fab', b => b.dispatchEvent(new PointerEvent('pointerdown', {bubbles: true})));
-  await desk.page.evaluate(() => getSelection().removeAllRanges());
-  await desk.page.waitForSelector('#pop', {state: 'hidden'});
+  await press(desk, 'fab');
+  await collapse(desk);
   await desk.page.$eval('#fab', b => b.click());
   assert.equal(await desk.page.textContent('#carrySlot .carry span'), PASSAGE);
 });
+
+test('a selection collapsed by the press on the pop keeps the pop up for that press\'s click', async () => {
+  desk = await open(browser, {data: withPassage()});
+  await selectPassage(desk);
+  await press(desk, 'pop');
+  await collapse(desk);
+  assert.equal(await desk.page.isVisible('#pop'), true, 'hidden, the pop would never receive the click');
+  await desk.page.$eval('#pop', b => b.click());
+  assert.equal(await desk.page.textContent('#carrySlot .carry span'), PASSAGE);
+});
+
+for (const id of ['pop', 'fab']){
+  test(`a press on #${id} that never becomes a click drops the passage once the grace runs out`, async () => {
+    desk = await open(browser, {data: withPassage()});
+    await selectPassage(desk);
+    await press(desk, id);
+    await collapse(desk);
+    await desk.page.waitForSelector('#pop', {state: 'hidden', timeout: 2000});
+    await desk.page.$eval('#fab', b => b.click());
+    assert.equal(await desk.page.innerHTML('#carrySlot'), '');
+    await desk.page.fill('#box', 'A general question');
+    await desk.page.press('#box', 'Enter');
+    const store = await desk.until(s => asked(s).length === 1);
+    assert.equal(asked(store)[0].quote, null);
+  });
+}
 
 test('touch: the pop sits below the selection, and a tap on it carries the passage', async () => {
   desk = await open(browser, {data: withPassage(), context: IPAD});
