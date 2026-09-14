@@ -21,7 +21,9 @@ listed only when that branch is pushed: the branches the push's refspecs name,
 or the checked-out branch when it names none. Several desks open in one
 repository are otherwise listed together, and a session can write one pull
 request's commits onto another's desk. An entry without a `branch`, and any
-push whose branches cannot be told, lists every desk as before.
+push whose branches cannot be told (a refspec that is a shell expansion such
+as `"$(git branch --show-current)"` included), lists every desk as before. A
+command with several pushes lists the desks of each.
 
 Silent unless the command was a push from a checkout with an open desk. Every
 outcome exits 0: a reminder that fails must never fail the push it follows.
@@ -151,18 +153,19 @@ def push_directory(words, base):
     return None
 
 
-def pushed_from(command, cwd):
-    """Where the command's push runs, and the words after its `push`: the
-    session's directory, moved by any `cd` before the push and by `git -C`.
-    None when the command does not push."""
-    base = cwd
+def pushes(command, cwd):
+    """Every push in the command, in order, as (directory, words after `push`):
+    the session's directory, moved by any `cd` before that push and by
+    `git -C`. Every push, not the first: `git push origin a && git push origin
+    b` moves both pull requests. Empty when the command does not push."""
+    base, found = cwd, []
     for words in segments(command):
-        found = push_directory(words, base)
-        if found:
-            return found
-        if len(words) > 1 and words[0] == "cd":
+        push = push_directory(words, base)
+        if push:
+            found.append(push)
+        elif len(words) > 1 and words[0] == "cd":
             base = os.path.join(base, os.path.expanduser(words[1]))
-    return None
+    return found
 
 
 def refspecs(args):
@@ -204,13 +207,21 @@ def current_branch(directory):
     return name if done.returncode == 0 and name else None
 
 
+# A character no branch name git accepts contains, so a word holding one is not
+# a name: a shell expansion the hook only sees unexpanded (`"$BRANCH"`,
+# `"$(git branch --show-current)"`, backticks, and the `$` left when an unquoted
+# `$(` is split at its parenthesis), or a glob.
+NOT_A_NAME = re.compile(r"[$`(){}\[\]*?~\\]")
+
+
 def pushed_branches(args, directory):
     """The names of the branches a push with `args` updates on the remote: the
     destination of each refspec, or the checked-out branch when the push names
     none or names HEAD. None when that cannot be told (`--all`, a wildcard
-    refspec, a detached HEAD, a git failure), and the caller then lists every
-    desk rather than guess one. The refspec wins over the checkout: after
-    `git push origin other` the checked-out branch is not what moved."""
+    refspec, a shell expansion, `:` or an empty refspec, a detached HEAD, a git
+    failure), and the caller then lists every desk rather than guess one. The
+    refspec wins over the checkout: after `git push origin other` the
+    checked-out branch is not what moved."""
     specs = refspecs(args)
     if specs is None:
         return None
@@ -218,7 +229,7 @@ def pushed_branches(args, directory):
     for spec in specs or ["HEAD"]:
         source, _, destination = spec.lstrip("+").partition(":")
         name = destination or source
-        if "*" in name:
+        if not name or NOT_A_NAME.search(name):
             return None
         if name in ("HEAD", "@"):
             name = current_branch(directory)
@@ -283,12 +294,9 @@ def main():
     if not isinstance(command, str):
         return 0
     cwd = event.get("cwd") if isinstance(event.get("cwd"), str) else None
-    found = pushed_from(command, cwd or os.getcwd())
-    if not found:
-        return 0
-    directory, args = found
-    repos = repos_of(directory)
-    if not repos:
+    found = [(directory, args, repos_of(directory))
+             for directory, args in pushes(command, cwd or os.getcwd())]
+    if not any(repos for _, _, repos in found):
         return 0
     try:
         with open(LEDGER, encoding="utf-8") as f:
@@ -299,10 +307,14 @@ def main():
         return 0
     if not isinstance(entries, list):
         return 0
-    open_desks = [e for e in entries if is_open(e) and entry_repo_in(e, repos)]
-    if any(e.get("branch") for e in open_desks):
-        branches = pushed_branches(args, directory)
-        open_desks = [e for e in open_desks if entry_on_branch(e, branches)]
+    listed = set()
+    for directory, args, repos in found:
+        desks = [i for i, e in enumerate(entries) if is_open(e) and entry_repo_in(e, repos)]
+        if any(entries[i].get("branch") for i in desks):
+            branches = pushed_branches(args, directory)
+            desks = [i for i in desks if entry_on_branch(entries[i], branches)]
+        listed.update(desks)
+    open_desks = [entries[i] for i in sorted(listed)]
     if not open_desks:
         return 0
     lines = ["You just pushed from a checkout whose remotes have open review desks:"]

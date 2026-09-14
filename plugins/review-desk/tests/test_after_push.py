@@ -277,8 +277,22 @@ class AfterPush(unittest.TestCase):
         self.desks_on_a_and_b()
         both = ["- o/r#1 https://x/1", "- o/r#2 https://x/2"]
         self.checkout("b")
-        for command in ["git push --all", "git push --mirror origin",
-                        "git push origin 'refs/heads/*:refs/heads/*'", "git push origin a b"]:
+        for command in [
+            "git push --all", "git push --mirror origin",
+            "git push origin 'refs/heads/*:refs/heads/*'", "git push origin a b",
+            # The hook sees a shell expansion unexpanded. Read as a branch name it
+            # matched no desk and the push of b went unreminded.
+            'git push -u origin "$(git branch --show-current)"',
+            "git push -u origin $(git branch --show-current)",
+            'rtk git push origin "$BRANCH"',
+            "git push origin $BRANCH",
+            'git push origin HEAD:"${BRANCH}"',
+            "git push origin `git rev-parse --abbrev-ref HEAD`",
+            'git push origin "HEAD:`git branch --show-current`"',
+            # An empty refspec, and `:`, which pushes every matching branch.
+            'git push origin ""',
+            "git push origin :",
+        ]:
             with self.subTest(command=command):
                 self.assertEqual(self.listed(self.run_hook(command)), both)
         # A detached HEAD names no branch; `git push` there is left to git.
@@ -286,6 +300,26 @@ class AfterPush(unittest.TestCase):
             f.write("1" * 40 + "\n")
         self.assertEqual(self.listed(self.run_hook("git push")), both)
         self.assertEqual(self.listed(self.run_hook("git push origin b")), ["- o/r#2 https://x/2"])
+
+    def test_every_push_in_one_command_lists_its_desks(self):
+        # Only the first push was read, so pushing two stacked branches in one
+        # line dropped the second one's desk.
+        self.desks_on_a_and_b()
+        self.checkout("c")
+        both = ["- o/r#1 https://x/1", "- o/r#2 https://x/2"]
+        for command in [
+            "git push origin a && git push origin b",
+            "rtk git push origin b; git checkout a && git push origin HEAD:a",
+            "git push origin b\ngit push origin a",
+        ]:
+            with self.subTest(command=command):
+                self.assertEqual(self.listed(self.run_hook(command)), both)
+        self.assertEqual(self.listed(self.run_hook("git push origin c && git push origin b")),
+                         ["- o/r#2 https://x/2"])
+        # A second push from a directory with no remote adds nothing and hides nothing.
+        self.assertEqual(self.listed(self.run_hook(
+            f"git push origin b && cd {self.work} && git push origin a")),
+            ["- o/r#2 https://x/2"])
 
     def test_entry_without_a_branch_is_listed_for_any_push(self):
         # Ledgers written before branch was recorded keep their reminder.
