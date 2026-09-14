@@ -1,5 +1,5 @@
-// Loads a built desk in Chromium with window.claude stubbed, so the page's code
-// runs outside the claude.ai host.
+// Loads a built desk in Chromium, or WebKit (see launch), with window.claude
+// stubbed, so the page's code runs outside the claude.ai host.
 //
 // The stub is written from the runtime's db.d.ts and artifact.d.ts, not observed
 // on the host, so it can drift. Three things keep it honest:
@@ -10,7 +10,7 @@
 //   that ignores it. afterEach in the tests asserts missing() is empty.
 // - An onSnapshot with no error callback is recorded in missing() too. db.d.ts:
 //   without one a terminal error still kills the listener, only silently.
-import {chromium} from 'playwright';
+import {chromium, webkit} from 'playwright';
 import {execFileSync} from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -217,8 +217,12 @@ function installStub({seed, capabilities, publishError, getDelay, getFailures, l
   });
 }
 
+// DESK_BROWSER=webkit runs a suite in WebKit, the engine every iPad browser uses.
 export async function launch(){
-  return chromium.launch();
+  const name = process.env.DESK_BROWSER || 'chromium';
+  const type = {chromium, webkit}[name];
+  if (!type) throw new Error('DESK_BROWSER must be chromium or webkit, not ' + name);
+  return type.launch();
 }
 
 // The host wraps the file in this skeleton.
@@ -264,10 +268,12 @@ function deskFor(frame, {page, errors, pr, html, close}){
 }
 
 // Opens a desk. `seed` is the store as it stands before the page loads.
+// `context` is passed to browser.newContext: {hasTouch: true} is a touch screen,
+// and makes (pointer: coarse) match in both Chromium and WebKit.
 export async function open(browser, options = {}){
   const data = options.data || payload();
   const html = build(data, options.title);
-  const context = await browser.newContext();
+  const context = await browser.newContext(options.context || {});
   const page = await context.newPage();
   const errors = [];
   page.on('pageerror', e => errors.push(e.message));

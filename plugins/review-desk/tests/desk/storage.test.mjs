@@ -154,6 +154,7 @@ test('a save refused as invalid_argument says the conversation is too large, and
   // The banner's advice works: open another thread, close the oversized one.
   await desk.page.click('#more');
   await desk.page.click('[data-shut="0"]');
+  await desk.page.click('#closeYes');
   await desk.until(s => !!s[PR]);
   await desk.page.waitForFunction(() => !document.querySelector('#lostSlot .lost'));
   assert.deepEqual(desk.errors, []);
