@@ -60,6 +60,10 @@ h1.doctitle{font-family:var(--doc);font-weight:600;font-size:30px;
   padding-top:15px;border-top:1px solid var(--rule);scroll-margin-top:14px}
 .md h2:first-of-type{border-top:none;padding-top:0;margin-top:6px}
 .md h3{font-family:var(--ui);font-weight:600;font-size:15px;margin:18px 0 5px}
+/* An identifier or a path with nothing to break at wraps where it must. `anywhere`
+   rather than `break-word`, because only `anywhere` also narrows the element's
+   minimum width, which is what stops a token from widening its container. */
+.md p,.md li,.md blockquote,.md h1,.md h2,.md h3{overflow-wrap:anywhere}
 .md p{margin:0 0 13px}
 .md ul,.md ol{margin:0 0 13px;padding-left:22px}
 .md li{margin-bottom:6px}
@@ -76,7 +80,7 @@ h1.doctitle{font-family:var(--doc);font-weight:600;font-size:30px;
   padding:1px 4px;border-radius:3px}
 .md pre{background:var(--rule);padding:12px 14px;border-radius:5px;
   overflow-x:auto;margin:0 0 13px}
-.md pre code{background:none;padding:0;font-size:13px;line-height:1.5}
+.md pre code{background:none;padding:0;font-size:13px;line-height:1.5;overflow-wrap:normal}
 
 /* Syntax colours drawn from the page's own palette rather than a downloaded
    theme: the artifact CSP blocks third-party stylesheets, and a theme picked
@@ -220,7 +224,7 @@ body.open #panel{display:flex}
 .turn.theirs .said{background:var(--rule);border-bottom-left-radius:2px}
 .quoted{border-left:2px solid var(--mark);padding:5px 0 5px 10px;
   font-family:var(--doc);font-size:13.5px;color:var(--soft);
-  margin-bottom:6px;max-width:94%;white-space:pre-wrap}
+  margin-bottom:6px;max-width:94%;white-space:pre-wrap;overflow-wrap:anywhere}
 .turn.mine .quoted{border-left:none;border-right:2px solid var(--mark);
   padding:5px 10px 5px 0;text-align:right;align-self:flex-end}
 .hint{color:var(--faint);font-size:14px;line-height:1.55}
@@ -233,7 +237,14 @@ body.open #panel{display:flex}
 /* The working session writes markdown, so its replies are rendered, not shown raw. */
 .said.rich{white-space:normal}
 .said.rich p,.said.rich ul,.said.rich ol,.said.rich pre,.said.rich .tw{margin:0 0 8px}
+.said.rich > :first-child{margin-top:0}
 .said.rich > :last-child{margin-bottom:0}
+/* Headings mark sections of an answer; at the page's sizes a 22px "Details" was
+   the loudest thing in the panel. */
+.said.rich h1,.said.rich h2,.said.rich h3{font-family:var(--ui);font-size:14.5px;
+  font-weight:600;margin:10px 0 4px}
+.said.rich blockquote{margin:0 0 8px;padding-left:10px;border-left:2px solid var(--mark);
+  color:var(--soft)}
 .said.rich li > ul,.said.rich li > ol,.said.rich li > pre{margin:4px 0}
 .said.rich ul,.said.rich ol{padding-left:18px}
 .said.rich code{font-family:var(--mono);font-size:12.5px}

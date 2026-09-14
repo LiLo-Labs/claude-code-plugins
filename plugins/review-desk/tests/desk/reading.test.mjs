@@ -327,6 +327,69 @@ test('inside list items, markup is escaped, links open away, and a mermaid fence
   assert.deepEqual(desk.errors, []);
 });
 
+// One thread whose one question has an answer stored; the quote is what the
+// reviewer highlighted.
+const answered = (text, quote) => ({[PR]: {pr: 42, title: 'Harness desk', decision: null, reason: null,
+  decidedAt: null, threads: [{id: 't1', name: 'Only', turns: [
+    {id: 'u1', role: 'user', content: 'What did you run?', to: 'session', ...(quote ? {quote} : {})},
+    {role: 'assistant', via: 'session', answers: 'u1', status: 'done', sentAt: 1000, rungAt: 1400}]}]},
+  [REPLIES + '/u1']: {turn: 'u1', status: 'done', text, at: AT}});
+
+test('headings and quotes in a session reply are sized to the chat bubble', async () => {
+  desk = await open(browser, {seed: answered('# Summary\n\n## Details\n\n### Verified\n\n'
+    + 'See the run.\n\n> The lease is held for thirty seconds.\n\n1. First\n\n2. Second')});
+  await desk.page.click('#fab');
+  await desk.page.waitForSelector('.said.rich h2');
+  const got = await desk.page.evaluate(() => {
+    const px = (sel, prop) => parseFloat(getComputedStyle(document.querySelector('.said.rich ' + sel))[prop]);
+    return {h1: px('h1', 'fontSize'), h2: px('h2', 'fontSize'), h3: px('h3', 'fontSize'), p: px('p', 'fontSize'),
+      h1Top: px('h1', 'marginTop'), quoteLeft: px('blockquote', 'marginLeft'),
+      quoteRight: px('blockquote', 'marginRight'), items: document.querySelectorAll('.said.rich ol > li').length,
+      lists: document.querySelectorAll('.said.rich ol').length};
+  });
+  for (const h of ['h1', 'h2', 'h3']) assert.ok(got[h] <= 16, `${h} is ${got[h]}px`);
+  assert.equal(got.h1Top, 0, 'the first heading adds space above the bubble\'s own padding');
+  assert.ok(got.quoteLeft <= 12, `blockquote left margin is ${got.quoteLeft}px`);
+  assert.ok(got.quoteRight <= 12, `blockquote right margin is ${got.quoteRight}px`);
+  assert.deepEqual([got.lists, got.items], [1, 2], 'a loose list in a reply is one list');
+  assert.deepEqual(desk.errors, []);
+});
+
+// An identifier with nothing a line may break at: no spaces, slashes or hyphens.
+const TOKEN = Array.from({length: 14}, (_, i) => 'segment_' + String(i).padStart(2, '0')).join('_').slice(0, 140);
+
+test('a long unbroken token wraps in the quote, the reply and the description, at phone width', async () => {
+  assert.equal(TOKEN.length, 140);
+  assert.ok(!/[\s/-]/.test(TOKEN));
+  const narrow = {viewport: {width: 400, height: 800}};
+  desk = await open(browser, {context: narrow, seed: answered('It is `' + TOKEN + '`, set in ' + TOKEN + '.', TOKEN),
+    data: payload({body: '## What it does\n\nRenames `' + TOKEN + '` in one place.\n\n- also ' + TOKEN + '\n'})});
+  await desk.page.waitForSelector('#sheet code');
+
+  // The page: the description's inline code wraps instead of widening it.
+  const pageFits = await desk.page.evaluate(() => ({doc: document.documentElement.scrollWidth, view: innerWidth,
+    code: document.querySelector('#sheet p code').getBoundingClientRect(),
+    sheet: document.getElementById('sheet').getBoundingClientRect()}));
+  assert.ok(pageFits.doc <= pageFits.view, `the page is ${pageFits.doc}px wide in a ${pageFits.view}px viewport`);
+  // Wrapped, not clipped: the code sits inside the sheet and runs over more than one line.
+  assert.ok(pageFits.code.right <= pageFits.sheet.right + 0.5, 'the inline code runs past the sheet');
+  assert.ok(pageFits.code.height > 30, `the inline code is one ${pageFits.code.height}px line`);
+
+  await desk.page.click('#fab');
+  await desk.page.waitForSelector('.said.rich code');
+  const panel = await desk.page.evaluate(() => {
+    const box = el => ({scroll: el.scrollWidth, client: el.clientWidth});
+    return {stream: box(document.getElementById('stream')), quoted: box(document.querySelector('.quoted')),
+      said: box(document.querySelector('.said.rich')), doc: document.documentElement.scrollWidth, view: innerWidth};
+  });
+  assert.ok(panel.stream.scroll <= panel.stream.client, `#stream scrolls sideways: ${JSON.stringify(panel.stream)}`);
+  assert.ok(panel.quoted.scroll <= panel.quoted.client, `the quote overflows its box: ${JSON.stringify(panel.quoted)}`);
+  assert.ok(panel.said.scroll <= panel.said.client, `the reply overflows its bubble: ${JSON.stringify(panel.said)}`);
+  assert.ok(panel.doc <= panel.view, `the page is ${panel.doc}px wide with the panel open`);
+  assert.ok((await desk.page.textContent('.quoted')).includes(TOKEN), 'the quote lost part of the token');
+  assert.deepEqual(desk.errors, []);
+});
+
 /* ---------------- contrast ---------------- */
 
 // WCAG 2 contrast of each element's computed text colour on its computed
