@@ -204,6 +204,9 @@ body.open #panel{display:flex}
 .tab .spin{width:7px;height:7px;border-radius:4px;background:var(--mark);
   animation:pulse 1.1s ease-in-out infinite}
 .tab.on .spin{background:var(--on-accent)}
+/* A reply in this thread the reviewer has not seen yet. */
+.tab .unread{width:7px;height:7px;border-radius:4px;background:var(--mark)}
+.tab.on .unread{background:var(--on-accent)}
 @keyframes pulse{0%,100%{opacity:.3}50%{opacity:1}}
 .tabpair{display:flex;align-items:center;flex-shrink:0}
 /* Its own button beside the tab, 44px square by its box rather than its glyph.
@@ -636,6 +639,10 @@ let bodyText = DATA.body || '';
 const isHead = h => typeof h === 'string' && /^[0-9a-f]{40}$/.test(h);
 const builtOn = isHead(DATA.headRefOid) ? DATA.headRefOid : null;
 let head = builtOn;
+// freshOn[i]: page i changed while this view was open. It stays until the reviewer
+// opens that page, or leaves it if the change landed on the page on screen. A
+// timer that cleared every mark after 5 s took the mark away from a reviewer
+// who was in the panel and never saw it.
 let leaf = 0, freshOn = {};
 
 /* Everything readable, in one strip: the request itself, then each document
@@ -815,6 +822,17 @@ function drawMeta(){
       : '');
 }
 
+// The tab strip alone. A change to a page the reviewer is not reading redraws only
+// this: paint() replaces the sheet on screen, and with it any highlight held in it,
+// the place it was scrolled to and any diagram, which falls back to its source
+// until mermaid draws it again.
+function drawLeaves(){
+  $('leaves').innerHTML = pages().map((p, i) =>
+    '<button class="leaf'+(i===leaf?' on':'')+'" data-leaf="'+i+'" title="'+esc(p.full||p.name)+'">'
+    + esc(p.name)
+    + '<span class="fresh'+(freshOn[i]?' show':'')+'"></span></button>').join('');
+}
+
 function paint(){
   $('title').textContent = DATA.title || 'Review';
   $('repoTag').textContent = (DATA.repo ? DATA.repo + ' · ' : '') + 'review desk';
@@ -824,10 +842,7 @@ function paint(){
   forget();
   const all = pages();
   if (leaf >= all.length) leaf = 0;
-  $('leaves').innerHTML = all.map((p, i) =>
-    '<button class="leaf'+(i===leaf?' on':'')+'" data-leaf="'+i+'" title="'+esc(p.full||p.name)+'">'
-    + esc(p.name)
-    + '<span class="fresh'+(freshOn[i]?' show':'')+'"></span></button>').join('');
+  drawLeaves();
   $('sheet').innerHTML = render(all[leaf]);
   paintCode();
   paintDiagrams();
@@ -838,7 +853,7 @@ $('leaves').addEventListener('click', e => {
   const b = e.target.closest('[data-leaf]'); if (!b) return;
   const i = +b.dataset.leaf;
   if (i === leaf) return;
-  leaf = i; delete freshOn[i];
+  delete freshOn[leaf]; leaf = i; delete freshOn[i];
   unlight();                       // the painted range belonged to the old page
   paint();
   window.scrollTo({top: 0, behavior: 'smooth'});
@@ -887,8 +902,37 @@ function watchHeadings(){
 }
 
 /* ================= threads ================= */
-let threads = [{id: 't1', name: 'Thread 1', turns: [], busy: false}];
+let threads = [{id: 't1', name: 'Thread 1', turns: [], unread: false}];
 let live = 0;
+
+// The newest reply, by its `at`, that this browser has shown the reviewer on this
+// desk, kept in localStorage so a reload can tell answers that came while the desk
+// was closed from answers already read. Replies are compared with replies, never
+// with this device's clock: the session stamps `at` on its own machine, which may
+// be another computer. null when nothing is stored, or storage is refused: then
+// every answer stored at load counts as read, as it did before this was kept.
+const SEEN_KEY = 'review-desk seen ' + (typeof DATA.repo === 'string' ? DATA.repo : '') + '#' + DATA.number;
+let seenAt = null;
+try {
+  const v = localStorage.getItem(SEEN_KEY);
+  if (typeof v === 'string' && /^\d+$/.test(v)) seenAt = +v;
+} catch (e) {}
+const replyAt = r => { const t = r && typeof r.at === 'string' ? Date.parse(r.at) : NaN; return isNaN(t) ? 0 : t; };
+// Moved on only while no thread is unread. One time per desk cannot say which
+// threads were read, so while one is not, it holds still: a reload may then mark
+// an answer the reviewer already read in another thread, which costs a glance,
+// where moving on would lose the mark on the one they have not read.
+function noteSeen(){
+  if (!repliesIn || threads.some(t => t.unread)) return;
+  let newest = 0;
+  threads.forEach(t => t.turns.forEach(m => {
+    const r = m.via === 'session' && sessionReplies.get(m.answers);
+    if (r && r.at > newest) newest = r.at;
+  }));
+  if (seenAt !== null && newest <= seenAt) return;
+  seenAt = newest;
+  try { localStorage.setItem(SEEN_KEY, String(newest)); } catch (e) {}
+}
 let carried = null;
 let db = null, decided = null, reason = null;
 
@@ -941,7 +985,9 @@ function goReadOnly(){
 // nothing to conflict with -- and the name starts with the epoch second of the
 // ring. No answer is not proof the session is gone: a busy one answers after its
 // current task, so the page says both, and how to bring one back.
-let lastHeard = 0, lastResume = '', stampsSeen = null, checkedAt = null, answeredAt = 0;
+let lastHeard = 0, lastResume = '', stampsSeen = new Set(), checkedAt = null, answeredAt = 0;
+// Whether the presence listener has had a server-definitive snapshot yet.
+let presenceIn = false;
 // Measured: a ring reaches an idle session in about 16 seconds, and a one-write
 // answer adds about 5. 75 seconds leaves room for a session finishing a step.
 const CHECK_WAIT = 75000;
@@ -955,9 +1001,16 @@ function drawTabs(){
   // A closed desk's discussion is the record of the review: no thread is added
   // to it, and none is closed out of it.
   const shut = !!closedOutcome();
+  // A thread whose reply the session is still writing pulses; once no reply in it
+  // is being written, one the reviewer has not seen is marked. Both are on the tab,
+  // because the badge is hidden while the panel is open, and a reply for another
+  // thread otherwise changed nothing on screen.
+  const writing = t => t.turns.some(m => m.via === 'session'
+    && (sessionReplies.get(m.answers) || {}).status === 'working');
   el.innerHTML = threads.map((t, i) =>
     '<span class="tabpair"><button class="tab'+(i===live?' on':'')+'" data-go="'+i+'">'
-    + (t.busy ? '<span class="spin"></span>' : '')
+    + (writing(t) ? '<span class="spin" title="The working session is writing a reply"></span>'
+      : t.unread ? '<span class="unread" title="A reply you have not seen"></span>' : '')
     + esc(t.name) + '</button>'
     + (threads.length > 1 && !shut ? '<button class="shut" data-shut="'+i+'" aria-label="Close '
         + esc(t.name) + '" title="Close this thread">×</button>' : '')
@@ -1098,7 +1151,7 @@ function drawStream(toEnd){
 }
 function gate(){
   const shut = !!closedOutcome();
-  sendBtn.disabled = locked() || threads[live].busy || shut;
+  sendBtn.disabled = locked() || shut;
   // An outdated view keeps its box: what the reviewer typed stays to copy.
   $('box').disabled = shut;
   document.querySelectorAll('#seed button').forEach(b => { b.disabled = locked() || shut; });
@@ -1154,6 +1207,7 @@ function drawBadge(){
   const d = $('dot');
   d.textContent = waiting || '';
   d.classList.toggle('show', waiting > 0 && !open);
+  noteSeen();
 }
 // The resume command is offered for the reviewer to copy and run on their own
 // computer, and the presence stamp it can come from is a document anyone who can
@@ -1244,7 +1298,7 @@ $('tabs').addEventListener('click', e => {
   }
   if (e.target.closest('#more')){
     threads.push({id:'t'+(threads.length+1)+'-'+Date.now(),
-                  name:'Thread '+(threads.length+1), turns:[], busy:false});
+                  name:'Thread '+(threads.length+1), turns:[], unread:false});
     live = threads.length - 1; draw(true); $('box').focus(); return;
   }
   const go = e.target.closest('[data-go]');
@@ -2172,7 +2226,7 @@ function restoredThreads(stored){
   // so the next save leaves it out.
   // A slot stored as unsaved was written by a later save after its own failed.
   // Read back from the store, it is saved, and waits to be rung.
-  return stored.filter(isRow).map((t, i) => ({...t, busy: false,
+  return stored.filter(isRow).map((t, i) => ({...t, unread: false,
     id: typeof t.id === 'string' && t.id ? t.id : 't' + (i + 1) + '-restored',
     name: typeof t.name === 'string' && t.name ? t.name : 'Thread ' + (i + 1),
     turns: (Array.isArray(t.turns) ? t.turns : []).filter(isRow)
@@ -2317,20 +2371,30 @@ document.addEventListener('click', e => {
 // save would only rewrite review/pr-N from this view's threads, which may be
 // missing a message another open view has sent since this one loaded.
 const replied = new Set();
+// Replies already marked unread for having come while the desk was closed.
+const flaggedAtLoad = new Set();
 let reringStarted = false;
 function listenReplies(){
   if (FEEDS.replies) return;
   follow('replies', 'the working session’s replies', 'panel',
     () => db.collection('review/pr-' + DATA.number + '/replies'), snap => {
-      // The first delivery is what was already there at load, which the reviewer
-      // is about to see anyway, so it flags no thread unread.
+      // Every delivery up to and including the first server-definitive one is what
+      // was already there at load, so none of it flags a thread unread by arriving.
+      // db.d.ts: the first pages of a subscription can be fromCache, empty or
+      // older than the store, with the definitive snapshot after them. Taking the
+      // first delivery as the whole of history lit the badge for answers read the
+      // day before. Only what this browser recorded as seen (seenAt) marks history:
+      // an answer newer than that came while the desk was closed.
       // A change confined to threads the reviewer is not looking at redraws only
       // the tabs and the badge. The open thread's stream is left alone, nodes and
       // all, so a selection in it survives and its text is not re-parsed. Any
       // change touching the open thread still redraws that stream in full.
       const history = !repliesIn;
       let shown = history, liveShown = history;
-      repliesIn = true;
+      // Not "in" until definitive: a cache page may lack replies the store holds,
+      // and rering, started below, must not ring for a message already answered.
+      if (!(snap.metadata && snap.metadata.fromCache)) repliesIn = true;
+      const open = document.body.classList.contains('open');
       snap.docs.forEach(d => {
         const r = d.data();
         if (!r || typeof r.turn !== 'string') return;
@@ -2339,7 +2403,12 @@ function listenReplies(){
         const status = r.status === 'done' ? 'done' : 'working';
         const was = sessionReplies.get(r.turn);
         const changed = !was || was.text !== text || was.status !== status;
-        if (changed) sessionReplies.set(r.turn, {text, status});
+        if (changed) sessionReplies.set(r.turn, {text, status, at: replyAt(r)});
+        else was.at = Math.max(was.at, replyAt(r));
+        // Once per reply: a cache page and the definitive snapshot can both carry it,
+        // and a thread opened between them stays read.
+        const missed = history && seenAt !== null && replyAt(r) > seenAt && !flaggedAtLoad.has(r.turn);
+        if (missed) flaggedAtLoad.add(r.turn);
         for (const t of threads){
           const at = t.turns.findIndex(m => m.id === r.turn);
           if (at < 0) continue;
@@ -2351,14 +2420,16 @@ function listenReplies(){
             hit = true;
           }
           if (hit){ shown = true; if (t === threads[live]) liveShown = true; }
-          if (changed && !history
-              && (t !== threads[live] || !document.body.classList.contains('open'))) t.unread = true;
+          if (((changed && !history) || missed) && (t !== threads[live] || !open)){
+            t.unread = true;
+            shown = true;
+          }
           break;
         }
       });
       if (liveShown) draw();
       else if (shown){ drawTabs(); drawBadge(); drawApproveAsk(); }
-      if (!reringStarted){ reringStarted = true; rering(); }
+      if (repliesIn && !reringStarted){ reringStarted = true; rering(); }
     });
 }
 
@@ -2725,15 +2796,16 @@ function followPage(){
       }
       if (typeof row.text !== 'string' || row.text === bodyText) return;
       bodyText = row.text;
-      unlight();
       freshOn[0] = true;
-      paint();
-      setTimeout(() => { freshOn = {}; paint(); }, 5000);
+      if (leaf === 0){ unlight(); paint(); } else drawLeaves();
     });
 
-  // The session's presence stamps, one per ring it handled. The first snapshot is
-  // history, timed from the stamps' names; a stamp that arrives after it is an
-  // answer happening now, timed by this clock.
+  // The session's presence stamps, one per ring it handled. Every snapshot up to and
+  // including the first server-definitive one is history, timed from the stamps'
+  // names; a stamp that arrives after that is an answer happening now, timed by this
+  // clock. A fromCache first page (db.d.ts) holds none of the stored stamps, and
+  // taking it as the whole of history made a stamp from hours ago say "last
+  // answered" at the moment the page loaded.
   // A name that is not an epoch second, or is one a Date cannot hold, times
   // nothing. lastHeard only grows, so one bad name used to stay for the life of
   // the page and throw in every draw(). A stamp more than a day ahead of this
@@ -2745,8 +2817,8 @@ function followPage(){
   };
   follow('presence', 'word from the working session', 'panel',
     () => db.collection('review/pr-' + DATA.number + '/presence'), snap => {
-      const first = stampsSeen === null;
-      if (first) stampsSeen = new Set();
+      const history = !presenceIn;
+      if (!(snap.metadata && snap.metadata.fromCache)) presenceIn = true;
       let newest = 0;
       snap.docs.forEach(d => {
         const row = d.data() || {};
@@ -2757,7 +2829,7 @@ function followPage(){
         }
         if (!stampsSeen.has(d.id)){
           stampsSeen.add(d.id);
-          if (!first) answeredAt = Date.now();
+          if (!history) answeredAt = Date.now();
         }
       });
       lastHeard = Math.max(lastHeard, newest);
@@ -2809,13 +2881,16 @@ function followPage(){
           changed.push(row.name); touched = true;
         });
         if (!touched) return;
-        unlight();          // the range points into nodes about to be replaced
+        let onScreen = false;
         changed.forEach(name => {
           const at = documents.findIndex(x => x.name === name);
-          if (at >= 0) freshOn[at + 1] = true;      // +1: page 0 is the request
+          if (at < 0) return;
+          freshOn[at + 1] = true;                  // +1: page 0 is the request
+          if (at + 1 === leaf) onScreen = true;
         });
+        if (!onScreen){ drawLeaves(); return; }
+        unlight();          // the range points into nodes about to be replaced
         paint();
-        setTimeout(() => { freshOn = {}; paint(); }, 5000);
       });
 }
 </script>

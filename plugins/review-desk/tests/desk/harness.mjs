@@ -21,6 +21,11 @@
 //   echo of an earlier set lands with hasPendingWrites false even while a later one
 //   is pending, which the real store may not do. `cacheFirst` gives a document
 //   subscription a fromCache first snapshot.
+// - `firstFromCache` gives every collection subscription an empty fromCache page
+//   first and the definitive snapshot about 60 ms later. db.d.ts: the first pages
+//   of a subscription can be fromCache, and a definitive snapshot follows. Whether
+//   the host sends one on a reload is not known; a page tested only against a lone
+//   definitive first delivery took a later one for news.
 //
 // Known gaps, each something the page does not depend on today: rules that set
 // `read` or use {self} are refused at open() rather than half-enforced; the 64
@@ -77,7 +82,7 @@ const PUBLISH_CODES = ['conflict', 'not_writer', 'not_declared', 'too_large', 'i
 // Runs in every frame before any of its scripts. Serialised by Playwright, so it
 // may use only its argument.
 function installStub({seed, capabilities, publishError, getDelay, getFailures, leases: held,
-    subscribeFailures, setFailures, setDelay, rules, level, levels, cacheFirst}){
+    subscribeFailures, setFailures, setDelay, rules, level, levels, cacheFirst, firstFromCache}){
   const frozen = v => {
     if (v && typeof v === 'object'){ Object.values(v).forEach(frozen); Object.freeze(v); }
     return v;
@@ -211,9 +216,17 @@ function installStub({seed, capabilities, publishError, getDelay, getFailures, l
     const list = map.get(key) || []; map.set(key, list); list.push(sub);
     const fromCache = sub.doc && Object.prototype.hasOwnProperty.call(cacheFirst, key) && !cached.has(key);
     if (fromCache) cached.add(key);
+    const cachePage = !sub.doc && firstFromCache;
     setTimeout(() => {
       if (fromCache && list.includes(sub))
         deliver(sub, snapOf(key, cacheFirst[key] !== null, cacheFirst[key], {fromCache: true}));
+      if (cachePage){
+        if (list.includes(sub)) sub.next(frozen({docs: [], size: 0, empty: true,
+          docChanges: () => { missing.push('QuerySnapshot.docChanges'); throw new TypeError('stub has no docChanges'); },
+          metadata: {fromCache: true, hasPendingWrites: false}}));
+        setTimeout(() => { if (list.includes(sub)) deliver(sub, snap()); }, 60);
+        return;
+      }
       if (list.includes(sub)) deliver(sub, snap());
     }, 0);
     return () => { const i = list.indexOf(sub); if (i >= 0) list.splice(i, 1); };
@@ -365,7 +378,7 @@ const skeleton = html => '<!doctype html><html><head>'
 // capabilities object build_desk.py printed, whose db rules the stub enforces.
 function stubOptions({seed = {}, capabilities = ['db', 'artifact'], publishError = null,
     getDelay = 0, getFailures = 0, leases = {}, subscribeFailures = {}, setFailures = {}, setDelay = 0,
-    level = 'interact', cacheFirst = {}}, declared){
+    level = 'interact', cacheFirst = {}, firstFromCache = false}, declared){
   const unknown = capabilities.filter(c => !['db', 'artifact'].includes(c));
   if (unknown.length) throw new Error('the stub grants only db and artifact, not ' + unknown);
   const codes = publishError === null ? [] : [].concat(publishError).filter(c => c !== null);
@@ -379,7 +392,7 @@ function stubOptions({seed = {}, capabilities = ['db', 'artifact'], publishError
       throw new Error('the stub enforces only path and write levels, not ' + JSON.stringify(r));
   }
   return {seed, capabilities, publishError, getDelay, getFailures, leases, subscribeFailures, setFailures,
-    setDelay, rules, level, levels: LEVELS, cacheFirst};
+    setDelay, rules, level, levels: LEVELS, cacheFirst, firstFromCache: !!firstFromCache};
 }
 
 // Everything a test does to one view. `frame` is a Page for a lone desk, or the
