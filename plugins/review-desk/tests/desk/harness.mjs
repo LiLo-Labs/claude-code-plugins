@@ -215,7 +215,7 @@ export async function open(browser, {data = payload(), title, seed = {},
       desk.write(pr + '/replies/' + turn, {turn, status, text, at: new Date().toISOString()}),
     presence: (id, resume) => desk.write(pr + '/presence/' + id, resume ? {resume} : {}),
     context: (name, v) => desk.write(pr + '/context/' + name, v),
-    document: (id, name, text) => desk.write(pr + '/documents/' + id, {name, text}),
+    document: (id, name, text, extra = {}) => desk.write(pr + '/documents/' + id, {name, text, ...extra}),
     // Resolves once fn(store, arg) is truthy, polling the page's store from here.
     until: async (fn, arg, timeout = 5000) => {
       const end = Date.now() + timeout;
