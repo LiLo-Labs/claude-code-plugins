@@ -124,7 +124,8 @@ A reviewer who presses **Change this** and decides again gets a new `decidedAt`,
 so a second verdict on the same request is collected like the first.
 
 The one exception is a matching pickup whose `outcome` is `blocked`, when the
-user typed this command themselves after clearing what blocked it. Retry the
+user typed this command themselves after clearing what blocked it, such as
+adding the allow rule for a merge Claude Code refused. Retry the
 action under "Act on it" and report its new outcome, but do not post the comment
 a second time. A ring or the session-start sweep never counts as the user asking.
 The exception does not cover a block for a message after deciding, or for
@@ -272,6 +273,30 @@ moved, read `headRefOid` again, bring the desk to it and only then report the
 outcome, exactly as a `decidedOn` that is not the head does under "Answer what
 is waiting first", so deciding again stores the new commit. Say which merge you
 used and confirm it landed.
+
+**A merge refused by Claude Code's permission system, not by GitHub.** When `gh
+pr merge` never ran because Claude Code refused it (the tool result says it was
+denied by auto mode or its classifier, or by a permission rule, or that the user
+can add a Bash permission rule, instead of showing what `gh` printed), this
+machine has not allowed unattended merges. Do not retry it, and never try
+another route to the merge: not `gh api`, not `git merge` and a push, not the
+same command spelled another way (a full path, `command gh`, `sh -c`), and not
+asking again with a different explanation. The reviewer's approval stands; only
+the permission is missing. Report the outcome onto the pickup as `blocked`,
+naming the exact allow rule:
+
+    data: {"outcome": {"result": "blocked", "detail": "Approved, but not merged: this computer has not allowed unattended merges, so Claude Code's permission system refused gh pr merge. Someone at the computer can add the allow rule Bash(gh pr merge *) to Claude Code's settings (the review-desk README section Unattended merges says where), then run /review-collect <owner/repo>#<n> to merge it. You do not need to decide again.", "at": "<now, UTC ISO>"}}
+
+Name the rule the session-start line named, when it named one. When the
+refused command began with `rtk`, or the user's settings run RTK's rewriting
+hook, Claude Code matched the rewritten command, so name `Bash(rtk gh pr merge
+*)` beside `Bash(gh pr merge *)`. Record `blocked` in the ledger, and tell the
+user in the terminal the same thing in one line: the merge was refused by this
+machine's permission settings, the exact rule that allows it, and that
+`/review-collect <owner/repo>#<n>` merges it once the rule is there. Do not add
+the rule or change any settings file yourself: a permission is the user's to
+grant, and a session that grants itself one has removed the check it exists
+for.
 
 A desk published before `decidedOn` existed has none on its approval, since its
 page was built before it stored one. Merge it as before, after the same state

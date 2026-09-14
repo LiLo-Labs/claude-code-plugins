@@ -4,6 +4,7 @@ a decision being collected twice, a revising desk vanishing from the hooks, a
 dead session's claim stranding a message, and a publish assuming its watch.
 They also hold the docs to the constants the hooks use, so the two cannot
 drift apart. No dependencies beyond the standard library."""
+import json
 import os
 import re
 import sys
@@ -260,6 +261,105 @@ class Collect(unittest.TestCase):
         self.assertIn("`repo` field", text)
         self.assertIn("must equal", text)
         self.assertIn("has none", text)
+
+
+    def test_a_merge_refused_by_the_permission_system_is_blocked_naming_the_rule(self):
+        # Seen on the real host: auto mode refused `gh pr merge` for an approved
+        # desk, and the approval waited on someone running the merge by hand.
+        act = flat(section(self.doc, "Act on it"))
+        start = act.index("**A merge refused by Claude Code's permission system, not by GitHub.**")
+        para = act[start:act.index("A desk published before `decidedOn` existed", start)]
+        self.assertIn("this machine has not allowed unattended merges", para)
+        self.assertIn("Do not retry it, and never try another route to the merge", para)
+        for route in ("`gh api`", "`git merge` and a push", "`command gh`", "`sh -c`"):
+            self.assertIn(route, para)
+        data = re.search(r'data: (\{"outcome".*?\}\})', para)
+        self.assertTrue(data, para)
+        outcome = json.loads(data.group(1))["outcome"]
+        self.assertEqual(outcome["result"], "blocked")
+        self.assertIn(f"allow rule {sweep.MERGE_RULE}", outcome["detail"])
+        self.assertIn("has not allowed unattended merges", outcome["detail"])
+        self.assertIn(sweep.README_SECTION, outcome["detail"])
+        self.assertIn(f"`{sweep.RTK_MERGE_RULE}` beside `{sweep.MERGE_RULE}`", para)
+        self.assertIn("Record `blocked` in the ledger", para)
+        self.assertIn("tell the user in the terminal the same thing", para)
+        self.assertIn("Do not add the rule or change any settings file yourself", para)
+        # Adding the rule is what clears the block when the user runs the command.
+        exception = flat(section(self.doc, "Is it already handled"))
+        self.assertIn("such as adding the allow rule for a merge Claude Code refused", exception)
+
+    def test_readme_names_the_rules_and_where_they_go(self):
+        with open(os.path.join(ROOT, "README.md"), encoding="utf-8") as f:
+            readme = f.read()
+        text = flat(section(readme, sweep.README_SECTION))
+        self.assertIn(f'"allow": ["{sweep.MERGE_RULE}"]', text)
+        self.assertIn(f'"allow": ["{sweep.MERGE_RULE}", "{sweep.RTK_MERGE_RULE}"]', text)
+        self.assertIn("`~/.claude/settings.json`", text)
+        self.assertIn("The plugin does not add the rule itself", text)
+        self.assertIn("classifyAllShell", text)
+
+
+# An imperative aimed at whoever reads the text: a sentence that starts by
+# telling the reader to change settings or permission rules.
+EDIT_SETTINGS = re.compile(
+    r"^(?:then |and |so |first |now |please )?(?:you (?:can |should |must |may )?)?"
+    r"(?:add|edit|write|update|modify|append|insert|put|set|change|grant|allow)\b"
+    r".*(?:settings(?:\.local)?\.json|\bsettings\b|permissions\.(?:allow|ask|deny)|"
+    r"allow rule|permission rule|/permissions|update-config)",
+    re.I)
+
+
+def edits_settings(sentence):
+    return bool(EDIT_SETTINGS.search(sentence.lstrip("-*> `#0123456789.")))
+
+
+class NoSettingsEdits(unittest.TestCase):
+    """A plugin must not grant itself permissions. Nothing under
+    plugins/review-desk may tell the reader, session or person, to edit
+    settings or permission rules; the README states the rule and where it
+    goes, and the hooks and commands only tell the user about it."""
+
+    def texts(self):
+        skip = {"node_modules", "tests", ".git"}
+        for base, dirs, files in os.walk(ROOT):
+            dirs[:] = [d for d in dirs if d not in skip]
+            for name in files:
+                path = os.path.join(base, name)
+                if name.endswith(".py"):
+                    import ast
+                    with open(path, encoding="utf-8") as f:
+                        tree = ast.parse(f.read())
+                    body = " ".join(n.value for n in ast.walk(tree)
+                                    if isinstance(n, ast.Constant) and isinstance(n.value, str))
+                elif name.endswith((".md", ".html", ".json")):
+                    with open(path, encoding="utf-8") as f:
+                        body = f.read()
+                else:
+                    continue
+                yield os.path.relpath(path, ROOT), body
+
+    def test_the_check_catches_an_instruction_to_edit_settings(self):
+        for bad in ("Add `Bash(gh pr merge *)` to ~/.claude/settings.json.",
+                    "Then write the allow rule into .claude/settings.local.json",
+                    "You can add the rule to permissions.allow",
+                    "- Update the user's settings with the rule"):
+            self.assertTrue(edits_settings(bad), bad)
+        for fine in ("Tell the user in one line that adding `Bash(gh pr merge *)` to permissions.allow lets it merge",
+                     "Do not add the rule or change any settings file yourself",
+                     "The place for it is `~/.claude/settings.json`, your user settings"):
+            self.assertFalse(edits_settings(fine), fine)
+
+    def test_no_plugin_text_tells_anyone_to_edit_settings(self):
+        mentions = 0
+        for rel, body in self.texts():
+            for sentence in re.split(r"(?<=[.!?;:])\s+|\n\s*\n", body):
+                sentence = flat(sentence)
+                if re.search(r"settings|permissions\.allow|allow rule", sentence, re.I):
+                    mentions += 1
+                with self.subTest(file=rel, sentence=sentence[:90]):
+                    self.assertFalse(edits_settings(sentence), sentence)
+        # Guards against a pass that checked nothing because the files moved.
+        self.assertGreaterEqual(mentions, 5)
 
 
 class Desk(unittest.TestCase):
