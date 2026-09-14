@@ -46,6 +46,22 @@ ASSIGNMENT = re.compile(r"[A-Za-z_]\w*=")
 # and the revision's pushes still need the desk rewritten.
 TERMINAL = ("merged", "closed")
 
+OWNER_NAME = re.compile(r"[^/]+/[^/]+")
+
+
+def well_formed(entry):
+    """Whether a ledger entry has the shape a desk is named by: `repo` an
+    owner/name string, `pr` a positive integer, `url` a non-empty string. Only
+    types and shapes, never values, so a repo written in another case still
+    matches. The ledger is edited by hand, and a repo that is a list reached a
+    dict key in sweep.message and crashed the session-start hook."""
+    if not isinstance(entry, dict):
+        return False
+    repo, pr, url = entry.get("repo"), entry.get("pr"), entry.get("url")
+    return (isinstance(repo, str) and OWNER_NAME.fullmatch(repo) is not None
+            and type(pr) is int and pr > 0
+            and isinstance(url, str) and url != "")
+
 
 def is_open(entry):
     """A well-formed ledger entry nobody has closed. The recorded outcome decides:
@@ -54,9 +70,7 @@ def is_open(entry):
     entry stamped with no outcome at all was written before outcomes were
     recorded and is left closed, since nothing here can tell a merged one from
     a revising one."""
-    if not isinstance(entry, dict):
-        return False
-    if not (entry.get("repo") and entry.get("pr") and entry.get("url")):
+    if not well_formed(entry):
         return False
     if not entry.get("collectedAt"):
         return True
@@ -170,8 +184,13 @@ def main():
         event = json.load(sys.stdin)
     except ValueError:
         return 0
-    command = (event.get("tool_input") or {}).get("command") or ""
-    directory = pushed_from(command, event.get("cwd") or os.getcwd())
+    if not isinstance(event, dict) or not isinstance(event.get("tool_input"), dict):
+        return 0
+    command = event["tool_input"].get("command")
+    if not isinstance(command, str):
+        return 0
+    cwd = event.get("cwd") if isinstance(event.get("cwd"), str) else None
+    directory = pushed_from(command, cwd or os.getcwd())
     if not directory:
         return 0
     repos = repos_of(directory)
@@ -180,7 +199,9 @@ def main():
     try:
         with open(LEDGER, encoding="utf-8") as f:
             entries = json.load(f)
-    except (OSError, ValueError):
+    except (OSError, ValueError, RecursionError):
+        # RecursionError: valid JSON nested deeper than the decoder allows
+        # before Python 3.14.
         return 0
     if not isinstance(entries, list):
         return 0

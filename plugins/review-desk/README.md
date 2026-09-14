@@ -13,8 +13,14 @@ reasoning lives with the code rather than evaporating.
 
 ## Use
 
-    /review-desk 12          # publish it, hand over the link
-    /review-collect 12       # read the discussion back, write it in, merge
+    /review-desk <owner/repo>#<number>       # publish it, hand over the link
+    /review-collect <owner/repo>#<number>    # answer, write the discussion in, act on the decision
+
+Both also take a pull request URL. A bare number means the pull request the
+conversation has been about, which can belong to another repository; only when
+the conversation says nothing does the working directory's remote decide. Pull request numbers repeat
+across repositories, and `/review-collect` comments and can merge, so name the
+repository. A ring and the session-start hook always pass the full name.
 
 ## Worth knowing
 
@@ -29,8 +35,9 @@ The panel says when the working session last answered, and has a **Check**
 button that rings it and waits. If nothing answers, the page shows the command
 that brings that session back (`claude --resume …`), for someone at the computer
 to run; a page cannot start a session by itself. After any `git push`, a hook
-lists the open desks for that repository, so the session rewrites whatever the
-push made out of date.
+lists the open desks for every repository named by any git remote of the
+checkout the push ran from, so a push to a fork reaches the upstream's desk, and
+the session rewrites whatever the push made out of date.
 
 The page draws mermaid diagrams: the ones Claude writes into the description,
 fenced `mermaid` blocks in any markdown file the request carries, and `.mmd`
@@ -51,17 +58,27 @@ before 0.7.0 has no rules until it is republished.
 Pressing **Approve** or **Needs changes** reaches the session two ways. The page
 stores the decision and publishes a small file into itself, which wakes the
 Claude Code session watching the desk within seconds of it going idle; that
-session writes back a pickup, and the page shows when it landed. A decision is
-acted on once: later messages and **Check** presses ring the same desk, and a
-pickup already holding that decision and its outcome tells the session to answer
-the messages rather than comment or merge again. A pickup with no outcome is a
-claim; if the session that wrote it stops, another takes it over after 5
-minutes, and reads the pull request first so it neither comments nor merges
-twice. If no session is watching, a session-start
-hook lists the open desks in `~/.review-desks.json` for the repository a session
-starts or resumes in, and counts the ones open elsewhere, so the next session
-there picks it up. A desk stays open until it is merged or closed, so a desk
-sent back with **Needs changes** is still listed, and still rewritten after a
+session writes back a pickup, and the page shows when it landed. It then
+answers every message still waiting before it comments on or merges the pull
+request, so the comment never calls a question unanswered. An approval followed
+by a later message is not merged: it is recorded as `blocked`, and the reviewer
+is asked to decide again.
+
+A decision is acted on once: later messages and **Check** presses ring the same
+desk, and a pickup already holding that decision and its outcome tells the
+session to answer the messages rather than comment or merge again. A pickup with
+no outcome is a claim; if the session that wrote it stops, another takes it over
+after 5 minutes, and reads the pull request first so it neither comments nor
+merges twice.
+
+If no session is watching, a session-start hook reads `~/.review-desks.json` and
+lists in full the open desks whose repository is named by any git remote of the
+session's directory (origin, a fork's upstream, or any other), and the open
+desks whose recorded launch directory is the session's directory, even outside
+a git repository. It counts the ones open elsewhere, so the next session started
+in either place picks the desk up. A desk is closed in the ledger, by stamping
+`collectedAt`, only when its pull request is merged or closed. A desk sent back
+with **Needs changes**, or blocked, is still listed, and still rewritten after a
 push, while it is revised.
 
 A session can watch at most five desks at once. The sweep asks for at most four,
@@ -70,8 +87,8 @@ publish result rather than assuming one. A message a session claimed and never
 answered, because that session stopped, is taken over by another session once
 the claim has sat at "working" for 5 minutes, and at once by the same session
 brought back with `claude --resume`, which keeps its id. The page itself still
-shows such a claim as working until then; showing a stalled claim differently on the page is
-left to a later release.
+shows such a claim as working until then; showing a stalled claim differently on
+the page is left to a later release.
 
 ## Why it exists
 

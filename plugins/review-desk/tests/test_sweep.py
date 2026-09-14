@@ -231,6 +231,46 @@ class Sweep(unittest.TestCase):
         self.assertIn("o/r#3", text)
         self.assertEqual(sum(l.startswith("- o/r#") for l in text.splitlines()), 1)
 
+    def test_hand_edited_shapes_are_skipped_without_a_traceback(self):
+        # A repo that is a list or dict reached sweep.message, which counted it
+        # as a dict key and crashed the SessionStart hook with a TypeError.
+        def entries(cwd):
+            bad = [
+                dict(desk(11), repo=["o", "r"]), dict(desk(12), repo={"o": "r"}),
+                dict(desk(13), repo=42), dict(desk(14), repo="no-slash"),
+                dict(desk(15), pr="12"), dict(desk(16), pr=-1), dict(desk(17), pr=True),
+                dict(desk(18), url=42),
+                # Launched here, so a well-formed one would be listed in full.
+                dict(desk(19), repo=["o", "r"], cwd=cwd),
+            ]
+            return bad + [desk(3)] + [dict(e, repo="o/a") for e in bad if e["repo"] == "o/r"]
+        for origin in ("https://github.com/o/r.git", None):
+            with self.subTest(origin=origin):
+                done = run(entries, origin=origin)
+                self.assertEqual((done.returncode, done.stderr), (0, ""))
+                text = said(done)
+                if origin:
+                    self.assertIn("- o/r#3 https://x/3 [watch]", text)
+                    self.assertEqual([l for l in text.splitlines() if l.startswith("- ")
+                                      and "https://x/" in l], ["- o/r#3 https://x/3 [watch]"])
+                else:
+                    self.assertIn("1 more review desk waits", text)
+                for n in range(11, 20):
+                    self.assertNotIn(f"https://x/{n}", text)
+                    self.assertNotIn(f"#{n}", text)
+
+    def test_no_json_ledger_content_raises(self):
+        values = [None, True, 0, -1, 1.5, "", "x", "o/r", [], ["o", "r"], {}, {"a": 1}]
+        fields = ("repo", "pr", "url", "cwd", "collectedAt", "outcome")
+        entries = [dict(desk(2), **{field: v}) for field in fields for v in values]
+        texts = [json.dumps(v) for v in (entries, entries + values, {"repo": "o/r"}, 7, "o/r", None)]
+        # Valid JSON nested past Python's recursion limit.
+        texts.append("[" * 100000 + "]" * 100000)
+        for text in texts:
+            with self.subTest(ledger=text[:60]):
+                done = run(text)
+                self.assertEqual((done.returncode, done.stderr), (0, ""))
+
 
 class HooksJson(unittest.TestCase):
     def test_sweep_runs_on_startup_and_resume_only(self):
