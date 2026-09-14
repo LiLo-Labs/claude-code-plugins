@@ -199,6 +199,7 @@ class AfterPush(unittest.TestCase):
     def test_no_json_content_raises(self):
         values = [None, True, 0, -1, 1.5, "", "x", "o/r", [], ["o", "r"], {}, {"a": 1}]
         fields = ("repo", "pr", "url", "cwd", "collectedAt", "outcome")
+        fields += ("branch", "head")
         entries = [{"repo": "o/r", "pr": 7, "url": "https://x/7", field: v}
                    for field in fields for v in values]
         for ledger in (entries + values, {"repo": "o/r"}, 7, None):
@@ -215,6 +216,109 @@ class AfterPush(unittest.TestCase):
                                       env=dict(os.environ, HOME=self.home),
                                       capture_output=True, text=True, timeout=10)
                 self.assertEqual((done.returncode, done.stderr), (0, ""))
+
+    def checkout(self, branch):
+        # An unborn branch is enough: the hook reads the name, never a commit.
+        subprocess.run(["git", "-C", self.repo, "symbolic-ref", "HEAD",
+                        f"refs/heads/{branch}"], check=True)
+
+    def listed(self, out):
+        return [l for l in self.said(out).splitlines() if l.startswith("- ")] if out else []
+
+    def desks_on_a_and_b(self, *extra):
+        self.ledger([
+            {"repo": "o/r", "pr": 1, "url": "https://x/1", "branch": "a",
+             "head": "1" * 40, "collectedAt": None},
+            {"repo": "o/r", "pr": 2, "url": "https://x/2", "branch": "b",
+             "head": "2" * 40, "collectedAt": None},
+            *extra,
+        ])
+
+    def test_push_lists_only_the_desk_for_the_branch_pushed(self):
+        # Two desks in one repository were listed for every push, so a session
+        # could write one pull request's commits onto the other's desk.
+        self.desks_on_a_and_b()
+        only_b = ["- o/r#2 https://x/2"]
+        self.checkout("b")
+        for command in [
+            "git push",
+            "rtk git push",
+            "git push origin",
+            "git push -u origin HEAD",
+            "git push 2>&1 | tail -3",
+            "git push >/dev/null 2>&1",
+            "git -C repo push",
+        ]:
+            with self.subTest(on="b", command=command):
+                self.assertEqual(self.listed(self.run_hook(command, cwd=self.work
+                                                           if "-C" in command else None)), only_b)
+        # The refspec names the branch, whatever is checked out.
+        self.checkout("a")
+        for command in [
+            "git push origin b",
+            "git push origin HEAD:b",
+            "rtk git push origin HEAD:b",
+            "GIT_TRACE=0 rtk git push -u origin HEAD:refs/heads/b",
+            "git push -o ci.skip --force-with-lease origin +b",
+            "git push --repo=origin b",
+            "git push origin b 2>&1",
+        ]:
+            with self.subTest(on="a", command=command):
+                self.assertEqual(self.listed(self.run_hook(command)), only_b)
+        self.assertEqual(self.listed(self.run_hook("git push")), ["- o/r#1 https://x/1"])
+
+    def test_push_of_another_branch_lists_no_desk(self):
+        self.desks_on_a_and_b()
+        self.checkout("c")
+        self.assertEqual(self.run_hook("git push"), "")
+        self.assertEqual(self.run_hook("git push origin v1.0 refs/tags/v1.0"), "")
+
+    def test_push_whose_branches_cannot_be_told_lists_every_desk(self):
+        self.desks_on_a_and_b()
+        both = ["- o/r#1 https://x/1", "- o/r#2 https://x/2"]
+        self.checkout("b")
+        for command in ["git push --all", "git push --mirror origin",
+                        "git push origin 'refs/heads/*:refs/heads/*'", "git push origin a b"]:
+            with self.subTest(command=command):
+                self.assertEqual(self.listed(self.run_hook(command)), both)
+        # A detached HEAD names no branch; `git push` there is left to git.
+        with open(os.path.join(self.repo, ".git", "HEAD"), "w") as f:
+            f.write("1" * 40 + "\n")
+        self.assertEqual(self.listed(self.run_hook("git push")), both)
+        self.assertEqual(self.listed(self.run_hook("git push origin b")), ["- o/r#2 https://x/2"])
+
+    def test_entry_without_a_branch_is_listed_for_any_push(self):
+        # Ledgers written before branch was recorded keep their reminder.
+        self.desks_on_a_and_b(
+            {"repo": "o/r", "pr": 3, "url": "https://x/3", "collectedAt": None},
+            {"repo": "o/r", "pr": 4, "url": "https://x/4", "branch": None, "head": None,
+             "collectedAt": None},
+        )
+        self.checkout("b")
+        self.assertEqual(self.listed(self.run_hook("git push")),
+                         ["- o/r#2 https://x/2", "- o/r#3 https://x/3", "- o/r#4 https://x/4"])
+
+    def test_entry_with_a_branch_or_head_that_is_not_a_string_is_ignored(self):
+        desk = {"repo": "o/r", "url": "https://x", "collectedAt": None}
+        self.ledger([
+            dict(desk, pr=11, branch=["b"]), dict(desk, pr=12, branch=5),
+            dict(desk, pr=13, branch={"b": 1}), dict(desk, pr=14, branch=True),
+            dict(desk, pr=15, branch="b", head=7), dict(desk, pr=16, head=["x"]),
+            dict(desk, pr=2, url="https://x/2", branch="b", head="2" * 40),
+        ])
+        self.checkout("b")
+        for command in ("git push", "git push origin HEAD:b", "git push --all"):
+            with self.subTest(command=command):
+                # run_hook asserts exit 0 and an empty stderr, so no traceback.
+                self.assertEqual(self.listed(self.run_hook(command)), ["- o/r#2 https://x/2"])
+
+    def test_instruction_computes_the_changelog_from_the_recorded_head(self):
+        text = self.said(self.run_hook("git push"))
+        self.assertIn("<head>..origin/<branch>", text)
+        self.assertIn("as the desk's entry in ~/.review-desks.json records them", text)
+        self.assertIn("keep the lines that section already has", text)
+        self.assertIn("Once that write has landed, set the entry's head to the headRefOid it wrote",
+                      text)
 
     def test_missing_ledger_says_nothing(self):
         os.remove(os.path.join(self.home, ".review-desks.json"))
