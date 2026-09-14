@@ -671,7 +671,19 @@ function place(){
   const name = p ? (p.full || p.name) : '';
   return here ? name + ' — ' + here : name;
 }
+// The observer and scroll handler for the headings on screen now. Each paint
+// replaces them. Left in place, the old handlers kept the old page's headings,
+// which a repaint had detached; a detached heading measures top 0, always "above
+// the fold", so on a page with no headings of its own (a source file) the last
+// old handler set `here` to the old page's heading, and a message sent from
+// a.py said the reviewer was reading a section of the description.
+let headingWatch = null;
 function watchHeadings(){
+  if (headingWatch){
+    headingWatch.io.disconnect();
+    window.removeEventListener('scroll', headingWatch.onScroll);
+    headingWatch = null;
+  }
   const hs = Array.from(document.querySelectorAll('.md h1, .md h2, .md h3'));
   here = '';
   $('where').textContent = pages()[leaf] ? pages()[leaf].name : '';
@@ -682,14 +694,16 @@ function watchHeadings(){
     $('where').textContent = here ? '¶ ' + here : pages()[leaf].name;
   }, {rootMargin: '-120px 0px 0px 0px', threshold: [0, 1]});
   hs.forEach(h => io.observe(h));
-  window.addEventListener('scroll', () => {
+  const onScroll = () => {
     const top = hs.filter(h => h.getBoundingClientRect().top < 130);
     const now = top.length ? top[top.length-1].textContent.trim() : '';
     if (now !== here){
       here = now;
       $('where').textContent = here ? '¶ '+here : pages()[leaf].name;
     }
-  }, {passive:true});
+  };
+  window.addEventListener('scroll', onScroll, {passive:true});
+  headingWatch = {io, onScroll};
 }
 
 /* ================= threads ================= */

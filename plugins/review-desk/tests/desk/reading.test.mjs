@@ -3,7 +3,7 @@
 // section they are reading.
 import {test, before, after, afterEach} from 'node:test';
 import assert from 'node:assert/strict';
-import {launch, open} from './harness.mjs';
+import {launch, open, payload} from './harness.mjs';
 
 let browser, desk;
 before(async () => { browser = await launch(); });
@@ -132,5 +132,90 @@ test('a reply for another thread leaves the open thread\'s stream nodes in place
   await desk.page.click('#shut');
   await desk.reply('u2', 'The retry is bounded, twice.');
   await desk.page.waitForSelector('#dot.show', {timeout: 3000});
+  assert.deepEqual(desk.errors, []);
+});
+
+/* ---------------- where the reviewer is reading ---------------- */
+
+// Counts, from inside the page, the IntersectionObservers made and not yet
+// disconnected, and the scroll handlers on window not yet removed.
+function countWatchers(){
+  const IO = window.IntersectionObserver;
+  window.__watch = {made: 0, live: 0, scroll: new Set()};
+  window.IntersectionObserver = class extends IO {
+    constructor(...a){ super(...a); window.__watch.made++; window.__watch.live++; this.__on = true; }
+    disconnect(){ if (this.__on){ this.__on = false; window.__watch.live--; } return super.disconnect(); }
+  };
+  const add = window.addEventListener, remove = window.removeEventListener;
+  window.addEventListener = function(type, fn, o){
+    // A {once: true} handler removes itself; those are the test's own.
+    if (type === 'scroll' && !(o && o.once)) window.__watch.scroll.add(fn);
+    return add.call(this, type, fn, o);
+  };
+  window.removeEventListener = function(type, fn, o){
+    if (type === 'scroll') window.__watch.scroll.delete(fn);
+    return remove.call(this, type, fn, o);
+  };
+}
+
+const sections = (label, n) => Array.from({length: n}, (_, i) => '## ' + label + ' ' + (i + 1) + '\n\n'
+  + Array.from({length: 6}, () => 'A sentence long enough to take up a line of the sheet. ').join('')
+  + '\n').join('\n');
+
+test('after many repaints the message says the section of the page on screen, and one observer is live', async () => {
+  const data = payload({body: sections('Section', 10),
+    documents: [{name: 'docs/notes.md', text: '# Notes\n\n' + sections('Part', 8)},
+                {name: 'tools/a.py', text: Array.from({length: 150}, (_, i) => 'x_' + i + ' = ' + i).join('\n')}]});
+  desk = await open(browser, {data, init: countWatchers});
+  await desk.page.waitForSelector('#sheet h2');
+  const PAGE = '#sheet';
+
+  // Ten rewrites of the description, each a repaint, and each followed 5 s later
+  // by another one that clears the fresh mark.
+  for (let i = 1; i <= 10; i++){
+    await desk.context('body', {text: sections('Section', 10) + '\nRevision ' + i + '\n'});
+    await desk.page.waitForFunction(([sel, i]) =>
+      document.querySelector(sel).textContent.includes('Revision ' + i), [PAGE, i]);
+  }
+  await desk.page.waitForTimeout(5400);
+  const made = await desk.page.evaluate(() => window.__watch.made);
+  assert.ok(made >= 20, 'the wrapped constructor saw the page\'s repaints (' + made + ')');
+
+  const scrollTo = y => desk.page.evaluate(y => new Promise(done => {
+    addEventListener('scroll', () => requestAnimationFrame(() => done()), {once: true});
+    window.scrollTo({top: y, behavior: 'instant'});
+  }), y);
+  const headingY = text => desk.page.evaluate(text => {
+    const h = [...document.querySelectorAll('#sheet h1, #sheet h2')].find(x => x.textContent.trim() === text);
+    return h.getBoundingClientRect().top + scrollY;
+  }, text);
+  const sendAndRead = async question => {
+    await desk.page.fill('#box', question);
+    await desk.page.press('#box', 'Enter');
+    const store = await desk.until(s => ((s[PR] && s[PR].threads) || [])
+      .some(t => t.turns.some(m => m.content === question)));
+    return store[PR].threads.flatMap(t => t.turns).find(m => m.content === question).reading;
+  };
+
+  await scrollTo(await headingY('Section 6') - 60);
+  assert.equal(await desk.page.textContent('#where'), '¶ Section 6');
+
+  // A source file has no headings; scrolling it must not bring back the description's.
+  await desk.page.click('.leaf:nth-child(3)');
+  await desk.page.waitForTimeout(800);                  // the switch's smooth scroll to the top
+  await scrollTo(400);
+  await desk.page.click('#fab');
+  assert.equal(await sendAndRead('Asked from the source file'), 'tools/a.py');
+
+  await desk.page.click('#shut');
+  await desk.page.click('.leaf:nth-child(2)');
+  await desk.page.waitForTimeout(800);
+  await scrollTo(await headingY('Part 3') - 60);
+  await desk.page.click('#fab');
+  assert.equal(await sendAndRead('Asked from the notes'), 'docs/notes.md — Part 3');
+
+  const watch = await desk.page.evaluate(() => ({live: window.__watch.live, scroll: window.__watch.scroll.size}));
+  assert.ok(watch.live <= 1, 'live IntersectionObservers: ' + watch.live);
+  assert.ok(watch.scroll <= 1, 'window scroll handlers: ' + watch.scroll);
   assert.deepEqual(desk.errors, []);
 });
