@@ -41,7 +41,7 @@ export function build(data, title = 'Harness Desk'){
 // Runs in every frame before any of its scripts. Serialised by Playwright, so it
 // may use only its argument.
 function installStub({seed, capabilities, publishError, getDelay, getFailures, leases: held,
-    subscribeFailures}){
+    subscribeFailures, setFailures}){
   const frozen = v => {
     if (v && typeof v === 'object'){ Object.values(v).forEach(frozen); Object.freeze(v); }
     return v;
@@ -58,9 +58,12 @@ function installStub({seed, capabilities, publishError, getDelay, getFailures, l
       leases: new Map(Object.entries(held || {}).map(([p, ms]) =>
         [p, {holder: 'another-view', expires: Date.now() + ms}])),
       docSubs: new Map(), colSubs: new Map(), log: [], counter: {version: 0},
+      // `setFailures` maps a document path to the codes its next sets are refused
+      // with, one code per set, from any view. failSets() adds to it mid-test.
+      setRefusals: new Map(Object.entries(setFailures || {}).map(([p, c]) => [p, c.slice()])),
     };
   }
-  const {store, leases, docSubs, colSubs, log, counter} = shared;
+  const {store, leases, docSubs, colSubs, log, counter, setRefusals} = shared;
   const view = window === window.top ? 'page' : window.name;
   const rings = [], missing = [];
   let failuresLeft = getFailures || 0;
@@ -110,7 +113,8 @@ function installStub({seed, capabilities, publishError, getDelay, getFailures, l
     if (data !== null && new TextEncoder().encode(JSON.stringify(data)).length > MAX_BODY)
       throw fail('invalid_argument', 'document body over 256 KiB');
     if (data === null) store.delete(p); else store.set(p, clone(data));
-    log.push({op: data === null ? 'delete' : 'set', path: p, by: who, view, data: data && clone(data)});
+    log.push({op: data === null ? 'delete' : 'set', path: p, by: who, view, data: data && clone(data),
+      at: Date.now()});
     setTimeout(() => notify(p), 0);
   };
   const subscribe = (map, key, next, error, snap) => {
@@ -144,6 +148,11 @@ function installStub({seed, capabilities, publishError, getDelay, getFailures, l
         return snap;
       },
       set: async data => {
+        const refused = (setRefusals.get(p) || []).shift();
+        if (refused){
+          log.push({op: 'refused', path: p, code: refused, view, at: Date.now()});
+          throw fail(refused, 'stubbed ' + refused);
+        }
         if (!data || typeof data !== 'object' || Array.isArray(data))
           throw fail('invalid_argument', 'body must be an object');
         put(p, data, 'page');
@@ -159,9 +168,9 @@ function installStub({seed, capabilities, publishError, getDelay, getFailures, l
       acquire: async ({holder, ttlMs, data} = {}) => {
         if (typeof holder !== 'string' || !holder) throw fail('invalid_argument', 'holder is required');
         const now = Date.now(), lease = leases.get(p);
-        log.push({op: 'acquire', path: p, holder, view});
-        if (lease && lease.expires > now && lease.holder !== holder)
-          return {acquired: false, expiresAt: new Date(lease.expires).toISOString()};
+        const busy = !!lease && lease.expires > now && lease.holder !== holder;
+        log.push({op: 'acquire', path: p, holder, view, acquired: !busy, at: now});
+        if (busy) return {acquired: false, expiresAt: new Date(lease.expires).toISOString()};
         const expires = now + Math.min(Math.max(ttlMs || 30000, 1000), 600000);
         leases.set(p, {holder, expires});
         if (data) put(p, {...(store.get(p) || {}), ...clone(data)}, 'page');
@@ -201,6 +210,11 @@ function installStub({seed, capabilities, publishError, getDelay, getFailures, l
     log: () => clone(log), rings: () => clone(rings), missing: () => missing.slice(),
     // A write from outside the page, as the session's write_db lands.
     write: (p, data) => put(p, data, 'session'),
+    failSets: (p, codes) => {
+      const queue = setRefusals.get(p) || [];
+      setRefusals.set(p, queue);
+      queue.push(...codes);
+    },
     // Ends every live subscription on a document or collection path with one
     // terminal error, as db.d.ts describes: the error callback fires once and
     // the listener receives nothing more.
@@ -231,8 +245,8 @@ const skeleton = html => '<!doctype html><html><head>'
   + '</head><body>' + html;
 
 const stubOptions = ({seed = {}, capabilities = ['db', 'artifact'], publishError = null,
-    getDelay = 0, getFailures = 0, leases = {}, subscribeFailures = {}}) =>
-  ({seed, capabilities, publishError, getDelay, getFailures, leases, subscribeFailures});
+    getDelay = 0, getFailures = 0, leases = {}, subscribeFailures = {}, setFailures = {}}) =>
+  ({seed, capabilities, publishError, getDelay, getFailures, leases, subscribeFailures, setFailures});
 
 // Everything a test does to one view. `frame` is a Page for a lone desk, or the
 // view's Frame in openPair(); both answer the calls the tests make.
@@ -244,6 +258,13 @@ function deskFor(frame, {page, errors, pr, html, close}){
     rings: () => frame.evaluate(() => window.__desk.rings()),
     missing: () => frame.evaluate(() => window.__desk.missing()),
     write: (p, v) => frame.evaluate(([p, v]) => window.__desk.write(p, v), [p, v]),
+    failSets: (p, codes) => frame.evaluate(([p, c]) => window.__desk.failSets(p, c), [p, codes]),
+    // Loads this view again, as another view's ring does on the host. In
+    // openPair() the store is the top window's, so it survives the reload.
+    reload: async () => {
+      await frame.goto(frame.url());
+      await frame.waitForFunction(() => !!window.__desk);
+    },
     kill: (p, code = 'unavailable') => frame.evaluate(([p, c]) => window.__desk.kill(p, c), [p, code]),
     subscribes: async p => (await desk.log()).filter(e => e.op === 'subscribe' && e.path === p).length,
     reply: (turn, text, status = 'done') =>
