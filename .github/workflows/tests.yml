@@ -63,3 +63,30 @@ jobs:
       - name: Run the after-push reminder tests
         working-directory: plugins/review-desk
         run: python3 tests/test_after_push.py
+      - name: Run the desk build tests
+        working-directory: plugins/review-desk
+        run: python3 tests/test_build.py
+
+  # The desk page itself, in Chromium, with window.claude stubbed. Real-host
+  # behaviour still needs a person: automation cannot click inside the
+  # artifact iframe.
+  review-desk-page:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: plugins/review-desk
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: plugins/review-desk/package-lock.json
+      - name: Check the page's script parses
+        run: |
+          python3 -c "import build_desk as b; print(b.page_script(b.template().replace(b.MARKER, '{}')))" > "$RUNNER_TEMP/desk-script.js"
+          node --check "$RUNNER_TEMP/desk-script.js"
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - name: Run the page tests
+        run: npm test
