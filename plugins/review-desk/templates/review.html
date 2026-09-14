@@ -757,7 +757,7 @@ function closeThread(id){
   // thread under the reviewer.
   if (i < live) live--;
   if (live >= threads.length) live = threads.length - 1;
-  draw(); save();
+  draw(true); save();
 }
 // What the working session has said, by the id of the message it answers, taken
 // only from review/pr-N/replies. Under the desk's rules only the owner writes
@@ -817,8 +817,15 @@ function said(m){
   return '<div class="said">'+esc(sessionWait(m, r))+'</div>';
 }
 
-function drawStream(){
+// The stream follows new text only for a reader already at its end. A reply is
+// rewritten several times while the session works, and each rewrite used to
+// jump the stream to the bottom, away from whatever earlier answer the reviewer
+// had scrolled up to read. `toEnd` is for the reviewer's own moves: opening the
+// panel, switching or closing a thread, sending. A closed panel's stream has no
+// box, so every measure is 0 and it counts as at the end.
+function drawStream(toEnd){
   const t = threads[live], el = $('stream');
+  const atEnd = toEnd || el.scrollHeight - el.scrollTop - el.clientHeight < 40;
   if (!t.turns.length && restore === 'pending'){
     el.innerHTML = '<div class="hint">Loading the saved discussion…</div>';
   } else if (!t.turns.length){
@@ -834,7 +841,7 @@ function drawStream(){
           : m.via==='session' ? 'working session' : 'claude')+'</span>'
       + said(m) + '</div>').join('');
   }
-  el.scrollTop = el.scrollHeight;
+  if (atEnd) el.scrollTop = el.scrollHeight;
   $('seed').style.display = t.turns.length ? 'none' : 'flex';
   gate();
 }
@@ -901,7 +908,7 @@ function drawPresence(){
         + 'this desk, and anything you sent meanwhile, as it starts.</span>'
       : '');
 }
-function draw(){ drawTabs(); drawStream(); drawCarry(); drawBadge(); drawPresence(); }
+function draw(toEnd){ drawTabs(); drawStream(toEnd); drawCarry(); drawBadge(); drawPresence(); }
 
 $('presence').addEventListener('click', async e => {
   if (e.target.id === 'check'){
@@ -948,10 +955,10 @@ $('tabs').addEventListener('click', e => {
   if (e.target.closest('#more')){
     threads.push({id:'t'+(threads.length+1)+'-'+Date.now(),
                   name:'Thread '+(threads.length+1), turns:[], busy:false});
-    live = threads.length - 1; draw(); $('box').focus(); return;
+    live = threads.length - 1; draw(true); $('box').focus(); return;
   }
   const go = e.target.closest('[data-go]');
-  if (go){ live = +go.dataset.go; threads[live].unread = false; draw(); }
+  if (go){ live = +go.dataset.go; threads[live].unread = false; draw(true); }
 });
 
 const SEEDS = DATA.openers && DATA.openers.length ? DATA.openers : [
@@ -1066,7 +1073,7 @@ function openPanel(){
   if (!carried && pending) take();
   document.body.classList.add('open');
   threads[live].unread = false;
-  draw();
+  draw(true);
 }
 $('fab').addEventListener('click', openPanel);
 $('shut').addEventListener('click', () => {
@@ -1099,7 +1106,7 @@ async function ask(){
   if (!db){
     t.turns.push({role: 'assistant', content: 'This view cannot save messages, so this '
       + 'one will not reach the working session. Tell it directly.'});
-    draw();
+    draw(true);
     return;
   }
 
@@ -1109,7 +1116,7 @@ async function ask(){
   const slot = {role: 'assistant', via: 'session', answers: turn.id,
                 status: 'sent', sentAt: Date.now()};
   t.turns.push(slot);
-  draw();
+  draw(true);
   // rering must not ring for a slot this view is still ringing for.
   ringing.add(turn.id);
   try {
@@ -1535,8 +1542,12 @@ function listenReplies(){
     () => db.collection('review/pr-' + DATA.number + '/replies'), snap => {
       // The first delivery is what was already there at load, which the reviewer
       // is about to see anyway, so it flags no thread unread.
+      // A change confined to threads the reviewer is not looking at redraws only
+      // the tabs and the badge. The open thread's stream is left alone, nodes and
+      // all, so a selection in it survives and its text is not re-parsed. Any
+      // change touching the open thread still redraws that stream in full.
       const history = !repliesIn;
-      let shown = history;
+      let shown = history, liveShown = history;
       repliesIn = true;
       snap.docs.forEach(d => {
         const r = d.data();
@@ -1546,22 +1557,25 @@ function listenReplies(){
         const status = r.status === 'done' ? 'done' : 'working';
         const was = sessionReplies.get(r.turn);
         const changed = !was || was.text !== text || was.status !== status;
-        if (changed){ sessionReplies.set(r.turn, {text, status}); shown = true; }
+        if (changed) sessionReplies.set(r.turn, {text, status});
         for (const t of threads){
           const at = t.turns.findIndex(m => m.id === r.turn);
           if (at < 0) continue;
+          let hit = changed;
           if (!t.turns.some(m => m.via === 'session' && m.answers === r.turn)){
             let j = at + 1;
             while (j < t.turns.length && t.turns[j].role === 'assistant') j++;
             t.turns.splice(j, 0, {role: 'assistant', via: 'session', answers: r.turn});
-            shown = true;
+            hit = true;
           }
+          if (hit){ shown = true; if (t === threads[live]) liveShown = true; }
           if (changed && !history
               && (t !== threads[live] || !document.body.classList.contains('open'))) t.unread = true;
           break;
         }
       });
-      if (shown) draw();
+      if (liveShown) draw();
+      else if (shown){ drawTabs(); drawBadge(); }
       if (!reringStarted){ reringStarted = true; rering(); }
     });
 }
@@ -1774,7 +1788,7 @@ paint(); draw();
       lastHeard = Math.max(lastHeard, newest);
       drawPresence();
       // A stamp can turn a waiting "Saved and rung" into "Sent". Only then is the
-      // stream redrawn, since a redraw scrolls it to the bottom.
+      // stream redrawn, since a redraw replaces its nodes and any selection in them.
       if (threads[live].turns.some(m => m.via === 'session' && m.status === 'sent'
                                      && !replied.has(m.answers)))
         drawStream();
