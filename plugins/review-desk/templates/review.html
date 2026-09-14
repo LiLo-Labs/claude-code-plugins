@@ -60,9 +60,15 @@ h1.doctitle{font-family:var(--doc);font-weight:600;font-size:30px;
   padding-top:15px;border-top:1px solid var(--rule);scroll-margin-top:14px}
 .md h2:first-of-type{border-top:none;padding-top:0;margin-top:6px}
 .md h3{font-family:var(--ui);font-weight:600;font-size:15px;margin:18px 0 5px}
+/* An identifier or a path with nothing to break at wraps where it must. `anywhere`
+   rather than `break-word`, because only `anywhere` also narrows the element's
+   minimum width, which is what stops a token from widening its container. */
+.md p,.md li,.md blockquote,.md h1,.md h2,.md h3{overflow-wrap:anywhere}
 .md p{margin:0 0 13px}
 .md ul,.md ol{margin:0 0 13px;padding-left:22px}
 .md li{margin-bottom:6px}
+.md li > ul,.md li > ol{margin:6px 0 0}
+.md li > pre{margin:6px 0}
 .md a{color:var(--cool);text-decoration:underline;text-underline-offset:2px;
   text-decoration-thickness:1px}
 .md a:hover{color:var(--mark)}
@@ -74,7 +80,7 @@ h1.doctitle{font-family:var(--doc);font-weight:600;font-size:30px;
   padding:1px 4px;border-radius:3px}
 .md pre{background:var(--rule);padding:12px 14px;border-radius:5px;
   overflow-x:auto;margin:0 0 13px}
-.md pre code{background:none;padding:0;font-size:13px;line-height:1.5}
+.md pre code{background:none;padding:0;font-size:13px;line-height:1.5;overflow-wrap:normal}
 
 /* Syntax colours drawn from the page's own palette rather than a downloaded
    theme: the artifact CSP blocks third-party stylesheets, and a theme picked
@@ -218,7 +224,7 @@ body.open #panel{display:flex}
 .turn.theirs .said{background:var(--rule);border-bottom-left-radius:2px}
 .quoted{border-left:2px solid var(--mark);padding:5px 0 5px 10px;
   font-family:var(--doc);font-size:13.5px;color:var(--soft);
-  margin-bottom:6px;max-width:94%;white-space:pre-wrap}
+  margin-bottom:6px;max-width:94%;white-space:pre-wrap;overflow-wrap:anywhere}
 .turn.mine .quoted{border-left:none;border-right:2px solid var(--mark);
   padding:5px 10px 5px 0;text-align:right;align-self:flex-end}
 .hint{color:var(--faint);font-size:14px;line-height:1.55}
@@ -231,7 +237,15 @@ body.open #panel{display:flex}
 /* The working session writes markdown, so its replies are rendered, not shown raw. */
 .said.rich{white-space:normal}
 .said.rich p,.said.rich ul,.said.rich ol,.said.rich pre,.said.rich .tw{margin:0 0 8px}
+.said.rich > :first-child{margin-top:0}
 .said.rich > :last-child{margin-bottom:0}
+/* Headings mark sections of an answer; at the page's sizes a 22px "Details" was
+   the loudest thing in the panel. */
+.said.rich h1,.said.rich h2,.said.rich h3{font-family:var(--ui);font-size:14.5px;
+  font-weight:600;margin:10px 0 4px}
+.said.rich blockquote{margin:0 0 8px;padding-left:10px;border-left:2px solid var(--mark);
+  color:var(--soft)}
+.said.rich li > ul,.said.rich li > ol,.said.rich li > pre{margin:4px 0}
 .said.rich ul,.said.rich ol{padding-left:18px}
 .said.rich code{font-family:var(--mono);font-size:12.5px}
 .said.rich pre,.said.rich .tw{overflow-x:auto}
@@ -407,12 +421,76 @@ function fenced(body, lang){
 function markdown(src){
   let raw = String(src || '').replace(/\r/g,'');
   raw = raw.replace(/^---\n[\s\S]*?\n---\n/, '');   // front matter is not prose
-  const rows = raw.split('\n');
+  return blocks(raw.split('\n'));
+}
+
+// Leading whitespace in columns, a tab counting four.
+const indentOf = l => l.match(/^[ \t]*/)[0].replace(/\t/g, '    ').length;
+// Drops up to n columns of leading whitespace.
+const dedent = (l, n) => {
+  let k = 0, col = 0;
+  while (k < l.length && col < n && (l[k] === ' ' || l[k] === '\t')){ col += l[k] === '\t' ? 4 : 1; k++; }
+  return l.slice(k);
+};
+const FENCE = /^ {0,3}```/;
+// `inner` is the column the item's text starts at, where its later lines are
+// expected to be indented to.
+const listMarker = l => {
+  const m = l.match(/^([ \t]*)([-*]|\d+[.)])(\s+)(.*)$/);
+  if (!m) return null;
+  const at = indentOf(m[1]);
+  return {tag: /\d/.test(m[2]) ? 'ol' : 'ul', at, text: m[4], number: parseInt(m[2], 10),
+    inner: at + m[2].length + Math.min(m[3].replace(/\t/g, '    ').length, 4)};
+};
+
+// A list starting at rows[i]. Each item collects its own lines, dedented, and
+// they are parsed as blocks of their own, which is what lets a step hold a
+// fenced command, a second paragraph or a nested list. A blank line does not end
+// the list: what follows it does. Another item of the same kind continues it,
+// an indented line continues the item, and anything else ends it.
+function listAt(rows, i){
+  const {tag, at, number} = listMarker(rows[i]);
+  const items = [];
+  let item = null, inFence = false;
+  for (; i < rows.length; i++){
+    const line = rows[i], m = listMarker(line);
+    if (inFence){
+      // Inside a fence only a line back at the list's own margin ends the item,
+      // so a command's blank lines and its own indentation are kept.
+      if (line.trim() && indentOf(line) <= at && !FENCE.test(line)) break;
+      item.lines.push(dedent(line, item.inner));
+      if (FENCE.test(dedent(line, item.inner))) inFence = false;
+      continue;
+    }
+    if (m && m.at <= at){
+      if (m.tag !== tag) break;
+      item = {lines: [m.text], inner: m.inner};
+      items.push(item);
+      inFence = FENCE.test(m.text);
+      continue;
+    }
+    if (!line.trim()){ item.lines.push(''); continue; }
+    if (indentOf(line) <= at) break;
+    const body = dedent(line, item.inner);
+    item.lines.push(body);
+    if (FENCE.test(body)) inFence = true;
+  }
+  const html = items.map(({lines}) => {
+    while (lines.length && !lines[lines.length - 1].trim()) lines.pop();
+    const inner = blocks(lines);
+    // A tight item's text is not a paragraph, so a plain step renders as it
+    // always did and a nested list sits right under its parent's line.
+    return '<li>' + (lines.some(l => !l.trim()) ? inner : inner.replace(/^<p>([\s\S]*?)<\/p>/, '$1')) + '</li>';
+  }).join('');
+  const start = tag === 'ol' && number !== 1 && Number.isSafeInteger(number) ? ' start="' + number + '"' : '';
+  return {html: '<' + tag + start + '>' + html + '</' + tag + '>', next: i};
+}
+
+function blocks(rows){
   const out = [];
-  let para = [], quote = [], list = null, code = null, table = null, codeLang = '';
+  let para = [], quote = [], code = null, table = null, codeLang = '', fenceAt = 0;
   const shutP = () => { if (para.length){ out.push('<p>'+inline(para.join(' '))+'</p>'); para=[]; } };
   const shutQ = () => { if (quote.length){ out.push('<blockquote>'+inline(quote.join(' '))+'</blockquote>'); quote=[]; } };
-  const shutL = () => { if (list){ out.push('<'+list.tag+'>'+list.items.map(i=>'<li>'+inline(i)+'</li>').join('')+'</'+list.tag+'>'); list=null; } };
   const shutT = () => {
     if (!table) return;
     const head = '<tr>'+table.head.map(c=>'<th>'+inline(c)+'</th>').join('')+'</tr>';
@@ -420,20 +498,22 @@ function markdown(src){
     out.push('<div class="tw"><table><thead>'+head+'</thead><tbody>'+body+'</tbody></table></div>');
     table = null;
   };
-  const shutAll = () => { shutP(); shutQ(); shutL(); shutT(); };
+  const shutAll = () => { shutP(); shutQ(); shutT(); };
   const cells = l => l.replace(/^\||\|$/g,'').split('|').map(c=>c.trim());
 
   for (let i = 0; i < rows.length; i++){
     const line = rows[i];
     if (code !== null){
-      if (/^```/.test(line)){ out.push(fenced(code.join('\n'), codeLang)); code=null; codeLang=''; }
-      else code.push(line);
+      if (FENCE.test(line)){ out.push(fenced(code.join('\n'), codeLang)); code=null; codeLang=''; }
+      else code.push(dedent(line, fenceAt));
       continue;
     }
-    if (/^```/.test(line)){ shutAll(); code = []; codeLang = line.replace(/^```/, '').trim(); continue; }
+    if (FENCE.test(line)){
+      shutAll(); code = []; fenceAt = indentOf(line); codeLang = line.replace(/^ *```/, '').trim(); continue;
+    }
     // An indented block, but only where one can legally start: after a blank
-    // line and outside a list, so a wrapped list item is not mistaken for code.
-    if (/^(?: {4}|\t)\S/.test(line) && !list && !para.length){
+    // line. A list item's indented lines never reach here; listAt() takes them.
+    if (/^(?: {4}|\t)\S/.test(line) && !para.length){
       const body = [];
       while (i < rows.length &&
              (/^(?: {4}|\t)/.test(rows[i]) || !rows[i].trim())){
@@ -446,26 +526,19 @@ function markdown(src){
     if (/^\s*\|.*\|\s*$/.test(line)){
       const next = rows[i+1] || '';
       if (!table && /^\s*\|[\s:|-]+\|\s*$/.test(next)){
-        shutP(); shutQ(); shutL();
+        shutP(); shutQ();
         table = {head: cells(line), rows: []}; i++; continue;
       }
       if (table){ table.rows.push(cells(line)); continue; }
     } else shutT();
-    if (/^>\s?/.test(line)){ shutP(); shutL(); quote.push(line.replace(/^>\s?/,'')); continue; }
+    if (/^>\s?/.test(line)){ shutP(); quote.push(line.replace(/^>\s?/,'')); continue; }
     shutQ();
-    const bullet = line.match(/^\s*[-*]\s+(.*)$/);
-    const number = line.match(/^\s*\d+[.)]\s+(.*)$/);
-    if (bullet || number){
+    if (listMarker(line)){
       shutP();
-      const tag = bullet ? 'ul' : 'ol';
-      if (!list || list.tag !== tag){ shutL(); list = {tag, items: []}; }
-      list.items.push((bullet||number)[1]);
+      const list = listAt(rows, i);
+      out.push(list.html); i = list.next - 1;
       continue;
     }
-    if (line.trim() && list && /^\s+\S/.test(line)){
-      list.items[list.items.length-1] += ' ' + line.trim(); continue;
-    }
-    shutL();
     if (/^---+\s*$/.test(line)){ shutP(); out.push('<hr>'); continue; }
     const h = line.match(/^(#{1,4})\s+(.*)$/);
     if (h){ shutP(); const n = Math.min(h[1].length, 3);
