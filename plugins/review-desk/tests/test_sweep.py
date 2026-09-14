@@ -15,18 +15,25 @@ SWEEP = os.path.join(HERE, "..", "hooks", "sweep.py")
 HOOKS_JSON = os.path.join(HERE, "..", "hooks", "hooks.json")
 
 
-def run(ledger, origin="https://github.com/o/r.git"):
-    """Run the sweep against `ledger` (None: no file; str: raw text; else JSON)
-    from a repository whose origin is `origin` (None: not a repository)."""
+def run(ledger, origin="https://github.com/o/r.git", remotes=None):
+    """Run the sweep against `ledger` (None: no file; str: raw text; a callable
+    is given the session directory and returns the ledger; else JSON) from a
+    repository whose remotes are `remotes`, a name-to-URL dict, or else whose
+    origin is `origin` (None for both: not a repository)."""
     with tempfile.TemporaryDirectory() as home:
+        cwd = os.path.join(home, "session")
+        os.makedirs(cwd)
+        if callable(ledger):
+            ledger = ledger(cwd)
         if ledger is not None:
             with open(os.path.join(home, ".review-desks.json"), "w") as f:
                 f.write(ledger if isinstance(ledger, str) else json.dumps(ledger))
-        cwd = os.path.join(home, "session")
-        os.makedirs(cwd)
-        if origin:
+        if remotes is None:
+            remotes = {"origin": origin} if origin else {}
+        if remotes:
             subprocess.run(["git", "init", "-q", cwd], check=True)
-            subprocess.run(["git", "-C", cwd, "remote", "add", "origin", origin], check=True)
+            for name, url in remotes.items():
+                subprocess.run(["git", "-C", cwd, "remote", "add", name, url], check=True)
         event = {"hook_event_name": "SessionStart", "source": "startup", "cwd": cwd}
         done = subprocess.run([sys.executable, SWEEP], input=json.dumps(event),
                               env=dict(os.environ, HOME=home),
@@ -79,6 +86,58 @@ class Sweep(unittest.TestCase):
         self.assertEqual(len(text.splitlines()), 1)
         self.assertIn("2 more review desks wait", text)
         self.assertNotIn("read_db", text)
+
+    def test_fork_checkout_lists_the_upstream_desk_in_full(self):
+        # origin is the fork; the ledger records the pull request's base repo.
+        fork = {"origin": "https://github.com/MALathon/accrue.git",
+                "upstream": "https://github.com/LiLo-Labs/accrue.git"}
+        text = said(run([desk(3, repo="LiLo-Labs/accrue"), desk(4, repo="o/a")], remotes=fork))
+        lines = text.splitlines()
+        self.assertEqual([l for l in lines if l.startswith("- ") and "https://x/" in l],
+                         ["- LiLo-Labs/accrue#3 https://x/3 [watch]"])
+        self.assertIn("/review-collect LiLo-Labs/accrue#3", text)
+        count = [l for l in lines if "other repositories" in l]
+        self.assertEqual(len(count), 1)
+        self.assertNotIn("LiLo-Labs/accrue", count[0])
+        self.assertIn("o/a (1)", count[0])
+
+    def test_any_remote_matches_in_ssh_and_https_forms(self):
+        for remotes in [
+            {"origin": "git@github.com:fork/r.git", "upstream": "https://github.com/o/r.git"},
+            {"origin": "https://github.com/fork/r.git", "upstream": "git@github.com:o/r.git"},
+            {"origin": "https://github.com/fork/r", "upstream": "ssh://git@github.com/O/R.git"},
+        ]:
+            with self.subTest(remotes=remotes):
+                text = said(run([desk(2), desk(5, repo="o/a")], remotes=remotes))
+                self.assertIn("- o/r#2 https://x/2 [watch]", text)
+                self.assertNotIn("https://x/5", text)
+
+    def test_desk_recorded_as_launched_here_is_listed_outside_a_repository(self):
+        # A session launched in ~ published a desk for another repository; after
+        # --resume there, the ledger's cwd is the only thing tying them together.
+        entries = lambda cwd: [dict(desk(6, repo="o/forge"), cwd=cwd), desk(7, repo="o/a")]
+        text = said(run(entries, origin=None))
+        self.assertIn("- o/forge#6 https://x/6 [watch]", text)
+        self.assertIn("/review-collect o/forge#6", text)
+        self.assertIn("read_db", text)
+        count = [l for l in text.splitlines() if "other repositories" in l]
+        self.assertEqual(len(count), 1)
+        self.assertIn("o/a (1)", count[0])
+        self.assertNotIn("o/forge", count[0])
+
+    def test_recorded_cwd_is_compared_resolved(self):
+        # macOS temp directories live behind a symlink (/var -> /private/var).
+        entries = lambda cwd: [dict(desk(6, repo="o/forge"),
+                                    cwd=os.path.realpath(cwd) + os.sep)]
+        self.assertIn("- o/forge#6", said(run(entries, origin=None)))
+
+    def test_another_or_malformed_cwd_is_only_counted(self):
+        entries = lambda cwd: [dict(desk(1, repo="o/a"), cwd=os.path.dirname(cwd)),
+                               dict(desk(2, repo="o/a"), cwd=42),
+                               dict(desk(3, repo="o/a"), cwd="")]
+        text = said(run(entries, origin=None))
+        self.assertEqual(len(text.splitlines()), 1)
+        self.assertIn("3 more review desks wait", text)
 
     def test_only_other_repositories_gets_no_read_instructions(self):
         text = said(run([desk(1, repo="o/a")]))

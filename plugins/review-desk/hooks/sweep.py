@@ -3,8 +3,11 @@
 
 A reviewer decides on a page, often when no session is running, and the page's
 doorbell only reaches a session that is watching. This is the path that does
-not depend on anyone watching: a session started in a repository lists that
-repository's desks nobody has collected. It cannot read a desk's decision
+not depend on anyone watching: a session lists in full the open desks for any
+repository its directory's remotes name (origin, upstream or any other), and
+the desks whose ledger entry records this directory as the `cwd` the
+publishing session was launched in, which covers a desk published from a
+directory that is not a checkout of its repository. It cannot read a desk's decision
 itself -- only the Artifact tool can -- so it hands the session the list and
 what to do with it.
 
@@ -22,7 +25,7 @@ import json
 import os
 import sys
 
-from after_push import is_open, repo_of
+from after_push import entry_repo_in, is_open, repos_of
 
 LEDGER = os.path.join(os.path.expanduser("~"), ".review-desks.json")
 
@@ -43,19 +46,34 @@ def pending(entries):
     return [e for e in entries if is_open(e)]
 
 
-def message(waiting, here):
-    """The sweep for a session whose origin is `here` (None outside a GitHub
-    repository): this repository's desks in full, then one line counting the rest."""
-    mine = [e for e in waiting if e["repo"] == here]
-    others = {}
+def same_directory(recorded, cwd):
+    """Whether a ledger entry's recorded `cwd` names the session's directory.
+    Compared resolved, so /tmp and /private/tmp on macOS are one place. Older
+    entries have no `cwd`, and a hand-edited one may not be a string."""
+    if not isinstance(recorded, str) or not recorded or not cwd:
+        return False
+    try:
+        return os.path.realpath(recorded) == os.path.realpath(cwd)
+    except (OSError, ValueError):
+        return False
+
+
+def message(waiting, repos, cwd=None):
+    """The sweep for a session in `cwd`, whose remotes name `repos` (casefolded;
+    empty outside a GitHub repository): the desks for those repositories or
+    recorded as launched from `cwd` in full, then one line counting the rest."""
+    mine, others = [], {}
     for e in waiting:
-        if e["repo"] != here:
+        if entry_repo_in(e, repos) or same_directory(e.get("cwd"), cwd):
+            mine.append(e)
+        else:
             others[e["repo"]] = others.get(e["repo"], 0) + 1
     lines = []
     if mine:
         watch = {id(e) for e in mine[-WATCH_CAP:]}
         lines += [
-            f"Review desks for {here} still open (from ~/.review-desks.json):",
+            "Review desks still open for this directory, by its remotes or "
+            "because they were published from it (from ~/.review-desks.json):",
             "",
         ]
         for e in mine:
@@ -109,7 +127,8 @@ def message(waiting, here):
         lines.append(
             f"{total} more review {'desk waits' if total == 1 else 'desks wait'} "
             f"in other repositories, not read from this session: {counts}. A "
-            "session started in that repository lists them in full; "
+            "session started in a checkout of that repository, or in the "
+            "directory the desk was published from, lists them in full; "
             "/review-collect owner/repo#number collects one from anywhere."
         )
     return "\n".join(lines)
@@ -151,7 +170,9 @@ def main():
         return 0
     waiting = pending(entries)
     if waiting:
-        print(context(message(waiting, repo_of(event.get("cwd") or os.getcwd()))))
+        cwd = event.get("cwd") if isinstance(event.get("cwd"), str) else None
+        cwd = cwd or os.getcwd()
+        print(context(message(waiting, repos_of(cwd), cwd)))
     return 0
 
 
