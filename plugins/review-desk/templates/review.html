@@ -1069,11 +1069,17 @@ document.addEventListener('selectionchange', () => {
   pop.style.display = 'block';
   // Above the selection with a mouse. On a touch screen iPadOS puts its own
   // Copy / Look Up menu above the selection, so the pop goes below instead,
-  // clear of the lower selection handle, and kept inside the window.
+  // clear of the lower selection handle. Each falls back to the other side when
+  // its own has no room: clamping into the window instead put the pop over the
+  // selection it was offering to carry, or, with a mouse, off the top.
   const w = pop.offsetWidth, h = pop.offsetHeight;
+  const above = r.top - h - 10, below = r.bottom + 16;
+  const fitsAbove = above >= 10, fitsBelow = below + h <= innerHeight - 10;
   const top = matchMedia('(pointer: coarse)').matches
-    ? Math.min(r.bottom + 16, innerHeight - h - 10) : r.top - h - 10;
-  pop.style.top = (window.scrollY + top) + 'px';
+    ? (fitsBelow || !fitsAbove ? below : above)
+    : (fitsAbove || !fitsBelow ? above : below);
+  // A selection taller than the window has no clear side; stay on screen.
+  pop.style.top = (window.scrollY + Math.max(10, Math.min(top, innerHeight - h - 10))) + 'px';
   pop.style.left = (window.scrollX
     + Math.max(10, Math.min(r.left + r.width/2 - w/2, innerWidth - w - 10))) + 'px';
 });
