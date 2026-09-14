@@ -277,7 +277,7 @@ function installStub({seed, capabilities, publishError, getDelay, getFailures, l
       const ring = {files: Object.keys(files)};
       if (typeof files['doorbell.json'] === 'string') ring.doorbell = JSON.parse(files['doorbell.json']);
       rings.push(ring);
-      log.push({op: 'publish', ring, view});
+      log.push({op: 'publish', ring, view, at: Date.now()});
       return {version: 'v' + (++counter.version)};
     },
   });
@@ -428,6 +428,8 @@ export async function openPair(browser, options = {}){
   const errors = [];
   page.on('pageerror', e => errors.push(e.message));
   await page.addInitScript(installStub, stub);
+  // As in open(): run in every frame, both views, before the page's scripts.
+  if (options.init) await page.addInitScript(options.init);
   await page.route('**/*', route => {
     const url = route.request().url();
     const frame = 'style="float:left;border:0;width:1000px;height:720px"';
