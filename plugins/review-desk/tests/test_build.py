@@ -2,6 +2,7 @@
 that used to break the page. The page itself is exercised in tests/desk."""
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -124,6 +125,39 @@ class Capabilities(unittest.TestCase):
         self.assertTrue(all(p == "review/pr-7" or p.startswith("review/pr-7/") for p in paths))
 
 
+HEAD = "0123456789abcdef0123456789abcdef01234567"
+
+
+class Head(unittest.TestCase):
+    """The head the reviewer read reaches the page, which stores it as decidedOn;
+    /review-collect merges an approval only while GitHub's head is still it."""
+
+    def test_gh_query_and_payload_schema_carry_head_ref_oid(self):
+        with open(os.path.join(HERE, "..", "commands", "review-desk.md"), encoding="utf-8") as f:
+            doc = f.read()
+        query = re.search(r"gh pr view <n> --repo <owner/repo> --json (\S+)", doc)
+        self.assertTrue(query, "no gh pr view query in review-desk.md")
+        self.assertIn("headRefOid", query.group(1).split(","))
+        schema = doc[doc.index("The payload is a JSON object:"):]
+        schema = schema[:schema.index("\n    }\n")]
+        self.assertRegex(schema, r'\n      "headRefOid": ')
+
+    def test_a_valid_head_reaches_the_page_payload(self):
+        payload = dict(HOSTILE, headRefOid=HEAD)
+        build_desk.check_payload(payload)
+        script = build_desk.page_script(build_desk.render(build_desk.template(), payload, "T"))
+        line = next(l for l in script.splitlines() if l.startswith("const DATA = "))
+        self.assertEqual(json.loads(line[len("const DATA = "):-1])["headRefOid"], HEAD)
+
+    def test_a_payload_without_a_head_still_builds(self):
+        build_desk.check_payload(HOSTILE)
+
+    def test_a_malformed_head_is_refused(self):
+        for bad in (HEAD[:7], HEAD + "0", HEAD.upper(), "g" * 40, " " + HEAD[1:], None, 1234, [HEAD]):
+            with self.assertRaises(build_desk.BuildError, msg=repr(bad)):
+                build_desk.check_payload(dict(HOSTILE, headRefOid=bad))
+
+
 class Cli(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -158,6 +192,12 @@ class Cli(unittest.TestCase):
         result, out = self.run_build(payload)
         self.assertEqual(result.returncode, 1)
         self.assertIn("number", result.stderr)
+        self.assertFalse(os.path.exists(out))
+
+    def test_payload_with_a_short_head_is_refused(self):
+        result, out = self.run_build(dict(HOSTILE, headRefOid=HEAD[:7]))
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("headRefOid", result.stderr)
         self.assertFalse(os.path.exists(out))
 
 
