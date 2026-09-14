@@ -48,9 +48,22 @@ WRAPPERS = {
 }
 GIT_VALUE_OPTIONS = {"-C", "-c", "--git-dir", "--work-tree", "--namespace",
                      "--super-prefix", "--config-env"}
-PUSH_VALUE_OPTIONS = {"-o", "--push-option", "--repo", "--receive-pack", "--exec"}
+# git push's own options, from its option table (builtin/push.c), checked against
+# git 2.50.1. Only these take their value as the next word. `--force-with-lease`
+# and `--signed` take one only attached with `=`: `git push --signed yes origin
+# b` pushes to a repository named yes.
+PUSH_VALUE_OPTIONS = {"--repo", "--receive-pack", "--exec", "--push-option",
+                      "--recurse-submodules"}
 # Pushes that update every branch, or only tags, so no one desk can be picked.
 PUSH_EVERYTHING = {"--all", "--branches", "--mirror", "--tags"}
+PUSH_FLAGS = PUSH_EVERYTHING | {
+    "--verbose", "--quiet", "--delete", "--dry-run", "--porcelain", "--force",
+    "--force-with-lease", "--force-if-includes", "--thin", "--set-upstream",
+    "--progress", "--prune", "--no-verify", "--verify", "--follow-tags",
+    "--signed", "--atomic", "--ipv4", "--ipv6"}
+PUSH_OPTIONAL_VALUE = {"--force-with-lease", "--signed"}
+PUSH_SHORT_FLAGS = set("vqdnfu46")
+PUSH_SHORT_VALUE = "o"  # -o, --push-option
 ASSIGNMENT = re.compile(r"[A-Za-z_]\w*=")
 
 # The only ledger outcomes that close a desk. A `revising` or `blocked` desk is
@@ -168,11 +181,37 @@ def pushes(command, cwd):
     return found
 
 
+def option_words(word):
+    """How many words the git push option `word` spans: 1, or 2 when its value
+    is the next word. None for an option git push does not declare, or one
+    written in a shape git refuses, since its value may be the next word and
+    then every word after it is misread."""
+    if word.startswith("--"):
+        name, attached, _ = word.partition("=")
+        if name.startswith("--no-") and "--" + name[5:] in PUSH_FLAGS | PUSH_VALUE_OPTIONS:
+            return None if attached else 1
+        if name in PUSH_VALUE_OPTIONS:
+            return 1 if attached else 2
+        if name in PUSH_FLAGS and (not attached or name in PUSH_OPTIONAL_VALUE):
+            return 1
+        return None
+    # A cluster of short options such as `-fu`; `-o` ends it, taking the rest of
+    # the word as its value, or the next word when nothing follows.
+    for k, letter in enumerate(word[1:], start=1):
+        if letter == PUSH_SHORT_VALUE:
+            return 1 if k + 1 < len(word) else 2
+        if letter not in PUSH_SHORT_FLAGS:
+            return None
+    return 1
+
+
 def refspecs(args):
     """The refspecs among a push's arguments (the words after `push`): its
-    positional words after the repository, with redirections such as `2>&1` set
-    aside. None when an option pushes more than named branches."""
-    positional, repo_given, options_done, i = [], False, False, 0
+    positional words after the first, which git always takes as the repository
+    (`--repo` only stands in when there is none), with redirections such as
+    `2>&1` set aside. None when an option pushes more than named branches, or is
+    one this hook cannot read."""
+    positional, options_done, i = [], False, 0
     while i < len(args):
         word = args[i]
         if word and all(c in "<>&" for c in word):
@@ -182,15 +221,17 @@ def refspecs(args):
         elif not options_done and word == "--":
             options_done = True
             i += 1
-        elif not options_done and word.startswith("-"):
+        elif not options_done and word.startswith("-") and word != "-":
             if word in PUSH_EVERYTHING:
                 return None
-            repo_given = repo_given or word == "--repo" or word.startswith("--repo=")
-            i += 2 if word in PUSH_VALUE_OPTIONS else 1
+            span = option_words(word)
+            if span is None:
+                return None
+            i += span
         else:
             positional.append(word)
             i += 1
-    return positional if repo_given else positional[1:]
+    return positional[1:]
 
 
 def current_branch(directory):
