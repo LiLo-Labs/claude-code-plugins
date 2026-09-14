@@ -56,6 +56,12 @@ export function built(data, title = 'Harness Desk'){
 }
 export const build = (data, title) => built(data, title).html;
 
+// Approve is two presses: #ok opens the confirm step, and Confirm records.
+export async function approve(desk){
+  await desk.page.click('#ok');
+  await desk.page.click('#approveConfirm');
+}
+
 const LEVELS = ['view', 'interact', 'admin', 'owner'];
 // artifact.d.ts, ArtifactErrorCode.
 const PUBLISH_CODES = ['conflict', 'not_writer', 'not_declared', 'too_large', 'invalid_content',

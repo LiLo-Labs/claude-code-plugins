@@ -1,11 +1,11 @@
-// The decision loop past Approve: Needs changes and its reason, Change this, the
-// line under a recorded decision as the working session picks it up and reports
+// The decision loop: Approve and the confirm step it opens, Needs changes and its
+// reason, Change this, the line under a recorded decision as the working session picks it up and reports
 // what happened, and Check in the panel. The session's side is written the way
 // /review-desk and /review-collect write it: a set of context/pickup, then the
 // outcome, and a presence stamp for each ring it handles.
 import {test, before, after, afterEach} from 'node:test';
 import assert from 'node:assert/strict';
-import {launch, open} from './harness.mjs';
+import {launch, open, payload, approve} from './harness.mjs';
 
 const PR = 'review/pr-42';
 const RESUME = 'cd ~/code/claude-code-plugins && claude --resume 0123abcd-4567-89ab-cdef-0123456789ab';
@@ -90,7 +90,7 @@ test('Change this after a recorded decision re-opens the choice, and the new dec
   await desk.page.click('#back');
 
   await desk.page.waitForTimeout(5);
-  await desk.page.click('#ok');
+  await approve(desk);
   const again = (await desk.until(s => s[PR] && s[PR].decision === 'approved'))[PR];
   assert.ok(Date.parse(again.decidedAt) > Date.parse(first.decidedAt),
     again.decidedAt + ' is not later than ' + first.decidedAt);
@@ -103,7 +103,7 @@ test('Change this after a recorded decision re-opens the choice, and the new dec
 test('the pickup line follows the session: picked up, merged, blocked with its detail, closed, and revising on a later decision', async () => {
   desk = await open(browser);
   await ready(desk);
-  await desk.page.click('#ok');
+  await approve(desk);
   const {decidedAt} = (await desk.until(s => s[PR] && s[PR].decision === 'approved'))[PR];
   await lineSays('Waiting for the working session');
   const at = new Date().toISOString();
@@ -152,7 +152,7 @@ test('Approve whose ring is refused says the view could not notify the working s
   for (const code of ['rate_limited', 'not_granted', 'upstream_error', 'not_writer']){
     desk = await open(browser, {publishError: code});
     await ready(desk);
-    await desk.page.click('#ok');
+    await approve(desk);
     await desk.until(s => s[PR] && s[PR].decision === 'approved');
     await lineSays('could not notify');
     assert.equal(await line(), 'Saved, but this view could not notify the working session (' + code
@@ -170,7 +170,7 @@ test('Approve whose ring is refused says the view could not notify the working s
 test('a view that cannot ring records a decision and says it could not notify the working session', async () => {
   desk = await open(browser, {capabilities: ['db']});
   await ready(desk);
-  await desk.page.click('#ok');
+  await approve(desk);
   await desk.until(s => s[PR] && s[PR].decision === 'approved');
   await lineSays('could not notify');
   assert.match(await line(), /^Saved, but this view could not notify the working session \(unavailable\)\./);
@@ -179,7 +179,7 @@ test('a view that cannot ring records a decision and says it could not notify th
 test('a view that cannot reach the store says no session will see the decision', async () => {
   desk = await open(browser, {capabilities: []});
   await desk.page.waitForFunction('restore === "nostore"');
-  await desk.page.click('#ok');
+  await approve(desk);
   await lineSays('Saving is unavailable on this view');
   assert.deepEqual(await desk.store(), {});
 });
@@ -232,4 +232,156 @@ test('a Check whose ring is refused says it could not ring the working session',
   await desk.page.waitForSelector('#presence >> text=Could not ring the working session (rate_limited).');
   assert.doesNotMatch(await desk.page.textContent('#presence'), /Checking/);
   assert.deepEqual(await desk.rings(), []);
+});
+
+/* ---- Approve asks once before it starts a merge ---- */
+const HEAD = 'a1'.repeat(20);
+// The page must never ask with window.confirm: a frame sandboxed without
+// allow-modals answers false at once. A call throws, and afterEach sees the error.
+const noConfirm = () => { window.confirm = () => { throw new Error('window.confirm was called'); }; };
+const focused = () => desk.page.evaluate(() => document.activeElement && document.activeElement.id);
+const pending = () => desk.page.evaluate(() => {
+  const el = document.getElementById('approvePending');
+  return el.hidden ? null : el.textContent;
+});
+const slot = (id, extra = {}) => [{id, role: 'user', content: 'Question ' + id, to: 'session'},
+  {role: 'assistant', via: 'session', answers: id, status: 'sent', sentAt: 1, rungAt: 2, ...extra}];
+const withTurns = (turns, replies = {}) => ({
+  [PR]: {pr: 42, title: 'Harness desk', decision: null, reason: null, decidedAt: null,
+    threads: [{id: 't1', name: 'Asked', turns}]},
+  ...Object.fromEntries(Object.entries(replies).map(([id, [status, text]]) =>
+    [PR + '/replies/' + id, {turn: id, status, text, at: '2026-09-14T10:00:00.000Z'}])),
+});
+const repliesLoaded = d => d.page.waitForFunction('repliesIn === true', null, {timeout: 5000});
+
+test('one press on Approve stores and rings nothing, and opens a confirm step naming the pull request and head', async () => {
+  desk = await open(browser, {data: payload({headRefOid: HEAD}), init: noConfirm});
+  await ready(desk);
+  const ok = await desk.page.locator('#ok').boundingBox();
+  await desk.page.click('#ok');
+  await desk.page.waitForTimeout(600);
+  assert.deepEqual(await desk.store(), {});
+  assert.deepEqual(await desk.rings(), []);
+  // A double tap on Approve must not land its second tap on Confirm.
+  assert.notEqual(await desk.page.evaluate(([x, y]) => (document.elementFromPoint(x, y) || {}).id,
+    [ok.x + ok.width / 2, ok.y + ok.height / 2]), 'approveConfirm');
+
+  assert.equal(await desk.page.textContent('#approveAsk'), 'Approve and merge LiLo-Labs/claude-code-plugins#42 at a1a1a1a?');
+  assert.equal(await pending(), null, 'nothing is in progress, so no in-progress line');
+  assert.equal(await focused(), 'approveConfirm');
+  for (const [sel, name] of [['#approveConfirm', 'Confirm'], ['#approveBack', 'Back']]){
+    const b = desk.page.locator(sel);
+    assert.equal(await b.evaluate(el => el.tagName), 'BUTTON', sel);
+    assert.equal((await b.textContent()).trim(), name);
+    const box = await b.boundingBox();
+    assert.ok(box.width >= 44 && box.height >= 44, sel + ' is ' + box.width + 'x' + box.height);
+  }
+  assert.equal(await desk.page.locator('#decide button').count(), 2, 'Confirm and Back are separate buttons');
+});
+
+test('Approve then Confirm stores approved with decidedAt, decidedOn and repo, and rings kind decision once', async () => {
+  desk = await open(browser, {data: payload({headRefOid: HEAD}), init: noConfirm});
+  await ready(desk);
+  const before = new Date().toISOString();
+  await approve(desk);
+  const doc = (await desk.until(s => s[PR] && s[PR].decision === 'approved'))[PR];
+  assert.deepEqual(Object.keys(doc).sort(),
+    ['decidedAt', 'decidedOn', 'decision', 'pr', 'reason', 'repo', 'threads', 'title', 'updatedAt']);
+  assert.equal(doc.decidedOn, HEAD);
+  assert.equal(doc.repo, 'LiLo-Labs/claude-code-plugins');
+  assert.equal(doc.reason, null);
+  assert.match(doc.decidedAt, /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/);
+  assert.ok(doc.decidedAt >= before);
+
+  await lineSays('Waiting for the working session');
+  await desk.page.waitForTimeout(600);
+  const rings = await decisionRings();
+  assert.equal((await desk.rings()).length, 1);
+  assert.deepEqual({decision: rings[0].doorbell.decision, decidedAt: rings[0].doorbell.decidedAt},
+    {decision: 'approved', decidedAt: doc.decidedAt});
+  assert.match(await desk.page.textContent('#decide .done'), /You marked this approved/);
+});
+
+test('Back and Escape leave the confirm step with nothing stored or rung, and focus returns to Approve', async () => {
+  desk = await open(browser, {init: noConfirm});
+  await ready(desk);
+  for (const leave of [() => desk.page.click('#approveBack'), () => desk.page.keyboard.press('Escape')]){
+    await desk.page.click('#ok');
+    await desk.page.waitForSelector('#approveConfirm');
+    await leave();
+    await desk.page.waitForSelector('#ok');
+    assert.equal(await desk.page.locator('#approveAsk').count(), 0);
+    assert.equal(await focused(), 'ok');
+    assert.equal(await desk.page.isEnabled('#changes'), true);
+  }
+  await desk.page.waitForTimeout(600);
+  assert.deepEqual(await desk.store(), {});
+  assert.deepEqual(await desk.rings(), []);
+});
+
+test('a reply still being written is named in the confirm step, which clears when it finishes and does not block Confirm', async () => {
+  desk = await open(browser, {seed: withTurns(slot('m1'), {m1: ['working', 'Renaming it now']}), init: noConfirm});
+  await ready(desk);
+  await repliesLoaded(desk);
+  await desk.page.click('#ok');
+  assert.equal(await pending(), '1 answer is still being written. Confirm does not wait for it.');
+  assert.equal(await desk.page.isEnabled('#approveConfirm'), true);
+
+  await desk.reply('m1', 'Renamed.', 'done');
+  await desk.page.waitForFunction(() => document.getElementById('approvePending').hidden);
+  assert.equal(await focused(), 'approveConfirm', 'the redraw kept focus on Confirm');
+  await desk.page.click('#approveConfirm');
+  await desk.until(s => s[PR] && s[PR].decision === 'approved');
+});
+
+test('a sent message with no reply is named in the confirm step, and counts add up with replies still being written', async () => {
+  desk = await open(browser, {seed: withTurns(slot('m1')), init: noConfirm});
+  await ready(desk);
+  await repliesLoaded(desk);
+  await desk.page.click('#ok');
+  assert.equal(await pending(), '1 message is still waiting for the working session. Confirm does not wait for it.');
+  assert.equal(await desk.page.isEnabled('#approveConfirm'), true);
+  await desk.page.click('#approveBack');
+  await desk.close();
+
+  desk = await open(browser, {init: noConfirm, seed: withTurns(
+    [...slot('m1'), ...slot('m2'), ...slot('m3'), ...slot('m4')],
+    {m1: ['working', 'One'], m2: ['working', 'Two'], m4: ['done', 'Answered']})});
+  await ready(desk);
+  await repliesLoaded(desk);
+  await desk.page.click('#ok');
+  assert.equal(await pending(), '2 answers are still being written and 1 message is still waiting for '
+    + 'the working session. Confirm does not wait for them.');
+  await desk.page.click('#approveConfirm');
+  await desk.until(s => s[PR] && s[PR].decision === 'approved');
+  assert.deepEqual(await desk.store().then(s => Object.keys(s).filter(k => k.includes('/replies/')).length), 3);
+});
+
+test('with the replies unreadable, the confirm step says it cannot tell whether an answer is still coming', async () => {
+  desk = await open(browser, {seed: withTurns(slot('m1')), init: noConfirm,
+    subscribeFailures: {[PR + '/replies']: ['not_granted']}});
+  await ready(desk);
+  await desk.page.waitForFunction('FEEDS.replies && FEEDS.replies.dead === "not_granted"');
+  await desk.page.click('#ok');
+  assert.match(await pending(), /replies have not loaded on this view, so it cannot tell whether an answer is still coming/);
+  assert.equal(await desk.page.isEnabled('#approveConfirm'), true);
+});
+
+test('a held Enter on Approve stops at the confirm step, and a fresh Enter on Confirm records', async () => {
+  desk = await open(browser, {init: noConfirm});
+  await ready(desk);
+  await desk.page.focus('#ok');
+  // keyboard.down on a key already down sends it as an auto-repeat.
+  await desk.page.keyboard.down('Enter');
+  await desk.page.waitForSelector('#approveConfirm');
+  for (let i = 0; i < 5; i++){ await desk.page.keyboard.down('Enter'); await desk.page.waitForTimeout(30); }
+  await desk.page.keyboard.up('Enter');
+  await desk.page.waitForTimeout(600);
+  assert.equal(await desk.page.locator('#approveAsk').count(), 1, 'the repeats left the confirm step up');
+  assert.deepEqual(await desk.store(), {});
+  assert.deepEqual(await desk.rings(), []);
+
+  assert.equal(await focused(), 'approveConfirm');
+  await desk.page.keyboard.press('Enter');
+  await desk.until(s => s[PR] && s[PR].decision === 'approved');
 });

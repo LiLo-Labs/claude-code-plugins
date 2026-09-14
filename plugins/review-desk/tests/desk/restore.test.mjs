@@ -3,7 +3,7 @@
 // recorded ring is rung again when the desk next loads.
 import {test, before, after, afterEach} from 'node:test';
 import assert from 'node:assert/strict';
-import {launch, open} from './harness.mjs';
+import {launch, open, approve} from './harness.mjs';
 
 let browser, desk;
 before(async () => { browser = await launch(); });
@@ -107,7 +107,7 @@ test('while the stored document loads, Approve, Send and the openers write nothi
   assert.equal(await desk.page.inputValue('#box'), 'Sent during the load');
 
   // Once settled, the same button records the decision beside the discussion.
-  await desk.page.click('#ok');
+  await approve(desk);
   const store = await desk.until(s => s[PR].decision === 'approved');
   assert.deepEqual(asked(store), ['The important argument']);
   assert.deepEqual(desk.errors, []);
