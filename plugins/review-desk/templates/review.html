@@ -235,6 +235,7 @@ body.open #panel{display:flex}
   color:var(--mark);font-family:var(--ui);font-size:12px;padding:3px 9px;
   border-radius:5px;cursor:pointer}
 .btn:disabled,.seed button:disabled{opacity:.45;cursor:default}
+#pageFeeds .lost{margin:14px 0 0}
 
 .compose{display:flex;gap:8px;padding:11px 13px;border-top:1px solid var(--rule);
   align-items:flex-end;flex-shrink:0}
@@ -283,6 +284,7 @@ footer{padding:22px 0 0;font-size:12.5px;color:var(--faint);line-height:1.6}
   <div class="tag" id="repoTag"></div>
   <h1 class="doctitle" id="title"></h1>
   <div class="meta" id="meta"></div>
+  <div id="pageFeeds"></div>
 
   <div class="leaves" id="leaves"></div>
   <div class="sheet"><div class="md" id="sheet"></div></div>
@@ -324,6 +326,7 @@ footer{padding:22px 0 0;font-size:12.5px;color:var(--faint);line-height:1.6}
   <div class="stream" id="stream"></div>
   <div class="seed" id="seed"></div>
   <div id="aloneSlot"></div>
+  <div id="feedSlot"></div>
   <div id="lostSlot"></div>
   <div id="carrySlot"></div>
   <div class="compose">
@@ -724,27 +727,33 @@ function drawTabs(){
 }
 // What the working session has said, by the id of the message it answers, taken
 // only from review/pr-N/replies. Under the desk's rules only the owner writes
-// there. review/pr-N itself stays writable by any viewer, and a slot's stored
-// `content` and `status` are only this page's cache of a reply. Rendering that
-// cache let a viewer write a slot's content into the discussion document and
-// have it shown as the working session's words. So said() shows only what this
-// map holds, and the cache is kept only so a reload does not flag every answered
-// thread unread and save the whole document again.
+// there. review/pr-N itself stays writable by any viewer, so said() never shows
+// session text from it. The slot stored there carries only where the message
+// has got to (see leanSlot); desks saved before 0.8.0 also carry a `content`
+// copy of the reply, which is dropped on load and never shown.
 const sessionReplies = new Map();
 let repliesIn = false;
+// Every live listener, by name; see follow().
+const FEEDS = {};
 
 // A reply slot for the working session holds nothing until the session writes
 // to it, so what it shows meanwhile is where the message has got to.
 function sessionWait(m, r){
   if (r) return r.status === 'working' ? 'The working session has this and is working on it.'
     : 'The working session marked this answered without writing a reply.';
-  // The stored slot says the session took this, but no reply document backs it.
-  if (m.status === 'working' || m.status === 'done') return repliesIn
-    ? 'The saved discussion says this was answered, but the working session has no '
-      + 'reply for it on this desk.'
-    : 'Loading the working session’s reply…';
   if (m.status === 'unsent' && m.why === 'unsaved') return 'Not saved, so this will not '
     + 'reach the working session. Tell it directly.';
+  // A dead replies listener delivers nothing more, so "Loading" or "Sent" here
+  // would never change. Say that an answer may be waiting that this view cannot see.
+  const rf = FEEDS.replies;
+  if (rf && rf.dead) return (rf.ever ? 'This view stopped receiving the working session’s replies'
+      : 'The working session’s replies could not be loaded')
+    + ' (' + rf.dead + '), so an answer may be waiting that this view cannot show.'
+    + (rf.retrying ? ' Trying again…' : rf.dead === 'revoked' ? '' : ' Use Try again below.');
+  if (!repliesIn) return 'Loading the working session’s reply…';
+  // The stored slot says the session took this, but no reply document backs it.
+  if (m.status === 'working' || m.status === 'done') return 'The saved discussion says '
+    + 'this was answered, but the working session has no reply for it on this desk.';
   if (m.status === 'unsent') return 'Saved, but this view could not ring the working '
     + 'session (' + (m.why || 'unknown') + '). The next session to start will answer it.';
   // No rungAt: saved, but no ring is recorded yet. Either the ring is going out
@@ -1012,7 +1021,7 @@ async function ask(){
   // the message from the store, never from the ring. The reply arrives in its
   // own document (see the replies listener).
   const slot = {role: 'assistant', via: 'session', answers: turn.id,
-                status: 'sent', content: '', sentAt: Date.now()};
+                status: 'sent', sentAt: Date.now()};
   t.turns.push(slot);
   draw();
   // rering must not ring for a slot this view is still ringing for.
@@ -1021,7 +1030,7 @@ async function ask(){
     const kept = await saveNow();
     const rung = kept ? await ring({kind: 'message', turn: turn.id}) : 'unsaved';
     if (rung === 'rung') slot.rungAt = Date.now();
-    else if (!slot.content){ slot.status = 'unsent'; slot.why = rung; }
+    else if (!replied.has(turn.id)){ slot.status = 'unsent'; slot.why = rung; }
     draw();
     // Stored at once, not after the debounce. A tab closed now, or a reload from a
     // republish, can still lose this write. Then the store keeps 'sent' with no
@@ -1047,13 +1056,24 @@ $('box').addEventListener('keydown', e => {
 });
 
 /* ================= persistence and live document ================= */
+// What a working-session slot stores: where its message has got to, never what
+// the session said. The words are already durable in replies/<turn id>, and
+// copying them here did three kinds of harm. Every answer was stored twice, so a
+// long review grew this one document towards the store's 256 KiB cap, past which
+// nothing saves, rings or records a decision. The copy had to be saved whenever a
+// reply changed, so every open view rewrote the whole document from its own
+// possibly stale threads each time the session reported progress. And
+// /review-collect had to be told not to trust it.
+const SLOT_KEYS = ['role', 'via', 'answers', 'status', 'why', 'sentAt', 'rungAt'];
+const leanSlot = m => Object.fromEntries(SLOT_KEYS.filter(k => k in m).map(k => [k, m[k]]));
+
 function tidy(t){
   // A reply slot still waiting on the session is kept: it holds when the
   // message was sent, and dropping it would lose the "sent" state on reload.
-  // An answered slot keeps its content as a cache only; see sessionReplies.
   return {id:t.id, name:t.name,
           turns:t.turns.filter(m => (m.content && m.content !== 'Thinking…')
-                                    || m.via === 'session')};
+                                    || m.via === 'session')
+                       .map(m => m.via === 'session' ? leanSlot(m) : m)};
 }
 let saving = null, lost = null;
 
@@ -1066,6 +1086,21 @@ function sayLost(why){
   const el = $('lostSlot');
   if (el) el.innerHTML = '<div class="lost">Not saved \u2014 ' + esc(why)
     + '. Copy anything here you want to keep; reloading will lose it.</div>';
+}
+// db.d.ts gives invalid_argument for a body over 256 KiB, and says a retry
+// cannot succeed. Its other causes do not arise for this write: the page always
+// sends an object, and review/pr-N's `interact` rule admits anyone who can open
+// the desk. So it is reported as what it almost certainly is, with the one thing
+// the reviewer can do about it, rather than as a bare code.
+function sayRefused(e){
+  if (!(e && e.code === 'invalid_argument'))
+    return sayLost((e && (e.code || e.message)) || 'the write was refused');
+  if (lost === 'too large') return;
+  lost = 'too large';
+  $('lostSlot').innerHTML = '<div class="lost">This conversation is too large to save. '
+    + 'The store refuses a discussion over 256 KiB, so nothing new here is kept, and '
+    + 'no message or decision reaches the working session. Closing a thread with × '
+    + 'removes it from what is saved; copy anything you want to keep first.</div>';
 }
 function sayKept(){
   if (lost === null) return;
@@ -1105,7 +1140,7 @@ async function save(){
       await record();
       sayKept();
     } catch (e) {
-      sayLost((e && (e.code || e.message)) || 'the write was refused');
+      sayRefused(e);
     }
   }, 400);
 }
@@ -1121,7 +1156,7 @@ async function saveNow(){
     sayKept();
     return true;
   } catch (e) {
-    sayLost((e && (e.code || e.message)) || 'the write was refused');
+    sayRefused(e);
     return false;
   }
 }
@@ -1303,10 +1338,11 @@ async function restoreStored(){
     // thread but not its turns array, and pushing the next message onto that
     // frozen array threw "object is not extensible" -- so every message sent
     // after a reload was lost. Copy the turns too.
-    // A session slot's content comes back too, but any viewer can write this
-    // document, so it is never shown: said() waits for the replies listener.
+    // A desk saved before 0.8.0 also stores each session slot's content. Any
+    // viewer can write this document, so that copy is never shown, and it is
+    // dropped here so the next save leaves it out.
     threads = had.threads.map(t => ({...t, busy: false,
-      turns: (t.turns || []).map(m => ({...m}))}));
+      turns: (t.turns || []).map(m => m && m.via === 'session' ? leanSlot(m) : {...m})}));
     live = 0;
   }
   restore = 'done';
@@ -1320,19 +1356,91 @@ async function restoreStored(){
   return true;
 }
 
+/* ================= live listeners ================= */
+// db.d.ts: an onSnapshot error callback receives at most one terminal error,
+// after which that subscription delivers nothing, and a fresh onSnapshot is the
+// only way back. With no callback the listener still dies, only silently: a
+// dead replies listener left every answered message on "Loading the working
+// session's reply…" for good. So every listener goes through follow(), which
+// says on the page which feed stopped and with what code, and subscribes again
+// once after a short randomized wait. It never retries a code that db.d.ts says
+// cannot succeed on a retry, and never more than once on its own, so a store
+// that refuses every subscribe is not asked again for the life of the tab. After
+// that the reviewer gets Try again.
+const NO_RESUBSCRIBE = new Set(['invalid_argument', 'revoked', 'not_granted',
+  'capability_disabled', 'capability_removed', 'transform_error']);
+const RESUBSCRIBE_AFTER = 1500;
+function follow(name, label, where, ref, next){
+  const feed = FEEDS[name] = {name, label, where, dead: null, retrying: false,
+    retried: false, ever: false, gen: 0};
+  feed.start = () => {
+    const gen = ++feed.gen;
+    let over = false;
+    const died = e => {
+      if (over || gen !== feed.gen) return;
+      over = true;
+      feed.dead = (e && e.code) || 'unavailable';
+      feed.retrying = !feed.retried && !NO_RESUBSCRIBE.has(feed.dead);
+      if (feed.retrying){
+        feed.retried = true;
+        setTimeout(feed.start, RESUBSCRIBE_AFTER * (1 + Math.random()));
+      }
+      drawFeeds(feed);
+    };
+    try {
+      ref().onSnapshot(snap => {
+        if (over || gen !== feed.gen) return;
+        feed.ever = true;
+        if (feed.dead){ feed.dead = null; feed.retrying = false; drawFeeds(feed); }
+        next(snap);
+      }, died);
+    } catch (e){ died(e); }
+  };
+  feed.start();
+}
+function feedLine(f){
+  return esc((f.ever ? 'This view stopped receiving ' : 'This view could not load ')
+      + f.label + ' (' + f.dead + ').'
+      + (f.ever ? ' What shows here may be out of date.' : ''))
+    + (f.retrying ? ' Trying again…'
+      : f.dead === 'revoked' ? '' : '<button data-refollow="' + esc(f.name) + '">Try again</button>');
+}
+function drawFeeds(changed){
+  [['panel', 'feedSlot'], ['page', 'pageFeeds']].forEach(([where, id]) => {
+    const down = Object.values(FEEDS).filter(f => f.where === where && f.dead);
+    $(id).innerHTML = down.length
+      ? '<div class="lost">' + down.map(feedLine).join('<br>') + '</div>' : '';
+  });
+  if (changed && changed.name === 'replies') drawStream();
+}
+document.addEventListener('click', e => {
+  const b = e.target.closest && e.target.closest('[data-refollow]');
+  const f = b && FEEDS[b.dataset.refollow];
+  if (!f || !f.dead || f.retrying) return;
+  f.retrying = true;
+  drawFeeds(f);
+  f.start();
+});
+
 // Answers from the working session: one document per message, keyed by the
 // message's id, rewritten as the session works. A reply with no slot waiting
-// (the page reloaded before the slot was saved) is added after the
-// message rather than dropped. Every delivery also adds to `replied`, the
+// (the page reloaded before the slot was saved) gets one after the message
+// rather than being dropped. Every delivery also adds to `replied`, the
 // messages the session has already claimed, which rering skips.
+//
+// Nothing here saves. The reply is already stored, in its own document, so a
+// save would only rewrite review/pr-N from this view's threads, which may be
+// missing a message another open view has sent since this one loaded.
 const replied = new Set();
+let reringStarted = false;
 function listenReplies(){
-  let first = true;
-  try {
-    db.collection('review/pr-' + DATA.number + '/replies').onSnapshot(snap => {
-      // shown: what said() renders changed. touched: the cached slots changed
-      // too, which is a reply the stored discussion did not already hold.
-      let touched = false, shown = !repliesIn;
+  if (FEEDS.replies) return;
+  follow('replies', 'the working session’s replies', 'panel',
+    () => db.collection('review/pr-' + DATA.number + '/replies'), snap => {
+      // The first delivery is what was already there at load, which the reviewer
+      // is about to see anyway, so it flags no thread unread.
+      const history = !repliesIn;
+      let shown = history;
       repliesIn = true;
       snap.docs.forEach(d => {
         const r = d.data();
@@ -1341,30 +1449,25 @@ function listenReplies(){
         const text = typeof r.text === 'string' ? r.text : '';
         const status = r.status === 'done' ? 'done' : 'working';
         const was = sessionReplies.get(r.turn);
-        if (!was || was.text !== text || was.status !== status){
-          sessionReplies.set(r.turn, {text, status}); shown = true;
-        }
+        const changed = !was || was.text !== text || was.status !== status;
+        if (changed){ sessionReplies.set(r.turn, {text, status}); shown = true; }
         for (const t of threads){
           const at = t.turns.findIndex(m => m.id === r.turn);
           if (at < 0) continue;
-          let slot = t.turns.find(m => m.via === 'session' && m.answers === r.turn);
-          if (!slot){
+          if (!t.turns.some(m => m.via === 'session' && m.answers === r.turn)){
             let j = at + 1;
             while (j < t.turns.length && t.turns[j].role === 'assistant') j++;
-            slot = {role: 'assistant', via: 'session', answers: r.turn};
-            t.turns.splice(j, 0, slot);
+            t.turns.splice(j, 0, {role: 'assistant', via: 'session', answers: r.turn});
+            shown = true;
           }
-          if (slot.content !== text || slot.status !== status){
-            slot.content = text; slot.status = status; touched = true;
-            if (t !== threads[live] || !document.body.classList.contains('open')) t.unread = true;
-          }
+          if (changed && !history
+              && (t !== threads[live] || !document.body.classList.contains('open'))) t.unread = true;
           break;
         }
       });
-      if (touched){ draw(); save(); } else if (shown) draw();
-      if (first){ first = false; rering(); }
+      if (shown) draw();
+      if (!reringStarted){ reringStarted = true; rering(); }
     });
-  } catch (e) {}
 }
 
 // A message whose ring never went out. Nothing else wakes an idle session for
@@ -1406,7 +1509,7 @@ function reringIn(ms){
   clearTimeout(reringTimer);
   reringTimer = setTimeout(rering, Math.min(Math.max(ms, 0), RING_LEASE) + 50);
 }
-const unrung = m => m.via === 'session' && !m.content && !m.rungAt
+const unrung = m => m.via === 'session' && !replied.has(m.answers) && !m.rungAt
   && (m.status === 'sent' || (m.status === 'unsent' && m.why === 'conflict'));
 const sessionSlots = doc => new Map(((doc && Array.isArray(doc.threads)) ? doc.threads : [])
   .flatMap(t => (t && Array.isArray(t.turns)) ? t.turns : [])
@@ -1449,7 +1552,7 @@ async function rering(){
       const s = stored.get(m.answers);
       if (!s) return false;
       if (unrung(s)) return true;
-      for (const k of ['status', 'why', 'rungAt', 'content']){
+      for (const k of ['status', 'why', 'rungAt']){
         if (k in s) m[k] = s[k]; else delete m[k];
       }
       return false;
@@ -1459,7 +1562,7 @@ async function rering(){
     const rung = await ring({kind: 'message', turns: toRing.map(m => m.answers), again: true});
     toRing.forEach(m => {
       // A reply that landed during the ring has taken over this slot.
-      if (m.content || m.status === 'working') return;
+      if (replied.has(m.answers)) return;
       if (rung === 'rung'){ m.status = 'sent'; delete m.why; m.rungAt = Date.now(); }
       else { m.status = 'unsent'; m.why = rung; }
     });
@@ -1477,13 +1580,16 @@ async function rering(){
       const had = snap.exists && snap.data();
       if (!had || !Array.isArray(had.threads)) return;
       // The store hands back frozen objects; copy down to the turns before editing.
+      // A pre-0.8.0 slot's content copy is left out here too.
       const doc = {...had, updatedAt: new Date().toISOString(),
-        threads: had.threads.map(t => ({...t, turns: (t.turns || []).map(x => ({...x}))}))};
+        threads: had.threads.map(t => ({...t, turns: (t.turns || []).map(x =>
+          x && x.via === 'session' ? leanSlot(x) : {...x})}))};
       const outcome = new Map(toRing.map(m => [m.answers, m]));
       let changed = false;
       for (const x of doc.threads.flatMap(t => t.turns)){
         const m = x.via === 'session' && outcome.get(x.answers);
-        if (!m || x.content || x.rungAt || x.status === 'working' || x.status === 'done') continue;
+        if (!m || replied.has(x.answers) || x.rungAt || x.status === 'working'
+            || x.status === 'done') continue;
         x.status = m.status;
         if (m.rungAt) x.rungAt = m.rungAt;
         if (m.why) x.why = m.why; else delete x.why;
@@ -1494,7 +1600,7 @@ async function rering(){
       await ref.set(doc);
       if (records !== before) await saveNow(); else sayKept();
     } catch (e) {
-      sayLost((e && (e.code || e.message)) || 'the write was refused');
+      sayRefused(e);
     }
   } finally {
     ids.forEach(id => ringing.delete(id));
@@ -1522,14 +1628,15 @@ paint(); draw();
   draw();
 
   if (!db){ restore = 'nostore'; draw(); sayLost('this view cannot reach the store'); return; }
-  // The replies listener rewrites threads and saves, so it waits for a
-  // successful restore; Try again starts it if the first attempt failed.
+  // The replies listener adds slots to the restored threads and starts rering,
+  // so it waits for a successful restore; Try again starts it if the first
+  // attempt failed.
   if (await restoreStored()) listenReplies();
 
   // The description, rewritten by the working session when the pull request
   // changes under review.
-  try {
-    db.doc('review/pr-' + DATA.number + '/context/body').onSnapshot(snap => {
+  follow('body', 'changes to the description', 'page',
+    () => db.doc('review/pr-' + DATA.number + '/context/body'), snap => {
       const row = snap.exists && snap.data();
       if (!row || typeof row.text !== 'string' || row.text === bodyText) return;
       bodyText = row.text;
@@ -1538,7 +1645,6 @@ paint(); draw();
       paint();
       setTimeout(() => { freshOn = {}; paint(); }, 5000);
     });
-  } catch (e) {}
 
   // The session's presence stamps, one per ring it handled. The first snapshot is
   // history, timed from the stamps' names; a stamp that arrives after it is an
@@ -1552,8 +1658,8 @@ paint(); draw();
     const t = parseInt(String(id), 10) * 1000;
     return Number.isFinite(t) && t > 0 && t < Date.now() + 86400000 ? t : 0;
   };
-  try {
-    db.collection('review/pr-' + DATA.number + '/presence').onSnapshot(snap => {
+  follow('presence', 'word from the working session', 'panel',
+    () => db.collection('review/pr-' + DATA.number + '/presence'), snap => {
       const first = stampsSeen === null;
       if (first) stampsSeen = new Set();
       let newest = 0;
@@ -1573,20 +1679,18 @@ paint(); draw();
       drawPresence();
       // A stamp can turn a waiting "Saved and rung" into "Sent". Only then is the
       // stream redrawn, since a redraw scrolls it to the bottom.
-      if (threads[live].turns.some(m => m.via === 'session' && m.status === 'sent' && !m.content))
+      if (threads[live].turns.some(m => m.via === 'session' && m.status === 'sent'
+                                     && !replied.has(m.answers)))
         drawStream();
     });
-  } catch (e) {}
 
   // The session's acknowledgement, written when it answers the doorbell or
   // finds this desk in its session-start sweep.
-  try {
-    db.doc('review/pr-' + DATA.number + '/context/pickup')
-      .onSnapshot(snap => {
-        pickup = (snap.exists && snap.data()) || null;
-        if (showingDecided) drawDecided();
-      });
-  } catch (e) {}
+  follow('pickup', 'the working session’s pickup of your decision', 'page',
+    () => db.doc('review/pr-' + DATA.number + '/context/pickup'), snap => {
+      pickup = (snap.exists && snap.data()) || null;
+      if (showingDecided) drawDecided();
+    });
 
   // The document, live. Revised from the working session with write_db, this
   // page shows the new text without anyone reloading -- which is the point:
@@ -1602,9 +1706,8 @@ paint(); draw();
     const t = typeof row.at === 'string' ? Date.parse(row.at) : NaN;
     return isNaN(t) ? -Infinity : t;
   };
-  try {
-    db.collection('review/pr-' + DATA.number + '/documents')
-      .onSnapshot(snap => {
+  follow('documents', 'changes to the documents', 'page',
+    () => db.collection('review/pr-' + DATA.number + '/documents'), snap => {
         let touched = false; const changed = [];
         const newest = new Map();
         snap.docs.forEach(d => {
@@ -1628,6 +1731,5 @@ paint(); draw();
         paint();
         setTimeout(() => { freshOn = {}; paint(); }, 5000);
       });
-  } catch (e) {}
 })();
 </script>

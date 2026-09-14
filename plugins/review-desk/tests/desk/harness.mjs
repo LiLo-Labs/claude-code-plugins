@@ -2,12 +2,14 @@
 // runs outside the claude.ai host.
 //
 // The stub is written from the runtime's db.d.ts and artifact.d.ts, not observed
-// on the host, so it can drift. Two things keep it honest:
+// on the host, so it can drift. Three things keep it honest:
 // - Everything it hands the page is deep-frozen, as the real store's snapshots
 //   are. Code that mutates what it read throws here as it does on the host.
 // - A member the page reaches for that the stub does not implement is recorded
 //   in missing() and thrown, so a new call cannot pass silently against a stub
 //   that ignores it. afterEach in the tests asserts missing() is empty.
+// - An onSnapshot with no error callback is recorded in missing() too. db.d.ts:
+//   without one a terminal error still kills the listener, only silently.
 import {chromium} from 'playwright';
 import {execFileSync} from 'node:child_process';
 import fs from 'node:fs';
@@ -36,21 +38,35 @@ export function build(data, title = 'Harness Desk'){
   return html;
 }
 
-// Runs in the page before any of its scripts. Serialised by Playwright, so it
+// Runs in every frame before any of its scripts. Serialised by Playwright, so it
 // may use only its argument.
-function installStub({seed, capabilities, publishError, getDelay, getFailures, leases: held}){
+function installStub({seed, capabilities, publishError, getDelay, getFailures, leases: held,
+    subscribeFailures}){
   const frozen = v => {
     if (v && typeof v === 'object'){ Object.values(v).forEach(frozen); Object.freeze(v); }
     return v;
   };
   const clone = v => JSON.parse(JSON.stringify(v));
-  const store = new Map(Object.entries(seed || {}).map(([k, v]) => [k, clone(v)]));
-  // `leases` maps a document path to the ms left on a lease another view holds.
-  const leases = new Map(Object.entries(held || {}).map(([p, ms]) =>
-    [p, {holder: 'another-view', expires: Date.now() + ms}]));
-  const docSubs = new Map(), colSubs = new Map();
-  const log = [], rings = [], missing = [];
-  let version = 0, failuresLeft = getFailures || 0;
+  // One store per browser page. In openPair() each view is a frame of the same
+  // page, so the frames find the top window's store and share it, as two open
+  // views of one desk share the real one.
+  let shared = window !== window.top && window.top.__deskShared;
+  if (!shared){
+    shared = window.__deskShared = {
+      store: new Map(Object.entries(seed || {}).map(([k, v]) => [k, clone(v)])),
+      // `leases` maps a document path to the ms left on a lease another view holds.
+      leases: new Map(Object.entries(held || {}).map(([p, ms]) =>
+        [p, {holder: 'another-view', expires: Date.now() + ms}])),
+      docSubs: new Map(), colSubs: new Map(), log: [], counter: {version: 0},
+    };
+  }
+  const {store, leases, docSubs, colSubs, log, counter} = shared;
+  const view = window === window.top ? 'page' : window.name;
+  const rings = [], missing = [];
+  let failuresLeft = getFailures || 0;
+  // `subscribeFailures` maps a path to the codes its next subscribes die with,
+  // one code per subscribe, before any snapshot is delivered.
+  const refusals = new Map(Object.entries(subscribeFailures || {}).map(([p, c]) => [p, c.slice()]));
 
   const fail = (code, message) => Object.assign(new Error(message), {code});
   const segments = p => {
@@ -83,19 +99,33 @@ function installStub({seed, capabilities, publishError, getDelay, getFailures, l
       metadata: {fromCache: false, hasPendingWrites: false}});
   };
   const notify = p => {
-    (docSubs.get(p) || []).forEach(cb => cb(docSnap(p)));
+    (docSubs.get(p) || []).slice().forEach(s => s.next(docSnap(p)));
     const c = parentOf(p);
-    (colSubs.get(c) || []).forEach(cb => cb(colSnap(c)));
+    (colSubs.get(c) || []).slice().forEach(s => s.next(colSnap(c)));
   };
+  // db.d.ts: a document body is at most 256 KiB serialized, and an oversize
+  // write rejects invalid_argument.
+  const MAX_BODY = 256 * 1024;
   const put = (p, data, who) => {
+    if (data !== null && new TextEncoder().encode(JSON.stringify(data)).length > MAX_BODY)
+      throw fail('invalid_argument', 'document body over 256 KiB');
     if (data === null) store.delete(p); else store.set(p, clone(data));
-    log.push({op: data === null ? 'delete' : 'set', path: p, by: who, data: data && clone(data)});
+    log.push({op: data === null ? 'delete' : 'set', path: p, by: who, view, data: data && clone(data)});
     setTimeout(() => notify(p), 0);
   };
-  const subscribe = (map, key, cb, snap) => {
-    const list = map.get(key) || []; map.set(key, list); list.push(cb);
-    setTimeout(() => list.includes(cb) && cb(snap()), 0);
-    return () => { const i = list.indexOf(cb); if (i >= 0) list.splice(i, 1); };
+  const subscribe = (map, key, next, error, snap) => {
+    log.push({op: 'subscribe', path: key, view});
+    if (typeof error !== 'function') missing.push('onSnapshot without an error callback: ' + key);
+    const codes = refusals.get(key);
+    if (codes && codes.length){
+      const code = codes.shift();
+      setTimeout(() => error && error({code, message: 'stubbed ' + code}), 0);
+      return () => {};
+    }
+    const sub = {next, error};
+    const list = map.get(key) || []; map.set(key, list); list.push(sub);
+    setTimeout(() => list.includes(sub) && next(snap()), 0);
+    return () => { const i = list.indexOf(sub); if (i >= 0) list.splice(i, 1); };
   };
 
   const docRef = p => {
@@ -107,7 +137,7 @@ function installStub({seed, capabilities, publishError, getDelay, getFailures, l
       // is taken when the read is made, so a write landing during the delay is
       // missing from what comes back, as it would be on a real round trip.
       get: async () => {
-        log.push({op: 'get', path: p});
+        log.push({op: 'get', path: p, view});
         const snap = docSnap(p);
         if (getDelay) await new Promise(r => setTimeout(r, getDelay));
         if (failuresLeft > 0){ failuresLeft--; throw fail('unavailable', 'stubbed unavailable'); }
@@ -128,17 +158,17 @@ function installStub({seed, capabilities, publishError, getDelay, getFailures, l
       // expiry, and a grant merges `data` into the body.
       acquire: async ({holder, ttlMs, data} = {}) => {
         if (typeof holder !== 'string' || !holder) throw fail('invalid_argument', 'holder is required');
-        const now = Date.now(), held = leases.get(p);
-        log.push({op: 'acquire', path: p, holder});
-        if (held && held.expires > now && held.holder !== holder)
-          return {acquired: false, expiresAt: new Date(held.expires).toISOString()};
+        const now = Date.now(), lease = leases.get(p);
+        log.push({op: 'acquire', path: p, holder, view});
+        if (lease && lease.expires > now && lease.holder !== holder)
+          return {acquired: false, expiresAt: new Date(lease.expires).toISOString()};
         const expires = now + Math.min(Math.max(ttlMs || 30000, 1000), 600000);
         leases.set(p, {holder, expires});
         if (data) put(p, {...(store.get(p) || {}), ...clone(data)}, 'page');
-        return {acquired: true, version: ++version, holder,
+        return {acquired: true, version: ++counter.version, holder,
           expiresAt: new Date(expires).toISOString()};
       },
-      onSnapshot: (next, error) => subscribe(docSubs, p, next, () => docSnap(p)),
+      onSnapshot: (next, error) => subscribe(docSubs, p, next, error, () => docSnap(p)),
       collection: sub => colRef(p + '/' + sub),
     });
   };
@@ -148,7 +178,7 @@ function installStub({seed, capabilities, publishError, getDelay, getFailures, l
       path: c,
       doc: id => docRef(c + '/' + (id || Math.random().toString(36).slice(2, 12))),
       get: async () => colSnap(c),
-      onSnapshot: (next, error) => subscribe(colSubs, c, next, () => colSnap(c)),
+      onSnapshot: (next, error) => subscribe(colSubs, c, next, error, () => colSnap(c)),
     });
   };
 
@@ -161,8 +191,8 @@ function installStub({seed, capabilities, publishError, getDelay, getFailures, l
       const ring = {files: Object.keys(files)};
       if (typeof files['doorbell.json'] === 'string') ring.doorbell = JSON.parse(files['doorbell.json']);
       rings.push(ring);
-      log.push({op: 'publish', ring});
-      return {version: 'v' + (++version)};
+      log.push({op: 'publish', ring, view});
+      return {version: 'v' + (++counter.version)};
     },
   });
 
@@ -171,6 +201,16 @@ function installStub({seed, capabilities, publishError, getDelay, getFailures, l
     log: () => clone(log), rings: () => clone(rings), missing: () => missing.slice(),
     // A write from outside the page, as the session's write_db lands.
     write: (p, data) => put(p, data, 'session'),
+    // Ends every live subscription on a document or collection path with one
+    // terminal error, as db.d.ts describes: the error callback fires once and
+    // the listener receives nothing more.
+    kill: (p, code) => {
+      for (const map of [docSubs, colSubs]){
+        const list = map.get(p) || [];
+        map.set(p, []);
+        list.forEach(s => setTimeout(() => s.error && s.error({code, message: 'stubbed ' + code}), 0));
+      }
+    },
   };
   window.claude = strict('claude', {
     use: async name => (capabilities.includes(name) ? {db, artifact}[name] || null : null),
@@ -181,36 +221,27 @@ export async function launch(){
   return chromium.launch();
 }
 
-// Opens a desk. `seed` is the store as it stands before the page loads.
-export async function open(browser, {data = payload(), title, seed = {},
-    capabilities = ['db', 'artifact'], publishError = null, getDelay = 0, getFailures = 0,
-    leases = {}} = {}){
-  const html = build(data, title);
-  const context = await browser.newContext();
-  const page = await context.newPage();
-  const errors = [];
-  page.on('pageerror', e => errors.push(e.message));
-  await page.addInitScript(installStub, {seed, capabilities, publishError, getDelay, getFailures, leases});
-  // Nothing leaves the machine: fonts, highlight.js and mermaid are refused, which
-  // the page is built to survive (it loses colour and drawings, nothing else).
-  await page.route('**/*', route => {
-    if (route.request().url() === ORIGIN + '/') {
-      // The host wraps the file in this skeleton.
-      return route.fulfill({contentType: 'text/html', body: '<!doctype html><html><head>'
-        + '<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
-        + '</head><body>' + html});
-    }
-    return route.abort();
-  });
-  await page.goto(ORIGIN + '/');
-  const pr = 'review/pr-' + data.number;
+// The host wraps the file in this skeleton.
+const skeleton = html => '<!doctype html><html><head>'
+  + '<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
+  + '</head><body>' + html;
+
+const stubOptions = ({seed = {}, capabilities = ['db', 'artifact'], publishError = null,
+    getDelay = 0, getFailures = 0, leases = {}, subscribeFailures = {}}) =>
+  ({seed, capabilities, publishError, getDelay, getFailures, leases, subscribeFailures});
+
+// Everything a test does to one view. `frame` is a Page for a lone desk, or the
+// view's Frame in openPair(); both answer the calls the tests make.
+function deskFor(frame, {page, errors, pr, html, close}){
   const desk = {
-    page, errors, pr, html,
-    store: () => page.evaluate(() => window.__desk.store()),
-    log: () => page.evaluate(() => window.__desk.log()),
-    rings: () => page.evaluate(() => window.__desk.rings()),
-    missing: () => page.evaluate(() => window.__desk.missing()),
-    write: (p, v) => page.evaluate(([p, v]) => window.__desk.write(p, v), [p, v]),
+    page: frame, errors, pr, html,
+    store: () => frame.evaluate(() => window.__desk.store()),
+    log: () => frame.evaluate(() => window.__desk.log()),
+    rings: () => frame.evaluate(() => window.__desk.rings()),
+    missing: () => frame.evaluate(() => window.__desk.missing()),
+    write: (p, v) => frame.evaluate(([p, v]) => window.__desk.write(p, v), [p, v]),
+    kill: (p, code = 'unavailable') => frame.evaluate(([p, c]) => window.__desk.kill(p, c), [p, code]),
+    subscribes: async p => (await desk.log()).filter(e => e.op === 'subscribe' && e.path === p).length,
     reply: (turn, text, status = 'done') =>
       desk.write(pr + '/replies/' + turn, {turn, status, text, at: new Date().toISOString()}),
     presence: (id, resume) => desk.write(pr + '/presence/' + id, resume ? {resume} : {}),
@@ -226,7 +257,62 @@ export async function open(browser, {data = payload(), title, seed = {},
         await new Promise(r => setTimeout(r, 50));
       }
     },
-    close: () => context.close(),
+    browserPage: page,
+    close,
   };
   return desk;
+}
+
+// Opens a desk. `seed` is the store as it stands before the page loads.
+export async function open(browser, options = {}){
+  const data = options.data || payload();
+  const html = build(data, options.title);
+  const context = await browser.newContext();
+  const page = await context.newPage();
+  const errors = [];
+  page.on('pageerror', e => errors.push(e.message));
+  await page.addInitScript(installStub, stubOptions(options));
+  // Nothing leaves the machine: fonts, highlight.js and mermaid are refused, which
+  // the page is built to survive (it loses colour and drawings, nothing else).
+  await page.route('**/*', route => {
+    if (route.request().url() === ORIGIN + '/')
+      return route.fulfill({contentType: 'text/html', body: skeleton(html)});
+    return route.abort();
+  });
+  await page.goto(ORIGIN + '/');
+  return deskFor(page, {page, errors, pr: 'review/pr-' + data.number, html,
+    close: () => context.close()});
+}
+
+// Two open views of one desk, as a laptop tab and a tablet, sharing one store.
+// Each is a frame of one page, so the stub's store is a single object both reach.
+// Neither reloads when the other rings: that is the case where nothing but the
+// store keeps them in step (the doorbell's reload fails, or cannot publish).
+export async function openPair(browser, options = {}){
+  const data = options.data || payload();
+  const html = build(data, options.title);
+  // Side by side and wholly inside the viewport: the panel button is fixed to
+  // its frame's corner, and a frame scrolled out of view cannot be clicked.
+  const context = await browser.newContext({viewport: {width: 2000, height: 720}});
+  const page = await context.newPage();
+  const errors = [];
+  page.on('pageerror', e => errors.push(e.message));
+  await page.addInitScript(installStub, stubOptions(options));
+  await page.route('**/*', route => {
+    const url = route.request().url();
+    const frame = 'style="float:left;border:0;width:1000px;height:720px"';
+    if (url === ORIGIN + '/') return route.fulfill({contentType: 'text/html',
+      body: '<!doctype html><html><body style="margin:0;overflow:hidden">'
+        + '<iframe name="view-a" src="/a" ' + frame + '></iframe>'
+        + '<iframe name="view-b" src="/b" ' + frame + '></iframe></body></html>'});
+    if (url === ORIGIN + '/a' || url === ORIGIN + '/b')
+      return route.fulfill({contentType: 'text/html', body: skeleton(html)});
+    return route.abort();
+  });
+  await page.goto(ORIGIN + '/');
+  const frames = ['view-a', 'view-b'].map(name => page.frame({name}));
+  await Promise.all(frames.map(f => f.waitForFunction(() => !!window.__desk)));
+  const close = () => context.close();
+  const pr = 'review/pr-' + data.number;
+  return frames.map(f => deskFor(f, {page, errors, pr, html, close}));
 }
