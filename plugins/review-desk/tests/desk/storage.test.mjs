@@ -270,3 +270,30 @@ test('each outage after a delivery gets one automatic resubscribe; a revoked fee
   assert.match(await desk.page.textContent('#feedSlot'), /stopped receiving the working session’s replies \(revoked\)/);
   assert.deepEqual(desk.errors, []);
 });
+
+test('a replies listener killed after it has delivered says the view stopped receiving', async () => {
+  const seed = leanDesk();
+  delete seed[REPLIES + '/u2'];                     // u2 waits on an answer this view may miss
+  desk = await open(browser, {seed});
+  await desk.page.click('#fab');
+  await desk.page.waitForSelector('.said.rich strong >> text=two views');
+  await desk.page.click('.tab[data-go="1"]');
+  await desk.page.waitForSelector('text=Saved and rung');
+
+  // not_granted is never retried on its own, so the state holds still to be read.
+  await desk.kill(REPLIES, 'not_granted');
+  await desk.page.waitForSelector('#feedSlot .lost');
+  assert.match(await desk.page.textContent('#feedSlot'),
+    /This view stopped receiving the working session’s replies \(not_granted\)\. What shows here may be out of date\./);
+  assert.match(await desk.page.textContent('#stream'),
+    /This view stopped receiving the working session’s replies \(not_granted\), so an answer may be waiting/);
+  assert.doesNotMatch(await desk.page.textContent('#stream'), /Saved and rung|could not be loaded/);
+  await desk.page.waitForTimeout(3500);
+  assert.equal(await desk.subscribes(REPLIES), 1);
+
+  // Try again brings the feed, and the waiting line, back.
+  await desk.page.click('#feedSlot button');
+  await desk.page.waitForSelector('#stream >> text=Saved and rung');
+  assert.equal(await desk.page.textContent('#feedSlot'), '');
+  assert.deepEqual(desk.errors, []);
+});
