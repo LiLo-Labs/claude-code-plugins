@@ -100,8 +100,10 @@ class Collect(unittest.TestCase):
         self.assertIn("your own from an earlier turn", text)
 
     def test_the_pull_request_is_read_before_commenting_or_merging(self):
+        first = flat(section(self.doc, "Answer what is waiting first"))
+        self.assertIn("gh pr view <n> --repo <owner/repo> --json state,mergeCommit,comments,commits", first)
         write = flat(section(self.doc, "Write it into the request"))
-        self.assertIn("gh pr view <n> --repo <owner/repo> --json state,mergeCommit,comments,commits", write)
+        self.assertIn('Use the pull request as read under "Answer what is waiting first"', write)
         self.assertIn("**Review desk decision:** <decision>, recorded <decidedAt>", write)
         self.assertIn("If a comment already opens with that exact line", write)
         act = flat(section(self.doc, "Act on it"))
@@ -124,6 +126,48 @@ class Collect(unittest.TestCase):
     def test_collected_desk_is_unwatched(self):
         text = flat(section(self.doc, "Record it in the ledger"))
         self.assertIn('action: "unwatch"', text)
+
+    def test_waiting_messages_are_answered_before_the_pull_request_is_written(self):
+        # Collecting first posted a permanent comment calling a question
+        # unanswered, and merged before a "hold on" was read.
+        order = [self.doc.index("## " + h) for h in
+                 ("Is it already handled", "Answer what is waiting first",
+                  "Write it into the request", "Act on it")]
+        self.assertEqual(order, sorted(order))
+        text = flat(section(self.doc, "Answer what is waiting first"))
+        self.assertIn("answer every message still waiting", text)
+        self.assertIn('"While they read"', text)
+        write = flat(section(self.doc, "Write it into the request"))
+        self.assertIn("Post the comment only after every waiting reply is written", write)
+
+    def test_a_message_after_the_decision_blocks_the_merge(self):
+        text = flat(section(self.doc, "Answer what is waiting first"))
+        rule = re.search(r"reviewer's turn whose `at` is later than `decidedAt`(.*?)(?=\n|$)", text)
+        self.assertTrue(rule, text)
+        self.assertIn("do not merge", text)
+        self.assertIn('"result": "blocked"', text)
+        self.assertIn("message after deciding", text)
+        self.assertIn("decide again", text)
+        # The user typing the command does not clear this block; only a new decision does.
+        exception = flat(section(self.doc, "Is it already handled"))
+        self.assertIn("does not cover a block for a message after deciding", exception)
+
+    def test_github_state_is_read_before_a_later_message_can_block(self):
+        # A session that merged and then stopped leaves a pickup with no outcome.
+        # Blocking on a later message before reading GitHub would report a merged
+        # request as "not merged".
+        text = flat(section(self.doc, "Answer what is waiting first"))
+        self.assertLess(text.index("gh pr view"), text.index("later than `decidedAt`"))
+        self.assertIn("What GitHub shows wins", text)
+        self.assertIn("ever reported as `blocked`", text)
+
+    def test_desk_is_found_through_the_ledger_by_repo_and_pr(self):
+        text = flat(section(self.doc, "Read it back"))
+        self.assertLess(text.index("~/.review-desks.json"), text.index('action: "list"'))
+        self.assertIn("whose `repo` and `pr` match", text)
+        self.assertIn("`repo` field", text)
+        self.assertIn("must equal", text)
+        self.assertIn("has none", text)
 
 
 class Desk(unittest.TestCase):
@@ -188,6 +232,40 @@ class Desk(unittest.TestCase):
         text = flat(section(self.doc, "Write it down"))
         self.assertIn("a desk being revised stays open", text)
         self.assertIn("set `collectedAt` and `outcome` back to null", text)
+
+    def test_ring_answers_waiting_messages_before_collecting(self):
+        decide = flat(section(self.doc, "When they decide"))
+        steps = re.findall(r"(\d)\. \*\*(.*?)\*\*", decide)
+        names = [s[1] for s in steps]
+        answer = next(i for i, n in enumerate(names) if "answer every waiting message" in n)
+        collect = next(i for i, n in enumerate(names) if "/review-collect" in n)
+        self.assertLess(answer, collect, names)
+        ask = flat(section(self.doc, "When they ask the working session"))
+        self.assertNotIn("after checking for a decision", ask)
+        self.assertIn("before collecting any decision", ask)
+        # A pickup is a claim that goes stale; a long answer must not let it.
+        self.assertIn("renews the pickup", decide)
+
+    def test_ring_names_the_request_by_repo_and_pr_from_the_ledger(self):
+        full = "/review-collect <owner/repo>#<number>"
+        for heading in ("Whenever a ring arrives", "When they decide"):
+            text = flat(section(self.doc, heading))
+            self.assertIn(full, text, heading)
+        ring = flat(section(self.doc, "Whenever a ring arrives"))
+        self.assertIn("`~/.review-desks.json` whose `url` matches the notice", ring)
+        # No bare-number collect anywhere in the doc a ring follows.
+        self.assertEqual(re.findall(r"/review-collect <(?:number|n|pr)>|/review-collect \d+", self.doc), [])
+        self.assertEqual(re.findall(r"/review-collect <(?!owner/repo>#<number>)", self.doc), [])
+
+    def test_desk_lookup_goes_through_the_ledger_and_checks_the_stored_repo(self):
+        publish = flat(section(self.doc, "Publish"))
+        self.assertLess(publish.index("~/.review-desks.json"), publish.index('action: "list"'))
+        self.assertIn("whose `repo` and `pr` match", publish)
+        self.assertIn("`repo` field", publish)
+        self.assertIn("must equal", publish)
+        self.assertIn("has none", publish)
+        decide = flat(section(self.doc, "When they decide"))
+        self.assertIn("`repo` field", decide)
 
 
 if __name__ == "__main__":

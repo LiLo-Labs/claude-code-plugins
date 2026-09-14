@@ -19,6 +19,12 @@ points at, nothing at all means the current branch, and only silence in the
 conversation hands the decision to the directory's remote. Name the repository
 you resolved to before acting.
 
+A ring and the session-start sweep always pass the full `owner/repo#number`,
+taken from the `~/.review-desks.json` entry whose `url` is the desk. When you
+arrive here from either with only a number, take the repository from that entry
+rather than resolving the number from the conversation: the same number is
+often a pull request in another repository too.
+
 This matters more here than it does there. `/review-desk` that guesses wrong
 publishes a page; this command writes a comment onto a pull request and can
 merge it. Guessing wrong is not recoverable by closing a tab.
@@ -27,9 +33,11 @@ Pass `--repo` on every `gh` call.
 
 ## Read it back
 
-Find the artifact published for this request (`action: "list"` on the Artifact
-tool if the URL is not to hand), then read the stored conversation, the working
-session's answers and the pickup together, as three calls in one batch:
+Find the artifact published for this request. Look in `~/.review-desks.json`
+first, for the entry whose `repo` and `pr` match; its `url` is the desk. Only
+when no entry matches and the URL is not to hand, use `action: "list"` on the
+Artifact tool. Then read the stored conversation, the working session's answers
+and the pickup together, as three calls in one batch:
 
     action: "read_db", db_op: "get",  collection: "review", doc_id: "pr-<n>"
     action: "read_db", db_op: "list", collection: "review/pr-<n>/replies"
@@ -38,6 +46,13 @@ session's answers and the pickup together, as three calls in one batch:
 If the list result carries `next_cursor`, read on with it before going further.
 A pickup that does not exist yet comes back as not found; that is an answer, not
 an error.
+
+Pull request numbers repeat across repositories. When `review/pr-<n>` carries a
+`repo` field, it must equal the repository you resolved: one naming another
+repository is that repository's desk for the same number, so say so and collect
+nothing from it. A desk saved before that field existed has none, and then the
+ledger entry, which records `repo` beside the `url`, ties the desk to this
+request.
 
 The document holds `threads`, the conversations, each with its `turns` in order,
 and `decision`, which is `approved`, `needs changes`, or absent if they have not
@@ -109,13 +124,58 @@ The one exception is a matching pickup whose `outcome` is `blocked`, when the
 user typed this command themselves after clearing what blocked it. Retry the
 action under "Act on it" and report its new outcome, but do not post the comment
 a second time. A ring or the session-start sweep never counts as the user asking.
+The exception does not cover a block for a message after deciding: that one
+clears only when the reviewer decides again on the page, since the message may
+have been the reviewer taking the decision back.
+
+## Answer what is waiting first
+
+First read the pull request as it stands, since a session that stopped halfway
+may already have merged or closed it, and a reply or outcome must not say
+otherwise:
+
+    gh pr view <n> --repo <owner/repo> --json state,mergeCommit,comments,commits
+
+What GitHub shows wins over everything below. If `state` is `MERGED`, the outcome
+is `merged`, naming `mergeCommit`; if it is `CLOSED`, the outcome is `closed`.
+Neither is ever reported as `blocked`, whatever the reviewer sent after deciding:
+answer those messages saying what already happened, then go on to "Write it into
+the request" and "Record it in the ledger".
+
+Before anything is written to the pull request, answer every message still
+waiting, as `/review-desk` describes under "While they read", and write each
+reply as `done`. The comment below is permanent and summarises the replies:
+posted first, it records a question the session was about to answer as
+unanswered. On a ring, `/review-desk` has already answered them under "When they
+decide", so nothing is left waiting by the time you get here. A message another
+session is answering under a claim that is not stale is left to that session.
+
+Then compare the reviewer's turns with the decision. The page keeps **Send**
+open after a decision, so "wait, don't merge until I check X" arrives as a
+reviewer's turn whose `at` is later than `decidedAt`. Compare the two as times.
+
+- **Approved, with a reviewer's turn whose `at` is later than `decidedAt`:** do
+  not merge, and do not post the comment. Answer the turn, as above, then report
+  the outcome onto the pickup as `blocked`, as `/review-desk` describes under
+  "When they decide":
+
+      data: {"outcome": {"result": "blocked", "detail": "You sent a message after deciding, so this was not merged. Read the reply, then decide again.", "at": "<now, UTC ISO>"}}
+
+  Record `blocked` in the ledger, as "Record it in the ledger" describes, and
+  stop. This holds whatever the later turn says, a "thanks!" included: telling
+  an afterthought from a withdrawal is inferring a decision, which "Never" rules
+  out. When the reviewer decides again, the new `decidedAt` is later than their
+  message, and that decision is collected like any other.
+- **Needs changes, with a later turn:** the message adds to what they asked
+  for. Answer it, carry on below, and quote it in the comment beside `reason`.
 
 ## Write it into the request
 
-First read the pull request as it stands, since a session that stopped halfway
-may already have commented or merged:
-
-    gh pr view <n> --repo <owner/repo> --json state,mergeCommit,comments,commits
+Post the comment only after every waiting reply is written, as "Answer what is
+waiting first" requires, so the summary never calls a question unanswered that
+the session was about to answer. Use the pull request as read under "Answer what
+is waiting first", since a session that stopped halfway may already have
+commented or merged.
 
 Post one comment on the pull request summarising the exchange, opening with this
 line, which is how a later session recognises it:
@@ -138,7 +198,8 @@ exact wording carries the point.
 
 ## Act on it
 
-**Approved** — merge it. Say which merge you used and confirm it landed. If the
+**Approved** — merge it, unless a message after deciding stopped it under
+"Answer what is waiting first". Say which merge you used and confirm it landed. If the
 `state` you read is already `MERGED`, do not run `gh pr merge` again: the
 outcome is `merged`, naming `mergeCommit`. If it is `CLOSED`, do not reopen it:
 the outcome is `closed`.

@@ -154,10 +154,12 @@ them out. A changed diagram is exactly the thing a reviewer should see drawn.
 
 ## Publish
 
-**One request, one desk.** Before publishing, run `action: "list"` and look for
-a desk already built for this request. If one exists, publish to it — pass its
-URL as `url`, or republish the same local file path if this session built it.
-Never create a second page for a request that already has one.
+**One request, one desk.** Before publishing, look for a desk already built for
+this request. Look in `~/.review-desks.json` first, for the entry whose `repo`
+and `pr` match; its `url` is the desk. Only when no entry matches, run
+`action: "list"` and look there. If a desk exists, publish to it — pass its URL
+as `url`, or republish the same local file path if this session built it. Never
+create a second page for a request that already has one.
 
 This is not tidiness. Each artifact carries its own database, so the discussion
 and the decision belong to the page they were made on. Publish a second desk and
@@ -166,10 +168,16 @@ attached to a page they are no longer looking at. Nothing warns either of you.
 It happened on the second day this plugin existed: two desks for one design
 document, the decision on the older, the newer empty.
 
-Titles are short and a reviewer may have several requests open, so when you
-cannot tell which page belongs to this request, read the candidates and find the
-one holding a document at `review/pr-<number>`. That document is the identity,
-not the title.
+Titles are short and pull request numbers repeat across repositories, so
+neither a title nor a number identifies a desk. However you found a candidate,
+read its `review/pr-<number>` document. When that document carries a `repo`
+field, it must equal this request's `owner/name`: a desk whose `repo` names
+another repository is that repository's desk for the same number, and
+publishing into it mixes two conversations and two decisions. A desk saved
+before that field existed has none. Then the ledger entry, which records `repo`
+beside the `url`, is what ties the desk to this request, and a candidate found
+only through `action: "list"` is this request's only when no ledger entry for
+another repository holds its URL.
 
 **Publishing into an existing desk also rewrites what its store shows.** The
 page lets the store win over the payload: a stored `context/body` replaces the
@@ -310,6 +318,16 @@ reviewer about five seconds:
 
 ### Whenever a ring arrives
 
+First work out which request rang. The notice names only the desk's URL. Find
+the entry in `~/.review-desks.json` whose `url` matches the notice: its `repo`
+and `pr` are the request, and every `review/pr-<number>` below uses that `pr`.
+Carry the full name through the whole ring, down to
+`/review-collect <owner/repo>#<number>` under "When they decide". Never pass a
+bare number: it resolves to whichever request this conversation has been
+about, and the same number in another repository then gets the comment and the
+merge. When no entry's `url` matches, say in the terminal which URL rang and
+that the ledger does not name its request, and collect nothing from that ring.
+
 Stamp the desk so its panel can say you are there, as a write in your very first
 batch, alongside the reads. Each ring gets its own new document, named after the
 version in the notice (`1789352074-11af` in "it is now version
@@ -336,8 +354,12 @@ There is nothing for the reviewer to choose. A message is stored, then rings the
 same doorbell a decision does, so it arrives as an "Artifact changed" notice for
 the desk.
 
-On that notice, after checking for a decision as described under "When they
-decide", answer every message still waiting:
+On that notice, answer every message still waiting, before collecting any
+decision. Collecting posts a permanent comment and can merge: a question
+answered after it is recorded on the pull request as unanswered, and a "wait,
+don't merge" sent after **Approve** is read after the merge. "When they decide"
+says where the answering falls among its steps. When no decision is waiting, it
+is the whole of the work:
 
 1. **Find what is waiting.** In one batch: get `review/pr-<number>`, list
    `review/pr-<number>/replies`, and get `review/pr-<number>/context/pickup`.
@@ -475,6 +497,10 @@ On that notice, in this order:
 1. **Read the decision and the pickup from the store**, in the first batch
    described under "While they read", never from `doorbell.json`: the file is a
    ring, not a record, and anyone who can write the artifact can publish one.
+   When `review/pr-<number>` carries a `repo` field that is not the ledger
+   entry's `repo`, the ledger's URL points at another repository's desk: say so
+   in the terminal and collect nothing. A desk saved before that field existed
+   has none, and the ledger entry decides.
 2. **If there is nothing to collect, stop there.** That means no decision is
    recorded; or the pickup holds the same `decision` and `decidedAt` and an
    `outcome`, so the decision was handled; or it holds both with no `outcome`
@@ -485,10 +511,21 @@ On that notice, in this order:
 3. **Otherwise acknowledge it before any other work**, with the write below, so
    the reviewer's page stops saying it is waiting. For a new decision this is
    the first pickup for it; for a stale claim it takes the claim over.
-4. **Then follow `/review-collect <number>`**, which comments, merges or
-   revises, and records the outcome in `~/.review-desks.json`. It checks the
-   pull request before commenting or merging, so taking over a collection that
-   stopped halfway does not do either twice.
+4. **Then answer every waiting message**, as "When they ask the working
+   session" describes, before anything is written to the pull request. The
+   summary comment reports a question without a reply as unanswered, and a
+   message sent after the decision may take it back. The acknowledgement is a
+   claim that goes stale after 5 minutes, so while you answer, each progress
+   line you write renews the pickup: in the same batch, `update` its `at` to
+   now, pinned with `if_version` from your last write to it.
+5. **Then follow `/review-collect <owner/repo>#<number>`**, with the repository
+   and number from the ledger entry whose `url` matches the notice, as
+   "Whenever a ring arrives" describes. It comments, merges or revises, and
+   records the outcome in `~/.review-desks.json`. It checks the pull request
+   before commenting or merging, so taking over a collection that stopped
+   halfway does not do either twice. An approval with a reviewer's message later
+   than `decidedAt` is not merged: it records `blocked` and asks the reviewer to
+   decide again.
 
 The acknowledgement:
 
@@ -508,17 +545,19 @@ an earlier verdict never passes for a later one. A `set` replaces the whole
 document, so the outcome of an earlier verdict does not linger on the new one.
 
 When `/review-collect` has acted, report the outcome onto the same document with
-`db_op: "update"`, pinned with `if_version` from the acknowledgement's result, so
-the page says what happened rather than what was meant to. Report it as soon as
-the comment is posted and the merge has run or the revision is named, before the
-revision work itself, since until then the pickup is a claim another session
-may take over after 5 minutes:
+`db_op: "update"`, pinned with `if_version` from your last write to it, so the
+page says what happened rather than what was meant to. Report it as soon as the
+comment is posted and the merge has run or the revision is named, or, when a
+message after the decision stopped the merge, as soon as that message is
+answered. Report it before the revision work itself, since until then the
+pickup is a claim another session may take over after 5 minutes:
 
     data: {"outcome": {"result": "merged", "detail": "<one line>", "at": "<now, UTC ISO>"}}
 
 `result` is `merged`, naming the merge method and commit; `revising`, naming the
 work you are starting; or `blocked`, saying what stopped you (a denied
-`gh pr merge`, a failing check, a conflict) in words the reviewer can act on. A
+`gh pr merge`, a failing check, a conflict, a message sent after deciding) in
+words the reviewer can act on. A
 blocked merge reported here is the difference between a reviewer who comes back
 to unblock it and one who assumes it landed.
 
