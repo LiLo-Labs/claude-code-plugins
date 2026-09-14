@@ -231,6 +231,10 @@ body.open #panel{display:flex}
 .lost{margin:0 13px 8px;padding:9px 11px;border:1px solid var(--mark);
   border-radius:7px;font-size:13px;line-height:1.45;color:var(--mark);
   flex-shrink:0}
+.lost button{margin-left:6px;border:1px solid var(--mark);background:var(--paper);
+  color:var(--mark);font-family:var(--ui);font-size:12px;padding:3px 9px;
+  border-radius:5px;cursor:pointer}
+.btn:disabled,.seed button:disabled{opacity:.45;cursor:default}
 
 .compose{display:flex;gap:8px;padding:11px 13px;border-top:1px solid var(--rule);
   align-items:flex-end;flex-shrink:0}
@@ -675,6 +679,18 @@ let live = 0;
 let carried = null;
 let db = null, decided = null, reason = null;
 
+// Every save is a whole-document set, and set replaces what is stored. So a save
+// built before the stored document was read -- still loading, or the read failed
+// -- replaces the discussion and the decision with this page's empty defaults.
+// Nothing writes until `restore` is 'done'; while it is 'pending' or 'failed',
+// Send, the openers, Approve and Needs changes are off. 'nostore' is a view
+// with no store at all, which says so on every send and decision instead.
+let restore = 'pending';
+const blocked = () => restore === 'pending' || restore === 'failed';
+// Held from load: the reason panel reuses the id "send" for its own button, and
+// it comes first in the page, so looking the id up later can find that one.
+const sendBtn = $('send');
+
 // Whether this view can ring the working session. Without the doorbell a saved
 // message is still answered, by the next session to start.
 let bellOn = false;
@@ -710,9 +726,19 @@ function sessionWait(m){
     + 'reach the working session. Tell it directly.';
   if (m.status === 'unsent') return 'Saved, but this view could not ring the working '
     + 'session (' + (m.why || 'unknown') + '). The next session to start will answer it.';
+  // A stored 'sent' proves the message was saved, not that the ring went out or
+  // that anything is listening. Only a presence stamp from after the send shows a
+  // session is answering rings here, so until one arrives the page promises nothing.
+  if (!heardSince(m.sentAt || 0)) return 'Saved and rung. No working session has '
+    + 'answered on this desk since, so it may be busy or not running. The next '
+    + 'session to start answers it.';
   return 'Sent to the working session. It answers within seconds if it is idle, after '
     + 'its current task if it is busy, and at its next start if none is running.';
 }
+// A live stamp is timed by this clock when it arrives. One from the first
+// snapshot is history, timed by its name: the epoch second of the ring, which
+// can fall up to a second before a send made in that same second.
+const heardSince = ms => answeredAt > ms || lastHeard + 1000 > ms;
 
 function said(m){
   if (m.via !== 'session') return '<div class="said">'+esc(m.content)+'</div>';
@@ -723,7 +749,9 @@ function said(m){
 
 function drawStream(){
   const t = threads[live], el = $('stream');
-  if (!t.turns.length){
+  if (!t.turns.length && restore === 'pending'){
+    el.innerHTML = '<div class="hint">Loading the saved discussion…</div>';
+  } else if (!t.turns.length){
     el.innerHTML = '<div class="hint">Ask the working session anything: it has '
       + 'the code, the tests and the conversation that made this change, and it '
       + 'can change the pull request. Highlight a passage first and it goes along '
@@ -738,7 +766,12 @@ function drawStream(){
   }
   el.scrollTop = el.scrollHeight;
   $('seed').style.display = t.turns.length ? 'none' : 'flex';
-  $('send').disabled = t.busy;
+  gate();
+}
+function gate(){
+  sendBtn.disabled = blocked() || threads[live].busy;
+  document.querySelectorAll('#seed button, #ok, #changes')
+    .forEach(b => { b.disabled = blocked(); });
 }
 function drawCarry(){
   $('carrySlot').innerHTML = carried
@@ -924,6 +957,9 @@ async function ask(){
   const box = $('box');
   const q = box.value.trim();
   if (!q && !carried) return;
+  // Enter still reaches here while Send is off. Leave the text in the box: a
+  // message kept out of the store should not also vanish from the screen.
+  if (blocked()) return;
   const quote = carried; carried = null; unlight();
   box.value = ''; box.style.height = 'auto';
 
@@ -954,8 +990,13 @@ async function ask(){
   draw();
   const kept = await saveNow();
   const rung = kept ? await ring({kind: 'message', turn: turn.id}) : 'unsaved';
-  if (rung !== 'rung' && !slot.content){ slot.status = 'unsent'; slot.why = rung; }
-  draw(); save();
+  if (rung === 'rung') slot.rungAt = Date.now();
+  else if (!slot.content){ slot.status = 'unsent'; slot.why = rung; }
+  draw();
+  // Stored at once, not after the debounce: a tab closed now, or a reload from a
+  // republish, would otherwise leave 'sent' with no ring behind it. A slot left
+  // like that has no rungAt, and the next load rings for it (see rering).
+  if (kept) await saveNow(); else save();
 }
 // A send that throws has to say so. Otherwise the reviewer is left looking at a
 // box that emptied and a chat that did not change.
@@ -1015,8 +1056,11 @@ function record(){
   });
 }
 
+// Both savers refuse until the stored document has been read (see `restore`).
+// The banner for a failed read is already up, so they add nothing to it.
 async function save(){
   if (!db){ sayLost('this view cannot reach the store'); return; }
+  if (restore !== 'done') return;
   clearTimeout(saving);
   saving = setTimeout(async () => {
     try {
@@ -1032,6 +1076,7 @@ async function save(){
 // and a session answering the bell must find the decision already stored.
 async function saveNow(){
   if (!db){ sayLost('this view cannot reach the store'); return false; }
+  if (restore !== 'done') return false;
   clearTimeout(saving);
   try {
     await record();
@@ -1103,12 +1148,16 @@ function offerDecision(){
     + '<button class="btn" id="changes">Needs changes</button></div>';
   $('ok').addEventListener('click', () => decide('approved'));
   $('changes').addEventListener('click', () => askReason(reason));
+  gate();
 }
 
 async function decide(v, quiet, why){
   // A verdict restored from the store with no reason on it was recorded before
   // there was anywhere to put one. Ask now rather than stranding it.
   if (v === 'needs changes' && !why){ decided = v; return askReason(reason); }
+  // The buttons are off until restore settles; this covers anything that
+  // reaches decide another way, such as the reason panel's Record it.
+  if (!quiet && blocked()) return;
 
   decided = v;
   reason = why || null;
@@ -1169,51 +1218,73 @@ function drawDecided(){
   $('redo').addEventListener('click', offerDecision);
 }
 
-offerDecision();
+/* ================= restore ================= */
+// A failed read gets its own banner, not sayLost's: nothing typed here is at
+// risk, and reading again is the fix rather than the danger.
+function sayUnread(why){
+  lost = 'unread';
+  $('lostSlot').innerHTML = '<div class="lost">Not loaded — the saved discussion '
+    + 'could not be read (' + esc(why) + '). Sending and deciding are off until it '
+    + 'loads, so nothing stored is replaced.<button id="retryRestore">Try again</button></div>';
+}
+$('lostSlot').addEventListener('click', async e => {
+  if (e.target.id !== 'retryRestore' || restore !== 'failed') return;
+  if (await restoreStored()) listenReplies();
+});
 
-paint(); draw();
-
-(async () => {
-  // Reaching the runtime at all can fail, and an unhandled rejection here used
-  // to kill the rest of this block silently -- leaving a page that looked
-  // fine, answered nothing, and stored nothing.
-  try { db = await claude.use('db'); } catch (e) { db = null; }
-  bellOn = !!(await bellReady);
-
-  // Without the doorbell the session is not told straight away, but a saved
-  // message still reaches the next session to start. This lives in its own
-  // slot, not the not-saved banner, which clears on the first successful write.
-  if (!bellOn && db){
-    $('aloneSlot').innerHTML = '<div class="lost">This view cannot ring the working '
-      + 'session. What you send is saved, and the next session to start answers it.</div>';
+// db.d.ts calls `unavailable` transient and asks verbs to retry once after a
+// short randomized delay. Any other failure gets the same one retry: it is
+// cheap, and the alternative is a read-only desk. A read that never settles
+// would leave every control off with no banner and no way out, so each attempt
+// is given RESTORE_WAIT and then counts as failed.
+const RESTORE_WAIT = 10000;
+async function restoreStored(){
+  restore = 'pending';
+  draw();
+  const ref = db.doc('review/pr-' + DATA.number);
+  const read = () => Promise.race([ref.get(), new Promise((_, no) =>
+    setTimeout(() => no({code: 'timed out'}), RESTORE_WAIT))]);
+  let snap;
+  try {
+    try { snap = await read(); }
+    catch (e){
+      await new Promise(r => setTimeout(r, 300 + Math.random() * 700));
+      snap = await read();
+    }
+  } catch (e) {
+    restore = 'failed';
+    sayUnread((e && (e.code || e.message)) || 'the read failed');
+    draw();
+    return false;
+  }
+  const had = snap.exists && snap.data();
+  if (had && Array.isArray(had.threads) && had.threads.length){
+    // The store hands back frozen objects. Spreading a thread copies the
+    // thread but not its turns array, and pushing the next message onto that
+    // frozen array threw "object is not extensible" -- so every message sent
+    // after a reload was lost. Copy the turns too.
+    threads = had.threads.map(t => ({...t, busy: false,
+      turns: (t.turns || []).map(m => ({...m}))}));
+    live = 0;
+  }
+  restore = 'done';
+  if (lost === 'unread'){ lost = null; $('lostSlot').innerHTML = ''; }
+  if (had){
+    reason = had.reason || null;
+    decidedAt = had.decidedAt || null;
+    if (had.decision) decide(had.decision, true, had.reason);
   }
   draw();
+  return true;
+}
 
-  if (!db){ sayLost('this view cannot reach the store'); return; }
-  try {
-    const snap = await db.doc('review/pr-' + DATA.number).get();
-    const had = snap.exists && snap.data();
-    if (had){
-      if (Array.isArray(had.threads) && had.threads.length){
-        // The store hands back frozen objects. Spreading a thread copies the
-        // thread but not its turns array, and pushing the next message onto that
-        // frozen array threw "object is not extensible" -- so every message sent
-        // after a reload was lost. Copy the turns too.
-        threads = had.threads.map(t => ({...t, busy: false,
-          turns: (t.turns || []).map(m => ({...m}))}));
-        live = 0;
-      }
-      reason = had.reason || null;
-      decidedAt = had.decidedAt || null;
-      if (had.decision) decide(had.decision, true, had.reason);
-    }
-  } catch (e) {}
-  draw();
-
-  // Answers from the working session: one document per message, keyed by the
-  // message's id, rewritten as the session works. A reply with no slot waiting
-  // (the page reloaded before the slot was saved) is added after the
-  // message rather than dropped.
+// Answers from the working session: one document per message, keyed by the
+// message's id, rewritten as the session works. A reply with no slot waiting
+// (the page reloaded before the slot was saved) is added after the
+// message rather than dropped. The first delivery is also the list of messages
+// that already have a reply, which is what rering needs.
+function listenReplies(){
+  let first = true;
   try {
     db.collection('review/pr-' + DATA.number + '/replies').onSnapshot(snap => {
       let touched = false;
@@ -1240,8 +1311,61 @@ paint(); draw();
         }
       });
       if (touched){ draw(); save(); }
+      if (first){
+        first = false;
+        rering(new Set(snap.docs.map(d => (d.data() || {}).turn)));
+      }
     });
   } catch (e) {}
+}
+
+// A slot stored as 'sent' with no rungAt was saved, but its ring was never
+// recorded: the tab closed between the two, or a republish reloaded the view.
+// Nothing else wakes an idle session for it, so the first load after that
+// rings once and records it. A slot only seconds old is left alone, because
+// another open view may still be ringing for it. A ring for a message already
+// being answered costs one wake-up, not a second answer: the session answers
+// only turns with no reply document.
+const RERING_AFTER = 10000;
+async function rering(replied){
+  if (!bellOn) return;
+  const stale = threads.flatMap(t => t.turns).filter(m => m.via === 'session'
+    && m.status === 'sent' && !m.content && !m.rungAt && !replied.has(m.answers)
+    && Date.now() - (m.sentAt || 0) > RERING_AFTER);
+  if (!stale.length) return;
+  const rung = await ring({kind: 'message', turns: stale.map(m => m.answers), again: true});
+  stale.forEach(m => {
+    if (rung === 'rung') m.rungAt = Date.now();
+    else if (!m.content){ m.status = 'unsent'; m.why = rung; }
+  });
+  draw();
+  await saveNow();
+}
+
+offerDecision();
+
+paint(); draw();
+
+(async () => {
+  // Reaching the runtime at all can fail, and an unhandled rejection here used
+  // to kill the rest of this block silently -- leaving a page that looked
+  // fine, answered nothing, and stored nothing.
+  try { db = await claude.use('db'); } catch (e) { db = null; }
+  bellOn = !!(await bellReady);
+
+  // Without the doorbell the session is not told straight away, but a saved
+  // message still reaches the next session to start. This lives in its own
+  // slot, not the not-saved banner, which clears on the first successful write.
+  if (!bellOn && db){
+    $('aloneSlot').innerHTML = '<div class="lost">This view cannot ring the working '
+      + 'session. What you send is saved, and the next session to start answers it.</div>';
+  }
+  draw();
+
+  if (!db){ restore = 'nostore'; draw(); sayLost('this view cannot reach the store'); return; }
+  // The replies listener rewrites threads and saves, so it waits for a
+  // successful restore; Try again starts it if the first attempt failed.
+  if (await restoreStored()) listenReplies();
 
   // The description, rewritten by the working session when the pull request
   // changes under review.
@@ -1279,6 +1403,10 @@ paint(); draw();
       });
       lastHeard = Math.max(lastHeard, newest);
       drawPresence();
+      // A stamp can turn a waiting "Saved and rung" into "Sent". Only then is the
+      // stream redrawn, since a redraw scrolls it to the bottom.
+      if (threads[live].turns.some(m => m.via === 'session' && m.status === 'sent' && !m.content))
+        drawStream();
     });
   } catch (e) {}
 
