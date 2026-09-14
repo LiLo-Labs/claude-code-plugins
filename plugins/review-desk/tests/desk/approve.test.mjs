@@ -63,6 +63,41 @@ test('a head written with the description moves what a later decision stores', a
   assert.equal(await desk.page.locator('#staleHead').count(), 0);
 });
 
+// The recovery /review-collect performs for a head block: it writes the head it
+// read into context/body before reporting blocked, so deciding again is on the
+// new commit. Without that write the page kept storing the old one (the second
+// half of this test), and every collection blocked it again.
+test('a head block clears once the collector writes the head, and not before', async () => {
+  desk = await open(browser, {data: payload({headRefOid: A})});
+  await desk.page.click('#ok');
+  const first = (await desk.until(s => s[PR] && s[PR].decidedOn === A))[PR];
+  const blocked = decidedAt => ({decision: 'approved', decidedAt, session: 's', at: new Date().toISOString(),
+    outcome: {result: 'blocked', at: new Date().toISOString(),
+      detail: 'New commits since you approved (a1a1a1a..b2b2b2b), so this was not merged.'}});
+
+  // A text-only rewrite, as the after-push reminder used to ask for: the head stays.
+  await desk.context('body', {text: '## Changed since you opened this\n\n- b2b2b2b fixup\n'});
+  await desk.context('pickup', blocked(first.decidedAt));
+  await desk.page.waitForSelector('text=could not finish');
+  assert.match(await desk.page.textContent('#meta'), /commit a1a1a1a/);
+  await desk.page.click('#redo');
+  await desk.page.click('#ok');
+  const stuck = (await desk.until(s => s[PR] && s[PR].decidedAt !== first.decidedAt
+    && s[PR].decision === 'approved'))[PR];
+  assert.equal(stuck.decidedOn, A, 'with no head in context/body the page can only store the old commit');
+
+  // The collector's recovery: the head it read, then the blocked outcome.
+  await desk.context('body', {text: '## Changed since you opened this\n\n- b2b2b2b fixup\n', head: B});
+  await desk.context('pickup', blocked(stuck.decidedAt));
+  await desk.page.waitForSelector('#newerHead');
+  assert.match(await desk.page.textContent('#meta'), /commit b2b2b2b/);
+  await desk.page.click('#redo');
+  await desk.page.click('#ok');
+  const again = (await desk.until(s => s[PR] && s[PR].decidedAt !== stuck.decidedAt
+    && s[PR].decision === 'approved'))[PR];
+  assert.equal(again.decidedOn, B);
+});
+
 test('a body without a well-formed head leaves the head alone', async () => {
   desk = await open(browser, {data: payload({headRefOid: A}),
     seed: {[PR + '/context/body']: {text: 'Rewritten, no head'}}});

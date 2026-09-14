@@ -174,16 +174,41 @@ reviewer's turn whose `at` is later than `decidedAt`. Compare the two as times.
 - **Approved, with a `decidedOn` that is not the `headRefOid` you read:** commits
   were pushed after the reviewer read the desk, and merging now would merge them
   unread. Do not merge, and do not post the comment. Answer any waiting message,
-  as above, then report the outcome onto the pickup as `blocked`, naming the
-  approved commit and the head as short hashes (their first 7 characters):
+  as above.
 
-      data: {"outcome": {"result": "blocked", "detail": "New commits since you approved (<decidedOn, 7 chars>..<headRefOid, 7 chars>), so this was not merged. Look at them, then decide again.", "at": "<now, UTC ISO>"}}
+  Then bring the desk to the head you read, whoever pushed it and whether or not
+  this session has written the desk before. The page stores as `decidedOn` only
+  the head its `context/body` names, so until that document carries
+  `headRefOid`, every **Change this** and **Approve** stores the old commit again
+  and every collection blocks it again, with no way out from the page. In one
+  batch, get `review/pr-<n>/context/body`, list `review/pr-<n>/documents`, and
+  list the files the new commits changed:
+
+      gh api repos/<owner/repo>/compare/<decidedOn>...<headRefOid> --jq '.files[].filename'
+
+  Then rewrite the desk as `/review-desk` describes under "Changing the desk and
+  the pull request": set `context/body` to `{"text", "head": "<headRefOid>"}`,
+  its text opening with a `## Changed since you opened this` section naming each
+  commit in `commits` after `decidedOn` by short hash and what it changed, and
+  rewrite each carried document whose file those commits changed. Keep the rest
+  of the description as stored; when no `context/body` is stored, write the
+  description the way `/review-desk` writes the payload's `body`. When the
+  compare fails, as it can after a force-push, rewrite every carried document
+  from the head.
+
+  Report the outcome only once `context/body` has landed with the new `head`,
+  not in the same batch: a reviewer who reads "decide again" and taps
+  **Approve** before it lands stores the old commit. Report it onto the pickup
+  as `blocked`, naming the approved commit and the head as short hashes (their
+  first 7 characters):
+
+      data: {"outcome": {"result": "blocked", "detail": "New commits since you approved (<decidedOn, 7 chars>..<headRefOid, 7 chars>), so this was not merged. The desk now shows them. Look at them, then decide again.", "at": "<now, UTC ISO>"}}
 
   Record `blocked` in the ledger and stop. This holds for any new commit, a
   one-line fixup included: an approval is of the commit the reviewer read. When
-  they decide again, the page stores the head it then shows, and that decision
-  is collected like any other. An approval with no `decidedOn` is not compared;
-  "Act on it" says how it is merged.
+  they decide again, the page stores the head it then shows, which is now
+  `headRefOid`, and that decision is collected like any other. An approval with
+  no `decidedOn` is not compared; "Act on it" says how it is merged.
 - **Needs changes, with a later turn:** the message adds to what they asked
   for. Answer it, carry on below, and quote it in the comment beside `reason`.
 
@@ -229,9 +254,11 @@ Otherwise merge the commit the reviewer approved, and nothing else:
 `gh pr merge --help` describes the flag as "Commit SHA that the pull request
 head must match to allow merge". A push that lands between your `gh pr view` and
 the merge is then refused by GitHub rather than merged. A refused merge is
-`blocked`, for that reason or any other: give what `gh` printed, and when the
-head moved, name the new commits and ask the reviewer to look at them and decide
-again. Say which merge you used and confirm it landed.
+`blocked`, for that reason or any other: give what `gh` printed. When the head
+moved, read `headRefOid` again, bring the desk to it and only then report the
+outcome, exactly as a `decidedOn` that is not the head does under "Answer what
+is waiting first", so deciding again stores the new commit. Say which merge you
+used and confirm it landed.
 
 A desk published before `decidedOn` existed has none on its approval, since its
 page was built before it stored one. Merge it as before, after the same state

@@ -212,13 +212,17 @@ def main():
     lines += [f"- {e['repo']}#{e['pr']} {e['url']}" for e in open_desks]
     lines += [
         "",
-        "If this push changed what a desk shows, rewrite it now, as /review-desk "
-        'describes under "Changing the desk and the pull request": the '
-        "description at context/body and any carried file that changed. Open "
-        'context/body with a "Changed since you opened this" section naming '
-        "each commit pushed since the desk was published and what it changed, "
-        "so the reviewer reading the page learns the pull request moved. A push "
-        "that failed, or touches none of these pull requests, needs nothing.",
+        "If this push updated one of these pull requests, rewrite its desk now, "
+        'as /review-desk describes under "Changing the desk and the pull '
+        'request": context/body as {"text", "head"}, with head the headRefOid '
+        "from `gh pr view <number> --repo <owner/repo> --json headRefOid` read "
+        "after the push, and any carried file that changed. Write head even when "
+        "the description needs no change: the page stores it as decidedOn, and "
+        "an approval of an older head is never merged. Open context/body with a "
+        '"Changed since you opened this" section naming each commit pushed '
+        "since the desk was published and what it changed, so the reviewer "
+        "reading the page learns the pull request moved. A push that failed, or "
+        "touches none of these pull requests, needs nothing.",
     ]
     # A command that exits non-zero arrives as PostToolUseFailure, and
     # `git push && <a later step that fails>` pushed all the same.

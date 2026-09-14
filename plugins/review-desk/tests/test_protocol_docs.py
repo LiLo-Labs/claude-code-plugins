@@ -202,6 +202,27 @@ class Collect(unittest.TestCase):
         self.assertIn("`decidedOn`, the pull request's head commit the page was showing", read_back)
         self.assertIn("A desk published before `decidedOn` existed stores none", read_back)
 
+    def test_a_head_block_brings_the_desk_to_the_head_before_reporting(self):
+        # The page stores as decidedOn only the head context/body names. A block
+        # that left the desk on the old head made every re-approval store the
+        # old commit again and block again, with no way out from the page.
+        first = flat(section(self.doc, "Answer what is waiting first"))
+        rule = re.search(r"\*\*Approved, with a `decidedOn` that is not the `headRefOid` you read:\*\*(.*?)- \*\*",
+                         first).group(1)
+        self.assertIn("bring the desk to the head you read, whoever pushed it", rule)
+        self.assertIn('set `context/body` to `{"text", "head": "<headRefOid>"}`', rule)
+        self.assertIn("## Changed since you opened this", rule)
+        self.assertIn("gh api repos/<owner/repo>/compare/<decidedOn>...<headRefOid>", rule)
+        self.assertIn("rewrite each carried document whose file those commits changed", rule)
+        # The desk write lands before the outcome that asks for a new decision.
+        self.assertIn("Report the outcome only once `context/body` has landed with the new `head`, not in the same batch",
+                      rule)
+        self.assertLess(rule.index("set `context/body`"), rule.index('"result": "blocked"'))
+        # A merge --match-head-commit refuses for a moved head does the same.
+        act = flat(section(self.doc, "Act on it"))
+        refused = act[act.index("A refused merge is `blocked`"):]
+        self.assertIn("read `headRefOid` again, bring the desk to it and only then report the outcome", refused)
+
     def test_a_head_block_is_not_cleared_from_the_terminal(self):
         exception = flat(section(self.doc, "Is it already handled"))
         self.assertIn("or for commits pushed after approving: those clear only when the reviewer decides again",
@@ -354,6 +375,8 @@ class Desk(unittest.TestCase):
         self.assertIn("gh pr view <n> --repo <owner/repo> --json headRefOid", text)
         self.assertIn("stores it as `decidedOn`", text)
         self.assertIn("A push after **Approve** therefore blocks the merge", text)
+        self.assertIn("`/review-collect` writes `headRefOid` into `context/body` before it reports that block",
+                      text)
         publish = flat(section(self.doc, "Publish"))
         self.assertIn('"head": "<the payload\'s headRefOid>"', publish)
         decide = flat(section(self.doc, "When they decide"))

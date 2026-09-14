@@ -489,9 +489,11 @@ published with, and stores it as `decidedOn` when the reviewer next decides.
 `/review-collect` merges an approval only while the pull request's head is
 still `decidedOn`. A push after **Approve** therefore blocks the merge until the
 reviewer looks and decides again, and so does a push whose `head` never reached
-the desk: the page goes on showing the old commit, and an approval of it does
-not match. Writing `head` promptly is what keeps that second case from costing
-the reviewer a second tap.
+the desk, such as a collaborator's: the page goes on showing the old commit, and
+an approval of it does not match. The page can only store a head this store
+names, so `/review-collect` writes `headRefOid` into `context/body` before it
+reports that block, and the reviewer's next decision is on the commit GitHub
+has. Writing `head` promptly after your own push saves the reviewer that round.
 
 Each file has one document, and its id is the path with every `/` written as
 `~`: `docs/design/0002-x.md` is `docs~design~0002-x.md`. Any other character a

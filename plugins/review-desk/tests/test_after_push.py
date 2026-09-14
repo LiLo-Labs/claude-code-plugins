@@ -103,6 +103,16 @@ class AfterPush(unittest.TestCase):
         self.assertIn('"Changed since you opened this"', text)
         self.assertNotIn("reply", text.lower())
 
+    def test_instruction_asks_for_the_head_on_every_push(self):
+        # The page stores the head context/body names as decidedOn. A reminder
+        # that asked only for the description let a text-only rewrite leave the
+        # page on the old commit, and every approval of it was blocked.
+        text = self.said(self.run_hook("git push"))
+        self.assertIn('context/body as {"text", "head"}', text)
+        self.assertIn("--json headRefOid", text)
+        self.assertIn("Write head even when the description needs no change", text)
+        self.assertNotIn("If this push changed what a desk shows", text)
+
     def test_push_run_elsewhere_is_resolved_from_cd_and_dash_c(self):
         self.assertIn("#7", self.said(self.run_hook(f"cd {self.repo} && git push", cwd=self.home)))
         self.assertIn("#7", self.said(self.run_hook(f"git -C {self.repo} push", cwd=self.home)))
