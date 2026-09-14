@@ -628,7 +628,7 @@ test('a message whose retry is refused after a later send stored it is rung once
   desk = await open(browser, {setFailures: {[PR]: ['unavailable', null, null, 'unavailable']}});
   await ready(desk);
   await desk.page.click('#fab');
-  await watchFor(desk, '#stream', 'Not saved');
+  for (const sel of ['#stream', '#lostSlot']) await watchFor(desk, sel, 'Not saved');
   await sendText(desk, 'Question X');
   await sendDuring(desk, 'Question Y');
   await desk.until(s => slots(s).length === 2 && slots(s).every(m => m.status === 'sent' && m.rungAt),
@@ -656,7 +656,7 @@ test('a message whose retry is refused while a later send is still storing it wa
   desk = await open(browser, {setDelay: 1500, setFailures: {[PR]: ['unavailable', null, 'unavailable']}});
   await ready(desk);
   await desk.page.click('#fab');
-  await watchFor(desk, '#stream', 'Not saved');
+  for (const sel of ['#stream', '#lostSlot']) await watchFor(desk, sel, 'Not saved');
   await sendText(desk, 'Question X');
   await sendDuring(desk, 'Question Y');
   await desk.until(s => slots(s).length === 2 && slots(s).every(m => m.status === 'sent' && m.rungAt),
@@ -677,13 +677,14 @@ test('a message whose retry is refused while a later send is still storing it wa
   assert.deepEqual(await seen(desk), {});
   assert.equal(await desk.page.locator('[data-resend]').count(), 0);
   assert.equal(await desk.page.inputValue('#box'), '');
+  assert.equal(await desk.page.textContent('#lostSlot'), '');
   assert.deepEqual(desk.errors, []);
 });
 
 test('a decision whose retry is refused after a send stored it is rung once and never shown as not saved', async () => {
   desk = await open(browser, {setFailures: {[PR]: ['unavailable', null, null, 'unavailable']}});
   await ready(desk);
-  await watchFor(desk, '#decide', 'Not saved');
+  for (const sel of ['#decide', '#lostSlot']) await watchFor(desk, sel, 'Not saved');
   await desk.page.click('#fab');
   await desk.page.evaluate(() => { decide('approved'); });
   await sendDuring(desk, 'One more thing');
@@ -699,5 +700,6 @@ test('a decision whose retry is refused after a send stored it is rung once and 
   assert.equal(ringsOf(rings, 'message').length, 1);
   await desk.page.waitForSelector('#decide .pickup >> text=Waiting for the working session', {state: 'attached'});
   assert.deepEqual(await seen(desk), {});
+  assert.equal(await desk.page.textContent('#lostSlot'), '');
   assert.deepEqual(desk.errors, []);
 });

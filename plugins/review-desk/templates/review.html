@@ -1229,7 +1229,7 @@ async function deliver(turn, slot){
     // A send made during saveNow's retry wait writes the whole document, this
     // slot included. When that write stores it and the retry is then refused,
     // the store holds the message, so it is kept and rung here.
-    const kept = await saveNow() || await storedBy(turn.id);
+    const kept = await saveNow(() => storedBy(turn.id));
     const rung = kept ? await ring({kind: 'message', turn: turn.id}) : 'unsaved';
     if (rung === 'rung') slot.rungAt = Date.now();
     else if (!replied.has(turn.id)){ slot.status = 'unsent'; slot.why = rung; }
@@ -1454,7 +1454,13 @@ async function save(){
 
 // A decision cannot sit out the debounce: the doorbell rings straight after it,
 // and a session answering the bell must find the decision already stored.
-async function saveNow(){
+// `stored`, when given, asks whether another write stored what this save was for.
+// If so, a refusal is not reported: the banner would say the thing was lost while
+// the store holds it, and a refusal that lands after the covering write would
+// leave that banner up, since no later save comes to clear it. The refused write
+// may still have carried something newer, so the document as it is now is saved
+// once more, and the banner says whatever that write says.
+async function saveNow(stored){
   if (!db){ sayLost('this view cannot reach the store'); return false; }
   if (restore !== 'done') return false;
   clearTimeout(saving);
@@ -1463,6 +1469,7 @@ async function saveNow(){
     sayKept();
     return true;
   } catch (e) {
+    if (stored && await stored()){ await saveNow(); return true; }
     sayRefused(e);
     return false;
   }
@@ -1547,11 +1554,12 @@ async function decide(v, quiet, why){
     const at = decidedAt = new Date().toISOString();
     rang = 'sending';
     drawDecided();
+    // As in deliver(): a send during the retry wait may have stored this decision.
+    const kept = await saveNow(() => decisionStored(at));
     // Read `lost` straight after the refusal: a later save that succeeds clears
     // it, and the line under the buttons must keep saying why this one failed.
-    const kept = await saveNow(), why = lost === 'too large' ? 'too large' : 'unsaved';
-    // As in deliver(): a send during the retry wait may have stored this decision.
-    rang = kept || await decisionStored(at) ? await ring() : why;
+    const why = lost === 'too large' ? 'too large' : 'unsaved';
+    rang = kept ? await ring() : why;
   }
   drawDecided();
 }
