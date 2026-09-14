@@ -318,13 +318,114 @@ test('inside list items, markup is escaped, links open away, and a mermaid fence
   const link = desk.page.locator('#sheet li:nth-child(2) a');
   assert.equal(await link.getAttribute('href'), 'https://example.com/docs');
   assert.equal(await link.getAttribute('target'), '_blank');
-  assert.equal(await link.getAttribute('rel'), 'noopener');
+  assert.equal(await link.getAttribute('rel'), 'noopener noreferrer');
   // The harness refuses the mermaid script, so the source block stays, marked for it.
   assert.equal(await desk.page.textContent('#sheet li:nth-child(3) pre > code.language-mermaid'),
     'graph TD\n  A["<b>x</b>"] --> B');
   assert.equal(await desk.page.textContent('#sheet li:nth-child(4) pre > code'),
     '<script>window.__ran=1</script>');
   assert.deepEqual(desk.errors, []);
+});
+
+/* ---------------- which link targets become links ---------------- */
+
+// Every link a scheme the page must not follow: the description, carried files
+// and replies are written by whoever opened the pull request. The entity forms
+// are as typed in the PR text, so they arrive escaped once more by the renderer.
+const UNSAFE = [
+  ['a', 'javascript:alert(1)'], ['b', 'JavaScript:alert(1)'], ['c', '  javascript:alert(1)'],
+  ['d', 'java&#x09;script:alert(1)'], ['g', 'javascript&colon;alert(1)'], ['h', '&#106;avascript:alert(1)'],
+  ['e', 'data:text/html;base64,PHNjcmlwdD4='], ['f', 'vbscript:msgbox'],
+];
+const unsafeText = UNSAFE.map(([label, url]) => '- [' + label + '](' + url + ') after').join('\n');
+const links = sel => desk.page.$$eval(sel + ' a', as => as.map(a => ({href: a.getAttribute('href'),
+  protocol: a.protocol, text: a.textContent, target: a.getAttribute('target'), rel: a.getAttribute('rel')})));
+// No link in `sel` goes anywhere but http, https or mailto, and every label is on
+// the page as text.
+const neutralised = async sel => {
+  for (const l of await links(sel)) assert.ok(['http:', 'https:', 'mailto:'].includes(l.protocol),
+    'a link to ' + l.href + ' (' + l.protocol + ')');
+  assert.deepEqual(await links(sel), [], 'an unsafe target still became a link');
+  const text = await desk.page.textContent(sel);
+  for (const [label] of UNSAFE) assert.ok(text.includes('[' + label + ']'), 'the text of link ' + label + ' is gone');
+  assert.equal(await desk.page.evaluate(() => window.__ran), undefined);
+};
+
+test('a description\'s javascript:, data: and vbscript: links render as text, not links', async () => {
+  await describe(unsafeText + '\n\nAnd [inline](javascript:window.__ran=1) in a paragraph.');
+  await neutralised('#sheet');
+  assert.ok((await desk.page.textContent('#sheet li:nth-child(1)')).includes('[a](javascript:alert(1)) after'),
+    'the reviewer does not see where the link pointed');
+  assert.deepEqual(desk.errors, []);
+});
+
+test('http, https, mailto, fragment and relative links keep their exact hrefs and open away', async () => {
+  await describe([
+    '- [ok](https://example.com/x?a=1&b=2)', '- [mail](mailto:a@b.c)', '- [frag](#section)',
+    '- [rel](docs/design.md)', '- bare https://example.com here',
+    // A colon after the path has started is not a scheme.
+    '- [colon](docs/a:b.md)', '- [up](../notes.md?at=10:30)', '- [query](?q=a:b)', '- [plain](HTTP://EXAMPLE.COM/Up)',
+  ].join('\n'));
+  const got = await links('#sheet');
+  assert.deepEqual(got.map(l => [l.text, l.href]), [
+    ['ok', 'https://example.com/x?a=1&b=2'], ['mail', 'mailto:a@b.c'], ['frag', '#section'],
+    ['rel', 'docs/design.md'], ['https://example.com', 'https://example.com'],
+    ['colon', 'docs/a:b.md'], ['up', '../notes.md?at=10:30'], ['query', '?q=a:b'], ['plain', 'HTTP://EXAMPLE.COM/Up'],
+  ]);
+  for (const l of got){
+    assert.equal(l.target, '_blank', l.href);
+    assert.deepEqual(l.rel.split(/\s+/).sort(), ['noopener', 'noreferrer'], l.href);
+  }
+  assert.deepEqual(desk.errors, []);
+});
+
+test('the same unsafe links in a session reply and in a carried markdown file are text too', async () => {
+  desk = await open(browser, {seed: answered('Look:\n\n' + unsafeText),
+    data: payload({documents: [{name: 'docs/notes.md', text: '# Notes\n\n' + unsafeText}]})});
+  await desk.page.click('.leaf:nth-child(2)');
+  await desk.page.waitForSelector('#sheet h1');
+  await neutralised('#sheet');
+
+  await desk.page.click('#fab');
+  await desk.page.waitForSelector('.said.rich li');
+  await neutralised('.said.rich');
+  assert.deepEqual(desk.errors, []);
+});
+
+test('safeHref, called directly, allows only http, https, mailto and scheme-less targets', async () => {
+  desk = await open(browser);
+  // Each input is the text as it sits between the href's quotes; a literal & is
+  // written &amp;, as the renderer's escaping leaves it.
+  const cases = [
+    ['https://example.com/x?a=1&amp;b=2', true], ['HTTP://EXAMPLE.COM', true], ['HtTpS://example.com', true],
+    ['mailto:a@b.c', true], ['#section', true], ['#note:1', true], ['docs/design.md', true],
+    ['docs/a:b.md', true], ['../up.md?at=10:30', true], ['?q=a:b', true], ['//example.com/x', true],
+    ['ht&#x09;tps://example.com', true],
+    ['javascript:alert(1)', false], ['JavaScript:alert(1)', false], ['JAVASCRIPT:alert(1)', false],
+    ['  javascript:alert(1)', false], ['\u0001\u0008 javascript:alert(1)', false],
+    ['java\tscript:alert(1)', false], ['java\nscript:alert(1)', false], ['\njavascript:alert(1)', false],
+    ['jav&#x09;ascript:alert(1)', false], ['javascript&colon;alert(1)', false], ['&#106;avascript:alert(1)', false],
+    ['java&Tab;script:alert(1)', false], ['&#x20;javascript:alert(1)', false], ['java&amp;#x09;script:alert(1)', false],
+    ['data:text/html;base64,PHNjcmlwdD4=', false], ['vbscript:msgbox', false], ['VBScript:msgbox', false],
+    ['file:///etc/passwd', false], ['a:b.md', false],
+    // Still decoding after four rounds: refused, not decoded without end.
+    ['&amp;amp;amp;amp;amp;#106;avascript:alert(1)', false],
+  ];
+  const got = await desk.page.evaluate(cases => cases.map(([attr]) => {
+    // What the browser itself makes of the attribute, resolved against this page:
+    // a template's content has no base URL of its own, so its anchors report about:.
+    const t = document.createElement('template');
+    t.innerHTML = '<a href="' + attr + '"></a>';
+    let protocol = null;
+    try { protocol = new URL(t.content.firstChild.getAttribute('href'), location.href).protocol; } catch (e) {}
+    return {attr, allowed: safeHref(attr), protocol};
+  }), cases);
+  assert.deepEqual(got.map(g => [g.attr, g.allowed]), cases);
+  for (const g of got.filter(g => g.allowed))
+    assert.ok(['http:', 'https:', 'mailto:'].includes(g.protocol), JSON.stringify(g));
+  // The blocked ones include the forms the browser would really run.
+  assert.equal(got.find(g => g.attr === 'java\tscript:alert(1)').protocol, 'javascript:');
+  assert.equal(got.find(g => g.attr === 'javascript&colon;alert(1)').protocol, 'javascript:');
 });
 
 // One thread whose one question has an answer stored; the quote is what the
