@@ -202,6 +202,16 @@ class Collect(unittest.TestCase):
         self.assertIn("`decidedOn`, the pull request's head commit the page was showing", read_back)
         self.assertIn("A desk published before `decidedOn` existed stores none", read_back)
 
+    def test_a_later_message_does_not_skip_the_head_sync(self):
+        # Both rules can apply at once. The later-message rule says "stop"; if a
+        # session stopped there, the page would keep the old head and the next
+        # Approve would store the old commit again.
+        first = flat(section(self.doc, "Answer what is waiting first"))
+        self.assertIn("Check both approval rules below before stopping at either", first)
+        self.assertIn("bringing the desk to the head first, then report one `blocked` outcome", first)
+        self.assertLess(first.index("Check both approval rules"),
+                        first.index("**Approved, with a reviewer's turn whose `at` is later than `decidedAt`:**"))
+
     def test_a_head_block_brings_the_desk_to_the_head_before_reporting(self):
         # The page stores as decidedOn only the head context/body names. A block
         # that left the desk on the old head made every re-approval store the

@@ -159,6 +159,12 @@ Then compare the reviewer's turns with the decision. The page keeps **Send**
 open after a decision, so "wait, don't merge until I check X" arrives as a
 reviewer's turn whose `at` is later than `decidedAt`. Compare the two as times.
 
+Check both approval rules below before stopping at either. When a later turn and
+a moved head are both present, do everything the moved-head rule asks, bringing
+the desk to the head first, then report one `blocked` outcome whose detail gives
+both reasons. Stopping at the first rule would leave the page on the old head, so
+the reviewer's next **Approve** would store the old commit and block again.
+
 - **Approved, with a reviewer's turn whose `at` is later than `decidedAt`:** do
   not merge, and do not post the comment. Answer the turn, as above, then report
   the outcome onto the pickup as `blocked`, as `/review-desk` describes under
