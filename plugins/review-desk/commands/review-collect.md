@@ -130,6 +130,18 @@ have been the reviewer taking the decision back.
 
 ## Answer what is waiting first
 
+First read the pull request as it stands, since a session that stopped halfway
+may already have merged or closed it, and a reply or outcome must not say
+otherwise:
+
+    gh pr view <n> --repo <owner/repo> --json state,mergeCommit,comments,commits
+
+What GitHub shows wins over everything below. If `state` is `MERGED`, the outcome
+is `merged`, naming `mergeCommit`; if it is `CLOSED`, the outcome is `closed`.
+Neither is ever reported as `blocked`, whatever the reviewer sent after deciding:
+answer those messages saying what already happened, then go on to "Write it into
+the request" and "Record it in the ledger".
+
 Before anything is written to the pull request, answer every message still
 waiting, as `/review-desk` describes under "While they read", and write each
 reply as `done`. The comment below is permanent and summarises the replies:
@@ -161,10 +173,9 @@ reviewer's turn whose `at` is later than `decidedAt`. Compare the two as times.
 
 Post the comment only after every waiting reply is written, as "Answer what is
 waiting first" requires, so the summary never calls a question unanswered that
-the session was about to answer. First read the pull request as it stands, since
-a session that stopped halfway may already have commented or merged:
-
-    gh pr view <n> --repo <owner/repo> --json state,mergeCommit,comments,commits
+the session was about to answer. Use the pull request as read under "Answer what
+is waiting first", since a session that stopped halfway may already have
+commented or merged.
 
 Post one comment on the pull request summarising the exchange, opening with this
 line, which is how a later session recognises it:

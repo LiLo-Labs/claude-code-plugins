@@ -100,8 +100,10 @@ class Collect(unittest.TestCase):
         self.assertIn("your own from an earlier turn", text)
 
     def test_the_pull_request_is_read_before_commenting_or_merging(self):
+        first = flat(section(self.doc, "Answer what is waiting first"))
+        self.assertIn("gh pr view <n> --repo <owner/repo> --json state,mergeCommit,comments,commits", first)
         write = flat(section(self.doc, "Write it into the request"))
-        self.assertIn("gh pr view <n> --repo <owner/repo> --json state,mergeCommit,comments,commits", write)
+        self.assertIn('Use the pull request as read under "Answer what is waiting first"', write)
         self.assertIn("**Review desk decision:** <decision>, recorded <decidedAt>", write)
         self.assertIn("If a comment already opens with that exact line", write)
         act = flat(section(self.doc, "Act on it"))
@@ -149,6 +151,15 @@ class Collect(unittest.TestCase):
         # The user typing the command does not clear this block; only a new decision does.
         exception = flat(section(self.doc, "Is it already handled"))
         self.assertIn("does not cover a block for a message after deciding", exception)
+
+    def test_github_state_is_read_before_a_later_message_can_block(self):
+        # A session that merged and then stopped leaves a pickup with no outcome.
+        # Blocking on a later message before reading GitHub would report a merged
+        # request as "not merged".
+        text = flat(section(self.doc, "Answer what is waiting first"))
+        self.assertLess(text.index("gh pr view"), text.index("later than `decidedAt`"))
+        self.assertIn("What GitHub shows wins", text)
+        self.assertIn("ever reported as `blocked`", text)
 
     def test_desk_is_found_through_the_ledger_by_repo_and_pr(self):
         text = flat(section(self.doc, "Read it back"))
