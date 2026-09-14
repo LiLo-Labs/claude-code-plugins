@@ -174,8 +174,11 @@ body.open #panel{display:flex}
 .presence .check{border:1px solid var(--edge);background:var(--paper);color:var(--soft);
   font-family:var(--ui);font-size:11.5px;padding:3px 9px;border-radius:11px;
   cursor:pointer;margin-left:auto}
-.presence .resume{flex-basis:100%;display:flex;gap:6px;align-items:center}
-.presence .resume code{flex:1;font-family:var(--mono);font-size:11px;
+/* min-width:0 on the row and on the command lets the command shrink and scroll.
+   A flex item otherwise never shrinks below its content, so a resume command
+   widened both and pushed Copy out of the panel, past the window's edge. */
+.presence .resume{flex-basis:100%;min-width:0;display:flex;gap:6px;align-items:center}
+.presence .resume code{flex:1;min-width:0;font-family:var(--mono);font-size:11px;
   background:var(--rule);padding:4px 6px;border-radius:4px;overflow-x:auto;
   white-space:nowrap}
 .presence .resume .check{margin-left:0}
@@ -1629,6 +1632,9 @@ function pickupLine(){
       const said = o.detail ? ': ' + String(o.detail).replace(/[.\s]+$/, '') : '';
       if (o.result === 'merged') return 'Merged by the working session' + when(o.at) + said + '.';
       if (o.result === 'revising') return 'The working session is revising' + said + '.';
+      // /review-collect reports `closed` when GitHub shows the request closed
+      // without merging, and never as blocked; it is not a failure to finish.
+      if (o.result === 'closed') return 'Closed without merging' + when(o.at) + said + '.';
       return 'The working session could not finish' + said + '.';
     }
     return 'Picked up by the working session' + when(pickup.at)
