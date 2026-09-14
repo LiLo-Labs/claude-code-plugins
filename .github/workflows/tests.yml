@@ -90,6 +90,10 @@ jobs:
           python3 -c "import build_desk as b; print(b.page_script(b.template().replace(b.MARKER, '{}')))" > "$RUNNER_TEMP/desk-script.js"
           node --check "$RUNNER_TEMP/desk-script.js"
       - run: npm ci
-      - run: npx playwright install --with-deps chromium
+      - run: npx playwright install --with-deps chromium webkit
       - name: Run the page tests
         run: npm test
+      # The reviewer reads on an iPad, and every iPad browser is WebKit. Only the
+      # input tests run there: they are the ones whose events differ by engine.
+      - name: Run the input tests in WebKit
+        run: npm run test:webkit
