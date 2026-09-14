@@ -726,6 +726,11 @@ function sessionWait(m){
     + 'reach the working session. Tell it directly.';
   if (m.status === 'unsent') return 'Saved, but this view could not ring the working '
     + 'session (' + (m.why || 'unknown') + '). The next session to start will answer it.';
+  // No rungAt: saved, but no ring is recorded yet. Either the ring is going out
+  // now, or rering will send it. Saying "rung" here would be untrue.
+  if (!m.rungAt) return bellOn ? 'Saved. Ringing the working session.'
+    : 'Saved, but this view cannot ring the working session. The next session to '
+      + 'start will answer it.';
   // A stored 'sent' proves the message was saved, not that the ring went out or
   // that anything is listening. Only a presence stamp from after the send shows a
   // session is answering rings here, so until one arrives the page promises nothing.
@@ -988,15 +993,21 @@ async function ask(){
                 status: 'sent', content: '', sentAt: Date.now()};
   t.turns.push(slot);
   draw();
-  const kept = await saveNow();
-  const rung = kept ? await ring({kind: 'message', turn: turn.id}) : 'unsaved';
-  if (rung === 'rung') slot.rungAt = Date.now();
-  else if (!slot.content){ slot.status = 'unsent'; slot.why = rung; }
-  draw();
-  // Stored at once, not after the debounce: a tab closed now, or a reload from a
-  // republish, would otherwise leave 'sent' with no ring behind it. A slot left
-  // like that has no rungAt, and the next load rings for it (see rering).
-  if (kept) await saveNow(); else save();
+  // rering must not ring for a slot this view is still ringing for.
+  ringing.add(turn.id);
+  try {
+    const kept = await saveNow();
+    const rung = kept ? await ring({kind: 'message', turn: turn.id}) : 'unsaved';
+    if (rung === 'rung') slot.rungAt = Date.now();
+    else if (!slot.content){ slot.status = 'unsent'; slot.why = rung; }
+    draw();
+    // Stored at once, not after the debounce. A tab closed now, or a reload from a
+    // republish, can still lose this write. Then the store keeps 'sent' with no
+    // rungAt, or 'unsent' with why 'conflict'. rering rings for either one.
+    if (kept) await saveNow(); else save();
+  } finally {
+    ringing.delete(turn.id);
+  }
 }
 // A send that throws has to say so. Otherwise the reviewer is left looking at a
 // box that emptied and a chat that did not change.
@@ -1281,8 +1292,9 @@ async function restoreStored(){
 // Answers from the working session: one document per message, keyed by the
 // message's id, rewritten as the session works. A reply with no slot waiting
 // (the page reloaded before the slot was saved) is added after the
-// message rather than dropped. The first delivery is also the list of messages
-// that already have a reply, which is what rering needs.
+// message rather than dropped. Every delivery also adds to `replied`, the
+// messages the session has already claimed, which rering skips.
+const replied = new Set();
 function listenReplies(){
   let first = true;
   try {
@@ -1291,6 +1303,7 @@ function listenReplies(){
       snap.docs.forEach(d => {
         const r = d.data();
         if (!r || typeof r.turn !== 'string') return;
+        replied.add(r.turn);
         const text = typeof r.text === 'string' ? r.text : '';
         const status = r.status === 'done' ? 'done' : 'working';
         for (const t of threads){
@@ -1311,32 +1324,54 @@ function listenReplies(){
         }
       });
       if (touched){ draw(); save(); }
-      if (first){
-        first = false;
-        rering(new Set(snap.docs.map(d => (d.data() || {}).turn)));
-      }
+      if (first){ first = false; rering(); }
     });
   } catch (e) {}
 }
 
-// A slot stored as 'sent' with no rungAt was saved, but its ring was never
-// recorded: the tab closed between the two, or a republish reloaded the view.
-// Nothing else wakes an idle session for it, so the first load after that
-// rings once and records it. A slot only seconds old is left alone, because
-// another open view may still be ringing for it. A ring for a message already
-// being answered costs one wake-up, not a second answer: the session answers
-// only turns with no reply document.
+// A message whose ring never went out. Nothing else wakes an idle session for
+// it, so this view rings once and stores rungAt. There are two ways to get here:
+// - 'sent' with no rungAt. The slot was saved, but the ring outcome was not:
+//   the tab closed, or a republish reloaded the view. Such a slot is left alone
+//   until it is RERING_AFTER old, because another open view may still be ringing
+//   for it. A slot that is too young gets a timer for the moment it comes of
+//   age, not just a check at load. A republish reloads the view seconds after
+//   the send, so a check at load alone would never ring for it.
+// - 'unsent' with why 'conflict'. The ring was refused because a newer version
+//   was already live and this view was being reloaded (artifact.d.ts). No view
+//   is still ringing for it, so it rings straight away.
+// A ring for a message that is already being answered costs one extra wake-up,
+// not a second answer, because the session answers only turns with no reply
+// document.
 const RERING_AFTER = 10000;
-async function rering(replied){
-  if (!bellOn) return;
-  const stale = threads.flatMap(t => t.turns).filter(m => m.via === 'session'
-    && m.status === 'sent' && !m.content && !m.rungAt && !replied.has(m.answers)
-    && Date.now() - (m.sentAt || 0) > RERING_AFTER);
-  if (!stale.length) return;
-  const rung = await ring({kind: 'message', turns: stale.map(m => m.answers), again: true});
-  stale.forEach(m => {
-    if (rung === 'rung') m.rungAt = Date.now();
-    else if (!m.content){ m.status = 'unsent'; m.why = rung; }
+const ringing = new Set();
+let reringTimer = null;
+async function rering(){
+  clearTimeout(reringTimer);
+  reringTimer = null;
+  if (!bellOn || restore !== 'done') return;
+  const now = Date.now();
+  const unrung = threads.flatMap(t => t.turns).filter(m => m.via === 'session'
+    && !m.content && !m.rungAt && !replied.has(m.answers) && !ringing.has(m.answers)
+    && (m.status === 'sent' || (m.status === 'unsent' && m.why === 'conflict')));
+  const due = unrung.filter(m => m.status === 'unsent' || now - (m.sentAt || 0) > RERING_AFTER);
+  const young = unrung.filter(m => !due.includes(m));
+  if (young.length){
+    // Capped at RERING_AFTER, so a sentAt from a clock that runs ahead only
+    // means another check later, not a timer set hours out.
+    const wait = Math.min(...young.map(m => (m.sentAt || 0) + RERING_AFTER)) - now;
+    reringTimer = setTimeout(rering, Math.min(Math.max(wait, 0), RERING_AFTER) + 50);
+  }
+  if (!due.length) return;
+  const ids = due.map(m => m.answers);
+  ids.forEach(id => ringing.add(id));
+  const rung = await ring({kind: 'message', turns: ids, again: true});
+  ids.forEach(id => ringing.delete(id));
+  due.forEach(m => {
+    // A reply that landed during the ring has taken over this slot.
+    if (m.content || m.status === 'working') return;
+    if (rung === 'rung'){ m.status = 'sent'; delete m.why; m.rungAt = Date.now(); }
+    else { m.status = 'unsent'; m.why = rung; }
   });
   draw();
   await saveNow();

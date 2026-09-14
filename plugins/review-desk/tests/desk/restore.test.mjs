@@ -136,7 +136,10 @@ test('a stored message with no recorded ring is rung again once, and not on the 
   assert.deepEqual(desk.errors, []);
 });
 
-test('a message with a reply, or sent seconds ago, is not rung again', async () => {
+// The republish case: the view reloads seconds after a send, before the ring
+// outcome was stored. The slot is too young to ring at load, and must still be
+// rung once it comes of age while the tab stays open.
+test('a message with a reply is never rung; one sent seconds ago is rung when it is ten seconds old', async () => {
   const seed = {
     [PR]: {pr: 42, threads: [{id: 't1', name: 'Two', turns: [
       {id: 'm-claimed', role: 'user', content: 'Claimed already', to: 'session'},
@@ -144,14 +147,49 @@ test('a message with a reply, or sent seconds ago, is not rung again', async () 
        sentAt: Date.now() - 30000},
       {id: 'm-fresh', role: 'user', content: 'Sent a moment ago', to: 'session'},
       {role: 'assistant', via: 'session', answers: 'm-fresh', status: 'sent', content: '',
-       sentAt: Date.now() - 1000}]}]},
+       sentAt: Date.now() - 6000}]}]},
     // Another tab may still be ringing for m-fresh; m-claimed has a reply document.
     [PR + '/replies/m-claimed']: {turn: 'm-claimed', status: 'working', text: '', at: '2026-09-13T00:00:00Z'},
   };
   desk = await open(browser, {seed});
-  await desk.page.waitForSelector('text=Sent a moment ago', {state: 'attached'});
-  await desk.page.waitForTimeout(1200);
-  assert.deepEqual(await desk.rings(), []);
+  await desk.page.click('#fab');
+  await desk.page.waitForSelector('text=Sent a moment ago');
+  await desk.page.waitForTimeout(500);
+  assert.deepEqual(await desk.rings(), [], 'too young to ring at load');
+  // No ring is recorded, so the page must not say it rang.
+  assert.doesNotMatch(await desk.page.textContent('#stream'), /Saved and rung/);
+  assert.match(await desk.page.textContent('#stream'), /Ringing the working session/);
+
+  const store = await desk.until(s => turnsIn(s).some(m => m.answers === 'm-fresh' && m.rungAt),
+    null, 8000);
+  await desk.page.waitForTimeout(800);
+  const rings = await desk.rings();
+  assert.equal(rings.length, 1);
+  assert.deepEqual(rings[0].doorbell.turns, ['m-fresh']);
+  assert.ok(!turnsIn(store).find(m => m.answers === 'm-claimed').rungAt);
+  assert.deepEqual(desk.errors, []);
+});
+
+test('a ring refused with conflict is rung again on the next load, without waiting', async () => {
+  // The ring publish loses to a newer version, as it does when the session
+  // republishes the desk during a send.
+  desk = await open(browser, {seed: {}, publishError: 'conflict'});
+  await desk.page.click('#fab');
+  await desk.page.fill('#box', 'Sent as the desk republished');
+  await desk.page.press('#box', 'Enter');
+  const stored = await desk.until(s => turnsIn(s).some(m => m.status === 'unsent' && m.why === 'conflict'));
+  const id = turnsIn(stored).find(m => m.why === 'conflict').answers;
+  await desk.close();
+
+  // The reloaded view, seconds after the send: well inside RERING_AFTER.
+  desk = await open(browser, {seed: stored});
+  const after = await desk.until(s => turnsIn(s).some(m => m.answers === id && m.rungAt), null, 3000);
+  const slot = turnsIn(after).find(m => m.answers === id);
+  assert.equal(slot.status, 'sent');
+  assert.equal(slot.why, undefined);
+  const rings = await desk.rings();
+  assert.equal(rings.length, 1);
+  assert.deepEqual(rings[0].doorbell.turns, [id]);
   assert.deepEqual(desk.errors, []);
 });
 
