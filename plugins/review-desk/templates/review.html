@@ -755,8 +755,6 @@ let db = null, decided = null, reason = null;
 // with no store at all, which says so on every send and decision instead.
 let restore = 'pending';
 const blocked = () => restore === 'pending' || restore === 'failed';
-// Held from load: the reason panel reuses the id "send" for its own button, and
-// it comes first in the page, so looking the id up later can find that one.
 const sendBtn = $('send');
 
 // Whether this view can ring the working session. Without the doorbell a saved
@@ -1559,12 +1557,12 @@ function askReason(existing){
     + '<div class="verdict"><span class="note">This goes into the pull request '
     + 'with the discussion.</span>'
     + '<button class="btn" id="back">Back</button>'
-    + '<button class="btn yes" id="send">Record it</button></div></div>';
+    + '<button class="btn yes" id="recordReason">Record it</button></div></div>';
   const why = $('why');
   why.value = existing || '';
   why.focus();
   $('back').addEventListener('click', offerDecision);
-  $('send').addEventListener('click', () => {
+  $('recordReason').addEventListener('click', () => {
     if (!why.value.trim()){ why.focus(); return; }
     decide('needs changes', false, why.value.trim());
   });

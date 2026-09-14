@@ -330,7 +330,7 @@ test('a decision refused as too large says so on the decision, not only in the p
   await ready(desk);
   await desk.page.click('#changes');
   await desk.page.fill('#why', 'y'.repeat(8 * 1024));
-  await desk.page.click('#decide #send');
+  await desk.page.click('#recordReason');
   await desk.page.waitForFunction(() => {
     const p = document.querySelector('#decide .pickup');
     return p && !/Saving/.test(p.textContent);
