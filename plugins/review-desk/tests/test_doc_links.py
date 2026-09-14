@@ -46,5 +46,50 @@ class DocLinks(unittest.TestCase):
                                    "commands/review-desk.md", 1)
 
 
+README = os.path.join(ROOT, "README.md")
+SKILL = os.path.join(ROOT, "skills", "review-desk", "SKILL.md")
+
+
+def flat(path):
+    return " ".join(read(path).split())
+
+
+class ReaderDocs(unittest.TestCase):
+    """README.md and SKILL.md are what a person and a model read first. They
+    restated behaviour the command docs and hooks later changed, so they are
+    held to the parts a reader acts on."""
+
+    def test_collect_is_always_shown_with_its_repository(self):
+        # A bare number resolves to whatever request the conversation is about,
+        # and the same number in another repository then gets the comment and
+        # the merge.
+        for path in (README, SKILL):
+            with self.subTest(path=os.path.basename(path)):
+                args = re.findall(r"/review-collect\s+(\S+)", read(path))
+                self.assertTrue(args, path)
+                for arg in args:
+                    self.assertRegex(arg, r"^`?<?[\w.-]*owner/repo>?#|^[\w.-]+/[\w.-]+#\d+", arg)
+                self.assertEqual(re.findall(r"/review-collect\s+<?(?:\d+|n|pr|number)\b", read(path)), [])
+                self.assertIn("bare number", flat(path))
+
+    def test_hooks_are_described_as_matching_any_git_remote_and_the_launch_directory(self):
+        text = flat(README)
+        self.assertGreaterEqual(text.count("any git remote"), 2, "after-push and session-start")
+        self.assertIn("launch directory", text)
+        for stale in ("for that repository", "for the repository a session starts"):
+            self.assertNotIn(stale, text)
+        self.assertIn("any git remote", flat(SKILL))
+
+    def test_lifecycle_matches_the_command_docs(self):
+        for path in (README, SKILL):
+            with self.subTest(path=os.path.basename(path)):
+                text = flat(path)
+                stamps = [s for s in re.split(r"(?<=[.;:])\s", text) if "collectedAt" in s]
+                self.assertTrue(stamps, path)
+                for sentence in stamps:
+                    self.assertRegex(sentence, r"only when [^.]*merged or closed", sentence)
+                self.assertIn("every message still waiting before", text)
+
+
 if __name__ == "__main__":
     unittest.main()

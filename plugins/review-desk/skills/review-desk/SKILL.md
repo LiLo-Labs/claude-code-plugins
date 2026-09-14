@@ -26,18 +26,29 @@ asked for.
 
 ## How it goes
 
-1. `/review-desk <pr>` — gather the request, build the page, publish it with the
-   capabilities object the build prints (`db` with its write rules, and
-   `artifact`), hand over the link.
-2. They read, ask, argue, and press **Approve** or **Needs changes**. The page
-   rings the session watching it; with no session watching, the next session
-   start picks the desk up.
-3. `/review-collect <pr>` — read the discussion, summarise it into the pull
-   request, merge or revise. Each decision is collected once: a pickup already
+1. `/review-desk <owner/repo>#<number>` — gather the request, build the page,
+   publish it with the capabilities object the build prints (`db` with its
+   write rules, and `artifact`), record it in `~/.review-desks.json` with the
+   directory the session was launched in, hand over the link.
+2. They read, ask, argue, and press **Approve** or **Needs changes**. Each
+   message and decision rings the session watching the desk. With no session
+   watching, the next session started in a checkout where any git remote names
+   the repository, or in the directory the desk was published from, picks it
+   up.
+3. `/review-collect <owner/repo>#<number>` — answer every message still waiting
+   before anything is written to the pull request, then summarise the
+   discussion into it and merge or revise. An approval followed by a later
+   message is not merged. Each decision is collected once: a pickup already
    holding it and its outcome means later rings only answer messages, and a
-   pickup left without an outcome by a session that stopped is taken over. The desk stays open,
-   listed at session start and after pushes, until the request is merged or
-   closed.
+   pickup left without an outcome by a session that stopped is taken over.
+
+Always name the repository. A bare number resolves only within the current
+repository (the request under discussion, or else the working directory's
+remote), and the same number is often another repository's pull request too.
+
+The ledger entry is stamped `collectedAt` only when the pull request is merged
+or closed. A desk being revised or blocked stays open, listed at session start
+and after pushes.
 
 ## Writing the page
 
