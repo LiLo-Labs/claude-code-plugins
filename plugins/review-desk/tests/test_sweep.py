@@ -14,12 +14,33 @@ HERE = os.path.dirname(__file__)
 SWEEP = os.path.join(HERE, "..", "hooks", "sweep.py")
 HOOKS_JSON = os.path.join(HERE, "..", "hooks", "hooks.json")
 
+# User settings that allow the merge, so tests about the desk list do not also
+# get the unattended-merge line.
+ALLOWED = {"permissions": {"allow": ["Bash(gh pr merge *)"]}}
+ADVICE = "Unattended merges are not allowed here"
 
-def run(ledger, origin="https://github.com/o/r.git", remotes=None):
+
+def put(path, content):
+    """None: no file; a callable is given the path and makes whatever it likes;
+    str: raw text; else JSON."""
+    if content is None:
+        return
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    if callable(content):
+        content(path)
+        return
+    with open(path, "w") as f:
+        f.write(content if isinstance(content, str) else json.dumps(content))
+
+
+def run(ledger, origin="https://github.com/o/r.git", remotes=None,
+        settings=ALLOWED, project=None, local=None):
     """Run the sweep against `ledger` (None: no file; str: raw text; a callable
     is given the session directory and returns the ledger; else JSON) from a
     repository whose remotes are `remotes`, a name-to-URL dict, or else whose
-    origin is `origin` (None for both: not a repository)."""
+    origin is `origin` (None for both: not a repository). `settings`,
+    `project` and `local` are the user, shared project and local project
+    settings files, as `put` takes them."""
     with tempfile.TemporaryDirectory() as home:
         cwd = os.path.join(home, "session")
         os.makedirs(cwd)
@@ -28,6 +49,9 @@ def run(ledger, origin="https://github.com/o/r.git", remotes=None):
         if ledger is not None:
             with open(os.path.join(home, ".review-desks.json"), "w") as f:
                 f.write(ledger if isinstance(ledger, str) else json.dumps(ledger))
+        put(os.path.join(home, ".claude", "settings.json"), settings)
+        put(os.path.join(cwd, ".claude", "settings.json"), project)
+        put(os.path.join(cwd, ".claude", "settings.local.json"), local)
         if remotes is None:
             remotes = {"origin": origin} if origin else {}
         if remotes:
@@ -35,9 +59,10 @@ def run(ledger, origin="https://github.com/o/r.git", remotes=None):
             for name, url in remotes.items():
                 subprocess.run(["git", "-C", cwd, "remote", "add", name, url], check=True)
         event = {"hook_event_name": "SessionStart", "source": "startup", "cwd": cwd}
+        env = dict(os.environ, HOME=home)
+        env.pop("CLAUDE_CONFIG_DIR", None)
         done = subprocess.run([sys.executable, SWEEP], input=json.dumps(event),
-                              env=dict(os.environ, HOME=home),
-                              capture_output=True, text=True, timeout=10)
+                              env=env, capture_output=True, text=True, timeout=10)
     return done
 
 
@@ -270,6 +295,164 @@ class Sweep(unittest.TestCase):
             with self.subTest(ledger=text[:60]):
                 done = run(text)
                 self.assertEqual((done.returncode, done.stderr), (0, ""))
+
+
+def advice(done):
+    """The unattended-merge lines the sweep said, after checking it exited
+    cleanly."""
+    assert (done.returncode, done.stderr) == (0, ""), (done.returncode, done.stderr)
+    if not done.stdout:
+        return []
+    return [l for l in said(done).splitlines() if ADVICE in l]
+
+
+class UnattendedMerges(unittest.TestCase):
+    # Seen on the real host: an approval's gh pr merge was refused by auto
+    # mode's classifier, and nothing told the user a permission rule allows it.
+
+    def test_an_allow_rule_covering_the_merge_is_silent(self):
+        for rule in ("Bash(gh pr merge *)", "Bash(gh pr merge:*)", "Bash(gh pr *)", "Bash(gh *)"):
+            with self.subTest(rule=rule):
+                self.assertEqual(advice(run([desk(1)], settings={"permissions": {"allow": [rule]}})), [])
+
+    def test_a_rule_in_project_settings_is_silent(self):
+        for where in ("project", "local"):
+            with self.subTest(where=where):
+                done = run([desk(1)], settings=None, **{where: ALLOWED})
+                self.assertEqual(advice(done), [])
+
+    def test_no_rule_with_an_open_desk_gives_one_line_naming_the_rule(self):
+        for settings in (None, {}, {"permissions": {"allow": ["Bash(gh pr view *)"]}}):
+            with self.subTest(settings=settings):
+                lines = advice(run([desk(1)], settings=settings))
+                self.assertEqual(len(lines), 1)
+                self.assertIn("`Bash(gh pr merge *)`", lines[0])
+                self.assertNotIn("rtk", lines[0])
+                self.assertIn('README section "Unattended merges"', lines[0])
+                self.assertIn("Do not add the rule or change any settings file yourself", lines[0])
+
+    def test_an_open_desk_in_another_repository_still_gets_the_line(self):
+        self.assertEqual(len(advice(run([desk(1, repo="o/a")], settings=None))), 1)
+
+    def test_rules_auto_mode_drops_or_that_do_not_match_give_the_line(self):
+        for rule in ("Bash", "Bash(*)", "Bash(gh pr merge)", "Bash(* --squash)", "Bash(gh pr merge 2 *)",
+                     "Bash(git merge *)", "Read", 42):
+            with self.subTest(rule=rule):
+                lines = advice(run([desk(1)], settings={"permissions": {"allow": [rule]}}))
+                self.assertEqual(len(lines), 1)
+
+    def test_rtk_rewriting_hook_needs_the_rewritten_rule(self):
+        # Claude Code matches rules against the command the PreToolUse hook
+        # returns, and RTK's hook turns `gh pr merge` into `rtk gh pr merge`.
+        hooks = {"PreToolUse": [{"matcher": "Bash",
+                                 "hooks": [{"type": "command", "command": "rtk hook claude"}]}]}
+        lines = advice(run([desk(1)], settings={"hooks": hooks,
+                                                "permissions": {"allow": ["Bash(gh pr merge *)"]}}))
+        self.assertEqual(len(lines), 1)
+        self.assertIn("`Bash(rtk gh pr merge *)`", lines[0])
+        self.assertNotIn("`Bash(gh pr merge *)`", lines[0])
+        both = {"hooks": hooks, "permissions": {"allow": ["Bash(gh pr merge *)", "Bash(rtk gh pr merge *)"]}}
+        self.assertEqual(advice(run([desk(1)], settings=both)), [])
+        neither = advice(run([desk(1)], settings={"hooks": hooks}))
+        self.assertIn("`Bash(gh pr merge *)` and `Bash(rtk gh pr merge *)`", neither[0])
+
+    def test_classify_all_shell_suspends_the_rule(self):
+        settings = dict(ALLOWED, autoMode={"classifyAllShell": True})
+        lines = advice(run([desk(1)], settings=settings))
+        self.assertEqual(len(lines), 1)
+        self.assertIn("classifyAllShell", lines[0])
+        # Claude Code reads autoMode only from user settings.
+        self.assertEqual(advice(run([desk(1)], project={"autoMode": {"classifyAllShell": True}})), [])
+
+    def test_a_deny_or_ask_rule_is_the_users_choice_and_silent(self):
+        for key, rule in (("ask", "Bash(gh pr merge *)"), ("deny", "Bash(gh pr *)"), ("ask", "Bash")):
+            with self.subTest(key=key, rule=rule):
+                self.assertEqual(advice(run([desk(1)], settings={"permissions": {key: [rule]}})), [])
+
+    def test_a_leading_wildcard_deny_or_ask_rule_counts_only_when_it_matches(self):
+        # A deny or ask rule like `Bash(* --force)` does not stop `gh pr merge ...
+        # --squash`, so it must not silence the advice as if it did.
+        for key, rule in (("deny", "Bash(* --force)"), ("ask", "Bash(*sudo*)"), ("deny", "Bash(*rm -rf*)")):
+            with self.subTest(key=key, rule=rule):
+                self.assertEqual(len(advice(run([desk(1)], settings={"permissions": {key: [rule]}}))), 1)
+        for key, rule in (("deny", "Bash(* --squash)"), ("ask", "Bash(*pr merge*)"), ("ask", "Bash(*)")):
+            with self.subTest(key=key, rule=rule):
+                self.assertEqual(advice(run([desk(1)], settings={"permissions": {key: [rule]}})), [])
+
+    def test_the_advice_names_claude_config_dir_when_it_is_set(self):
+        with tempfile.TemporaryDirectory() as config:
+            put(os.path.join(config, "settings.json"), {})
+            with tempfile.TemporaryDirectory() as home:
+                cwd = os.path.join(home, "s")
+                os.makedirs(cwd)
+                with open(os.path.join(home, ".review-desks.json"), "w") as f:
+                    json.dump([desk(1)], f)
+                env = dict(os.environ, HOME=home, CLAUDE_CONFIG_DIR=config)
+                done = subprocess.run([sys.executable, SWEEP], env=env, capture_output=True, text=True,
+                                      input=json.dumps({"cwd": cwd}), timeout=10)
+                lines = advice(done)
+        self.assertEqual(len(lines), 1)
+        self.assertIn(os.path.join(config, "settings.json"), lines[0])
+        self.assertNotIn("~/.claude/settings.json", lines[0])
+
+    def test_no_open_desk_is_silent(self):
+        for ledger in (None, [], [desk(1, "2026-09-10T00:00:00Z")]):
+            with self.subTest(ledger=ledger):
+                done = run(ledger, settings=None)
+                self.assertEqual((done.returncode, done.stdout, done.stderr), (0, "", ""))
+
+    def test_malformed_or_unreadable_settings_are_silent(self):
+        def fifo(path):
+            os.mkfifo(path)
+
+        def directory(path):
+            os.makedirs(path)
+
+        def huge(path):
+            with open(path, "w") as f:
+                f.write(json.dumps({"x": "y" * (2 << 20)}))
+
+        cases = {
+            "not json": "{nope",
+            "not an object": "[]",
+            "permissions a list": {"permissions": ["Bash(gh pr merge *)"]},
+            "allow a string": {"permissions": {"allow": "Bash(gh pr merge *)"}},
+            "deep nesting": "[" * 100000 + "]" * 100000,
+            "not utf-8": b"\xff\xfe{}".decode("latin-1"),
+            "a directory": directory,
+            "over the size cap": huge,
+        }
+        if hasattr(os, "mkfifo"):
+            cases["a fifo"] = fifo
+        for name, settings in cases.items():
+            with self.subTest(settings=name):
+                done = run([desk(1)], settings=settings)
+                self.assertEqual(advice(done), [])
+                self.assertIn("o/r#1", said(done))
+        # A malformed project file silences it even when user settings lack the rule.
+        self.assertEqual(advice(run([desk(1)], settings=None, local="{nope")), [])
+
+    @unittest.skipIf(hasattr(os, "geteuid") and os.geteuid() == 0, "root reads a mode-000 file")
+    def test_a_settings_file_without_read_permission_is_silent(self):
+        def locked(path):
+            with open(path, "w") as f:
+                f.write("{}")
+            os.chmod(path, 0)
+
+        self.assertEqual(advice(run([desk(1)], settings=locked)), [])
+
+    def test_claude_config_dir_is_where_user_settings_are_read(self):
+        with tempfile.TemporaryDirectory() as config:
+            put(os.path.join(config, "settings.json"), ALLOWED)
+            with tempfile.TemporaryDirectory() as home:
+                cwd = os.path.join(home, "s")
+                os.makedirs(cwd)
+                with open(os.path.join(home, ".review-desks.json"), "w") as f:
+                    json.dump([desk(1)], f)
+                env = dict(os.environ, HOME=home, CLAUDE_CONFIG_DIR=config)
+                done = subprocess.run([sys.executable, SWEEP], env=env, capture_output=True, text=True,
+                                      input=json.dumps({"cwd": cwd}), timeout=10)
+        self.assertEqual(advice(done), [])
 
 
 class HooksJson(unittest.TestCase):

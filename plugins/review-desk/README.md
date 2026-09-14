@@ -95,6 +95,51 @@ brought back with `claude --resume`, which keeps its id. The page itself still
 shows such a claim as working until then; showing a stalled claim differently on
 the page is left to a later release.
 
+## Unattended merges
+
+An approval on the desk merges on its own only if Claude Code lets the session
+run `gh pr merge` without asking. In auto mode it often does not: the
+classifier refused `gh pr merge` for an approved desk ("Merge Without Review",
+then "External System Writes"), the desk recorded `blocked`, and the pull
+request merged only when someone ran the command by hand. What lets it through
+is a permission allow rule in your Claude Code settings:
+
+    {
+      "permissions": {
+        "allow": ["Bash(gh pr merge *)"]
+      }
+    }
+
+With RTK (Rust Token Killer) or any other PreToolUse hook that
+rewrites shell commands, the rule also needs the rewritten form, because Claude
+Code matches rules against the command the hook returns:
+
+    "allow": ["Bash(gh pr merge *)", "Bash(rtk gh pr merge *)"]
+
+The place for it is `~/.claude/settings.json`, your user settings. Desks are
+collected from whichever directory a session starts in, and user settings apply
+in all of them; a rule in a repository's `.claude/settings.json` or
+`.claude/settings.local.json` covers only sessions started there. The
+`/permissions` command shows the rules in effect.
+
+What it costs: the rule allows every `gh pr merge` a session writes, in any
+repository `gh` can reach, not only desk approvals. The desk's own checks (the
+approved commit via `--match-head-commit`, no message after the decision) apply
+only to merges that go through `/review-collect`. Narrowing the rule by
+repository is not reliable, since Claude Code's docs call argument-matching
+patterns fragile. It has no effect when a deny or ask rule also matches
+`gh pr merge` (those are evaluated first), or when `autoMode.classifyAllShell`
+is on, which suspends every Bash allow rule in auto mode.
+
+The plugin does not add the rule itself. A permission is yours to grant, and a
+plugin that wrote its own allow rule would be approving the very merge the check
+is there to stop. It only reads: while a desk is open and no allow rule in your
+user settings, or in the session directory's project settings, covers
+`gh pr merge`, the session-start hook adds one line naming the rule. When a
+merge is refused anyway, `/review-collect` records `blocked` with that rule in
+the detail the reviewer reads, and running `/review-collect owner/repo#number`
+after the rule is in place merges the approval without a new decision.
+
 ## Why it exists
 
 Built for a reviewer who reads pull requests on an iPad, away from any terminal,

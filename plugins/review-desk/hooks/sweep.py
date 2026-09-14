@@ -20,9 +20,18 @@ send a session back through the sweep in the middle of its work.
 It never fails the session. Every outcome exits 0; a ledger it cannot read is
 reported to the session rather than swallowed, because a silently unreadable
 ledger is exactly how a decision gets lost.
+
+While a desk is open it also reads, and only reads, the Claude Code settings
+files that apply to this session, and adds one line when no allow rule covers
+the `gh pr merge` an approval runs: in auto mode the classifier can refuse that
+merge, and the approval then waits for someone at the computer. A settings file
+it cannot read or parse makes it say nothing about merges, since it cannot tell
+what is allowed. It never writes settings: a permission is the user's to grant.
 """
 import json
 import os
+import re
+import stat
 import sys
 
 from after_push import entry_repo_in, is_open, repos_of
@@ -39,6 +48,177 @@ WATCH_CAP = 4
 # it over. /review-desk states the same age; tests/test_protocol_docs.py holds
 # the two together.
 STALE_CLAIM_MINUTES = 5
+
+# The merge /review-collect runs for an approval, and the allow rule the README
+# and review-collect.md name for it. tests/test_protocol_docs.py holds the docs
+# to these. Claude Code matches permission rules against the command a
+# PreToolUse hook returns, so under RTK's rewriting hook the command matched is
+# `rtk gh pr merge ...` and needs its own rule.
+MERGE_COMMAND = "gh pr merge 1 --repo o/r --match-head-commit 0123abc --squash"
+MERGE_RULE = "Bash(gh pr merge *)"
+RTK_MERGE_RULE = "Bash(rtk gh pr merge *)"
+README_SECTION = "Unattended merges"
+
+# A settings file larger than this is not read. Settings are a few kilobytes;
+# the cap keeps a stray huge file from slowing session start.
+SETTINGS_MAX_BYTES = 1 << 20
+
+
+class Unreadable(Exception):
+    pass
+
+
+def bash_rule_covers(rule, command, broad):
+    """Whether a permission rule matches `command` as Claude Code's permissions
+    docs describe Bash rules: `*` stands for any text, a trailing ` *` also
+    matches the bare command, and `:*` at the end means the same as ` *`.
+    A blanket rule (`Bash`, `Bash(*)`) counts only when `broad`: auto mode
+    drops such allow rules, while deny and ask rules of that shape still apply.
+    Any other rule with nothing before its first `*` (`Bash(* --force)`) is
+    never counted as an allow rule, so the advice errs toward being shown, and
+    as a deny or ask rule it counts only when it actually matches `command`."""
+    if not isinstance(rule, str):
+        return False
+    rule = rule.strip()
+    if rule == "Bash":
+        return broad
+    m = re.fullmatch(r"Bash\((.*)\)", rule, re.S)
+    if not m:
+        return False
+    pattern = m.group(1)
+    if pattern.endswith(":*"):
+        pattern = pattern[:-2] + " *"
+    if pattern.strip() == "*":
+        return broad
+    if "*" in pattern and not pattern.split("*", 1)[0].strip() and not broad:
+        return False
+    if re.fullmatch(".*".join(re.escape(p) for p in pattern.split("*")), command, re.S):
+        return True
+    return pattern.endswith(" *") and pattern.count("*") == 1 and command == pattern[:-2]
+
+
+def git_root(directory):
+    """The nearest ancestor holding `.git`, found by stat alone so session start
+    does not wait on a git process."""
+    here = os.path.abspath(directory)
+    for _ in range(64):
+        if os.path.exists(os.path.join(here, ".git")):
+            return here
+        parent = os.path.dirname(here)
+        if parent == here:
+            return None
+        here = parent
+    return None
+
+
+def user_settings_path():
+    """Where Claude Code reads user settings: `$CLAUDE_CONFIG_DIR/settings.json`
+    when that is set, else `~/.claude/settings.json`."""
+    config = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude")
+    return os.path.join(config, "settings.json")
+
+
+def settings_paths(cwd):
+    """(is user settings, path) for the files Claude Code reads permissions from
+    for a session in `cwd`: user settings, the directory's shared and local
+    project settings, and local settings at the repository root. Managed
+    settings are not read."""
+    paths = [(True, user_settings_path())]
+    if cwd:
+        paths.append((False, os.path.join(cwd, ".claude", "settings.json")))
+        paths.append((False, os.path.join(cwd, ".claude", "settings.local.json")))
+        root = git_root(cwd)
+        if root:
+            paths.append((False, os.path.join(root, ".claude", "settings.local.json")))
+    seen, unique = set(), []
+    for user, path in paths:
+        key = os.path.realpath(path)
+        if key not in seen:
+            seen.add(key)
+            unique.append((user, path))
+    return unique
+
+
+def read_settings(path):
+    """The settings object at `path`, or None when there is no file. Anything
+    else that is not a small regular file holding a JSON object raises
+    Unreadable; the stat check keeps a FIFO from blocking the open."""
+    try:
+        info = os.stat(path)
+    except (FileNotFoundError, NotADirectoryError):
+        return None
+    if not stat.S_ISREG(info.st_mode) or info.st_size > SETTINGS_MAX_BYTES:
+        raise Unreadable(path)
+    with open(path, encoding="utf-8") as f:
+        data = json.load(f)
+    if not isinstance(data, dict):
+        raise Unreadable(path)
+    return data
+
+
+def rewrites_through_rtk(data):
+    hooks = data.get("hooks")
+    groups = hooks.get("PreToolUse") if isinstance(hooks, dict) else None
+    for group in groups if isinstance(groups, list) else []:
+        inner = group.get("hooks") if isinstance(group, dict) else None
+        for hook in inner if isinstance(inner, list) else []:
+            command = hook.get("command") if isinstance(hook, dict) else None
+            if isinstance(command, str) and re.search(r"\brtk\b", command):
+                return True
+    return False
+
+
+def merge_advice(cwd):
+    """One line for the session when no allow rule lets `gh pr merge` run
+    unattended, or None: when a rule covers it, when a deny or ask rule shows
+    the user chose to be stopped, or when any settings file cannot be read."""
+    try:
+        allow, stop, rtk, classify_all = [], [], False, False
+        for user, path in settings_paths(cwd):
+            data = read_settings(path)
+            if data is None:
+                continue
+            perms = data.get("permissions", {})
+            if not isinstance(perms, dict):
+                raise Unreadable(path)
+            for key in ("allow", "ask", "deny"):
+                rules = perms.get(key, [])
+                if not isinstance(rules, list):
+                    raise Unreadable(path)
+                (allow if key == "allow" else stop).extend(rules)
+            rtk = rtk or rewrites_through_rtk(data)
+            # Claude Code reads autoMode from user settings, not project files.
+            auto = data.get("autoMode") if user else None
+            classify_all = classify_all or (isinstance(auto, dict) and auto.get("classifyAllShell") is True)
+    except (Unreadable, OSError, ValueError, RecursionError):
+        return None
+    needs = [(MERGE_COMMAND, MERGE_RULE)]
+    if rtk:
+        needs.append(("rtk " + MERGE_COMMAND, RTK_MERGE_RULE))
+    if any(bash_rule_covers(r, cmd, broad=True) for r in stop for cmd, _ in needs):
+        return None
+    missing = [rule for cmd, rule in needs
+               if not any(bash_rule_covers(r, cmd, broad=False) for r in allow)]
+    where = f'as the review-desk README section "{README_SECTION}" explains'
+    if classify_all:
+        return (
+            "Unattended merges are not allowed here: autoMode.classifyAllShell is on in "
+            "user settings, which suspends every Bash allow rule in auto mode, so an "
+            "approval collected from a review desk can stop at blocked until someone "
+            f"merges it by hand. Tell the user that in one line, {where}. Do not change "
+            "any settings file yourself."
+        )
+    if not missing:
+        return None
+    rules = " and ".join(f"`{r}`" for r in missing)
+    return (
+        "Unattended merges are not allowed here: no permission allow rule in the "
+        "Claude Code settings this session reads covers `gh pr merge`, so in auto mode "
+        "an approval collected from a review desk can stop at blocked until someone "
+        f"merges it by hand. Tell the user in one line that adding {rules} to "
+        f"permissions.allow in {user_settings_path()} lets approvals merge unattended, "
+        f"{where}. Do not add the rule or change any settings file yourself."
+    )
 
 
 def pending(entries):
@@ -174,7 +354,11 @@ def main():
     if waiting:
         cwd = event.get("cwd") if isinstance(event.get("cwd"), str) else None
         cwd = cwd or os.getcwd()
-        print(context(message(waiting, repos_of(cwd), cwd)))
+        text = message(waiting, repos_of(cwd), cwd)
+        advice = merge_advice(cwd)
+        if advice:
+            text += "\n\n" + advice
+        print(context(text))
     return 0
 
 
