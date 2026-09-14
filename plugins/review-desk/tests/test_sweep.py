@@ -369,6 +369,32 @@ class UnattendedMerges(unittest.TestCase):
             with self.subTest(key=key, rule=rule):
                 self.assertEqual(advice(run([desk(1)], settings={"permissions": {key: [rule]}})), [])
 
+    def test_a_leading_wildcard_deny_or_ask_rule_counts_only_when_it_matches(self):
+        # A deny or ask rule like `Bash(* --force)` does not stop `gh pr merge ...
+        # --squash`, so it must not silence the advice as if it did.
+        for key, rule in (("deny", "Bash(* --force)"), ("ask", "Bash(*sudo*)"), ("deny", "Bash(*rm -rf*)")):
+            with self.subTest(key=key, rule=rule):
+                self.assertEqual(len(advice(run([desk(1)], settings={"permissions": {key: [rule]}}))), 1)
+        for key, rule in (("deny", "Bash(* --squash)"), ("ask", "Bash(*pr merge*)"), ("ask", "Bash(*)")):
+            with self.subTest(key=key, rule=rule):
+                self.assertEqual(advice(run([desk(1)], settings={"permissions": {key: [rule]}})), [])
+
+    def test_the_advice_names_claude_config_dir_when_it_is_set(self):
+        with tempfile.TemporaryDirectory() as config:
+            put(os.path.join(config, "settings.json"), {})
+            with tempfile.TemporaryDirectory() as home:
+                cwd = os.path.join(home, "s")
+                os.makedirs(cwd)
+                with open(os.path.join(home, ".review-desks.json"), "w") as f:
+                    json.dump([desk(1)], f)
+                env = dict(os.environ, HOME=home, CLAUDE_CONFIG_DIR=config)
+                done = subprocess.run([sys.executable, SWEEP], env=env, capture_output=True, text=True,
+                                      input=json.dumps({"cwd": cwd}), timeout=10)
+                lines = advice(done)
+        self.assertEqual(len(lines), 1)
+        self.assertIn(os.path.join(config, "settings.json"), lines[0])
+        self.assertNotIn("~/.claude/settings.json", lines[0])
+
     def test_no_open_desk_is_silent(self):
         for ledger in (None, [], [desk(1, "2026-09-10T00:00:00Z")]):
             with self.subTest(ledger=ledger):

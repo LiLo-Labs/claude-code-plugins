@@ -72,9 +72,11 @@ def bash_rule_covers(rule, command, broad):
     """Whether a permission rule matches `command` as Claude Code's permissions
     docs describe Bash rules: `*` stands for any text, a trailing ` *` also
     matches the bare command, and `:*` at the end means the same as ` *`.
-    A rule with nothing before its first `*` (`Bash`, `Bash(*)`) counts only
-    when `broad`: auto mode drops such allow rules, while deny and ask rules of
-    that shape still apply."""
+    A blanket rule (`Bash`, `Bash(*)`) counts only when `broad`: auto mode
+    drops such allow rules, while deny and ask rules of that shape still apply.
+    Any other rule with nothing before its first `*` (`Bash(* --force)`) is
+    never counted as an allow rule, so the advice errs toward being shown, and
+    as a deny or ask rule it counts only when it actually matches `command`."""
     if not isinstance(rule, str):
         return False
     rule = rule.strip()
@@ -86,8 +88,10 @@ def bash_rule_covers(rule, command, broad):
     pattern = m.group(1)
     if pattern.endswith(":*"):
         pattern = pattern[:-2] + " *"
-    if "*" in pattern and not pattern.split("*", 1)[0].strip():
+    if pattern.strip() == "*":
         return broad
+    if "*" in pattern and not pattern.split("*", 1)[0].strip() and not broad:
+        return False
     if re.fullmatch(".*".join(re.escape(p) for p in pattern.split("*")), command, re.S):
         return True
     return pattern.endswith(" *") and pattern.count("*") == 1 and command == pattern[:-2]
@@ -107,13 +111,19 @@ def git_root(directory):
     return None
 
 
+def user_settings_path():
+    """Where Claude Code reads user settings: `$CLAUDE_CONFIG_DIR/settings.json`
+    when that is set, else `~/.claude/settings.json`."""
+    config = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude")
+    return os.path.join(config, "settings.json")
+
+
 def settings_paths(cwd):
     """(is user settings, path) for the files Claude Code reads permissions from
     for a session in `cwd`: user settings, the directory's shared and local
     project settings, and local settings at the repository root. Managed
     settings are not read."""
-    config = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude")
-    paths = [(True, os.path.join(config, "settings.json"))]
+    paths = [(True, user_settings_path())]
     if cwd:
         paths.append((False, os.path.join(cwd, ".claude", "settings.json")))
         paths.append((False, os.path.join(cwd, ".claude", "settings.local.json")))
@@ -206,7 +216,7 @@ def merge_advice(cwd):
         "Claude Code settings this session reads covers `gh pr merge`, so in auto mode "
         "an approval collected from a review desk can stop at blocked until someone "
         f"merges it by hand. Tell the user in one line that adding {rules} to "
-        f"permissions.allow in ~/.claude/settings.json lets approvals merge unattended, "
+        f"permissions.allow in {user_settings_path()} lets approvals merge unattended, "
         f"{where}. Do not add the rule or change any settings file yourself."
     )
 
