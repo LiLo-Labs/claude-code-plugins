@@ -43,6 +43,7 @@ h1.doctitle{font-family:var(--doc);font-weight:600;font-size:30px;
   line-height:1.15;margin:8px 0 6px;letter-spacing:-.01em}
 .meta{font-family:var(--mono);font-size:11.5px;color:var(--faint)}
 .meta a{color:var(--cool)}
+.meta .newer{color:var(--mark)}
 
 .slab{background:var(--card);border:1px solid var(--edge);border-radius:6px;
   margin:18px 0;overflow:hidden}
@@ -482,6 +483,14 @@ const isDocument = d => !!d && typeof d.name === 'string' && typeof d.text === '
 let documents = (DATA.documents || []).filter(isDocument).map(d => ({name: d.name, text: d.text}));
 // The description, which the working session can rewrite while the page is open.
 let bodyText = DATA.body || '';
+// The pull request's head commit this page shows: the payload's, then whichever
+// the working session writes into context/body with each pushed revision. A
+// decision stores it as decidedOn, and /review-collect merges an approval only
+// while GitHub's head is still that commit, so approving never merges commits
+// the page never showed.
+const isHead = h => typeof h === 'string' && /^[0-9a-f]{40}$/.test(h);
+const builtOn = isHead(DATA.headRefOid) ? DATA.headRefOid : null;
+let head = builtOn;
 let leaf = 0, freshOn = {};
 
 /* Everything readable, in one strip: the request itself, then each document
@@ -648,11 +657,23 @@ matchMedia('(prefers-color-scheme: dark)').addEventListener('change', redrawDiag
 new MutationObserver(redrawDiagrams).observe(document.documentElement,
   {attributes: true, attributeFilter: ['data-theme']});
 
+// Its own function so a new head redraws this line alone: paint() replaces the
+// sheet, and with it any passage the reviewer has highlighted.
+function drawMeta(){
+  const short = h => h.slice(0, 7);
+  $('meta').innerHTML = 'pull request <a href="'+esc(DATA.url)+'" target="_blank" rel="noopener">#'
+    + DATA.number + '</a>' + (DATA.summary ? ' · ' + esc(DATA.summary) : '')
+    + (head ? ' · commit <code>' + short(head) + '</code>' : '')
+    + (head && head !== builtOn
+      ? ' · <span class="newer" id="newerHead">updated to a newer commit since this desk '
+        + 'was published' + (builtOn ? ' (was ' + short(builtOn) + ')' : '') + '</span>'
+      : '');
+}
+
 function paint(){
   $('title').textContent = DATA.title || 'Review';
   $('repoTag').textContent = (DATA.repo ? DATA.repo + ' · ' : '') + 'review desk';
-  $('meta').innerHTML = 'pull request <a href="'+esc(DATA.url)+'" target="_blank" rel="noopener">#'
-    + DATA.number + '</a>' + (DATA.summary ? ' · ' + esc(DATA.summary) : '');
+  drawMeta();
   // The sheet is about to be replaced: a leaf switch, or a document or the
   // description changing. A selection held from it points at nodes that are gone.
   forget();
@@ -1363,6 +1384,10 @@ function sayKept(){
 // The session's pickup copies it back, so an acknowledgement of an earlier
 // verdict never reads as one for the verdict on screen.
 let decidedAt = null, pickup = null, rang = null, showingDecided = false;
+// The head the page was showing when the reviewer decided, stamped with
+// decidedAt. Null for a decision restored from a desk saved before it existed,
+// which /review-collect then merges as it always did.
+let decidedOn = null;
 
 // Counts whole-document writes from this view, so rering can tell whether one
 // went out while its own read-modify-write was in flight.
@@ -1384,11 +1409,14 @@ async function record(){
   const at = decided ? decidedAt : undefined;
   const write = {ids: new Set(slots.map(m => m.answers)), at};
   write.done = db.doc('review/pr-' + DATA.number).set({
-    pr: DATA.number, title: DATA.title,
+    pr: DATA.number,
+    ...(typeof DATA.repo === 'string' ? {repo: DATA.repo} : {}),
+    title: DATA.title,
     threads: threads.map(t => tidy(t, held)),
     decision: decided,
     reason: reason,
     decidedAt: decidedAt,
+    ...(decided && decidedOn ? {decidedOn} : {}),
     updatedAt: new Date().toISOString(),
   }).then(() => {
     write.ids.forEach(id => storedSlots.add(id));
@@ -1569,6 +1597,7 @@ async function decide(v, quiet, why){
   rang = null;
   if (!quiet){
     const at = decidedAt = new Date().toISOString();
+    decidedOn = head;
     rang = 'sending';
     drawDecided();
     // As in deliver(): a send during the retry wait may have stored this decision.
@@ -1619,6 +1648,14 @@ function pickupLine(){
     + rang + ').' + later;
 }
 
+// An approval of a head the page no longer shows. Not said once the pickup
+// reports the merge: the push that moved the head came after it.
+function staleApproval(){
+  if (decided !== 'approved' || !decidedOn || !head || decidedOn === head) return false;
+  const o = pickup && pickup.decision === decided && pickup.decidedAt === decidedAt && pickup.outcome;
+  return !(o && o.result === 'merged');
+}
+
 function drawDecided(){
   showingDecided = true;
   $('decide').innerHTML = '<div class="cap">Recorded</div><div class="done">'
@@ -1628,6 +1665,10 @@ function drawDecided(){
     + ', and reports back here.'
     + (reason ? '<blockquote>'+esc(reason)+'</blockquote>' : '')
     + '<p class="pickup">'+esc(pickupLine())+'</p>'
+    + (staleApproval() ? '<p class="pickup" id="staleHead">You approved commit '
+      + decidedOn.slice(0, 7) + '. The desk now shows ' + head.slice(0, 7)
+      + ', pushed since, so the working session will not merge until you look at '
+      + 'the new commits and decide again.</p>' : '')
     + '<div class="verdict"><button class="btn" id="redo">Change this</button></div>'
     + '</div>';
   $('redo').addEventListener('click', offerDecision);
@@ -1721,6 +1762,7 @@ async function restoreStored(){
     if (had){
       reason = had.reason || null;
       decidedAt = had.decidedAt || null;
+      decidedOn = isHead(had.decidedOn) ? had.decidedOn : null;
       if (had.decision) decide(had.decision, true, had.reason);
     }
     draw();
@@ -2064,7 +2106,16 @@ function followPage(){
   follow('body', 'changes to the description', 'page',
     () => db.doc('review/pr-' + DATA.number + '/context/body'), snap => {
       const row = snap.exists && snap.data();
-      if (!row || typeof row.text !== 'string' || row.text === bodyText) return;
+      if (!row) return;
+      // The session writes the head with the text of a pushed revision. It is
+      // taken even when the text is unchanged: a push the description did not
+      // need to mention still moves what an approval would merge.
+      if (isHead(row.head) && row.head !== head){
+        head = row.head;
+        drawMeta();
+        if (showingDecided) drawDecided();
+      }
+      if (typeof row.text !== 'string' || row.text === bodyText) return;
       bodyText = row.text;
       unlight();
       freshOn[0] = true;

@@ -62,7 +62,12 @@ session writes back a pickup, and the page shows when it landed. It then
 answers every message still waiting before it comments on or merges the pull
 request, so the comment never calls a question unanswered. An approval followed
 by a later message is not merged: it is recorded as `blocked`, and the reviewer
-is asked to decide again.
+is asked to decide again. The same happens when commits are pushed after
+**Approve**: the page stores the head commit it was showing with the decision,
+and the session merges only that commit, with `gh pr merge --match-head-commit`.
+When the head has moved, the session first writes the new commit into the desk,
+so the page shows it and the reviewer's next decision is on it. A trivial fixup
+pushed after approval therefore needs the reviewer to approve again.
 
 A decision is acted on once: later messages and **Check** presses ring the same
 desk, and a pickup already holding that decision and its outcome tells the

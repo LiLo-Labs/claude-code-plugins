@@ -56,7 +56,10 @@ request.
 
 The document holds `threads`, the conversations, each with its `turns` in order,
 and `decision`, which is `approved`, `needs changes`, or absent if they have not
-finished, with `decidedAt`, when they recorded it. A reviewer's turn (`"role":
+finished, with `decidedAt`, when they recorded it, and `decidedOn`, the pull
+request's head commit the page was showing when they did. It also carries
+`repo`. A desk published before `decidedOn` existed stores none on any decision
+until it is republished; "Act on it" says how its approval is merged. A reviewer's turn (`"role":
 "user"`) carries its `id`, the `content` they wrote and, when they highlighted
 something, `quote` (the passage) and `reading` (the page and section they were
 on). A `needs changes` decision also carries `reason`: what the reviewer said
@@ -124,9 +127,10 @@ The one exception is a matching pickup whose `outcome` is `blocked`, when the
 user typed this command themselves after clearing what blocked it. Retry the
 action under "Act on it" and report its new outcome, but do not post the comment
 a second time. A ring or the session-start sweep never counts as the user asking.
-The exception does not cover a block for a message after deciding: that one
-clears only when the reviewer decides again on the page, since the message may
-have been the reviewer taking the decision back.
+The exception does not cover a block for a message after deciding, or for
+commits pushed after approving: those clear only when the reviewer decides again
+on the page, since the message may have been the reviewer taking the decision
+back, and the new commits are ones they have not read.
 
 ## Answer what is waiting first
 
@@ -134,11 +138,12 @@ First read the pull request as it stands, since a session that stopped halfway
 may already have merged or closed it, and a reply or outcome must not say
 otherwise:
 
-    gh pr view <n> --repo <owner/repo> --json state,mergeCommit,comments,commits
+    gh pr view <n> --repo <owner/repo> --json state,mergeCommit,comments,commits,headRefOid
 
 What GitHub shows wins over everything below. If `state` is `MERGED`, the outcome
 is `merged`, naming `mergeCommit`; if it is `CLOSED`, the outcome is `closed`.
-Neither is ever reported as `blocked`, whatever the reviewer sent after deciding:
+Neither is ever reported as `blocked`, whatever the reviewer sent after deciding
+and whatever was pushed after they approved:
 answer those messages saying what already happened, then go on to "Write it into
 the request" and "Record it in the ledger".
 
@@ -154,6 +159,12 @@ Then compare the reviewer's turns with the decision. The page keeps **Send**
 open after a decision, so "wait, don't merge until I check X" arrives as a
 reviewer's turn whose `at` is later than `decidedAt`. Compare the two as times.
 
+Check both approval rules below before stopping at either. When a later turn and
+a moved head are both present, do everything the moved-head rule asks, bringing
+the desk to the head first, then report one `blocked` outcome whose detail gives
+both reasons. Stopping at the first rule would leave the page on the old head, so
+the reviewer's next **Approve** would store the old commit and block again.
+
 - **Approved, with a reviewer's turn whose `at` is later than `decidedAt`:** do
   not merge, and do not post the comment. Answer the turn, as above, then report
   the outcome onto the pickup as `blocked`, as `/review-desk` describes under
@@ -166,6 +177,44 @@ reviewer's turn whose `at` is later than `decidedAt`. Compare the two as times.
   an afterthought from a withdrawal is inferring a decision, which "Never" rules
   out. When the reviewer decides again, the new `decidedAt` is later than their
   message, and that decision is collected like any other.
+- **Approved, with a `decidedOn` that is not the `headRefOid` you read:** commits
+  were pushed after the reviewer read the desk, and merging now would merge them
+  unread. Do not merge, and do not post the comment. Answer any waiting message,
+  as above.
+
+  Then bring the desk to the head you read, whoever pushed it and whether or not
+  this session has written the desk before. The page stores as `decidedOn` only
+  the head its `context/body` names, so until that document carries
+  `headRefOid`, every **Change this** and **Approve** stores the old commit again
+  and every collection blocks it again, with no way out from the page. In one
+  batch, get `review/pr-<n>/context/body`, list `review/pr-<n>/documents`, and
+  list the files the new commits changed:
+
+      gh api repos/<owner/repo>/compare/<decidedOn>...<headRefOid> --jq '.files[].filename'
+
+  Then rewrite the desk as `/review-desk` describes under "Changing the desk and
+  the pull request": set `context/body` to `{"text", "head": "<headRefOid>"}`,
+  its text opening with a `## Changed since you opened this` section naming each
+  commit in `commits` after `decidedOn` by short hash and what it changed, and
+  rewrite each carried document whose file those commits changed. Keep the rest
+  of the description as stored; when no `context/body` is stored, write the
+  description the way `/review-desk` writes the payload's `body`. When the
+  compare fails, as it can after a force-push, rewrite every carried document
+  from the head.
+
+  Report the outcome only once `context/body` has landed with the new `head`,
+  not in the same batch: a reviewer who reads "decide again" and taps
+  **Approve** before it lands stores the old commit. Report it onto the pickup
+  as `blocked`, naming the approved commit and the head as short hashes (their
+  first 7 characters):
+
+      data: {"outcome": {"result": "blocked", "detail": "New commits since you approved (<decidedOn, 7 chars>..<headRefOid, 7 chars>), so this was not merged. The desk now shows them. Look at them, then decide again.", "at": "<now, UTC ISO>"}}
+
+  Record `blocked` in the ledger and stop. This holds for any new commit, a
+  one-line fixup included: an approval is of the commit the reviewer read. When
+  they decide again, the page stores the head it then shows, which is now
+  `headRefOid`, and that decision is collected like any other. An approval with
+  no `decidedOn` is not compared; "Act on it" says how it is merged.
 - **Needs changes, with a later turn:** the message adds to what they asked
   for. Answer it, carry on below, and quote it in the comment beside `reason`.
 
@@ -198,11 +247,32 @@ exact wording carries the point.
 
 ## Act on it
 
-**Approved** — merge it, unless a message after deciding stopped it under
-"Answer what is waiting first". Say which merge you used and confirm it landed. If the
-`state` you read is already `MERGED`, do not run `gh pr merge` again: the
-outcome is `merged`, naming `mergeCommit`. If it is `CLOSED`, do not reopen it:
-the outcome is `closed`.
+**Approved** — merge it, unless "Answer what is waiting first" stopped it, for a
+message after deciding or for commits pushed after approving. If the `state` you
+read is already `MERGED`, do not run `gh pr merge` again: the outcome is
+`merged`, naming `mergeCommit`. If it is `CLOSED`, do not reopen it: the outcome
+is `closed`.
+
+Otherwise merge the commit the reviewer approved, and nothing else:
+
+    gh pr merge <n> --repo <owner/repo> --match-head-commit <decidedOn> <--squash, --merge or --rebase>
+
+`gh pr merge --help` describes the flag as "Commit SHA that the pull request
+head must match to allow merge". A push that lands between your `gh pr view` and
+the merge is then refused by GitHub rather than merged. A refused merge is
+`blocked`, for that reason or any other: give what `gh` printed. When the head
+moved, read `headRefOid` again, bring the desk to it and only then report the
+outcome, exactly as a `decidedOn` that is not the head does under "Answer what
+is waiting first", so deciding again stores the new commit. Say which merge you
+used and confirm it landed.
+
+A desk published before `decidedOn` existed has none on its approval, since its
+page was built before it stored one. Merge it as before, after the same state
+and later-message checks, with `--match-head-commit <headRefOid>`, the head you
+read, so the merge is at least the commit those checks looked at. Do not stall
+it and do not ask in the terminal: the reviewer approves from a page, often on a
+tablet with no terminal, and a question there strands the approval. Republishing
+the desk gives its page `decidedOn` for the next decision.
 
 **Needs changes** — do not merge. Turn what they asked for into the specific
 work, and say what you are going to do before doing it. When you took over a
@@ -216,7 +286,7 @@ After acting on a decision, report what happened as the pickup's `outcome` at
 once, before any revision work, as `/review-desk` describes under "When they
 decide": `merged` with the method and
 commit, `revising` with the work, or `blocked` with what stopped you. A merge
-that auto mode or branch protection refuses is `blocked`, never silence; the
+that auto mode, branch protection or `--match-head-commit` refuses is `blocked`, never silence; the
 reviewer's page otherwise goes on saying the decision was picked up.
 
 ## Record it in the ledger

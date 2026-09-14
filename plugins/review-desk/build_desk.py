@@ -20,6 +20,7 @@ import argparse
 import html
 import json
 import os
+import re
 import sys
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -99,6 +100,17 @@ def check_payload(payload):
         raise BuildError("the payload is missing " + ", ".join(missing))
     if not isinstance(payload["number"], int) or isinstance(payload["number"], bool):
         raise BuildError("number must be an integer: the page stores under review/pr-<number>")
+    # The page stores this as decidedOn when the reviewer decides, and
+    # /review-collect compares it with GitHub's headRefOid before merging and
+    # passes it to --match-head-commit. A value that can never equal a real head
+    # would block every approval, so it is refused here rather than on the page.
+    if "headRefOid" in payload and not is_head(payload["headRefOid"]):
+        raise BuildError("headRefOid must be the 40-character lowercase hex commit "
+                         "gh pr view --json headRefOid prints")
+
+
+def is_head(value):
+    return isinstance(value, str) and re.fullmatch(r"[0-9a-f]{40}", value) is not None
 
 
 def main(argv=None):
