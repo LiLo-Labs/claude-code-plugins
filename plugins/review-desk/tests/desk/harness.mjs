@@ -103,12 +103,15 @@ function installStub({seed, capabilities, publishError, getDelay, getFailures, l
     return strict('doc', {
       id: p.split('/').pop(), path: p,
       // getDelay holds every document read; getFailures rejects the first N of
-      // them with `unavailable`, the code db.d.ts calls transient.
+      // them with `unavailable`, the code db.d.ts calls transient. The snapshot
+      // is taken when the read is made, so a write landing during the delay is
+      // missing from what comes back, as it would be on a real round trip.
       get: async () => {
         log.push({op: 'get', path: p});
+        const snap = docSnap(p);
         if (getDelay) await new Promise(r => setTimeout(r, getDelay));
         if (failuresLeft > 0){ failuresLeft--; throw fail('unavailable', 'stubbed unavailable'); }
-        return docSnap(p);
+        return snap;
       },
       set: async data => {
         if (!data || typeof data !== 'object' || Array.isArray(data))

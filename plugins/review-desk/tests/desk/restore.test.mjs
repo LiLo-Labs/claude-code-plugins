@@ -236,6 +236,40 @@ test('a slot another view holds the ring lease for is not rung while the lease l
   assert.deepEqual(await desk.rings(), []);
   assert.deepEqual(pageSets(await desk.log()), []);
   assert.deepEqual((await desk.store())[PR], rung);
+  // Nothing rang because the view asked and was refused, not because it never
+  // looked; and it then took the holder's stored outcome.
+  assert.ok((await desk.log()).some(e => e.op === 'acquire' && e.path === LEASE), 'the view asked for the lease');
+  assert.match(await desk.page.textContent('#stream'), /Saved and rung/);
+  assert.deepEqual(desk.errors, []);
+});
+
+// rering reads the stored document and writes the ring outcome into that copy.
+// A message sent from the same view between that read and that write must
+// survive the write.
+test('a message sent while a re-ring is storing its outcome is not overwritten', async () => {
+  const slot = {status: 'unsent', why: 'conflict', sentAt: Date.now() - 60000};
+  desk = await open(browser, {seed: {[PR]: unrungDesk(slot)}, getDelay: 1500});
+  await desk.page.click('#fab');
+  await desk.page.waitForSelector('text=Sent from view A');
+  // Restore read, lease read, ring, then the read the outcome is written into.
+  for (const end = Date.now() + 8000;;){
+    const log = await desk.log();
+    const ringAt = log.findIndex(e => e.op === 'publish');
+    if (ringAt >= 0 && log.slice(ringAt).some(e => e.op === 'get' && e.path === PR)) break;
+    if (Date.now() > end) throw new Error('rering never re-read after ringing');
+    await new Promise(r => setTimeout(r, 25));
+  }
+  await desk.page.fill('#box', 'Sent during the re-ring');
+  await desk.page.press('#box', 'Enter');
+
+  await desk.page.waitForTimeout(2500);               // past the outcome read and its write
+  const store = await desk.store();
+  assert.deepEqual(asked(store), ['Sent from view A', 'Sent during the re-ring']);
+  assert.ok(turnsIn(store).find(m => m.answers === 'm-a').rungAt, 'the re-ring outcome is stored');
+  const rings = await desk.rings();
+  assert.deepEqual(rings.map(r => r.doorbell.turns || [r.doorbell.turn]),
+    [['m-a'], [turnsIn(store).find(m => m.content === 'Sent during the re-ring').id]]);
+  assert.match(await desk.page.textContent('#stream'), /Saved and rung/);
   assert.deepEqual(desk.errors, []);
 });
 

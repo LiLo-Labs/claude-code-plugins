@@ -1056,7 +1056,11 @@ function sayKept(){
 // verdict never reads as one for the verdict on screen.
 let decidedAt = null, pickup = null, rang = null, showingDecided = false;
 
+// Counts whole-document writes from this view, so rering can tell whether one
+// went out while its own read-modify-write was in flight.
+let records = 0;
 function record(){
+  records++;
   return db.doc('review/pr-' + DATA.number).set({
     pr: DATA.number, title: DATA.title,
     threads: threads.map(tidy),
@@ -1428,6 +1432,13 @@ async function rering(){
     draw();
 
     try {
+      // set is last-writer-wins with no transactions (db.d.ts), so this write can
+      // land after a save this view made while it was reading, and drop the turn
+      // that save stored: say, a message sent right after load. That save was
+      // taken from this view's threads, which already carry the outcome above.
+      // So when one went out, this view saves its own threads again instead,
+      // after this write if this write is already on its way.
+      const before = records;
       const snap = await ref.get();
       const had = snap.exists && snap.data();
       if (!had || !Array.isArray(had.threads)) return;
@@ -1444,7 +1455,10 @@ async function rering(){
         if (m.why) x.why = m.why; else delete x.why;
         changed = true;
       }
-      if (changed){ await ref.set(doc); sayKept(); }
+      if (!changed) return;
+      if (records !== before){ await saveNow(); return; }
+      await ref.set(doc);
+      if (records !== before) await saveNow(); else sayKept();
     } catch (e) {
       sayLost((e && (e.code || e.message)) || 'the write was refused');
     }
