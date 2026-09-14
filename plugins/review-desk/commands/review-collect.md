@@ -310,7 +310,10 @@ the desk gives its page `decidedOn` for the next decision.
 work, and say what you are going to do before doing it. When you took over a
 stale claim, look at the `commits` pushed after `decidedAt` first: the revision
 may already be under way, and it continues from there rather than starting
-over.
+over. Once the revision is pushed and the desk rewritten for it, report outcome
+`revised`, naming the pushed commits, as `/review-desk` describes under
+"Changing the desk and the pull request", so the reviewer's page says it is
+ready to judge again.
 
 **Undecided** — say so and stop. Do not interpret silence as either.
 
@@ -326,15 +329,16 @@ reviewer's page otherwise goes on saying the decision was picked up.
 
 Then record the same result on this request's entry in `~/.review-desks.json`,
 as `"outcome"`: `merged`, `revising`, `blocked`, or `closed` for a pull request
-closed without merging.
+closed without merging. A `revising` entry becomes `revised` once the revision is
+pushed.
 
 Stamp `collectedAt` with the current UTC time only when the outcome is `merged`
-or `closed`. Those are the only outcomes that end a review. For `revising` and
-`blocked`, leave `collectedAt` null: the reviewer can still send a message or
-press **Change this**, the revision's pushes still need the desk rewritten, and
+or `closed`. Those are the only outcomes that end a review. For `revising`,
+`revised` and `blocked`, leave `collectedAt` null: the reviewer can still send a
+message or decide again, the revision's pushes still need the desk rewritten, and
 both hooks list a desk only while it is open. The hooks go by the outcome, so an
-entry that carries a stamp next to a `revising` or `blocked` outcome, for
-example one edited by hand, is still treated as open.
+entry that carries a stamp next to a `revising`, `revised` or `blocked` outcome,
+for example one edited by hand, is still treated as open.
 
 Once `collectedAt` is stamped, the desk needs no watch. Pass `action: "unwatch"`
 with its URL, so the slot is free for the next desk this session publishes.

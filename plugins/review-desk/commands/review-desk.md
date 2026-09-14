@@ -323,7 +323,11 @@ are pushed to. If an entry for this request already exists, keep that one
 rather than adding a second, and set its `cwd` to this session's launch
 directory and its `head` and `branch` to this publish's. If it has
 `collectedAt` set and the pull request is still open, set `collectedAt` and
-`outcome` back to null, so the desk is listed again.
+`outcome` back to null, so the desk is listed again. When its
+`review/pr-<number>/context/pickup` holds outcome `closed`, as it does for a
+pull request reopened after closing, delete that pickup too, pinned with
+`if_version`, in the batch with the publish: while the pickup says `closed`,
+the page keeps the desk closed, with no composer and no decision.
 
 `head` moves with the desk. Every later head sync, whether a rewrite of
 `context/body` for a push, a republish, or `/review-collect` bringing the desk
@@ -588,6 +592,22 @@ the head it wrote as soon as that write lands, before its reply, its outcome or
 anything else. Not later either: an entry left on the old `head` makes the next
 push's `git log <head>..origin/<branch>` list the same commits again.
 
+**A pushed revision is reported as `revised`.** When the push is work for a
+**Needs changes** decision, write outcome `revised` once `context/body` with the
+new `head` has landed. Write it only while `context/pickup` still holds that
+decision, the same `decision` and `decidedAt`, with outcome `revising` or
+`revised`. A different pickup means the reviewer has decided again, and that
+decision is collected on its own. Update the pickup, pinned with `if_version`:
+
+    data: {"outcome": {"result": "revised", "detail": "Pushed <short hashes>: <what they changed>", "at": "<now, UTC ISO>"}}
+
+Name every commit pushed for the revision, not only this push's, since a later
+push replaces the detail. Then set the ledger entry's `outcome` to `revised`,
+leaving `collectedAt` null. Until this is written the page goes on saying the
+session is revising, and the reviewer has no sign the change is ready to judge.
+The page then shows "Revised" with the detail and offers **Approve** and **Needs
+changes** directly.
+
 After every `git push` the plugin's hook lists the open desks for every
 repository the checkout's remotes name, so a push to a fork reaches the
 upstream's desk. Of those, a desk whose entry records a `branch` is listed only
@@ -688,12 +708,19 @@ pickup is a claim another session may take over after 5 minutes:
     data: {"outcome": {"result": "merged", "detail": "<one line>", "at": "<now, UTC ISO>"}}
 
 `result` is `merged`, naming the merge method and commit; `revising`, naming the
-work you are starting; `blocked`, saying what stopped you (a denied
-`gh pr merge`, a failing check, a conflict, a message sent after deciding) in
-words the reviewer can act on; or `closed`, when GitHub shows the pull request
-closed without merging, which the page shows as "Closed without merging". A
-blocked merge reported here is the difference between a reviewer who comes back
-to unblock it and one who assumes it landed.
+work you are starting; `revised`, naming the commits pushed for that work, which
+you write later, once the revision is pushed and the desk rewritten for it, as
+"Changing the desk and the pull request" describes; `blocked`, saying what
+stopped you (a denied `gh pr merge`, a failing check, a conflict, a message sent
+after deciding) in words the reviewer can act on; or `closed`, when GitHub shows
+the pull request closed without merging, which the page shows as "Closed without
+merging". A blocked merge reported here is the difference between a reviewer who
+comes back to unblock it and one who assumes it landed.
+
+`merged` and `closed` close the desk on the page: a banner under the title says
+what happened, **Change this** goes, and the composer is disabled, since no
+session collects the desk after that. The discussion stays readable. `revised`
+shows as "Revised" with **Approve** and **Needs changes** offered again.
 
 A session holds at most five artifact watches, and a watch ends with its
 session. The session-start sweep asks for at most four, leaving one for a desk

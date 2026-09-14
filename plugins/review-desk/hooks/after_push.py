@@ -66,10 +66,13 @@ PUSH_SHORT_FLAGS = set("vqdnfu46")
 PUSH_SHORT_VALUE = "o"  # -o, --push-option
 ASSIGNMENT = re.compile(r"[A-Za-z_]\w*=")
 
-# The only ledger outcomes that close a desk. A `revising` or `blocked` desk is
-# still under review: the reviewer can change their decision or send a message,
-# and the revision's pushes still need the desk rewritten.
+# The only ledger outcomes that close a desk. A `revising`, `revised` or
+# `blocked` desk is still under review: the reviewer can change their decision or
+# send a message, and the revision's pushes still need the desk rewritten.
 TERMINAL = ("merged", "closed")
+# Ledger outcomes of a desk sent back with Needs changes whose revision is being
+# pushed. After such a push the page is told the revision is ready to look at.
+REVISION = ("revising", "revised")
 
 OWNER_NAME = re.compile(r"[^/]+/[^/]+")
 
@@ -397,6 +400,22 @@ def main():
         "entry's head to the headRefOid it wrote. A push that failed, or touches "
         "none of these pull requests, needs nothing.",
     ]
+    revised = [e for e in open_desks if e.get("outcome") in REVISION]
+    if revised:
+        lines += [
+            "",
+            "Being revised after Needs changes: "
+            + ", ".join(f"{e['repo']}#{e['pr']}" for e in revised)
+            + ". Once this push's context/body write has landed, and while the "
+            "desk's context/pickup still holds that needs changes decision with "
+            'outcome "revising" or "revised", update the pickup with {"outcome": '
+            '{"result": "revised", "detail": "<the commits pushed for the '
+            'revision, by short hash, and what they changed>", "at": "<now, UTC '
+            'ISO>"}}, pinned with if_version, so the page shows "Revised" and '
+            "offers the reviewer the decision again. Then set the entry's outcome "
+            'to "revised". /review-desk describes it under "Changing the desk and '
+            'the pull request".',
+        ]
     # A command that exits non-zero arrives as PostToolUseFailure, and
     # `git push && <a later step that fails>` pushed all the same.
     print(json.dumps({"hookSpecificOutput": {
