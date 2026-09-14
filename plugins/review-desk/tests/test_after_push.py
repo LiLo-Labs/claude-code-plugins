@@ -260,12 +260,96 @@ class AfterPush(unittest.TestCase):
             "rtk git push origin HEAD:b",
             "GIT_TRACE=0 rtk git push -u origin HEAD:refs/heads/b",
             "git push -o ci.skip --force-with-lease origin +b",
-            "git push --repo=origin b",
             "git push origin b 2>&1",
         ]:
             with self.subTest(on="a", command=command):
                 self.assertEqual(self.listed(self.run_hook(command)), only_b)
         self.assertEqual(self.listed(self.run_hook("git push")), ["- o/r#1 https://x/1"])
+
+    def test_options_that_take_a_separate_value_are_skipped_with_it(self):
+        # `--recurse-submodules check origin b` was read with `check` as the
+        # repository and `origin` as a branch. Every command here was run as
+        # `git push -n --porcelain` against git 2.50.1, and each pushed b.
+        self.desks_on_a_and_b()
+        self.checkout("a")
+        for command in [
+            "git push --recurse-submodules check origin b",
+            "git push --recurse-submodules=on-demand origin b",
+            "git push --no-recurse-submodules origin b",
+            "git push -o ci.skip origin b",
+            "git push -oci.skip origin b",
+            "git push -uo ci.skip origin b",
+            "git push --push-option ci.skip origin b",
+            "git push --push-option=ci.skip origin b",
+            "git push --receive-pack git-receive-pack origin b",
+            "git push --exec git-receive-pack origin b",
+            "git push origin --exec=git-receive-pack b",
+            # These two take a value only attached with `=`: `git push --signed
+            # yes origin b` pushes to a repository named yes.
+            "git push --signed=if-asked origin b",
+            "git push --force-with-lease origin b",
+            f"git push --force-with-lease=b:{'2' * 40} origin b",
+            "git push -fu --no-verify --atomic origin b",
+        ]:
+            with self.subTest(command=command):
+                self.assertEqual(self.listed(self.run_hook(command)), ["- o/r#2 https://x/2"])
+
+    def test_branch_set_skips_option_values(self):
+        # The listing above can come out right by luck: a stray `origin` read as
+        # a branch matches no desk. The branch set itself must be exactly {b}.
+        sys.path.insert(0, os.path.dirname(HOOK))
+        import after_push
+        for command in [
+            "--recurse-submodules check origin b",
+            "-o ci.skip origin b",
+            "-uo ci.skip origin b",
+            "--push-option ci.skip origin b",
+            "--repo origin upstream b",
+            "--receive-pack git-receive-pack origin b",
+            "--exec git-receive-pack origin b",
+            "--signed=yes origin b",
+            "--force-with-lease origin b",
+        ]:
+            with self.subTest(command=command):
+                self.assertEqual(after_push.pushed_branches(command.split(), self.repo), {"b"})
+        self.assertIsNone(after_push.pushed_branches("--frobnicate val origin b".split(), self.repo))
+
+    def test_repo_option_is_overridden_by_a_positional_repository(self):
+        # git takes the first positional word as the repository whether or not
+        # --repo is given: `git push --repo origin b` fails with "'b' does not
+        # appear to be a git repository" (git 2.50.1). So `--repo origin
+        # upstream` pushes the checked-out branch to upstream, and reading
+        # upstream as a branch listed no desk.
+        self.desks_on_a_and_b()
+        self.checkout("a")
+        only_a, only_b = ["- o/r#1 https://x/1"], ["- o/r#2 https://x/2"]
+        for command, listed in [
+            ("git push --repo origin", only_a),
+            ("git push --repo=origin", only_a),
+            ("git push --repo origin upstream", only_a),
+            ("git push --repo=origin upstream b", only_b),
+            ("git push --repo origin upstream HEAD:b", only_b),
+        ]:
+            with self.subTest(command=command):
+                self.assertEqual(self.listed(self.run_hook(command)), listed)
+
+    def test_an_option_git_push_does_not_declare_lists_every_desk(self):
+        # An option the hook does not know may take the next word as its value,
+        # which moves the repository and every refspec one word along. Guessing
+        # either way can name the wrong branch, so every desk is listed.
+        self.desks_on_a_and_b()
+        self.checkout("a")
+        both = ["- o/r#1 https://x/1", "- o/r#2 https://x/2"]
+        for command in [
+            "git push --frobnicate val origin b",
+            "git push -x val origin b",
+            "git push -uz origin b",
+            "git push --quiet=yes origin b",
+            # git accepts unique abbreviations; the hook reads them as unknown.
+            "git push --set-up origin b",
+        ]:
+            with self.subTest(command=command):
+                self.assertEqual(self.listed(self.run_hook(command)), both)
 
     def test_bare_push_uses_the_remote_branch_it_updates(self):
         # A local branch can push to a differently named remote branch. Reading

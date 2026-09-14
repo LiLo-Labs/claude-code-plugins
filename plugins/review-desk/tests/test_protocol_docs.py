@@ -233,6 +233,21 @@ class Collect(unittest.TestCase):
         refused = act[act.index("A refused merge is `blocked`"):]
         self.assertIn("read `headRefOid` again, bring the desk to it and only then report the outcome", refused)
 
+    def test_a_head_block_moves_the_ledger_head_in_the_same_step(self):
+        # The desk was brought to the new head but the ledger entry kept the old
+        # one, so the next push's `git log <head>..origin/<branch>` listed the
+        # same commits on the desk again.
+        first = flat(section(self.doc, "Answer what is waiting first"))
+        rule = re.search(r"\*\*Approved, with a `decidedOn` that is not the `headRefOid` you read:\*\*(.*?)- \*\*",
+                         first).group(1)
+        sync = ("once `context/body` has landed, set the ledger entry's `head` to `headRefOid` "
+                "in the same step")
+        self.assertIn(sync, rule)
+        self.assertLess(rule.index('set `context/body` to `{"text", "head": "<headRefOid>"}`'),
+                        rule.index(sync))
+        self.assertLess(rule.index(sync), rule.index('"result": "blocked"'))
+        self.assertIn('"Changing the desk and the pull request"', rule[rule.index(sync):])
+
     def test_a_head_block_is_not_cleared_from_the_terminal(self):
         exception = flat(section(self.doc, "Is it already handled"))
         self.assertIn("or for commits pushed after approving: those clear only when the reviewer decides again",
@@ -364,7 +379,7 @@ class Desk(unittest.TestCase):
         self.assertIn('"cwd": "<launch directory>", "head": "<headRefOid>", '
                       '"branch": "<headRefName>", "collectedAt": null}', down)
         self.assertIn("its `head` and `branch` to this publish's", down)
-        self.assertIn("Every later rewrite of `context/body` for a push sets the entry's `head`",
+        self.assertIn("Every later head sync, whether a rewrite of `context/body` for a push, a republish, or `/review-collect` bringing the desk to a moved head, sets the entry's `head`",
                       down)
         self.assertIn("An entry written before these fields were recorded has neither and still works",
                       down)
@@ -387,6 +402,21 @@ class Desk(unittest.TestCase):
         publish = flat(section(self.doc, "Publish"))
         self.assertIn("When the ledger entry's `head` is not the payload's, open the text with the "
                       "`## Changed since you opened this` section", publish)
+
+    def test_every_head_sync_moves_the_ledger_head_in_the_same_step(self):
+        change = flat(section(self.doc, "Changing the desk and the pull request"))
+        rule = "**Every head sync moves the ledger entry's `head` in the same step.**"
+        self.assertIn(rule, change)
+        para = change[change.index(rule):]
+        for sync in ("this rewrite after a push", 'a republish under "Publish"',
+                     "`/review-collect` bringing the desk to a head"):
+            self.assertIn(sync, para)
+        self.assertIn("as soon as that write lands, before its reply, its outcome or anything else", para)
+        self.assertIn("list the same commits again", para)
+        self.assertLess(change.index("Rewrite `context/body` after every push"), change.index(rule))
+        publish = flat(section(self.doc, "Publish"))
+        self.assertIn("This is a head sync: once it lands, set the ledger entry's `head` to the "
+                      "payload's `headRefOid` in the same step", publish)
 
     def test_invalid_argument_is_diagnosed_before_blaming_ownership(self):
         # The same code covers bad ids and oversize documents, and "not the
@@ -440,6 +470,24 @@ class Desk(unittest.TestCase):
         # The limit the refusal paragraph checks is the one this section applies.
         publish = flat(section(self.doc, "Publish"))
         self.assertIn("cap the id or carry an excerpt", publish)
+
+
+class Outcomes(unittest.TestCase):
+    def test_every_enumeration_of_outcomes_includes_closed_with_one_meaning(self):
+        # The page renders a `closed` outcome and review-collect reports one, but
+        # the list review-desk.md gives a session to report from left it out.
+        with open(os.path.join(ROOT, "templates", "review.html"), encoding="utf-8") as f:
+            self.assertIn("'Closed without merging'", f.read())
+        for name in ("review-desk.md", "review-collect.md"):
+            sentences = re.split(r"(?<=\.)\s", flat(read(name)))
+            listed = [s for s in sentences
+                      if all(f"`{r}`" in s for r in ("merged", "revising", "blocked"))]
+            self.assertTrue(listed, name)
+            for sentence in listed:
+                with self.subTest(doc=name, sentence=sentence[:80]):
+                    self.assertIn("`closed`", sentence)
+                    self.assertIn("closed without merging", sentence)
+        self.assertIn("closed", after_push.TERMINAL)
 
 
 if __name__ == "__main__":

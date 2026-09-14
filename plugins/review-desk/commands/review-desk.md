@@ -201,7 +201,9 @@ Then, in one batch with the publish:
 - set `context/body` to `{"text": "<the new body>", "head": "<the payload's headRefOid>"}`, pinned with `if_version`
   from that read, or with no `if_version` when it was not found. When the ledger
   entry's `head` is not the payload's, open the text with the `## Changed since
-  you opened this` section "Changing the desk and the pull request" describes;
+  you opened this` section "Changing the desk and the pull request" describes.
+  This is a head sync: once it lands, set the ledger entry's `head` to the
+  payload's `headRefOid` in the same step, as "Write it down" records it;
 - set each carried file's document to `{"name", "text", "at": "<now, UTC ISO>"}`,
   under the id "Changing the desk and the pull request" describes, pinned with
   `if_version` when the list held it;
@@ -323,9 +325,10 @@ directory and its `head` and `branch` to this publish's. If it has
 `collectedAt` set and the pull request is still open, set `collectedAt` and
 `outcome` back to null, so the desk is listed again.
 
-`head` moves with the desk. Every later rewrite of `context/body` for a push
-sets the entry's `head` to the head that rewrite wrote, as "Changing the desk
-and the pull request" describes, so the entry always names the commit the desk
+`head` moves with the desk. Every later head sync, whether a rewrite of
+`context/body` for a push, a republish, or `/review-collect` bringing the desk
+to a moved head, sets the entry's `head` to the head it wrote, as "Changing the
+desk and the pull request" describes, so the entry always names the commit the desk
 shows, and the next `## Changed since you opened this` section starts from it.
 `branch` is how the after-push hook tells the desks in one repository apart: it
 lists a desk whose entry records a `branch` only when that branch is pushed. An
@@ -574,6 +577,14 @@ entry's `head` to the `headRefOid` it wrote, and its `branch` to `headRefName`
 when the entry has none. Not before: a ledger `head` ahead of the desk drops
 those commits from the next section.
 
+**Every head sync moves the ledger entry's `head` in the same step.** A head
+sync is any write that puts a new `head` into `context/body`: this rewrite after
+a push, a republish under "Publish", and `/review-collect` bringing the desk to a
+head that moved after an approval. Each one sets the ledger entry's `head` to
+the head it wrote as soon as that write lands, before its reply, its outcome or
+anything else. Not later either: an entry left on the old `head` makes the next
+push's `git log <head>..origin/<branch>` list the same commits again.
+
 After every `git push` the plugin's hook lists the open desks for every
 repository the checkout's remotes name, so a push to a fork reaches the
 upstream's desk. Of those, a desk whose entry records a `branch` is listed only
@@ -674,9 +685,10 @@ pickup is a claim another session may take over after 5 minutes:
     data: {"outcome": {"result": "merged", "detail": "<one line>", "at": "<now, UTC ISO>"}}
 
 `result` is `merged`, naming the merge method and commit; `revising`, naming the
-work you are starting; or `blocked`, saying what stopped you (a denied
+work you are starting; `blocked`, saying what stopped you (a denied
 `gh pr merge`, a failing check, a conflict, a message sent after deciding) in
-words the reviewer can act on. A
+words the reviewer can act on; or `closed`, when GitHub shows the pull request
+closed without merging, which the page shows as "Closed without merging". A
 blocked merge reported here is the difference between a reviewer who comes back
 to unblock it and one who assumes it landed.
 
