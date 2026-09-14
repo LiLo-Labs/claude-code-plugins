@@ -1333,48 +1333,124 @@ function listenReplies(){
 // it, so this view rings once and stores rungAt. There are two ways to get here:
 // - 'sent' with no rungAt. The slot was saved, but the ring outcome was not:
 //   the tab closed, or a republish reloaded the view. Such a slot is left alone
-//   until it is RERING_AFTER old, because another open view may still be ringing
-//   for it. A slot that is too young gets a timer for the moment it comes of
-//   age, not just a check at load. A republish reloads the view seconds after
-//   the send, so a check at load alone would never ring for it.
+//   until it is RERING_AFTER old, because the view that sent it is usually still
+//   ringing and storing rungAt. A slot that is too young gets a timer for the
+//   moment it comes of age, not just a check at load. A republish reloads the
+//   view seconds after the send, so a check at load alone would never ring for it.
 // - 'unsent' with why 'conflict'. The ring was refused because a newer version
-//   was already live and this view was being reloaded (artifact.d.ts). No view
-//   is still ringing for it, so it rings straight away.
-// A ring for a message that is already being answered costs one extra wake-up,
-// not a second answer, because the session answers only turns with no reply
-// document.
+//   was already live and the view was being reloaded (artifact.d.ts), so the
+//   view that sent it is not ringing for it any more.
+//
+// What this view read at load is not enough to decide. Every ring is a publish
+// that reloads the other open views, so a view is usually reading a slot just
+// before the ringing view stores rungAt for it. The page has no live copy of
+// the main document, so three things stop a second ring:
+// - A lease. db.d.ts: acquire is set-if-not-busy and expires on its own. Only
+//   the holder rings, so two views that load the same slot do not both ring,
+//   and a view reloaded by the holder's ring finds the lease still held.
+// - A fresh read under the lease. A slot the store already shows as rung,
+//   answered or gone is taken from the store and not rung.
+// - The outcome is written into a fresh read of the stored document, not this
+//   view's load-time copy. Writing that copy would undo whatever another view
+//   saved since, such as a closed thread.
+// A second ring can still happen if the sending view takes longer than
+// RERING_AFTER to store rungAt. It costs one extra wake-up and a reload of the
+// other views, not a second answer: the session answers only turns with no
+// reply document.
 const RERING_AFTER = 10000;
+const RING_LEASE = 20000;
+const viewId = 'v' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 const ringing = new Set();
 let reringTimer = null;
+// Capped, so a sentAt or lease expiry from a clock that runs ahead only means
+// another check later, not a timer set hours out.
+function reringIn(ms){
+  clearTimeout(reringTimer);
+  reringTimer = setTimeout(rering, Math.min(Math.max(ms, 0), RING_LEASE) + 50);
+}
+const unrung = m => m.via === 'session' && !m.content && !m.rungAt
+  && (m.status === 'sent' || (m.status === 'unsent' && m.why === 'conflict'));
+const sessionSlots = doc => new Map(((doc && Array.isArray(doc.threads)) ? doc.threads : [])
+  .flatMap(t => (t && Array.isArray(t.turns)) ? t.turns : [])
+  .filter(m => m && m.via === 'session' && typeof m.answers === 'string')
+  .map(m => [m.answers, m]));
+
 async function rering(){
   clearTimeout(reringTimer);
   reringTimer = null;
   if (!bellOn || restore !== 'done') return;
   const now = Date.now();
-  const unrung = threads.flatMap(t => t.turns).filter(m => m.via === 'session'
-    && !m.content && !m.rungAt && !replied.has(m.answers) && !ringing.has(m.answers)
-    && (m.status === 'sent' || (m.status === 'unsent' && m.why === 'conflict')));
-  const due = unrung.filter(m => m.status === 'unsent' || now - (m.sentAt || 0) > RERING_AFTER);
-  const young = unrung.filter(m => !due.includes(m));
-  if (young.length){
-    // Capped at RERING_AFTER, so a sentAt from a clock that runs ahead only
-    // means another check later, not a timer set hours out.
-    const wait = Math.min(...young.map(m => (m.sentAt || 0) + RERING_AFTER)) - now;
-    reringTimer = setTimeout(rering, Math.min(Math.max(wait, 0), RERING_AFTER) + 50);
-  }
+  const waiting = threads.flatMap(t => t.turns).filter(m => unrung(m)
+    && !replied.has(m.answers) && !ringing.has(m.answers));
+  const due = waiting.filter(m => m.status === 'unsent' || now - (m.sentAt || 0) > RERING_AFTER);
+  const young = waiting.filter(m => !due.includes(m));
+  if (young.length) reringIn(Math.min(...young.map(m => (m.sentAt || 0) + RERING_AFTER)) - now);
   if (!due.length) return;
+
   const ids = due.map(m => m.answers);
   ids.forEach(id => ringing.add(id));
-  const rung = await ring({kind: 'message', turns: ids, again: true});
-  ids.forEach(id => ringing.delete(id));
-  due.forEach(m => {
-    // A reply that landed during the ring has taken over this slot.
-    if (m.content || m.status === 'working') return;
-    if (rung === 'rung'){ m.status = 'sent'; delete m.why; m.rungAt = Date.now(); }
-    else { m.status = 'unsent'; m.why = rung; }
-  });
-  draw();
-  await saveNow();
+  try {
+    const ref = db.doc('review/pr-' + DATA.number);
+    // A store that cannot grant leases still gets the fresh read below, which
+    // covers a view reloaded by a ring that has already stored rungAt.
+    let lease = null;
+    try {
+      lease = await ref.collection('rering').doc('lease')
+        .acquire({holder: viewId, ttlMs: RING_LEASE});
+    } catch (e) {}
+    if (lease && !lease.acquired){
+      const until = Date.parse(lease.expiresAt || '') || now + RING_LEASE;
+      reringIn(until - Date.now() + Math.random() * 500);
+      return;
+    }
+
+    let stored;
+    try { stored = sessionSlots((await ref.get()).data()); }
+    catch (e){ reringIn(RERING_AFTER); return; }
+    const toRing = due.filter(m => {
+      const s = stored.get(m.answers);
+      if (!s) return false;
+      if (unrung(s)) return true;
+      for (const k of ['status', 'why', 'rungAt', 'content']){
+        if (k in s) m[k] = s[k]; else delete m[k];
+      }
+      return false;
+    });
+    if (!toRing.length){ draw(); return; }
+
+    const rung = await ring({kind: 'message', turns: toRing.map(m => m.answers), again: true});
+    toRing.forEach(m => {
+      // A reply that landed during the ring has taken over this slot.
+      if (m.content || m.status === 'working') return;
+      if (rung === 'rung'){ m.status = 'sent'; delete m.why; m.rungAt = Date.now(); }
+      else { m.status = 'unsent'; m.why = rung; }
+    });
+    draw();
+
+    try {
+      const snap = await ref.get();
+      const had = snap.exists && snap.data();
+      if (!had || !Array.isArray(had.threads)) return;
+      // The store hands back frozen objects; copy down to the turns before editing.
+      const doc = {...had, updatedAt: new Date().toISOString(),
+        threads: had.threads.map(t => ({...t, turns: (t.turns || []).map(x => ({...x}))}))};
+      const outcome = new Map(toRing.map(m => [m.answers, m]));
+      let changed = false;
+      for (const x of doc.threads.flatMap(t => t.turns)){
+        const m = x.via === 'session' && outcome.get(x.answers);
+        if (!m || x.content || x.rungAt || x.status === 'working' || x.status === 'done') continue;
+        x.status = m.status;
+        if (m.rungAt) x.rungAt = m.rungAt;
+        if (m.why) x.why = m.why; else delete x.why;
+        changed = true;
+      }
+      if (changed){ await ref.set(doc); sayKept(); }
+    } catch (e) {
+      sayLost((e && (e.code || e.message)) || 'the write was refused');
+    }
+  } finally {
+    ids.forEach(id => ringing.delete(id));
+  }
 }
 
 offerDecision();

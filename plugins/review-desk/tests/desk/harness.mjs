@@ -38,13 +38,16 @@ export function build(data, title = 'Harness Desk'){
 
 // Runs in the page before any of its scripts. Serialised by Playwright, so it
 // may use only its argument.
-function installStub({seed, capabilities, publishError, getDelay, getFailures}){
+function installStub({seed, capabilities, publishError, getDelay, getFailures, leases: held}){
   const frozen = v => {
     if (v && typeof v === 'object'){ Object.values(v).forEach(frozen); Object.freeze(v); }
     return v;
   };
   const clone = v => JSON.parse(JSON.stringify(v));
   const store = new Map(Object.entries(seed || {}).map(([k, v]) => [k, clone(v)]));
+  // `leases` maps a document path to the ms left on a lease another view holds.
+  const leases = new Map(Object.entries(held || {}).map(([p, ms]) =>
+    [p, {holder: 'another-view', expires: Date.now() + ms}]));
   const docSubs = new Map(), colSubs = new Map();
   const log = [], rings = [], missing = [];
   let version = 0, failuresLeft = getFailures || 0;
@@ -117,6 +120,21 @@ function installStub({seed, capabilities, publishError, getDelay, getFailures}){
         put(p, {...store.get(p), ...clone(data)}, 'page');
       },
       delete: async () => put(p, null, 'page'),
+      // db.d.ts: set-if-not-busy, ttlMs clamped to [1000, 600000] with 0 or
+      // absent meaning 30000, busy resolves {acquired: false} with only the
+      // expiry, and a grant merges `data` into the body.
+      acquire: async ({holder, ttlMs, data} = {}) => {
+        if (typeof holder !== 'string' || !holder) throw fail('invalid_argument', 'holder is required');
+        const now = Date.now(), held = leases.get(p);
+        log.push({op: 'acquire', path: p, holder});
+        if (held && held.expires > now && held.holder !== holder)
+          return {acquired: false, expiresAt: new Date(held.expires).toISOString()};
+        const expires = now + Math.min(Math.max(ttlMs || 30000, 1000), 600000);
+        leases.set(p, {holder, expires});
+        if (data) put(p, {...(store.get(p) || {}), ...clone(data)}, 'page');
+        return {acquired: true, version: ++version, holder,
+          expiresAt: new Date(expires).toISOString()};
+      },
       onSnapshot: (next, error) => subscribe(docSubs, p, next, () => docSnap(p)),
       collection: sub => colRef(p + '/' + sub),
     });
@@ -162,13 +180,14 @@ export async function launch(){
 
 // Opens a desk. `seed` is the store as it stands before the page loads.
 export async function open(browser, {data = payload(), title, seed = {},
-    capabilities = ['db', 'artifact'], publishError = null, getDelay = 0, getFailures = 0} = {}){
+    capabilities = ['db', 'artifact'], publishError = null, getDelay = 0, getFailures = 0,
+    leases = {}} = {}){
   const html = build(data, title);
   const context = await browser.newContext();
   const page = await context.newPage();
   const errors = [];
   page.on('pageerror', e => errors.push(e.message));
-  await page.addInitScript(installStub, {seed, capabilities, publishError, getDelay, getFailures});
+  await page.addInitScript(installStub, {seed, capabilities, publishError, getDelay, getFailures, leases});
   // Nothing leaves the machine: fonts, highlight.js and mermaid are refused, which
   // the page is built to survive (it loses colour and drawings, nothing else).
   await page.route('**/*', route => {

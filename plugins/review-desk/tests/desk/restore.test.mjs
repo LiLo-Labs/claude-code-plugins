@@ -193,6 +193,72 @@ test('a ring refused with conflict is rung again on the next load, without waiti
   assert.deepEqual(desk.errors, []);
 });
 
+// Two open views. View A sends and rings; the ring reloads view B, which reads
+// the slot before A has stored rungAt. B must see A's rungAt before ringing,
+// and must not write its load-time copy over what A stored.
+const LEASE = PR + '/rering/lease';
+const pageSets = log => log.filter(e => e.op === 'set' && e.by === 'page');
+const unrungDesk = (slot, extra = []) => ({pr: 42, title: 'Harness desk', decision: null,
+  reason: null, decidedAt: null, threads: [{id: 't1', name: 'A', turns: [
+    {id: 'm-a', role: 'user', content: 'Sent from view A', to: 'session'},
+    {role: 'assistant', via: 'session', answers: 'm-a', content: '', ...slot}]}, ...extra]});
+
+test('a view reloaded by another view\'s ring does not ring again once that view stores rungAt', async () => {
+  const sentAt = Date.now() - 2000;
+  desk = await open(browser, {seed: {[PR]: unrungDesk({status: 'sent', sentAt})}});
+  await desk.page.click('#fab');
+  await desk.page.waitForSelector('text=Sent from view A');
+  await desk.page.waitForTimeout(700);
+  // A's second save lands, and A has also renamed the thread: a save-only change
+  // that B's load-time copy does not have.
+  const fromA = unrungDesk({status: 'sent', sentAt, rungAt: sentAt + 400});
+  fromA.threads[0].name = 'Renamed in A';
+  await desk.write(PR, fromA);
+
+  await desk.page.waitForTimeout(10000);             // past RERING_AFTER from sentAt
+  assert.deepEqual(await desk.rings(), []);
+  assert.deepEqual(pageSets(await desk.log()), []);
+  assert.deepEqual((await desk.store())[PR], fromA);
+  // B takes the stored outcome, so it stops saying it is still ringing.
+  assert.match(await desk.page.textContent('#stream'), /Saved and rung/);
+  assert.deepEqual(desk.errors, []);
+});
+
+test('a slot another view holds the ring lease for is not rung while the lease lasts', async () => {
+  const slot = {status: 'unsent', why: 'conflict', sentAt: Date.now() - 3000};
+  desk = await open(browser, {seed: {[PR]: unrungDesk(slot)}, leases: {[LEASE]: 1500}});
+  await desk.page.waitForTimeout(800);
+  assert.deepEqual(await desk.rings(), [], 'the lease holder is ringing');
+  // The holder's outcome lands before its lease runs out.
+  const rung = unrungDesk({status: 'sent', sentAt: slot.sentAt, rungAt: Date.now()});
+  await desk.write(PR, rung);
+  await desk.page.waitForTimeout(2000);
+  assert.deepEqual(await desk.rings(), []);
+  assert.deepEqual(pageSets(await desk.log()), []);
+  assert.deepEqual((await desk.store())[PR], rung);
+  assert.deepEqual(desk.errors, []);
+});
+
+test('when the lease holder never stores an outcome, the slot is rung once into the stored document', async () => {
+  const slot = {status: 'unsent', why: 'conflict', sentAt: Date.now() - 3000};
+  desk = await open(browser, {seed: {[PR]: unrungDesk(slot)}, leases: {[LEASE]: 1500}});
+  await desk.page.waitForTimeout(500);
+  // Another view adds a thread meanwhile; the ring outcome must not undo it.
+  const later = unrungDesk(slot, [{id: 't2', name: 'Opened in another view', turns: []}]);
+  await desk.write(PR, later);
+
+  const store = await desk.until(s => turnsIn(s).some(m => m.answers === 'm-a' && m.rungAt), null, 5000);
+  await desk.page.waitForTimeout(800);
+  const rings = await desk.rings();
+  assert.equal(rings.length, 1);
+  assert.deepEqual(rings[0].doorbell.turns, ['m-a']);
+  assert.deepEqual(store[PR].threads.map(t => t.name), ['A', 'Opened in another view']);
+  const stored = turnsIn(store).find(m => m.answers === 'm-a');
+  assert.equal(stored.status, 'sent');
+  assert.equal(stored.why, undefined);
+  assert.deepEqual(desk.errors, []);
+});
+
 test('the Sent line promises no answer until a presence stamp newer than the send', async () => {
   const sentAt = Date.now() - 5000;
   const tenMinutesAgo = Math.floor((Date.now() - 600000) / 1000);
