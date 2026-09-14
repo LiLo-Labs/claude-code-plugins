@@ -402,6 +402,111 @@ test('typing in the box is never interrupted by a reply, a document row, a prese
   assert.deepEqual(desk.errors, []);
 });
 
+/* ---------------- what a reload gives back ---------------- */
+
+const DRAFT = 'review-desk draft LiLo-Labs/claude-code-plugins#42';
+const draftEntry = d => d.page.evaluate(k => JSON.parse(sessionStorage.getItem(k) || '{}'), DRAFT);
+const twoThreadSeed = () => ({[PR]: {pr: 42, title: 'Harness desk', decision: null, reason: null, decidedAt: null,
+  threads: [{id: 't1', name: 'The argument', turns: [{id: 'm-old', role: 'user', content: 'The important argument', to: 'session'},
+    {role: 'assistant', via: 'session', answers: 'm-old', status: 'sent', sentAt: 1000, rungAt: 1400}]},
+    {id: 't2', name: 'Another', turns: []}]}});
+const readyAgain = d => d.page.waitForFunction('typeof restore !== "undefined" && restore === "done"', null, {timeout: 5000});
+
+test('a draft, a reason being written, a carried quote, the open thread and the open page survive a reload, and each clears once sent', async () => {
+  const data = withPassage({documents: [{name: 'docs/notes.md', text: '# Notes\n\nOther text.\n'}]});
+  desk = await open(browser, {seed: twoThreadSeed(), data});
+  await ready(desk);
+  await selectPassage(desk);
+  await desk.page.click('#pop');                                  // carries it, and opens the panel
+  await desk.page.waitForSelector('#carrySlot .carry');
+  await desk.page.click('.tab[data-go="1"]');
+  await desk.page.fill('#box', 'Half a question');
+  await desk.page.click('.leaf[data-leaf="1"]');
+  await desk.page.waitForSelector('#sheet >> text=Other text.');
+  await desk.page.click('#changes');
+  await desk.page.fill('#why', 'Rename the flag');
+
+  await desk.reload();
+  await readyAgain(desk);
+  await desk.page.waitForSelector('#why');
+  assert.equal(await desk.page.inputValue('#why'), 'Rename the flag');
+  assert.equal(await desk.page.inputValue('#box'), 'Half a question');
+  assert.equal(await desk.page.getAttribute('.leaf.on', 'data-leaf'), '1');
+  assert.match(await desk.page.textContent('#sheet'), /Other text\./);
+  await desk.page.click('#fab');
+  assert.equal(await desk.page.textContent('.tab.on'), 'Another');
+  assert.equal(await desk.page.textContent('#carrySlot .carry span'), PASSAGE);
+
+  // Sent: the message carries the restored quote, and the box and quote entries go.
+  await desk.page.press('#box', 'Enter');
+  const store = await desk.until(s => asked(s).some(m => m.content === 'Half a question'));
+  assert.equal(asked(store).find(m => m.content === 'Half a question').quote, PASSAGE);
+  assert.equal(store[PR].threads.find(t => t.id === 't2').turns[0].content, 'Half a question');
+  await desk.page.waitForFunction(k => { const d = JSON.parse(sessionStorage.getItem(k) || '{}'); return !('box' in d) && !('quote' in d); },
+    DRAFT, {timeout: 3000});
+  const afterSend = await draftEntry(desk);
+  assert.equal(afterSend.why, 'Rename the flag');
+  assert.equal(afterSend.thread, 't2');
+
+  // Decided: the reason entry goes.
+  await desk.page.click('#shut');
+  await desk.page.click('#recordReason');
+  await desk.until(s => s[PR].decision === 'needs changes');
+  await desk.page.waitForFunction(k => !('why' in JSON.parse(sessionStorage.getItem(k) || '{}')), DRAFT, {timeout: 3000});
+
+  // A reload now brings back neither the message nor the reason. The stub's store
+  // starts from the seed again, so the decision is not there either: the slab offers
+  // the choice, with no reason form.
+  await desk.reload();
+  await readyAgain(desk);
+  assert.equal(await desk.page.inputValue('#box'), '');
+  assert.equal(await desk.page.locator('#why').count(), 0);
+  assert.equal(await desk.page.innerHTML('#carrySlot'), '');
+  assert.deepEqual(desk.errors, []);
+});
+
+test('Back from the reason form forgets the reason, and a message that could not be saved keeps its words for a reload', async () => {
+  desk = await open(browser, {setFailures: {[PR]: ['unavailable', 'unavailable']}});
+  await ready(desk);
+  await desk.page.click('#changes');
+  await desk.page.fill('#why', 'Not this after all');
+  await desk.page.click('#back');
+  assert.equal('why' in await draftEntry(desk), false);
+
+  await desk.page.click('#fab');
+  await desk.page.fill('#box', 'Refused twice');
+  await desk.page.press('#box', 'Enter');
+  await desk.page.waitForSelector('#stream >> text=Not saved');
+  assert.equal((await draftEntry(desk)).box, 'Refused twice');
+  assert.deepEqual(desk.errors, []);
+});
+
+function refuseSessionStorage(){
+  const refuse = () => { throw new DOMException('The operation is insecure.', 'SecurityError'); };
+  try { Object.defineProperty(window, 'sessionStorage', {get: refuse, configurable: true}); } catch (e) {}
+  for (const k of ['getItem', 'setItem', 'removeItem', 'key', 'clear']) Storage.prototype[k] = refuse;
+}
+
+test('with sessionStorage refused the page loads, sends, records a reason and reloads without errors', async () => {
+  desk = await open(browser, {init: refuseSessionStorage});
+  assert.equal(await desk.page.evaluate(() => { try { sessionStorage.getItem('x'); return 'read'; } catch (e) { return 'refused'; } }),
+    'refused', 'the init script did not take storage away');
+  await ready(desk);
+  await desk.page.click('#fab');
+  await desk.page.fill('#box', 'Does it still work?');
+  await desk.page.press('#box', 'Enter');
+  await desk.page.waitForFunction(() => window.__desk.rings().length === 1);
+  await desk.page.click('#shut');
+  await desk.page.click('#changes');
+  await desk.page.fill('#why', 'A reason');
+  await desk.page.click('#recordReason');
+  await desk.until(s => s[PR] && s[PR].decision === 'needs changes');
+  await desk.reload();
+  await readyAgain(desk);
+  assert.equal(await desk.page.inputValue('#box'), '');
+  assert.deepEqual(desk.errors, []);
+});
+
 /* ---------------- closing a thread ---------------- */
 
 const twoThreads = () => ({[PR]: {pr: 42, title: 'Harness desk', decision: null, reason: null,

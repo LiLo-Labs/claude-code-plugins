@@ -878,8 +878,10 @@ function paint(){
 $('leaves').addEventListener('click', e => {
   const b = e.target.closest('[data-leaf]'); if (!b) return;
   const i = +b.dataset.leaf;
+  wantLeaf = null;
   if (i === leaf) return;
   delete freshOn[leaf]; leaf = i; delete freshOn[i];
+  keepDraft('leaf', i ? pages()[i].full : null);
   unlight();                       // the painted range belonged to the old page
   paint();
   window.scrollTo({top: 0, behavior: 'smooth'});
@@ -959,6 +961,38 @@ function noteSeen(){
   seenAt = newest;
   try { localStorage.setItem(SEEN_KEY, String(newest)); } catch (e) {}
 }
+// What the reviewer has in hand and has not sent. A doorbell ring or a republish
+// reloads every other open view (artifact.d.ts), and state kept only in variables is
+// gone after a reload: a half-typed message, a Needs-changes reason, a carried quote,
+// and the thread and page they were on. Each is kept in sessionStorage, for this tab
+// and this desk, as one field of one entry: box, why, quote, thread, leaf. box and
+// quote are cleared once the send that took them has saved, and why once a decision
+// has, so a reload never offers something that was already sent. Storage can be
+// refused (a private window, a sandboxed frame), so every access is in try/catch and
+// the page runs as before without it.
+const DRAFT_KEY = 'review-desk draft ' + (typeof DATA.repo === 'string' ? DATA.repo : '') + '#' + DATA.number;
+function drafts(){
+  try {
+    const v = JSON.parse(sessionStorage.getItem(DRAFT_KEY) || '{}');
+    return v && typeof v === 'object' && !Array.isArray(v) ? v : {};
+  } catch (e){ return {}; }
+}
+function keepDraft(field, value){
+  try {
+    const d = drafts();
+    if (value === null || value === undefined || value === '') delete d[field]; else d[field] = value;
+    if (Object.keys(d).length) sessionStorage.setItem(DRAFT_KEY, JSON.stringify(d));
+    else sessionStorage.removeItem(DRAFT_KEY);
+  } catch (e) {}
+}
+// The page the reviewer had open, by name, when it is a document the store has not
+// delivered yet. Dropped once they pick a page themselves.
+let wantLeaf = null;
+function leafNamed(name){
+  const i = pages().findIndex((p, i) => i > 0 && p.full === name);
+  return i > 0 ? i : null;
+}
+
 let carried = null;
 let db = null, decided = null, reason = null;
 
@@ -1064,6 +1098,7 @@ function closeThread(id){
   // thread under the reviewer.
   if (i < live) live--;
   if (live >= threads.length) live = threads.length - 1;
+  keepDraft('thread', threads[live].id);
   draw(true); save();
 }
 // What the working session has said, by the id of the message it answers, taken
@@ -1218,7 +1253,7 @@ function drawCarry(){
     ? '<div class="carry"><span>'+esc(carried)+'</span><button id="drop">×</button></div>'
     : '';
   if (carried) $('drop').onclick = () => {
-    carried = null; unlight(); drawCarry();
+    carried = null; unlight(); drawCarry(); keepDraft('quote', null);
   };
 }
 // The open thread counts too while the panel is closed. Skipping it left the
@@ -1323,10 +1358,10 @@ $('tabs').addEventListener('click', e => {
   if (e.target.closest('#more')){
     threads.push({id:'t'+(threads.length+1)+'-'+Date.now(),
                   name:'Thread '+(threads.length+1), turns:[], unread:false});
-    live = threads.length - 1; draw(true); $('box').focus(); return;
+    live = threads.length - 1; keepDraft('thread', threads[live].id); draw(true); $('box').focus(); return;
   }
   const go = e.target.closest('[data-go]');
-  if (go){ live = +go.dataset.go; threads[live].unread = false; draw(true); }
+  if (go){ live = +go.dataset.go; threads[live].unread = false; keepDraft('thread', threads[live].id); draw(true); }
 });
 
 const SEEDS = DATA.openers && DATA.openers.length ? DATA.openers : [
@@ -1360,6 +1395,7 @@ $('seed').addEventListener('click', e => {
   // would split a word.
   if (box.value.trim()){
     box.value = box.value.replace(/\s+$/, '') + '\n' + opener;
+    keepDraft('box', box.value);
     fit(box);
     box.focus();
     box.setSelectionRange(box.value.length, box.value.length);
@@ -1399,6 +1435,7 @@ function unlight(){
 }
 function take(){
   carried = pending;
+  keepDraft('quote', carried);
   light(pendingRange);
   pending = ''; pendingRange = null;
   $('pop').style.display = 'none';
@@ -1474,20 +1511,36 @@ async function ask(){
   // Enter still reaches here while Send is off. Leave the text in the box: a
   // message kept out of the store should not also vanish from the screen.
   if (locked() || closedOutcome()) return;
-  // Always a new message. A message whose save failed never comes back through
-  // the box: it stays in its own thread with Send again, so nothing typed here is
-  // ever matched against it or sent in its place.
-  const quote = carried; carried = null; unlight();
-  box.value = ''; box.style.height = 'auto';
 
   // Every message carries an id, so the reply written elsewhere can find it; the
   // passage the reviewer highlighted; and where they were reading, because that
   // is half of what they meant.
+  const quote = carried;
   const turn = {id: 'm' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
     role: 'user', content: q || NO_QUESTION, quote,
     reading: place(), at: new Date().toISOString(), to: 'session'};
+  const slot = {role: 'assistant', via: 'session', answers: turn.id,
+                status: 'sent', sentAt: Date.now()};
+  const name = t.name;
   t.turns.push(turn);
   if (t.turns.length === 1) t.name = short(q || 'Highlighted');
+
+  // Every save carries the whole discussion, so a message that takes it past the
+  // store's cap makes every later save fail, Approve included, and with one thread
+  // there is nothing to close to get it back under. So it is measured first, as the
+  // same document record() would store, and refused before it joins the thread.
+  if (db){
+    t.turns.push(slot);
+    const bytes = deskBytes();
+    t.turns.splice(-2, 2);
+    if (bytes > MAX_DOC){ t.name = name; sayOversize(bytes); return; }
+    t.turns.push(turn);
+  }
+  // Always a new message. A message whose save failed never comes back through
+  // the box: it stays in its own thread with Send again, so nothing typed here is
+  // ever matched against it or sent in its place.
+  carried = null; unlight();
+  box.value = ''; box.style.height = 'auto';
 
   // A view that cannot save cannot reach the session at all. A reviewer typing
   // into a box and watching it look sent is the worst outcome available.
@@ -1501,8 +1554,6 @@ async function ask(){
   // Stored first, then the doorbell, exactly as a decision is: the session reads
   // the message from the store, never from the ring. The reply arrives in its
   // own document (see the replies listener).
-  const slot = {role: 'assistant', via: 'session', answers: turn.id,
-                status: 'sent', sentAt: Date.now()};
   t.turns.push(slot);
   storing.add(turn.id);
   draw(true);
@@ -1533,6 +1584,9 @@ async function deliver(turn, slot){
     // store holds the message, so it is kept and rung here.
     const kept = await saveNow(() => storedBy(turn.id));
     storing.delete(turn.id); resending.delete(turn.id);
+    // Saved, so the draft entry stops holding the words it sent. It takes whatever
+    // the box and the carry hold now, which is anything begun since.
+    if (kept){ keepDraft('box', $('box').value); keepDraft('quote', carried); }
     // Not drawn on a refusal: the slot still says 'sent' until the line below.
     if (kept) draw();
     const rung = kept ? await ring({kind: 'message', turn: turn.id}) : 'unsaved';
@@ -1576,6 +1630,7 @@ function edit(id){
   t.turns = t.turns.filter(m => m !== turn && m !== slot);
   box.value = turn.content === NO_QUESTION && turn.quote ? '' : turn.content;
   if (turn.quote && !carried) carried = turn.quote;
+  keepDraft('box', box.value); keepDraft('quote', carried);
   if (lost === HELD) sayKept();
   fit(box);
   draw(true);
@@ -1599,6 +1654,7 @@ function fit(box){
 $('box').addEventListener('input', e => {
   fit(e.target);
   gateRetry();
+  keepDraft('box', e.target.value);
 });
 $('box').addEventListener('keydown', e => {
   // Enter sends, as in every chat box; Shift+Enter is a new line. An input
@@ -1665,8 +1721,22 @@ function sayRefused(e){
   lost = 'too large';
   $('lostSlot').innerHTML = '<div class="lost">This conversation is too large to save. '
     + 'The store refuses a discussion over 256 KiB, so nothing new here is kept, and '
-    + 'no message or decision reaches the working session. Closing a thread with × '
-    + 'removes it from what is saved; copy anything you want to keep first.</div>';
+    + 'no message or decision reaches the working session. '
+    // × is drawn only beside a second thread, so with one there is nothing to close.
+    + (threads.length > 1 ? 'Closing a thread with × removes it from what is saved; copy '
+      + 'anything you want to keep first.' : 'Copy anything you want to keep, and tell the '
+      + 'working session directly.') + '</div>';
+}
+// A message refused before it joined the thread, because with it the saved
+// discussion would pass the store's cap. Nothing was lost: the words are still in
+// the box, and every other save goes on working.
+function sayOversize(bytes){
+  lost = 'oversize';
+  $('lostSlot').innerHTML = '<div class="lost">Not sent: with this message the saved '
+    + 'discussion would be ' + Math.ceil(bytes / 1024) + ' KiB, over the store’s 256 KiB '
+    + 'limit, so it was not added. It is still in the box. Shorten it, or send an excerpt '
+    + 'or a link instead.' + (threads.length > 1 ? ' Closing a thread with × also makes room.' : '')
+    + '</div>';
 }
 // A write for something else does not make a held-back message safe. While one is
 // on screen the banner says so, since it is what a reload would lose.
@@ -1711,20 +1781,10 @@ let records = 0;
 const storedSlots = new Set();
 let storedDecidedAt = null;
 const inFlight = new Set();
-async function record(){
-  // A retry waiting out its delay, or a save started just before the snapshot that
-  // made this view outdated, lands here too.
-  if (outdated) throw Object.assign(new Error('this view is out of date'), {code: 'outdated'});
-  records++;
-  // Everything this write carries, which is never a message marked unsaved when
-  // the write is built. A retry calls record() again, so it leaves out whatever
-  // was marked, or taken out by Edit, during its wait.
-  const all = threads.flatMap(t => t.turns);
-  const held = new Set(all.filter(unsaved).map(m => m.answers));
-  const slots = all.filter(m => m.via === 'session' && !held.has(m.answers));
-  const at = decided ? decidedAt : undefined;
-  const write = {ids: new Set(slots.map(m => m.answers)), at};
-  write.done = db.doc('review/pr-' + DATA.number).set({
+const heldIds = () => new Set(threads.flatMap(t => t.turns).filter(unsaved).map(m => m.answers));
+// The document every save stores, built from this view as it is now.
+function deskBody(held){
+  return {
     pr: DATA.number,
     ...(typeof DATA.repo === 'string' ? {repo: DATA.repo} : {}),
     title: DATA.title,
@@ -1738,7 +1798,25 @@ async function record(){
     // Which view saved this, so every view can tell its own save from another's.
     writer: viewId,
     writtenAt: new Date().toISOString(),
-  }).then(() => {
+  };
+}
+// db.d.ts: a document body is at most 256 KiB serialized. Measured in UTF-8 bytes,
+// as the store counts it, not in string length: an é or an emoji is two to four.
+const MAX_DOC = 256 * 1024;
+const deskBytes = () => new TextEncoder().encode(JSON.stringify(deskBody(heldIds()))).length;
+async function record(){
+  // A retry waiting out its delay, or a save started just before the snapshot that
+  // made this view outdated, lands here too.
+  if (outdated) throw Object.assign(new Error('this view is out of date'), {code: 'outdated'});
+  records++;
+  // Everything this write carries, which is never a message marked unsaved when
+  // the write is built. A retry calls record() again, so it leaves out whatever
+  // was marked, or taken out by Edit, during its wait.
+  const held = heldIds();
+  const slots = threads.flatMap(t => t.turns).filter(m => m.via === 'session' && !held.has(m.answers));
+  const at = decided ? decidedAt : undefined;
+  const write = {ids: new Set(slots.map(m => m.answers)), at};
+  write.done = db.doc('review/pr-' + DATA.number).set(deskBody(held)).then(() => {
     write.ids.forEach(id => storedSlots.add(id));
     if (at !== undefined) storedDecidedAt = at;
   });
@@ -1910,7 +1988,9 @@ async function ring(what, retry = true){
 // act on. Approving needs no reason -- the request already says what it wants --
 // so only this branch asks, and it asks before recording, because the panel is
 // replaced once a decision is in and there is no way back to it.
-function askReason(existing){
+// `focus` is false when a reload brings back a reason being written: nothing moves
+// the reader to the slab on load.
+function askReason(existing, focus = true){
   if (closedOutcome()) return drawShut();
   showingDecided = false;
   showingRevised = false;
@@ -1923,8 +2003,9 @@ function askReason(existing){
     + '<button class="btn yes" id="recordReason">Record it</button></div></div>');
   const why = $('why');
   why.value = existing || '';
-  why.focus();
-  $('back').addEventListener('click', backToChoice);
+  if (focus) why.focus();
+  why.addEventListener('input', () => keepDraft('why', why.value));
+  $('back').addEventListener('click', () => { keepDraft('why', null); backToChoice(); });
   $('recordReason').addEventListener('click', () => {
     if (!why.value.trim()){ why.focus(); return; }
     decide('needs changes', false, why.value.trim());
@@ -2056,6 +2137,7 @@ async function decide(v, quiet, why){
     // Read `lost` straight after the refusal: a later save that succeeds clears
     // it, and the line under the buttons must keep saying why this one failed.
     const why = lost === 'too large' ? 'too large' : 'unsaved';
+    if (kept) keepDraft('why', null);
     if (kept) await ringDecision(at);
     else if (decidedAt === at && rang === 'sending') rang = why;
   }
@@ -2132,8 +2214,8 @@ function pickupLine(){
   if (rang === 'unsaved') return 'Not saved, so no session will see this. '
     + 'Tell the working session directly.';
   if (rang === 'too large') return 'Not saved: this conversation is too large to store, '
-    + 'so no session will see this. Close a thread you no longer need and decide '
-    + 'again, or tell the working session directly.';
+    + 'so no session will see this. ' + (threads.length > 1 ? 'Close a thread you no longer '
+    + 'need and decide again, or tell' : 'Tell') + ' the working session directly.';
   const later = ' If no session is running, the next one to start picks it up.';
   // Waiting only once a ring is recorded.
   if (rang === 'rung') return 'Waiting for the working session.' + later;
@@ -2779,6 +2861,25 @@ function watchDesk(){
 
 offerDecision();
 
+// What a reload can give back before the store is read: the box, the carried quote
+// and the page. The thread and a reason being written wait for the stored document
+// (see resumeDrafts).
+{
+  const d = drafts();
+  if (typeof d.box === 'string'){ $('box').value = d.box; fit($('box')); }
+  if (typeof d.quote === 'string') carried = d.quote;
+  if (typeof d.leaf === 'string'){
+    const i = leafNamed(d.leaf);
+    if (i !== null) leaf = i; else wantLeaf = d.leaf;
+  }
+}
+function resumeDrafts(){
+  const d = drafts();
+  const i = threads.findIndex(t => t.id === d.thread);
+  if (i >= 0 && i !== live){ live = i; threads[i].unread = false; draw(true); }
+  if (typeof d.why === 'string' && !closedOutcome()) askReason(d.why, false);
+}
+
 paint(); draw();
 
 (async () => {
@@ -2794,7 +2895,7 @@ paint(); draw();
   if (!bellOn && db) sayAlone();
   draw();
 
-  if (!db){ restore = 'nostore'; draw(); sayLost('this view cannot reach the store'); return; }
+  if (!db){ restore = 'nostore'; draw(); sayLost('this view cannot reach the store'); resumeDrafts(); return; }
   // The replies listener adds slots to the restored threads and starts rering,
   // so it waits for a successful restore; Try again starts it if the first
   // attempt failed. The page's other feeds start either way: the description,
@@ -2804,6 +2905,9 @@ paint(); draw();
   // again only runs when the restore itself failed.
   let restored = false;
   try { restored = await restoreStored(); } catch (e){ restoreFailed(e); }
+  // After the stored threads, so the thread a reload came back to can be found, and
+  // after a restored decision has drawn, which a reason being written replaces.
+  resumeDrafts();
   followPage();
   // Before the replies listener, whose first delivery starts rering.
   if (restored){ watchDesk(); listenReplies(); }
@@ -2923,6 +3027,12 @@ function followPage(){
           changed.push(row.name); touched = true;
         });
         if (!touched) return;
+        // The page a reload came back to, once the store has delivered it.
+        const back = wantLeaf !== null && leaf === 0 ? leafNamed(wantLeaf) : null;
+        if (back !== null){
+          wantLeaf = null; leaf = back; delete freshOn[back];
+          unlight(); paint(); return;
+        }
         let onScreen = false;
         changed.forEach(name => {
           const at = documents.findIndex(x => x.name === name);
