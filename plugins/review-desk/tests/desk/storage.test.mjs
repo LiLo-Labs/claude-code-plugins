@@ -1077,3 +1077,31 @@ test('the review document\'s feed dying shows the dead-feed line and does not ma
   await notStale(desk);
   assert.deepEqual(desk.errors, []);
 });
+
+// The known risk: a false out-of-date blocks a reviewer who is the only writer.
+// Restore reads an older page's document, stamped only by updatedAt, and re-rings a
+// slot it never rang. The outcome write is this view's own, so it must carry the
+// writer stamp: without it, its echo is a changed updatedAt with no writer.
+test('a lone view whose re-ring on load writes the outcome over an older page\'s document is not marked out of date', async () => {
+  const seed = leanDesk();
+  seed[PR].updatedAt = '2026-09-13T09:00:00.000Z';
+  seed[PR].threads[0].turns.push({id: 'u9', role: 'user', content: 'Never rung', to: 'session'},
+    {role: 'assistant', via: 'session', answers: 'u9', status: 'sent', sentAt: 1000});
+  desk = await open(browser, {seed});
+  await ready(desk);
+  await watchingDesk(desk);
+  await desk.until(s => slots(s).some(m => m.answers === 'u9' && m.rungAt), null, 8000);
+  await desk.page.waitForTimeout(800);               // the outcome write's echo has landed
+
+  const self = await desk.page.evaluate('viewId');
+  const log = await desk.log();
+  assert.ok(prSets(log).length >= 1, 'the re-ring outcome was not written by the page');
+  assert.equal((await desk.store())[PR].writer, self);
+  await notStale(desk);
+  await desk.page.click('#fab');
+  await sendText(desk, 'Asked after the re-ring');
+  await desk.until(s => asked(s).includes('Asked after the re-ring'), null, 4000);
+  await desk.page.waitForTimeout(600);
+  await notStale(desk);
+  assert.deepEqual(desk.errors, []);
+});
