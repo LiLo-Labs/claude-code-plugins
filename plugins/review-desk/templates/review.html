@@ -1487,9 +1487,12 @@ async function restoreStored(){
 // session's reply…" for good. So every listener goes through follow(), which
 // says on the page which feed stopped and with what code, and subscribes again
 // once after a short randomized wait. It never retries a code that db.d.ts says
-// cannot succeed on a retry, and never more than once on its own, so a store
-// that refuses every subscribe is not asked again for the life of the tab. After
-// that the reviewer gets Try again.
+// cannot succeed on a retry. Each outage gets one automatic resubscribe: a
+// delivery ends the outage and earns the next one, so a feed that drops twice in
+// a long review comes back twice on its own. A store that refuses every
+// subscribe never delivers, so it is not asked again on its own; the reviewer
+// gets Try again. The cost: a store that delivers and then drops every time is
+// resubscribed every few seconds for as long as that goes on.
 const NO_RESUBSCRIBE = new Set(['invalid_argument', 'revoked', 'not_granted',
   'capability_disabled', 'capability_removed', 'transform_error']);
 const RESUBSCRIBE_AFTER = 1500;
@@ -1514,6 +1517,7 @@ function follow(name, label, where, ref, next){
       ref().onSnapshot(snap => {
         if (over || gen !== feed.gen) return;
         feed.ever = true;
+        feed.retried = false;
         if (feed.dead){ feed.dead = null; feed.retrying = false; drawFeeds(feed); }
         next(snap);
       }, died);

@@ -229,13 +229,44 @@ test('the description, documents, pickup and presence listeners each show a dead
   await desk.page.waitForSelector('.leaf:nth-child(2)');
   assert.match(await desk.page.textContent('#sheet'), /Rewritten after the reconnect/);
 
-  // A second death waits for the reviewer.
+  // The feed delivered after coming back, so a second outage is a new one and
+  // gets its own automatic resubscribe.
   await desk.kill(BODY);
-  await desk.page.waitForSelector('#pageFeeds button');
-  await desk.page.waitForTimeout(3500);
-  assert.equal(await desk.subscribes(BODY), 2);
-  await desk.page.click('#pageFeeds button');
-  await desk.page.waitForFunction(() => !document.querySelector('#pageFeeds .lost'));
+  await desk.page.waitForSelector('#pageFeeds .lost');
+  await desk.page.waitForFunction(() => !document.querySelector('#pageFeeds .lost'), null, {timeout: 8000});
   assert.equal(await desk.subscribes(BODY), 3);
+  assert.deepEqual(desk.errors, []);
+});
+
+const subscribedTimes = async (p, n) => {
+  for (const end = Date.now() + 8000;;){
+    if (await desk.subscribes(p) === n) return;
+    if (Date.now() > end) throw new Error(p + ' never reached ' + n + ' subscribes: ' + await desk.subscribes(p));
+    await desk.page.waitForTimeout(50);
+  }
+};
+
+test('each outage after a delivery gets one automatic resubscribe; a revoked feed never does', async () => {
+  desk = await open(browser, {seed: leanDesk()});
+  await desk.page.click('#fab');
+  await desk.page.waitForSelector('.said.rich strong >> text=two views');
+
+  for (const n of [2, 3]){
+    await desk.kill(REPLIES);
+    await desk.page.waitForSelector('#feedSlot .lost');
+    assert.match(await desk.page.textContent('#feedSlot'), /Trying again/);
+    await subscribedTimes(REPLIES, n);
+    await desk.page.waitForFunction(() => !document.querySelector('#feedSlot .lost'), null, {timeout: 8000});
+  }
+  // Still delivering after the second recovery.
+  await desk.reply('u1', 'Rewritten after two outages.');
+  await desk.page.waitForSelector('text=Rewritten after two outages.');
+
+  await desk.kill(REPLIES, 'revoked');
+  await desk.page.waitForSelector('#feedSlot .lost');
+  await desk.page.waitForTimeout(3500);             // longer than the longest automatic wait
+  assert.equal(await desk.subscribes(REPLIES), 3);
+  assert.equal(await desk.page.locator('#feedSlot button').count(), 0);
+  assert.match(await desk.page.textContent('#feedSlot'), /stopped receiving the working session’s replies \(revoked\)/);
   assert.deepEqual(desk.errors, []);
 });
