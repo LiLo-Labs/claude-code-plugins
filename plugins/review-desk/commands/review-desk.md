@@ -684,9 +684,10 @@ pickup is a claim another session may take over after 5 minutes:
     data: {"outcome": {"result": "merged", "detail": "<one line>", "at": "<now, UTC ISO>"}}
 
 `result` is `merged`, naming the merge method and commit; `revising`, naming the
-work you are starting; or `blocked`, saying what stopped you (a denied
+work you are starting; `blocked`, saying what stopped you (a denied
 `gh pr merge`, a failing check, a conflict, a message sent after deciding) in
-words the reviewer can act on. A
+words the reviewer can act on; or `closed`, when GitHub shows the pull request
+closed without merging, which the page shows as "Closed without merging". A
 blocked merge reported here is the difference between a reviewer who comes back
 to unblock it and one who assumes it landed.
 

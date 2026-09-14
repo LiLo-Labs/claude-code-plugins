@@ -472,5 +472,23 @@ class Desk(unittest.TestCase):
         self.assertIn("cap the id or carry an excerpt", publish)
 
 
+class Outcomes(unittest.TestCase):
+    def test_every_enumeration_of_outcomes_includes_closed_with_one_meaning(self):
+        # The page renders a `closed` outcome and review-collect reports one, but
+        # the list review-desk.md gives a session to report from left it out.
+        with open(os.path.join(ROOT, "templates", "review.html"), encoding="utf-8") as f:
+            self.assertIn("'Closed without merging'", f.read())
+        for name in ("review-desk.md", "review-collect.md"):
+            sentences = re.split(r"(?<=\.)\s", flat(read(name)))
+            listed = [s for s in sentences
+                      if all(f"`{r}`" in s for r in ("merged", "revising", "blocked"))]
+            self.assertTrue(listed, name)
+            for sentence in listed:
+                with self.subTest(doc=name, sentence=sentence[:80]):
+                    self.assertIn("`closed`", sentence)
+                    self.assertIn("closed without merging", sentence)
+        self.assertIn("closed", after_push.TERMINAL)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -292,7 +292,8 @@ over.
 After acting on a decision, report what happened as the pickup's `outcome` at
 once, before any revision work, as `/review-desk` describes under "When they
 decide": `merged` with the method and
-commit, `revising` with the work, or `blocked` with what stopped you. A merge
+commit, `revising` with the work, `blocked` with what stopped you, or `closed`
+when GitHub shows the pull request closed without merging. A merge
 that auto mode, branch protection or `--match-head-commit` refuses is `blocked`, never silence; the
 reviewer's page otherwise goes on saying the decision was picked up.
 
