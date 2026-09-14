@@ -204,18 +204,33 @@ button shows the command that resumes this session.
 The desk is live in both directions. The reviewer's messages reach this session,
 and what you write reaches their open page without a reload.
 
+Two rules keep every answer fast, because each extra round trip costs the
+reviewer about five seconds:
+
+- **Batch.** Send every write that does not depend on a read in the same batch
+  as that read.
+- **Pin, do not reread.** A write to a document that already exists is refused
+  without `if_version`. Take the version from the result of your last write to
+  it, since every write result names the new version, and read first only when
+  you have no result to hand.
+
 ### Whenever a ring arrives
 
-Before anything else, stamp the desk so its panel can say you are there:
+Stamp the desk so its panel can say you are there, as a write in your very first
+batch, alongside the reads. Each ring gets its own new document, named after the
+version in the notice (`1789352074-11af` in "it is now version
+1789352074-11af"). A new document needs no read and cannot conflict, and the
+page takes the time from the name:
 
     action: "write_db", db_op: "set",
-    collection: "review/pr-<number>/context", doc_id: "presence",
-    data: {"at": "<now, UTC ISO>", "resume": "<the resume command>"}
+    collection: "review/pr-<number>/presence", doc_id: "<the version from the notice>",
+    data: {"resume": "<the resume command>"}
 
 A ring with no new message and no new decision is the reviewer pressing
 **Check**, and this stamp is the whole answer. A session that picks a desk up at
 session start stamps it too, with its own resume command, because the one in
-the payload resumes a session that may have ended.
+the payload resumes a session that may have ended. Use the current Unix time in
+seconds as its `doc_id`.
 
 ### When they ask the working session
 
@@ -234,15 +249,20 @@ decide", answer every message still waiting:
 3. **Do what the question needs**, with whatever it takes: read the code, run
    the tests, search the web. The turn carries `quote`, the passage they
    highlighted, and `reading`, the page and section they were on.
-4. **Answer** by setting the same document again with `"status": "done"`. For a
-   long job, rewrite `text` as you go with `"status": "working"`; the page
-   shows each version.
+4. **Answer** by setting the same document again with `"status": "done"`,
+   pinned with `if_version` from your previous write's result.
 
 The claim, and later the answer, are one document per message:
 
     action: "write_db", db_op: "set",
     collection: "review/pr-<number>/replies", doc_id: "<the turn's id>",
     data: {"turn": "<the turn's id>", "status": "working", "text": "", "at": "<now, UTC ISO>"}
+
+**Show your progress.** For anything longer than one step, rewrite `text` with a
+short line about what you are doing now, such as "running the review-desk tests",
+keeping `"status": "working"`. Send each rewrite in the same batch as the step
+it describes, the tool call that runs the tests, never as a round trip of its
+own. The page shows every version as it lands.
 
 `text` is markdown, and the page renders it. Write for a reviewer on a tablet:
 lead with the answer, say what you ran and what it printed, and mark inference
