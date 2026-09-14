@@ -320,16 +320,17 @@ test('a replies listener killed after it has delivered says the view stopped rec
   assert.deepEqual(desk.errors, []);
 });
 
-test('Approve refused as too large says so on the decision, not only in the panel', async () => {
-  desk = await open(browser);
-  await desk.page.click('#fab');
-  // Over the store's 256 KiB body cap, so every whole-document set after it is
-  // refused invalid_argument, the decision's included.
-  await desk.page.fill('#box', 'x'.repeat(270 * 1024));
-  await desk.page.press('#box', 'Enter');
-  await desk.page.waitForSelector('#lostSlot .lost');
-  await desk.page.click('#shut');
-  await desk.page.click('#ok');
+// A message refused as too large is held out of later writes like any other
+// refused message, so it no longer makes the decision's write too large. What does
+// is a stored discussion near the cap: here 250 KiB, and a reason that crosses it.
+test('a decision refused as too large says so on the decision, not only in the panel', async () => {
+  const seed = leanDesk();
+  seed[PR].threads[0].turns[0] = {...seed[PR].threads[0].turns[0], content: 'x'.repeat(250 * 1024)};
+  desk = await open(browser, {seed});
+  await ready(desk);
+  await desk.page.click('#changes');
+  await desk.page.fill('#why', 'y'.repeat(8 * 1024));
+  await desk.page.click('#decide #send');
   await desk.page.waitForFunction(() => {
     const p = document.querySelector('#decide .pickup');
     return p && !/Saving/.test(p.textContent);
@@ -337,7 +338,7 @@ test('Approve refused as too large says so on the decision, not only in the pane
   const line = await desk.page.textContent('#decide .pickup');
   assert.match(line, /too large/);
   assert.doesNotMatch(line, /^Not saved, so no session will see this/);
-  assert.equal((await desk.store())[PR], undefined);
+  assert.equal((await desk.store())[PR].decision, null);
   assert.deepEqual(await desk.rings(), []);
   assert.deepEqual(desk.errors, []);
 });
@@ -412,7 +413,8 @@ test('a save refused as invalid_argument, quota_exceeded or resource_exhausted i
     assert.equal(refusals(log).length, 1, code);
     assert.deepEqual(prSets(log), [], code + ' was retried');
     assert.deepEqual(await desk.rings(), []);
-    assert.equal(await desk.page.inputValue('#box'), 'Refused with ' + code);
+    assert.match(await desk.page.textContent('#stream .turn.mine'), new RegExp('Refused with ' + code));
+    assert.equal(await desk.page.inputValue('#box'), '', 'the message stays in the stream, not the box');
     assert.deepEqual(desk.errors, []);
     if (code !== codes[codes.length - 1]){
       assert.deepEqual(await desk.missing(), []);
@@ -421,14 +423,15 @@ test('a save refused as invalid_argument, quota_exceeded or resource_exhausted i
   }
 });
 
-test('a message refused twice says not saved, puts its text back, and Send again stores and rings it once', async () => {
+test('a message refused twice stays in its thread marked not saved with Send again and an empty box, and Send again stores and rings it once', async () => {
   desk = await open(browser, {setFailures: {[PR]: ['unavailable', 'unavailable']}});
   await ready(desk);
   await desk.page.click('#fab');
   await sendText(desk, 'Is this safe?');
   await desk.page.waitForSelector('[data-resend]', {timeout: 3000});
   assert.match(await desk.page.textContent('#stream'), /Not saved, so this has not reached the working session/);
-  assert.equal(await desk.page.inputValue('#box'), 'Is this safe?');
+  assert.match(await desk.page.textContent('#stream .turn.mine'), /Is this safe\?/);
+  assert.equal(await desk.page.inputValue('#box'), '', 'nothing is put back in the shared box');
   await desk.page.waitForTimeout(1000);
   assert.equal(refusals(await desk.log()).length, 2);
   assert.equal((await desk.store())[PR], undefined, 'nothing saved it behind the reviewer');
@@ -451,52 +454,113 @@ test('a message refused twice says not saved, puts its text back, and Send again
   assert.deepEqual(desk.errors, []);
 });
 
-test('Enter on the text put back after a refused send sends that message again, not a second copy', async () => {
-  desk = await open(browser, {setFailures: {[PR]: ['unavailable', 'unavailable']}});
-  await ready(desk);
-  await desk.page.click('#fab');
-  await sendText(desk, 'Is this safe?');
-  await desk.page.waitForSelector('[data-resend]', {timeout: 3000});
-  await desk.page.press('#box', 'Enter');
-  await desk.until(s => slots(s).some(m => m.rungAt), null, 3000);
-  await desk.page.waitForTimeout(700);
-  const store = await desk.store();
-  assert.deepEqual(asked(store), ['Is this safe?']);
-  assert.equal(turnsIn(store).length, 2);
-  assert.equal((await desk.rings()).length, 1);
-  assert.equal(await desk.page.locator('#stream .turn.mine').count(), 1);
-  assert.equal(await desk.page.inputValue('#box'), '');
-  assert.deepEqual(desk.errors, []);
-});
+// Whether any write to review/pr-N stored a message with this text. The thread's
+// name is taken from its first question and is not a message, so it is not checked.
+const everWritten = (log, text) => log.some(e => e.op === 'set' && e.path === PR
+  && (e.data.threads || []).some(t => t.turns.some(m => m.role === 'user' && m.content === text)));
 
-test('the text put back after a refused send, sent from another thread, sends that message again, not a second copy', async () => {
-  desk = await open(browser, {setFailures: {[PR]: ['unavailable', 'unavailable']}});
+// The round-4 probe. Send again, then Enter on the box and a second Send again,
+// both while that save or its retry is still on its way. Before this design the
+// box still held the question at that moment, so Enter asked it a second time.
+async function sendAgainTwice(options){
+  desk = await open(browser, options);
   await ready(desk);
   await desk.page.click('#fab');
   await sendText(desk, 'Is this safe?');
-  await desk.page.waitForSelector('[data-resend]', {timeout: 3000});
-  await desk.page.click('#more');
-  assert.equal(await desk.page.inputValue('#box'), 'Is this safe?');
+  await desk.page.waitForSelector('[data-resend]:not([disabled])', {timeout: 3000});
+  const id = await desk.page.evaluate('threads[0].turns[0].id');
+
+  await desk.page.click('[data-resend]');
   await desk.page.press('#box', 'Enter');
-  await desk.until(s => slots(s).some(m => m.rungAt), null, 3000);
-  await desk.page.waitForTimeout(1200);
+  const again = desk.page.locator('[data-resend]');
+  const shown = await again.count();
+  const off = shown ? await again.isDisabled() : null;
+  if (shown) await again.dispatchEvent('click');
+  await desk.page.evaluate(id => resend(id), id);   // a click that got past the disabled button
+  const lastPress = await desk.page.evaluate('Date.now()');
+
+  await desk.until(s => slots(s).some(m => m.rungAt), null, 8000);
+  await desk.page.waitForTimeout(1200 + (options.setDelay || 0));
   const store = await desk.store();
   assert.deepEqual(asked(store), ['Is this safe?']);
-  assert.equal(turnsIn(store).length, 2);
-  assert.equal(store[PR].threads[0].turns.length, 2, 'in the thread it was first asked in');
+  assert.equal(turnsIn(store).length, 2, 'one stored turn and its slot');
   const rings = await desk.rings();
   assert.equal(rings.length, 1);
-  assert.equal(ringsFor(rings, turnsIn(store)[0].id).length, 1);
+  assert.equal(ringsFor(rings, id).length, 1);
+  assert.ok(lastPress < prSets(await desk.log())[0].at, 'the presses came before the save landed');
+  assert.equal(shown, 1, 'Send again stays on screen while its save is on its way');
+  assert.equal(off, true, 'and is disabled');
+  assert.equal(await desk.page.locator('#stream .turn.mine').count(), 1);
   assert.equal(await desk.page.inputValue('#box'), '');
+  assert.equal(await desk.page.locator('[data-resend], [data-edit]').count(), 0);
+  assert.doesNotMatch(await desk.page.textContent('#stream'), /Not saved/);
   assert.deepEqual(desk.errors, []);
-});
+}
 
-test('edited text put back after a refused send replaces that message, and only the edit is stored and rung', async () => {
+test('Enter and a second Send again during a Send again that is refused once store and ring the question once', () =>
+  sendAgainTwice({setFailures: {[PR]: ['unavailable', 'unavailable', 'unavailable']}}));
+
+test('Enter and a second Send again while a slow Send again save is landing store and ring the question once', () =>
+  sendAgainTwice({setDelay: 1500, setFailures: {[PR]: ['unavailable', 'unavailable']}}));
+
+// Round 3: the text put back in the shared box was sent again from another thread,
+// and stored and rung twice. Now nothing follows into the other thread, and no
+// write made there carries the refused message.
+test('a message refused in one thread is left out of a different question sent from another, and is rung only after its Send again', async () => {
   desk = await open(browser, {setFailures: {[PR]: ['unavailable', 'unavailable']}});
   await ready(desk);
   await desk.page.click('#fab');
   await sendText(desk, 'Is this safe?');
   await desk.page.waitForSelector('[data-resend]', {timeout: 3000});
+  const first = await desk.page.evaluate('threads[0].turns[0].id');
+
+  await desk.page.click('#more');
+  assert.equal(await desk.page.inputValue('#box'), '', 'nothing of the refused message follows into the new thread');
+  await desk.page.press('#box', 'Enter');
+  await sendText(desk, 'What about the tests?');
+  await desk.until(s => slots(s).some(m => m.rungAt), null, 3000);
+  await desk.page.waitForTimeout(1500);
+  let store = await desk.store();
+  assert.deepEqual(asked(store), ['What about the tests?']);
+  const second = turnsIn(store).find(m => m.role === 'user').id;
+  assert.equal((await desk.rings()).length, 1);
+  assert.equal(ringsFor(await desk.rings(), first).length, 0, 'not rung before its Send again');
+  assert.ok(!everWritten(await desk.log(), 'Is this safe?'), 'not written before its Send again');
+  assert.match(await desk.page.textContent('#lostSlot'), /could not be stored/);
+
+  await desk.page.click('.tab[data-go="0"]');
+  assert.match(await desk.page.textContent('#stream'), /Not saved/);
+  await desk.page.click('[data-resend]');
+  await desk.until(s => slots(s).length === 2 && slots(s).every(m => m.rungAt), null, 3000);
+  await desk.page.waitForTimeout(1200);
+  store = await desk.store();
+  assert.deepEqual(store[PR].threads.map(t => t.turns.filter(m => m.role === 'user').map(m => m.content)),
+    [['Is this safe?'], ['What about the tests?']]);
+  assert.equal(turnsIn(store).length, 4);
+  const rings = await desk.rings();
+  assert.equal(rings.length, 2);
+  assert.equal(ringsFor(rings, first).length, 1);
+  assert.equal(ringsFor(rings, second).length, 1);
+  assert.doesNotMatch(await desk.page.textContent('#stream'), /Not saved/);
+  assert.equal(await desk.page.textContent('#lostSlot'), '');
+  assert.deepEqual(desk.errors, []);
+});
+
+test('Edit takes a refused message out and puts its words in the empty box; only the reworded message is ever stored or rung', async () => {
+  desk = await open(browser, {setFailures: {[PR]: ['unavailable', 'unavailable']}});
+  await ready(desk);
+  await desk.page.click('#fab');
+  await sendText(desk, 'Is this safe?');
+  await desk.page.waitForSelector('[data-edit]', {timeout: 3000});
+
+  await desk.page.fill('#box', 'A draft');
+  assert.equal(await desk.page.locator('[data-edit]').isDisabled(), true, 'Edit never overwrites a draft');
+  await desk.page.fill('#box', '');
+  await desk.page.click('[data-edit]');
+  assert.equal(await desk.page.inputValue('#box'), 'Is this safe?');
+  assert.equal(await desk.page.locator('#stream .turn.mine').count(), 0);
+  assert.equal(await desk.page.locator('[data-resend], [data-edit]').count(), 0);
+
   await sendText(desk, 'Is this safe to ship?');
   await desk.until(s => slots(s).some(m => m.rungAt), null, 3000);
   await desk.page.waitForTimeout(1200);
@@ -506,39 +570,17 @@ test('edited text put back after a refused send replaces that message, and only 
   const rings = await desk.rings();
   assert.equal(rings.length, 1);
   assert.equal(ringsFor(rings, turnsIn(store)[0].id).length, 1);
+  assert.ok(!everWritten(await desk.log(), 'Is this safe?'), 'the original was never written');
   assert.equal(await desk.page.locator('#stream .turn.mine').count(), 1);
-  assert.equal(await desk.page.locator('[data-resend]').count(), 0);
   assert.doesNotMatch(await desk.page.textContent('#stream'), /Not saved/);
-  assert.deepEqual(desk.errors, []);
-});
-
-// Emptying the box ends the link to the refused message. A new question then saves
-// the whole document, the refused message included, and it is rung like any
-// message a later write stored.
-test('a new question typed after emptying the put-back text leaves the refused message, which that save stores and rings', async () => {
-  desk = await open(browser, {setFailures: {[PR]: ['unavailable', 'unavailable']}});
-  await ready(desk);
-  await desk.page.click('#fab');
-  await sendText(desk, 'Is this safe?');
-  await desk.page.waitForSelector('[data-resend]', {timeout: 3000});
-  await desk.page.fill('#box', '');
-  await sendText(desk, 'Something else');
-  await desk.until(s => slots(s).length === 2 && slots(s).every(m => m.rungAt), null, 4000);
-  await desk.page.waitForTimeout(1200);
-  const store = await desk.store();
-  assert.deepEqual(asked(store), ['Is this safe?', 'Something else']);
-  assert.equal(turnsIn(store).length, 4);
-  const rings = await desk.rings();
-  for (const m of turnsIn(store).filter(m => m.role === 'user'))
-    assert.equal(ringsFor(rings, m.id).length, 1, m.content);
-  assert.doesNotMatch(await desk.page.textContent('#stream'), /Not saved/);
+  assert.equal(await desk.page.textContent('#lostSlot'), '');
   assert.deepEqual(desk.errors, []);
 });
 
 test('Approve whose first save is refused as unavailable is stored on the retry and rung, never shown as not saved', async () => {
   desk = await open(browser, {setFailures: {[PR]: ['unavailable']}});
   await ready(desk);
-  await watchFor(desk, '#decide', 'Not saved');
+  for (const sel of ['#decide', '#lostSlot']) await watchFor(desk, sel, 'Not saved');
   await desk.page.click('#ok');
   await desk.until(s => s[PR] && s[PR].decision === 'approved', null, 3000);
   await desk.page.waitForFunction(() => window.__desk.rings().length === 1, null, {timeout: 3000});
@@ -566,52 +608,49 @@ test('a decision refused twice is rung, and stops saying not saved, once a later
   assert.deepEqual(desk.errors, []);
 });
 
-// View A's send is refused twice, so its slot is unsaved in A's memory only. A
-// later save from A stores it. View B is reloaded right then, as A's ring reloads
-// it on the host, and reads the stored slot while A holds the ring lease. Every
-// read takes 1.2 s, which keeps B's read inside A's lease.
-test('a message left unsaved is rung once when a later save stores it, and a view loaded meanwhile waits on the lease', async () => {
-  pair = await openPair(browser, {getDelay: 1200});
-  const [a, b] = pair;
-  for (const v of pair) await ready(v);
-  await a.page.click('#fab');
-  await a.failSets(PR, ['unavailable', 'unavailable']);
-  await sendText(a, 'Stranded question');
-  await a.page.waitForSelector('[data-resend]', {timeout: 3000});
-  const id = await a.page.evaluate('threads[0].turns[0].id');
-  await a.page.waitForTimeout(800);
-  assert.equal((await a.store())[PR], undefined);
+// Pages up to 0.10.2 let a later save store a message whose own save had failed,
+// still marked unsent/unsaved; this page never writes one (see record). Both views
+// load such a slot, and every read takes 1.2 s, so the two ask for the ring lease
+// together. Only the holder rings. The other waits the lease out, reads the
+// holder's rungAt, and does not ring. The test takes about 25 s for that wait.
+test('a slot a later save stored as unsaved is rung once across two views, and neither view says it was not saved', async () => {
+  const id = 'm-stranded';
+  const seed = {[PR]: {pr: 42, title: 'Harness desk', decision: null, reason: null, decidedAt: null,
+    threads: [{id: 't1', name: 'Stranded', turns: [
+      {id, role: 'user', content: 'Stranded question', to: 'session'},
+      {role: 'assistant', via: 'session', answers: id, status: 'unsent', why: 'unsaved', sentAt: Date.now() - 2000}]}]}};
+  pair = await openPair(browser, {seed, getDelay: 1200});
+  for (const v of pair) for (const sel of ['#stream', '#lostSlot']) await watchFor(v, sel, 'Not saved');
+  for (const v of pair){ await ready(v); await v.page.click('#fab'); }
+  const [a] = pair;
 
-  // A later save that rings for nothing of its own: a thread opened and closed.
-  await a.page.click('#more');
-  await a.page.click('[data-shut="1"]');
-  await a.until(s => slots(s).some(m => m.answers === id));
-  await b.reload();
-  await a.until(s => slots(s).some(m => m.answers === id && m.rungAt), null, 8000);
-  assert.equal(await a.page.locator('[data-resend]').count(), 0);
-  assert.doesNotMatch(await a.page.textContent('#stream'), /Not saved/);
+  const acquires = async () => (await a.log()).filter(e => e.op === 'acquire');
+  await pollFor('both views never asked for the lease', async () => (await acquires()).length >= 2, 10000);
+  const [one, two] = await acquires();
+  assert.notEqual(one.view, two.view);
+  assert.deepEqual([one.acquired, two.acquired], [true, false], 'one view holds the lease');
+  const holder = pair.find(v => v.page.name() === one.view), waiter = pair.find(v => v !== holder);
 
-  const byB = async () => (await a.log()).filter(e => e.op === 'acquire' && e.view === 'view-b');
-  await pollFor('view B never asked for the lease', async () => (await byB()).length, 8000);
-  assert.equal((await byB())[0].acquired, false, 'view A holds the lease');
-  assert.equal(await b.page.locator('[data-resend]').count(), 0);
-  assert.doesNotMatch(await b.page.textContent('#stream'), /Not saved/);
-
-  // Once A's lease runs out B asks again, reads A's rungAt, and does not ring.
-  await pollFor('view B never read the slot again under its own lease', async () => {
+  await pollFor('the waiting view never read the slot again under its own lease', async () => {
     const log = await a.log();
-    const got = log.findIndex(e => e.op === 'acquire' && e.view === 'view-b' && e.acquired);
-    return got >= 0 && log.slice(got).some(e => e.op === 'get' && e.view === 'view-b' && e.path === PR);
+    const got = log.findIndex(e => e.op === 'acquire' && e.view === two.view && e.acquired);
+    return got >= 0 && log.slice(got).some(e => e.op === 'get' && e.view === two.view && e.path === PR);
   }, 30000);
-  await b.page.waitForSelector('#stream >> text=Saved and rung', {state: 'attached', timeout: 5000});
+  await waiter.page.waitForSelector('#stream >> text=Saved and rung', {state: 'attached', timeout: 5000});
 
   const publishes = (await a.log()).filter(e => e.op === 'publish');
   assert.equal(publishes.length, 1);
-  assert.equal(publishes[0].view, 'view-a');
+  assert.equal(publishes[0].view, one.view);
   assert.deepEqual(publishes[0].ring.doorbell.turns, [id]);
-  const store = await a.store();
-  assert.deepEqual(asked(store), ['Stranded question']);
-  assert.equal(turnsIn(store).length, 2);
+  const [slot] = slots(await a.store());
+  assert.equal(slot.status, 'sent');
+  assert.equal(slot.why, undefined);
+  assert.ok(slot.rungAt);
+  for (const v of [holder, waiter]){
+    assert.equal(await v.page.evaluate('lateStored.size'), 0, v.page.name() + ' still holds a rung slot as late');
+    assert.equal(await v.page.locator('[data-resend], [data-edit]').count(), 0);
+    assert.deepEqual(await seen(v), {});
+  }
   assert.deepEqual(a.errors, []);
 });
 
