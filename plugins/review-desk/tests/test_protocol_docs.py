@@ -356,6 +356,38 @@ class Desk(unittest.TestCase):
         self.assertIn("even when it is not a git repository", text)
         self.assertIn("written before `cwd` was recorded", text)
 
+    def test_ledger_records_the_published_head_and_branch(self):
+        # "Changed since you opened this" lists commits pushed since the desk was
+        # published, and nothing recorded which commit that was, so a later
+        # session listed every commit on the pull request or guessed.
+        down = flat(section(self.doc, "Write it down"))
+        self.assertIn('"cwd": "<launch directory>", "head": "<headRefOid>", '
+                      '"branch": "<headRefName>", "collectedAt": null}', down)
+        self.assertIn("its `head` and `branch` to this publish's", down)
+        self.assertIn("Every later rewrite of `context/body` for a push sets the entry's `head`",
+                      down)
+        self.assertIn("An entry written before these fields were recorded has neither and still works",
+                      down)
+
+    def test_changelog_is_computed_from_the_recorded_head(self):
+        change = flat(section(self.doc, "Changing the desk and the pull request"))
+        self.assertIn("Compute those commits from the ledger; never recall or guess them", change)
+        self.assertIn("git log --reverse --format='%h %s' <head>..origin/<branch>", change)
+        self.assertIn("gh api repos/<owner/repo>/compare/<head>...<headRefOid>", change)
+        self.assertIn("start from the `head` in the stored `context/body` instead", change)
+        # A second rewrite used to drop the lines the first one wrote.
+        self.assertIn("read it first and keep the lines its section already has", change)
+        # The push rewrite moves the ledger head, and only once the body has landed.
+        rule = "Once the write has landed, set the entry's `head` to the `headRefOid` it wrote"
+        self.assertIn(rule, change)
+        self.assertLess(change.index("<head>..origin/<branch>"), change.index(rule))
+        self.assertLess(change.index("Rewrite `context/body` after every push"), change.index(rule))
+        self.assertIn("a desk whose entry records a `branch` is listed only when the push updates that branch",
+                      change)
+        publish = flat(section(self.doc, "Publish"))
+        self.assertIn("When the ledger entry's `head` is not the payload's, open the text with the "
+                      "`## Changed since you opened this` section", publish)
+
     def test_invalid_argument_is_diagnosed_before_blaming_ownership(self):
         # The same code covers bad ids and oversize documents, and "not the
         # owner, do not retry" silently abandoned a desk the session did own.
