@@ -288,3 +288,23 @@ test('closing an empty thread needs no confirmation, and the open thread stays o
   const store = await desk.until(s => s[PR].threads.length === 2);
   assert.deepEqual(store[PR].threads.map(t => t.id)[0], 't1');
 });
+
+test('closing a thread before the open one keeps the same thread open', async () => {
+  // Three threads, so an index left undecremented lands on a different thread
+  // rather than being clamped back onto the right one.
+  const seed = {[PR]: {pr: 42, title: 'Harness desk', decision: null, reason: null, decidedAt: null,
+    threads: [{id: 't0', name: 'Empty before', turns: []},
+      {id: 't1', name: 'The argument', turns: [
+        {id: 'm-old', role: 'user', content: 'The important argument', to: 'session'}]},
+      {id: 't2', name: 'Empty after', turns: []}]}};
+  desk = await open(browser, {seed});
+  await desk.page.click('#fab');
+  await desk.page.click('.tab[data-go="1"]');
+  await desk.page.waitForSelector('text=The important argument');
+  await desk.page.click('[data-shut="0"]');            // empty, so no confirmation
+  const store = await desk.until(s => s[PR].threads.length === 2);
+  assert.deepEqual(store[PR].threads.map(t => t.id), ['t1', 't2']);
+  assert.equal(await desk.page.textContent('.tab.on'), 'The argument');
+  assert.match(await desk.page.textContent('#stream'), /The important argument/);
+  assert.deepEqual(desk.errors, []);
+});
