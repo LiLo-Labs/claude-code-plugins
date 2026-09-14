@@ -55,6 +55,11 @@ document holds the reviewer's messages and where each one has got to, but no cop
 of the answers, which any of those viewers could have written. A desk published
 before 0.7.0 has no rules until it is republished.
 
+**Approve** asks once before it records anything: the page names the pull request
+and the commit it would merge, says how many answers are still being written or
+messages still waiting, and records only on **Confirm**. **Back** or Escape
+leaves nothing stored. **Needs changes** asks for its reason instead.
+
 Pressing **Approve** or **Needs changes** reaches the session two ways. The page
 stores the decision and publishes a small file into itself, which wakes the
 Claude Code session watching the desk within seconds of it going idle; that
