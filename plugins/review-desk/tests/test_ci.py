@@ -51,10 +51,31 @@ class Workflow(unittest.TestCase):
 
 
 class Scripts(unittest.TestCase):
+    # WebKit skips only the two 270 KiB "too large" storage tests, which time out
+    # on ubuntu WebKit (see review-desk.yml). Pinned exactly so the exclusion
+    # cannot quietly widen to other tests or files.
+    WEBKIT_SKIP = "--test-skip-pattern='too large' "
+
+    def test_page_job_runs_a_node_that_has_test_skip_pattern(self):
+        version = re.search(r'node-version: "(\d+)"', read(OWN)).group(1)
+        self.assertGreaterEqual(int(version), 22)
+
     def test_webkit_runs_the_same_suites_as_chromium(self):
         scripts = json.loads(read(os.path.join(ROOT, "package.json")))["scripts"]
         self.assertEqual(scripts["test"], "node --test tests/desk/*.test.mjs")
-        self.assertEqual(scripts["test:webkit"], "DESK_BROWSER=webkit " + scripts["test"])
+        self.assertEqual(
+            scripts["test:webkit"],
+            "DESK_BROWSER=webkit node --test " + self.WEBKIT_SKIP + "tests/desk/*.test.mjs")
+
+    def test_webkit_skip_names_only_the_two_oversized_storage_tests(self):
+        titles = []
+        desk = os.path.join(ROOT, "tests", "desk")
+        for name in sorted(os.listdir(desk)):
+            if name.endswith(".test.mjs"):
+                titles += [(name, t) for t in re.findall(r"^test\('([^']+)'", read(os.path.join(desk, name)), re.M)]
+        skipped = [(f, t) for f, t in titles if re.search("too large", t)]
+        self.assertEqual([f for f, _ in skipped], ["storage.test.mjs", "storage.test.mjs"])
+        self.assertGreater(len(titles), 60)
 
 
 if __name__ == "__main__":
