@@ -121,6 +121,37 @@ class AfterPush(unittest.TestCase):
         self.remote("git@github.com:o/r.git")
         self.assertIn("#7", self.said(self.run_hook("git push")))
 
+    def add_remote(self, name, url):
+        subprocess.run(["git", "-C", self.repo, "remote", "add", name, url], check=True)
+
+    def test_fork_push_reaches_the_upstream_desk(self):
+        # origin is the fork; the pull request, and so its desk, is upstream's.
+        self.remote("https://github.com/MALathon/accrue.git")
+        self.add_remote("upstream", "https://github.com/LiLo-Labs/accrue.git")
+        self.ledger([{"repo": "LiLo-Labs/accrue", "pr": 3, "url": "https://x/3",
+                      "collectedAt": None}])
+        text = self.said(self.run_hook("git push origin feature"))
+        self.assertIn("LiLo-Labs/accrue#3 https://x/3", text)
+
+    def test_any_remote_matches_in_ssh_and_https_forms(self):
+        for origin, upstream in [
+            ("git@github.com:fork/r.git", "https://github.com/o/r.git"),
+            ("https://github.com/fork/r.git", "git@github.com:o/r.git"),
+            ("https://github.com/fork/r", "ssh://git@github.com/o/r.git"),
+            ("git@github.com:fork/r.git", "https://github.com/O/R/"),
+        ]:
+            with self.subTest(origin=origin, upstream=upstream):
+                self.remote(origin)
+                subprocess.run(["git", "-C", self.repo, "remote", "remove", "upstream"],
+                               capture_output=True)
+                self.add_remote("upstream", upstream)
+                text = self.said(self.run_hook("git push"))
+                self.assertIn("o/r#7 https://x/7", text)
+                self.assertNotIn("#9", text)
+
+    def test_push_outside_a_repository_says_nothing(self):
+        self.assertEqual(self.run_hook("git push", cwd=self.work), "")
+
     def test_revising_desk_is_listed_as_open(self):
         # A revision's pushes are exactly the ones that make a desk out of date.
         self.ledger([

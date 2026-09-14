@@ -242,11 +242,31 @@ reviewer's messages in it are written by whoever is reading, and the rules do
 not say which viewer wrote one.
 
 Rules are fixed when the page is published. Republishing an older desk with this
-object is what closes it, and gives it the new chat too. If a write under
-`replies`, `presence`, `context` or `documents` is refused with
-`invalid_argument`, this session is not the desk's owner: someone else published
-it. Say so in the terminal rather than retrying; only the owner's session can
-answer on that desk.
+object is what closes it, and gives it the new chat too.
+
+**A write refused with `invalid_argument` has three possible causes**, and the
+code does not say which:
+
+- **A bad path or document id:** a character other than letters, digits and
+  `_ - . ~ : @ +`, or a document id (or any other path segment) over 200 bytes.
+- **A document over 256 KiB** once serialized as JSON, or nested more than 32
+  levels deep.
+- **This session is not the desk's owner:** someone else published it, and the
+  rules let only the owner write `replies`, `presence`, `context` and
+  `documents`.
+
+Rule the first two out before concluding the third. Check the refused write
+itself: its document id is at most 200 bytes, and its `data` serialized as JSON,
+escapes included, is under 256 KiB. When either is over, the write is at fault,
+not the desk: cap the id or carry an excerpt, as "Changing the desk and the pull
+request" describes, and write again. When both are within bounds, prove
+ownership with a small presence write: `set` under `review/pr-<number>/presence`
+with the current Unix time in seconds as its `doc_id` and `{"resume": "<the
+resume command>"}` as its `data`, as "Whenever a ring arrives" describes. When
+that write succeeds, this session owns the desk and the refused write is at
+fault: look again at its path and body. Only when the presence write is refused
+too is this session not the desk's owner. Say so in the terminal rather than
+retrying; only the owner's session can answer on that desk.
 
 Pass a `favicon` — one emoji, required on a first publish and fixed for the life
 of the page — and a one-sentence `description`, which becomes the subtitle on
@@ -271,21 +291,30 @@ nobody.
   the same way. Unwatch nothing else: every other watch is a desk a reviewer may
   be using now.
 - **Still not watching:** say so at handover, plainly. The reviewer's messages
-  and decision wait for the next session start in this repository.
+  and decision wait for the next session started in a checkout of this
+  repository, or in the directory this session was launched in.
 
 ## Write it down
 
 Append an entry to `~/.review-desks.json`, creating the file with an empty list
 if it is absent. Each entry is `{"repo": "owner/name", "pr": <number>, "url":
-"<artifact url>", "collectedAt": null}`. If an entry for this request already
-exists, keep that one rather than adding a second. If it has `collectedAt` set
-and the pull request is still open, set `collectedAt` and `outcome` back to
-null, so the desk is listed again.
+"<artifact url>", "cwd": "<launch directory>", "collectedAt": null}`. `cwd` is
+the absolute path of the directory this session was launched in, the working
+directory Claude Code named when the session started, not a directory you later
+ran `cd` into. If an entry for this request already exists, keep that one
+rather than adding a second, and set its `cwd` to this session's launch
+directory. If it has `collectedAt` set and the pull request is still open, set
+`collectedAt` and `outcome` back to null, so the desk is listed again.
 
 The reviewer decides on a page, often on a tablet, often when nothing is
 running here. This file is how a later session finds out: when a session starts
-or resumes in a repository, the plugin's session-start sweep lists that
-repository's open entries, and counts the ones open in other repositories. An
+or resumes, the plugin's session-start sweep lists the open entries whose `repo`
+is named by any remote of its directory (origin, a fork's upstream, or any
+other), and the open entries whose `cwd` is that directory, even when it is not
+a git repository. It counts the rest. `cwd` is what brings back a desk published
+from a session launched outside the request's repository, such as your home
+directory; an entry written before `cwd` was recorded is matched by its
+repository alone. An
 entry is open until `/review-collect` records a `merged` or `closed` outcome and
 stamps `collectedAt`; a desk being revised stays open. Without an entry the
 decision waits until somebody remembers to look, which is the failure this
@@ -445,10 +474,22 @@ included.
 Each file has one document, and its id is the path with every `/` written as
 `~`: `docs/design/0002-x.md` is `docs~design~0002-x.md`. Any other character a
 document id cannot hold (anything but letters, digits and `_ - . ~ : @ +`)
-becomes `_`. A later session works out the same id from the path, so it rewrites
-the document rather than adding a second one. The first write of a file needs
-no read. A rewrite is pinned with `if_version` from your last write to that
-document, and when you have no result to hand, read that one document first.
+becomes `_`. An id is at most 200 bytes, and after those replacements every
+character is one byte. When the id would be longer, keep its first 187
+characters and append `-` and the first 12 hex characters of the SHA-256 of the
+full path as carried (`printf %s '<path>' | shasum -a 256 | cut -c1-12`), so two
+long paths that share a beginning still get different ids. A later session
+works out the same id from the path, so it rewrites the document rather than
+adding a second one. The first write of a file needs no read. A rewrite is
+pinned with `if_version` from your last write to that document, and when you
+have no result to hand, read that one document first.
+
+A document holds at most 256 KiB serialized as JSON, escapes included. When a
+carried file's text, or the description, would take its document past that,
+carry an excerpt instead: the leading part that fits within 200 KiB, then a
+line saying the text was cut, how long the whole is, and where to read it in
+full (the file on the pull request's head branch). Say in the description which
+files were cut.
 
 Always set `at`. When two documents carry the same `name`, such as one written
 under another id by an earlier session, the page shows the one with the newest
@@ -459,7 +500,8 @@ per commit pushed since the desk was published, its short hash and what it
 changed. This is how a change nobody asked for on the page reaches the reviewer.
 The page draws a reply only beside the message it answers, and drops one that
 answers nothing, so a reply cannot carry it. After every `git push` the plugin's
-hook lists the open desks for that repository and points back here, so a change
+hook lists the open desks for every repository the checkout's remotes name, so
+a push to a fork reaches the upstream's desk, and points back here, so a change
 made from the terminal does not leave a desk out of date.
 
 Change a desk through these writes, never by republishing it. Every doorbell
@@ -565,5 +607,6 @@ A session holds at most five artifact watches, and a watch ends with its
 session. The session-start sweep asks for at most four, leaving one for a desk
 the session publishes, and `/review-collect` unwatches a desk once it stamps
 `collectedAt`. A ring nobody is watching goes unheard, and the session-start
-sweep lists the desk for the next session started in its repository instead,
-for as long as the desk is open. Nothing is lost; it waits.
+sweep lists the desk for the next session started in a checkout of its
+repository, or in the directory its ledger entry records as `cwd`, for as long
+as the desk is open. Nothing is lost; it waits.

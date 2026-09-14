@@ -267,6 +267,57 @@ class Desk(unittest.TestCase):
         decide = flat(section(self.doc, "When they decide"))
         self.assertIn("`repo` field", decide)
 
+    def test_ledger_entry_records_the_launch_directory(self):
+        # The sweep lists an entry whose cwd is the SessionStart directory, so a
+        # desk published from ~ is picked up again after --resume there.
+        text = flat(section(self.doc, "Write it down"))
+        self.assertIn('"cwd": "<launch directory>"', text)
+        self.assertIn("the directory this session was launched in", text)
+        self.assertIn("not a directory you later ran `cd` into", text)
+        self.assertIn("set its `cwd` to this session's launch directory", text)
+        self.assertIn("any remote of its directory", text)
+        self.assertIn("even when it is not a git repository", text)
+        self.assertIn("written before `cwd` was recorded", text)
+
+    def test_invalid_argument_is_diagnosed_before_blaming_ownership(self):
+        # The same code covers bad ids and oversize documents, and "not the
+        # owner, do not retry" silently abandoned a desk the session did own.
+        text = flat(section(self.doc, "Publish"))
+        start = text.index("A write refused with `invalid_argument` has three possible causes")
+        para = text[start:text.index("Pass a `favicon`", start)]
+        self.assertNotIn("`invalid_argument`, this session is not the desk's owner", text)
+        causes = [para.index(p) for p in (
+            "**A bad path or document id:**", "over 200 bytes",
+            "**A document over 256 KiB**",
+            "**This session is not the desk's owner:**")]
+        self.assertEqual(causes, sorted(causes))
+        check = [para.index(p) for p in (
+            "its document id is at most 200 bytes",
+            "serialized as JSON, escapes included, is under 256 KiB",
+            "prove ownership with a small presence write",
+            "Only when the presence write is refused too is this session not the desk's owner",
+            "rather than retrying")]
+        self.assertEqual(check, sorted(check))
+        self.assertGreater(check[0], causes[-1])
+        self.assertIn("`set` under `review/pr-<number>/presence`", para)
+
+    def test_document_id_is_capped_and_oversize_text_is_excerpted(self):
+        text = flat(section(self.doc, "Changing the desk and the pull request"))
+        self.assertIn("An id is at most 200 bytes", text)
+        cap = re.search(r"keep its first (\d+) characters and append `-` and the first "
+                        r"(\d+) hex characters of the SHA-256 of the full path", text)
+        self.assertTrue(cap, text)
+        keep, digest = int(cap.group(1)), int(cap.group(2))
+        # The stated split must add up to the cap, or the rule yields refused ids.
+        self.assertEqual(keep + 1 + digest, 200)
+        self.assertIn(f"cut -c1-{digest}", text)
+        self.assertIn("A document holds at most 256 KiB serialized as JSON", text)
+        self.assertIn("carry an excerpt instead", text)
+        self.assertIn("a line saying the text was cut", text)
+        # The limit the refusal paragraph checks is the one this section applies.
+        publish = flat(section(self.doc, "Publish"))
+        self.assertIn("cap the id or carry an excerpt", publish)
+
 
 if __name__ == "__main__":
     unittest.main()

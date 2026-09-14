@@ -12,7 +12,11 @@ rewrote it. With RTK installed, `git push` arrives as `rtk git push`. So a push
 is recognised by the command that actually runs once wrappers and variable
 assignments are set aside, not by the first word of the line.
 
-Silent unless the command was a push to a repository with an open desk. Every
+The repository is any GitHub remote of the directory the push ran from, not
+only origin: a fork's push updates a pull request whose desk is recorded under
+the upstream.
+
+Silent unless the command was a push from a checkout with an open desk. Every
 outcome exits 0: a reminder that fails must never fail the push it follows.
 """
 import json
@@ -130,17 +134,35 @@ def pushed_from(command, cwd):
     return None
 
 
-def repo_of(directory):
-    """owner/name from the origin remote, for GitHub over https or ssh."""
+GITHUB_URL = re.compile(r"github\.com(?::\d+)?[:/]([^/\s:]+/[^/\s]+?)(?:\.git)?/?$")
+
+
+def repos_of(directory):
+    """owner/name of every GitHub remote of `directory`, over https or ssh,
+    casefolded because GitHub names are case-insensitive. Every remote, not
+    only origin: in a fork checkout origin is the fork, and the pull request
+    and its desk belong to the upstream. Empty outside a repository, and on any
+    git failure."""
     try:
-        url = subprocess.run(
-            ["git", "-C", directory, "remote", "get-url", "origin"],
+        out = subprocess.run(
+            ["git", "-C", directory, "remote", "-v"],
             capture_output=True, text=True, timeout=5,
-        ).stdout.strip()
-    except (OSError, subprocess.SubprocessError):
-        return None
-    m = re.search(r"github\.com[:/]([^/\s]+/[^/\s]+?)(?:\.git)?/?$", url)
-    return m.group(1) if m else None
+        ).stdout
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return set()
+    found = set()
+    for line in out.splitlines():
+        parts = line.split()
+        if len(parts) >= 2:
+            m = GITHUB_URL.search(parts[1])
+            if m:
+                found.add(m.group(1).casefold())
+    return found
+
+
+def entry_repo_in(entry, repos):
+    repo = entry.get("repo")
+    return isinstance(repo, str) and repo.casefold() in repos
 
 
 def main():
@@ -152,8 +174,8 @@ def main():
     directory = pushed_from(command, event.get("cwd") or os.getcwd())
     if not directory:
         return 0
-    repo = repo_of(directory)
-    if not repo:
+    repos = repos_of(directory)
+    if not repos:
         return 0
     try:
         with open(LEDGER, encoding="utf-8") as f:
@@ -162,11 +184,11 @@ def main():
         return 0
     if not isinstance(entries, list):
         return 0
-    open_desks = [e for e in entries if is_open(e) and e["repo"] == repo]
+    open_desks = [e for e in entries if is_open(e) and entry_repo_in(e, repos)]
     if not open_desks:
         return 0
-    lines = [f"You just pushed to {repo}, which has open review desks:"]
-    lines += [f"- #{e['pr']} {e['url']}" for e in open_desks]
+    lines = ["You just pushed from a checkout whose remotes have open review desks:"]
+    lines += [f"- {e['repo']}#{e['pr']} {e['url']}" for e in open_desks]
     lines += [
         "",
         "If this push changed what a desk shows, rewrite it now, as /review-desk "
