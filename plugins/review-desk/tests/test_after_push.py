@@ -267,6 +267,21 @@ class AfterPush(unittest.TestCase):
                 self.assertEqual(self.listed(self.run_hook(command)), only_b)
         self.assertEqual(self.listed(self.run_hook("git push")), ["- o/r#1 https://x/1"])
 
+    def test_bare_push_uses_the_remote_branch_it_updates(self):
+        # A local branch can push to a differently named remote branch. Reading
+        # the local name listed no desk for `local-b` pushing to origin/b.
+        self.desks_on_a_and_b()
+        git = ["git", "-C", self.repo, "-c", "user.name=t", "-c", "user.email=t@x"]
+        self.checkout("local-b")
+        subprocess.run(git + ["commit", "-q", "--allow-empty", "-m", "x"], check=True)
+        subprocess.run(git + ["update-ref", "refs/remotes/origin/b", "HEAD"], check=True)
+        for key, value in (("push.default", "upstream"), ("branch.local-b.remote", "origin"),
+                           ("branch.local-b.merge", "refs/heads/b")):
+            subprocess.run(["git", "-C", self.repo, "config", key, value], check=True)
+        for command in ("git push", "git push origin HEAD", "rtk git push"):
+            with self.subTest(command=command):
+                self.assertEqual(self.listed(self.run_hook(command)), ["- o/r#2 https://x/2"])
+
     def test_push_of_another_branch_lists_no_desk(self):
         self.desks_on_a_and_b()
         self.checkout("c")

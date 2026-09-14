@@ -207,10 +207,30 @@ def current_branch(directory):
     return name if done.returncode == 0 and name else None
 
 
-# A character no branch name git accepts contains, so a word holding one is not
-# a name: a shell expansion the hook only sees unexpanded (`"$BRANCH"`,
-# `"$(git branch --show-current)"`, backticks, and the `$` left when an unquoted
-# `$(` is split at its parenthesis), or a glob.
+def push_branch(directory):
+    """The remote branch a bare `git push` updates, from `@{push}`; falls back
+    to the checked-out branch when git cannot say. A local branch can push to a
+    differently named remote branch (`local-b` tracking `origin/b` with
+    push.default=upstream), and the desk records the remote name."""
+    try:
+        done = subprocess.run(
+            ["git", "-C", directory, "rev-parse", "--abbrev-ref",
+             "--symbolic-full-name", "@{push}"],
+            capture_output=True, text=True, timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError, ValueError):
+        done = None
+    pushed = done.stdout.strip() if done and done.returncode == 0 else ""
+    if "/" in pushed:
+        return pushed.split("/", 1)[1]
+    return current_branch(directory)
+
+
+# Characters that mark a word as a shell expansion the hook only sees
+# unexpanded (`"$BRANCH"`, `"$(git branch --show-current)"`, backticks, and the
+# `$` left when an unquoted `$(` is split at its parenthesis), or a glob. Git
+# does accept some of them in branch names (`feat(x)`); such a push is read as
+# unknown, which lists every desk rather than missing one.
 NOT_A_NAME = re.compile(r"[$`(){}\[\]*?~\\]")
 
 
@@ -232,7 +252,7 @@ def pushed_branches(args, directory):
         if not name or NOT_A_NAME.search(name):
             return None
         if name in ("HEAD", "@"):
-            name = current_branch(directory)
+            name = push_branch(directory)
             if name is None:
                 return None
         if name.startswith("refs/heads/"):
