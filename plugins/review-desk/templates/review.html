@@ -1586,16 +1586,22 @@ let showingRevised = false;
 // which /review-collect then merges as it always did.
 let decidedOn = null;
 // What became of the ring for the decision on screen, stored beside it:
+// {decidedAt, pending: true} from the save that stores the decision, replaced by
 // {decidedAt, rungAt} once a ring went out, or {decidedAt, why} when it did not,
 // with `again` once a view has spent the one re-ring (see rering). Keyed by
-// decidedAt, so a record left over from an earlier decision never counts. Null
-// while nothing is recorded, which is every decision an older page stored. Such a
-// decision is never rung: a desk from before pickup stamps holds a decision that
-// was collected long ago with no pickup to show it, and a ring would make a session
-// treat it as new and comment on the pull request again.
+// decidedAt, so a record left over from an earlier decision never counts.
+// The pending record goes out in the same write as the decision, so the two land
+// together or not at all. Written after the ring instead, a tab closed, reloaded
+// or suspended between the save and that second write left a decision with no
+// record, which reads exactly as an older page's and was never rung by anyone.
+// Null while nothing is recorded, which is every decision an older page stored.
+// Such a decision is never rung: a desk from before pickup stamps holds a decision
+// that was collected long ago with no pickup to show it, and a ring would make a
+// session treat it as new and comment on the pull request again.
 let decisionRing = null;
 // What `rang` a recorded ring outcome restores to.
-const rangFrom = r => !r ? null : r.rungAt ? 'rung' : String(r.why || 'upstream_error');
+const rangFrom = r => !r ? null : r.rungAt ? 'rung' : r.why ? String(r.why)
+  : r.pending ? 'pending' : 'upstream_error';
 
 // Counts whole-document writes from this view, so rering can tell whether one
 // went out while its own read-modify-write was in flight.
@@ -1925,7 +1931,8 @@ async function decide(v, quiet, why){
   if (!quiet){
     const at = decidedAt = new Date().toISOString();
     decidedOn = head;
-    decisionRing = null;
+    // Stored by the same write as the decision (see decisionRing).
+    decisionRing = {decidedAt: at, pending: true};
     rang = 'sending';
     drawDecided();
     // As in deliver(): a send during the retry wait may have stored this decision.
@@ -2019,6 +2026,15 @@ function pickupLine(){
   // already, so it claims neither.
   if (rang === null) return 'Saved. What the working session did with it shows here '
     + 'once it reports back.';
+  // Saved by a view whose ring outcome never landed: it may still be ringing, or
+  // it closed first. Nothing says whether a session was told.
+  if (rang === 'pending'){
+    const unknown = 'Saved. No ring for it is recorded, so the working session may not know. ';
+    if (bellOn && decisionDueAt() !== null) return unknown
+      + 'This view rings it in a few seconds unless a ring is recorded first.' + later;
+    if (bellOn) return unknown + 'Check in the panel rings the working session.' + later;
+    return unknown + 'This view cannot ring it, so the next session to start picks it up.';
+  }
   // 'readonly' is this page's word, not an artifact.d.ts code, so it is never shown.
   if (bellOn && decisionDueAt() !== null) return 'Saved, but the working session was not notified'
     + (rang === 'readonly' ? '' : ' (' + rang + ')') + '. This view tries again in a few seconds.' + later;
@@ -2401,10 +2417,12 @@ const dueAt = m => m.status === 'unsent'
   ? (ringsLater(m) ? (m.sentAt || 0) + RING_BACKOFF : 0)
   : lateStored.has(m.answers) ? 0 : (m.sentAt || 0) + RERING_AFTER;
 // When the decision on screen is due a ring from rering, or null when it is not.
-// Due only when this page's own record says its ring failed and the one re-ring is
-// not spent. A decision with no record is left alone (see decisionRing). Never
-// while this view is saving or ringing for it, and never once the pickup shows it
-// was collected.
+// Due only when this page's own record says its ring failed, or is still pending,
+// and the one re-ring is not spent. A pending record is due RERING_AFTER after
+// decidedAt, as a 'sent' message is: the view that saved it is usually still
+// ringing and about to replace it. A decision with no record is left alone (see
+// decisionRing). Never while this view is saving or ringing for it, and never once
+// the pickup shows it was collected.
 function decisionDueAt(){
   if (!decided || typeof decidedAt !== 'string' || ringing.has(DECISION)) return null;
   if (decided === 'needs changes' && !reason) return null;
@@ -2412,6 +2430,7 @@ function decisionDueAt(){
   if (pickup && pickup.decision === decided && pickup.decidedAt === decidedAt) return null;
   const r = decisionRing, at = Date.parse(decidedAt) || 0;
   if (!r || r.decidedAt !== decidedAt || r.rungAt || r.again) return null;
+  if (r.pending && !r.why) return at + RERING_AFTER;
   return r.why === 'conflict' ? at : at + RING_BACKOFF;
 }
 const sessionSlots = doc => new Map(((doc && Array.isArray(doc.threads)) ? doc.threads : [])
@@ -2477,8 +2496,10 @@ async function rering(){
       lateStored.delete(m.answers);
       return false;
     });
-    // Rung only when the store still holds this decision, with a failed ring
-    // recorded for it whose re-ring is not spent, and no pickup for it. A record
+    // Rung only when the store still holds this decision, with a failed or pending
+    // ring recorded for it whose re-ring is not spent, and no pickup for it. A
+    // pending record read here is RERING_AFTER old, so the view that saved it has
+    // had that long to replace it; ringing it spends the one re-ring. A record
     // another view stored is taken, so this view stops saying it will ring. This
     // view's own failed record stands in only when the store has none, as when the
     // save that carried it was refused: no other view can ring a decision the store

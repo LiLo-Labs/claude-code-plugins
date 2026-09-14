@@ -207,7 +207,7 @@ test('a view refused as not_writer or not_granted stops ringing: the banner show
     await desk.page.click('#shut');
     await approve(desk);
     const doc = (await desk.until(s => s[PR] && s[PR].decision === 'approved' && s[PR].decisionRing
-      && s[PR].threads[0].turns.filter(m => m.via === 'session' && m.why === 'readonly').length === 2))[PR];
+      && s[PR].decisionRing.why && s[PR].threads[0].turns.filter(m => m.via === 'session' && m.why === 'readonly').length === 2))[PR];
     assert.equal(doc.decisionRing.why, 'readonly');
     await lineSays('cannot notify');
     assert.equal(await line(), 'Saved. This view cannot notify the working session, so the next session to start picks it up.');
@@ -322,6 +322,114 @@ test('a stored decision with no recorded ring is never rung on load, pickup or n
   await desk.page.waitForTimeout(1500);
   assert.deepEqual(await desk.rings(), []);
   assert.deepEqual(await desk.missing(), []);
+});
+
+/* ---- a decision whose tab closes before its ring settles ---- */
+// The page's RERING_AFTER: a pending ring record is left to the view that saved it
+// for this long after decidedAt.
+const RERING_AFTER = 10000;
+const PENDING = 'Saved. No ring for it is recorded, so the working session may not know. '
+  + 'This view rings it in a few seconds unless a ring is recorded first.' + LATER;
+// Anything that would tell the reviewer a session was told, or is on it.
+const CLAIMS = /Waiting for the working session|session (was|has been) (told|notified)|notified the working session\./;
+const claiming = lines => lines.filter(l => CLAIMS.test(l.text));
+
+test('Approve whose publish hangs until the tab closes stores the decision and a pending ring record in one write', async () => {
+  desk = await open(browser, {publishHang: true, init: recordLines});
+  await ready(desk);
+  await approve(desk);
+  const doc = (await desk.until(s => s[PR] && s[PR].decision === 'approved'))[PR];
+  await desk.page.waitForFunction(() => window.__desk.log().some(e => e.op === 'publish hung'));
+  await desk.page.waitForTimeout(600);
+  assert.deepEqual(doc.decisionRing, {decidedAt: doc.decidedAt, pending: true});
+  const decisionSets = (await desk.log()).filter(e => e.op === 'set' && e.path === PR && e.data.decision);
+  assert.ok(decisionSets.length >= 1);
+  for (const w of decisionSets)
+    assert.deepEqual(w.data.decisionRing, {decidedAt: doc.decidedAt, pending: true},
+      'a write stored the decision without its pending ring record');
+  assert.deepEqual(await desk.rings(), []);
+  assert.deepEqual(claiming(await desk.page.evaluate('window.__lines')), []);
+});
+
+test('a pending decision is rung once by the next view after RERING_AFTER, which records the ring, and a later view rings nothing', async () => {
+  // The tab that decided: its publish never settles, and it closes.
+  desk = await open(browser, {publishHang: true});
+  await ready(desk);
+  await approve(desk);
+  const left = await desk.until(s => s[PR] && s[PR].decisionRing && s[PR].decisionRing.pending);
+  const {decidedAt} = left[PR];
+  await desk.close();
+
+  desk = await open(browser, {seed: left, init: recordLines});
+  await ready(desk);
+  await lineSays('No ring for it is recorded');
+  assert.equal(await line(), PENDING);
+  await pollFor('the next view never rang the pending decision', async () =>
+    decisionPublishes(await desk.log()).length === 1, RERING_AFTER + 10000);
+  const [ring] = decisionPublishes(await desk.log());
+  assert.ok(ring.at >= Date.parse(decidedAt) + RERING_AFTER,
+    'rung ' + (ring.at - Date.parse(decidedAt)) + ' ms after the decision, inside RERING_AFTER');
+  assert.deepEqual([ring.ring.doorbell.decision, ring.ring.doorbell.decidedAt], ['approved', decidedAt]);
+  const rung = (await desk.until(s => s[PR].decisionRing && s[PR].decisionRing.rungAt))[PR];
+  assert.equal(rung.decisionRing.decidedAt, decidedAt);
+  assert.ok(rung.decisionRing.again, 'the one re-ring is spent');
+  assert.equal(rung.decisionRing.pending, undefined, 'the settled record replaces the pending one');
+  await lineSays('Waiting for the working session');
+  // Nothing claimed the session was told before the ring went out.
+  assert.deepEqual(claiming((await desk.page.evaluate('window.__lines')).filter(l => l.at < ring.at)), []);
+  await desk.page.waitForTimeout(1500);
+  assert.equal(decisionPublishes(await desk.log()).length, 1);
+  const after = await desk.store();
+  assert.deepEqual(await desk.missing(), []);
+  assert.deepEqual(desk.errors, []);
+  await desk.close();
+
+  desk = await open(browser, {seed: after});
+  await ready(desk);
+  await lineSays('Waiting for the working session');
+  await desk.page.waitForTimeout(3000);
+  assert.deepEqual(await desk.rings(), []);
+  assert.deepEqual((await desk.log()).filter(e => e.op === 'acquire' || e.op === 'publish refused'), []);
+});
+
+test('two views opened together on a pending decision ring it once in total', async () => {
+  // Due a few seconds after both views have loaded the pending record, so both set
+  // a timer for the same moment and the lease decides which one rings. A decision
+  // due at load let one view ring and store rungAt before the other had read it.
+  const decidedAt = new Date(Date.now() - RERING_AFTER + 4000).toISOString();
+  const seed = {[PR]: {pr: 42, title: 'Harness desk', decision: 'approved', reason: null, decidedAt,
+    decisionRing: {decidedAt, pending: true}, threads: []}};
+  const [a, b] = await openPair(browser, {seed});
+  desk = a;
+  await ready(a); await ready(b);
+  const before = (await a.log()).filter(e => e.op === 'get' && e.path === PR);
+  assert.deepEqual([...new Set(before.map(e => e.view))].sort(), ['view-a', 'view-b'],
+    'both views read the pending record before it was due');
+  assert.deepEqual(decisionPublishes(await a.log()), []);
+  await a.until(s => s[PR].decisionRing && s[PR].decisionRing.rungAt, null, 15000);
+  await pollFor('the other view never asked for the lease', async () =>
+    (await a.log()).some(e => e.op === 'acquire' && !e.acquired), 5000);
+  await a.page.waitForTimeout(1500);
+  assert.equal(decisionPublishes(await a.log()).length, 1);
+  assert.deepEqual(await b.missing(), []);
+});
+
+test('a decision whose ring succeeded, loaded again past RERING_AFTER, is never rung again', async () => {
+  desk = await open(browser);
+  await ready(desk);
+  await approve(desk);
+  const rung = await desk.until(s => s[PR] && s[PR].decisionRing && s[PR].decisionRing.rungAt);
+  const {decidedAt} = rung[PR];
+  assert.equal(rung[PR].decisionRing.pending, undefined);
+  await desk.close();
+
+  desk = await open(browser, {seed: rung});
+  await ready(desk);
+  await lineSays('Waiting for the working session');
+  const wait = Date.parse(decidedAt) + RERING_AFTER + 1500 - Date.now();
+  if (wait > 0) await desk.page.waitForTimeout(wait);
+  assert.deepEqual(await desk.rings(), []);
+  assert.deepEqual((await desk.log()).filter(e => e.op === 'acquire'), []);
 });
 
 test('a view that cannot ring records a decision and says it could not notify the working session', async () => {
@@ -459,7 +567,8 @@ test('Approve then Confirm stores approved with decidedAt, decidedOn and repo, a
   await ready(desk);
   const before = new Date().toISOString();
   await approve(desk);
-  const doc = (await desk.until(s => s[PR] && s[PR].decision === 'approved' && s[PR].decisionRing))[PR];
+  const doc = (await desk.until(s => s[PR] && s[PR].decision === 'approved' && s[PR].decisionRing
+    && s[PR].decisionRing.rungAt))[PR];
   assert.deepEqual(Object.keys(doc).sort(),
     ['decidedAt', 'decidedOn', 'decision', 'decisionRing', 'pr', 'reason', 'repo', 'threads', 'title', 'updatedAt']);
   // The ring's outcome is stored with the decision it rang for, so a later load
