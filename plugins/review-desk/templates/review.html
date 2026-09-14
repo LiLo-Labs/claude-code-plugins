@@ -1502,14 +1502,17 @@ async function restoreStored(){
 // delivery ends the outage and earns the next one, so a feed that drops twice in
 // a long review comes back twice on its own. A store that refuses every
 // subscribe never delivers, so it is not asked again on its own; the reviewer
-// gets Try again. The cost: a store that delivers and then drops every time is
-// resubscribed every few seconds for as long as that goes on.
+// gets Try again. A store that delivers and then drops every time would
+// otherwise be resubscribed every few seconds for as long as that goes on, and
+// db.d.ts names a per-viewer call rate that answers resource_exhausted, so the
+// wait doubles for each automatic resubscribe that follows the last one within
+// RESUBSCRIBE_MAX, and never exceeds it.
 const NO_RESUBSCRIBE = new Set(['invalid_argument', 'revoked', 'not_granted',
   'capability_disabled', 'capability_removed', 'transform_error']);
-const RESUBSCRIBE_AFTER = 1500;
+const RESUBSCRIBE_AFTER = 1500, RESUBSCRIBE_MAX = 60000;
 function follow(name, label, where, ref, next){
   const feed = FEEDS[name] = {name, label, where, dead: null, retrying: false,
-    retried: false, ever: false, gen: 0};
+    retried: false, ever: false, gen: 0, streak: 0, lastAuto: 0, wait: 0};
   feed.start = () => {
     const gen = ++feed.gen;
     let over = false;
@@ -1520,7 +1523,12 @@ function follow(name, label, where, ref, next){
       feed.retrying = !feed.retried && !NO_RESUBSCRIBE.has(feed.dead);
       if (feed.retrying){
         feed.retried = true;
-        setTimeout(feed.start, RESUBSCRIBE_AFTER * (1 + Math.random()));
+        const now = Date.now();
+        feed.streak = now - feed.lastAuto < RESUBSCRIBE_MAX ? feed.streak + 1 : 0;
+        feed.lastAuto = now;
+        feed.wait = Math.min(RESUBSCRIBE_AFTER * 2 ** feed.streak * (1 + Math.random()),
+          RESUBSCRIBE_MAX);
+        setTimeout(feed.start, feed.wait);
       }
       drawFeeds(feed);
     };

@@ -264,10 +264,32 @@ test('each outage after a delivery gets one automatic resubscribe; a revoked fee
 
   await desk.kill(REPLIES, 'revoked');
   await desk.page.waitForSelector('#feedSlot .lost');
-  await desk.page.waitForTimeout(3500);             // longer than the longest automatic wait
+  await desk.page.waitForTimeout(3500);             // longer than a first automatic wait
   assert.equal(await desk.subscribes(REPLIES), 3);
   assert.equal(await desk.page.locator('#feedSlot button').count(), 0);
   assert.match(await desk.page.textContent('#feedSlot'), /stopped receiving the working session’s replies \(revoked\)/);
+  assert.deepEqual(desk.errors, []);
+});
+
+test('a feed that keeps delivering and dropping waits longer each time, up to a minute', async () => {
+  desk = await open(browser, {seed: leanDesk()});
+  await desk.page.click('#fab');
+  await desk.page.waitForSelector('.said.rich strong >> text=two views');
+
+  const waits = [];
+  for (const n of [2, 3, 4]){
+    await desk.kill(REPLIES);
+    await desk.page.waitForSelector('#feedSlot .lost');
+    waits.push(await desk.page.evaluate('FEEDS.replies.wait'));
+    if (n < 4){
+      await subscribedTimes(REPLIES, n);
+      await desk.page.waitForFunction(() => !document.querySelector('#feedSlot .lost'), null, {timeout: 8000});
+    }
+  }
+  assert.ok(waits[0] >= 1500 && waits[0] <= 3000, 'first wait ' + waits[0]);
+  assert.ok(waits[1] >= 3000 && waits[1] <= 6000, 'second wait ' + waits[1]);
+  assert.ok(waits[2] >= 6000 && waits[2] <= 12000, 'third wait ' + waits[2]);
+  assert.equal(await desk.page.evaluate('RESUBSCRIBE_MAX'), 60000);
   assert.deepEqual(desk.errors, []);
 });
 
