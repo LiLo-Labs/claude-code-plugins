@@ -396,6 +396,17 @@ class Desk(unittest.TestCase):
         # A progress rewrite renews the claim, or a long answer looks abandoned.
         self.assertIn('keeping `"status": "working"` and setting `at` to now', body)
 
+    def test_a_check_ping_answers_waiting_messages_and_collects_a_waiting_decision(self):
+        # The page offers Check to ring again for a message or decision whose own
+        # ring failed. A doc that called the ping's presence stamp "the whole
+        # answer" let a session stamp the desk and leave both waiting.
+        ring = flat(section(self.doc, "Whenever a ring arrives"))
+        self.assertIn("A Check ping also answers every waiting message and collects a waiting decision",
+                      ring)
+        self.assertIn("Only when nothing is waiting", ring)
+        self.assertLess(ring.index("A Check ping also answers"), ring.index("is this stamp the whole answer"))
+        self.assertNotIn("When nothing is waiting, a stale claim included", ring)
+
     def test_publish_checks_the_watch_line(self):
         publish = section(self.doc, "Publish")
         self.assertIn("### Check the watch line", publish)
