@@ -339,9 +339,10 @@ function inline(s){
   let t = esc(s);
 
   // Code spans are lifted out before anything else runs and put back at the
-  // end. Emphasis used to run straight over them, so `/*PAYLOAD*/` -- the one
-  // string this plugin's own instructions talk about most -- rendered as
-  // /<em>PAYLOAD</em>/ and the reader saw /PAYLOAD/.
+  // end. Emphasis used to run straight over them, so the template's payload
+  // marker in backticks -- the string this plugin's own instructions talked
+  // about most -- rendered with its asterisks eaten and the reader saw /PAYLOAD/.
+  // (The marker itself must appear once in this file; build_desk.py checks.)
   const kept = [];
   t = t.replace(/`([^`]+)`/g, (m, a) => {
     kept.push('<code>' + a + '</code>');

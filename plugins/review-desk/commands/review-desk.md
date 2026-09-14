@@ -65,8 +65,17 @@ give.
 
 ## Build
 
-Read `${CLAUDE_PLUGIN_ROOT}/templates/review.html` and replace the single
-`/*PAYLOAD*/` marker with a JSON object:
+Write the payload to a JSON file, then build the page with the plugin's build
+script. Never fill the template by hand. The payload sits inside an inline
+script, and a carried file or body that contains `</script>` ends that script
+early and leaves the reviewer a blank page. The script escapes the payload so
+that cannot happen, replaces the marker once, and names the page:
+
+    python3 ${CLAUDE_PLUGIN_ROOT}/build_desk.py <payload.json> "<page name>" --out <desk.html>
+
+Put both files in your scratchpad directory, and name the page file after the
+request (`review-desk-pr-12.html`) so a later republish from this session uses
+the same path. The payload is a JSON object:
 
     {
       "repo":      "owner/name",
@@ -94,13 +103,14 @@ pointed at the actual decision in this request are what start the conversation.
 Write them for this request, and make at least one of them the question you
 would least like to be asked.
 
-Then name the page. Replace `<title>Review Desk</title>` with a short name for
-what this request is about — two to four words, the way a document is named:
-`<title>Design 0001 Review</title>`. Not the pull request title verbatim, which
-is a sentence, and not "Review Desk", which is what the template ships with. A
-reviewer accumulates these, and a gallery of pages all called "Review Desk"
-tells them nothing about which is which. The publisher reads this tag to name
-the artifact, so setting it from JavaScript at load does not work.
+The page name, the build script's second argument, is a short name for what
+this request is about — two to four words, the way a document is named:
+`Design 0001 Review`. Not the pull request title verbatim, which is a sentence,
+and not "Review Desk", which is what the template ships with. A reviewer
+accumulates these, and a gallery of pages all called "Review Desk" tells them
+nothing about which is which. The script writes it into the page's `<title>`
+tag, which the publisher reads to name the artifact, so setting it from
+JavaScript at load does not work.
 
 ## Draw it
 
