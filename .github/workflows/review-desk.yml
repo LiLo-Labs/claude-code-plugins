@@ -64,10 +64,13 @@ jobs:
       # suite runs there: scroll-keeping, IntersectionObserver, the CSS Highlight
       # API and storage all behave differently by engine, not only input events.
       #
-      # Two storage.test.mjs tests are skipped here by name ("too large"): each
-      # fills #box with 270 KiB, and on ubuntu WebKit that fill plus the Enter
-      # press overran Playwright's 30 s action timeout (56 s and 54 s, run
-      # 34832569736), while Chromium and macOS WebKit finish them in about 20 s.
+      # Two storage.test.mjs tests are skipped here by name ("too large"). The
+      # first fills #box with 270 KiB, and on ubuntu WebKit that fill plus the
+      # Enter press overran Playwright's 30 s action timeout (56 s, run
+      # 34832569736). The second was rewritten in #31 to seed a large stored turn
+      # and fill #why with 8 KiB, and no longer needs the skip; it stays skipped
+      # only because tests/test_ci.py pins the two titles, until someone reruns
+      # it on ubuntu WebKit and drops it from the pattern.
       # The rest of storage.test.mjs still runs in WebKit. --test-skip-pattern
       # needs Node 22; Node 20's --test-name-pattern cannot exclude a single
       # test, because each file's own name matches and runs all its tests.
