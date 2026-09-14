@@ -80,16 +80,23 @@ store is not by itself a reason to act. Compare it with the pickup:
   Answer any waiting messages, as `/review-desk` describes under "While they
   read", and stop.
 - **The pickup holds the same `decision` and `decidedAt` but no `outcome`:** a
-  session claimed this decision and has not said what it did. If the claim is
-  not stale, as `/review-desk` defines under "When they decide" (another
-  session's pickup 5 minutes old or less, or your own that you are collecting in
-  this turn), that session is collecting it: leave it, answer any waiting
-  messages, and stop. If it is stale, take it over: write the pickup again with
-  your own `session` and a fresh `at`, pinned with `if_version` from your read.
-  A write refused for its version means another session took it first; leave
-  it and stop. Then carry on below. The session before you may have commented,
-  merged or started the revision before it stopped, and the steps below check
-  for each before doing it.
+  session claimed this decision and has not said what it did. Which session
+  decides what you do, as `/review-desk` defines under "When they decide":
+  - **Your own claim, written in this turn.** This is the usual case: a ring
+    acknowledged a new decision under "When they decide" and then sent you
+    here. You are the session collecting it. Do not write the pickup again;
+    carry on below.
+  - **Another session's claim that is not stale** (its `session` is not this
+    session's id, or it has none, and its `at` is 5 minutes old or less): that
+    session is collecting it. Leave it, answer any waiting messages, and stop.
+  - **A stale claim**: another session's whose `at` is more than 5 minutes old,
+    or your own from an earlier turn (`claude --resume` keeps the session id,
+    and the turn that wrote it has stopped). Take it over: write the pickup
+    again with your own `session` and a fresh `at`, pinned with `if_version`
+    from your read. A write refused for its version means another session took
+    it first; leave it and stop. Then carry on below. The session before you may
+    have commented, merged or started the revision before it stopped, and the
+    steps below check for each before doing it.
 - **A decision, and no pickup or one holding a different `decision` or
   `decidedAt`:** this is a new decision. Write the pickup before anything else,
   as `/review-desk` describes under "When they decide". Until one lands, the

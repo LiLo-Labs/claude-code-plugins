@@ -478,7 +478,8 @@ On that notice, in this order:
 2. **If there is nothing to collect, stop there.** That means no decision is
    recorded; or the pickup holds the same `decision` and `decidedAt` and an
    `outcome`, so the decision was handled; or it holds both with no `outcome`
-   and the claim is not stale, so another session is collecting it now. Do not
+   and the claim is another session's and not stale, so that session is
+   collecting it now. Do not
    acknowledge it again, comment, merge or rewrite its outcome. Answer any
    waiting messages, as described under "While they read", and stop.
 3. **Otherwise acknowledge it before any other work**, with the write below, so

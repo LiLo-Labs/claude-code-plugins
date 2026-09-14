@@ -81,8 +81,23 @@ class Collect(unittest.TestCase):
         # merging must not strand the decision.
         text = flat(section(self.doc, "Is it already handled"))
         self.assertIn("The pickup holds the same `decision` and `decidedAt` but no `outcome`", text)
-        self.assertIn("If it is stale, take it over", text)
+        self.assertIn("**A stale claim**", text)
+        self.assertIn("Take it over: write the pickup again", text)
         self.assertIn("pinned with `if_version` from your read", text)
+
+    def test_own_claim_from_this_turn_carries_on(self):
+        # /review-desk writes the pickup and then sends the session here, so the
+        # most common path meets its own fresh claim. A rule that said "leave it
+        # and stop" for that stranded every new decision without an outcome.
+        text = flat(section(self.doc, "Is it already handled"))
+        own = re.search(r"\*\*Your own claim, written in this turn\.\*\*(.*?)- \*\*", text)
+        self.assertTrue(own, text)
+        self.assertIn("Do not write the pickup again; carry on below", own.group(1))
+        self.assertNotIn("stop", own.group(1))
+        other = re.search(r"\*\*Another session's claim that is not stale\*\*(.*?)- \*\*", text)
+        self.assertTrue(other, text)
+        self.assertIn("Leave it, answer any waiting messages, and stop", other.group(1))
+        self.assertIn("your own from an earlier turn", text)
 
     def test_the_pull_request_is_read_before_commenting_or_merging(self):
         write = flat(section(self.doc, "Write it into the request"))

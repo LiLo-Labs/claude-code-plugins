@@ -102,18 +102,16 @@ class Sweep(unittest.TestCase):
     def test_revising_desk_stays_open_even_when_stamped(self):
         # A ledger from before 0.9.0 stamped collectedAt on a Needs-changes
         # pickup too, which hid the desk while the revision was under review.
-        revising = dict(desk(1, "2026-09-10T00:00:00Z"), outcome="revising")
-        blocked = dict(desk(2, "2026-09-10T00:00:00Z"), outcome="blocked")
-        text = said(run([revising, blocked]))
+        # Only merged and closed end a review; a stamp with no outcome is an
+        # entry from before outcomes were recorded, and stays closed.
+        stamped = "2026-09-10T00:00:00Z"
+        entries = [dict(desk(n, stamped), outcome=o) for n, o in
+                   ((1, "revising"), (2, "blocked"), (3, "merged"), (4, "closed"), (5, None))]
+        text = said(run(entries))
         self.assertIn("o/r#1 https://x/1", text)
         self.assertIn("o/r#2 https://x/2", text)
-
-    def test_terminal_outcomes_close_a_desk(self):
-        for outcome in ("merged", "closed", None):
-            with self.subTest(outcome=outcome):
-                entry = dict(desk(1, "2026-09-10T00:00:00Z"), outcome=outcome)
-                done = run([entry])
-                self.assertEqual((done.returncode, done.stdout), (0, ""))
+        for n in (3, 4, 5):
+            self.assertNotIn(f"https://x/{n}", text)
 
     def test_a_handled_decision_is_not_collected_again(self):
         text = said(run([desk(1)]))
