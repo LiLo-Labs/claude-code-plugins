@@ -219,3 +219,37 @@ test('after many repaints the message says the section of the page on screen, an
   assert.ok(watch.scroll <= 1, 'window scroll handlers: ' + watch.scroll);
   assert.deepEqual(desk.errors, []);
 });
+
+/* ---------------- contrast ---------------- */
+
+// WCAG 2 contrast of each element's computed text colour on its computed
+// background, both opaque in these rules.
+const contrasts = selectors => desk.page.evaluate(selectors => {
+  const lum = css => {
+    const [r, g, b] = css.match(/[\d.]+/g).slice(0, 3).map(v => {
+      const c = +v / 255;
+      return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+    });
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  };
+  return Object.fromEntries(selectors.map(sel => {
+    const st = getComputedStyle(document.querySelector(sel));
+    const [hi, lo] = [lum(st.color), lum(st.backgroundColor)].sort((a, b) => b - a);
+    return [sel, Math.round((hi + 0.05) / (lo + 0.05) * 100) / 100];
+  }));
+}, selectors);
+
+for (const scheme of ['dark', 'light']){
+  test(`${scheme} mode: Approve, Send, the active tab and the reviewer's own message clear 4.5:1`, async () => {
+    desk = await open(browser, {context: {colorScheme: scheme}});
+    assert.equal(await desk.page.evaluate(() => matchMedia('(prefers-color-scheme: dark)').matches),
+      scheme === 'dark', 'the context does not emulate the colour scheme, so this test would prove nothing');
+    await desk.page.click('#fab');
+    await desk.page.fill('#box', 'Mine, in my own bubble');
+    await desk.page.press('#box', 'Enter');
+    await desk.page.waitForSelector('.turn.mine .said');
+    const got = await contrasts(['#ok', '#send', '.tab.on', '.turn.mine .said']);
+    for (const [sel, ratio] of Object.entries(got)) assert.ok(ratio >= 4.5, `${sel} is ${ratio}:1`);
+    assert.deepEqual(desk.errors, []);
+  });
+}
