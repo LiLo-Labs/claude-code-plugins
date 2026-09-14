@@ -4,6 +4,7 @@ session's directory a throwaway git repository. No dependencies beyond the
 standard library."""
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -140,6 +141,26 @@ class Sweep(unittest.TestCase):
         text = said(run([desk(1)]))
         self.assertIn('"session" is this session\'s own, whatever its age', text)
         self.assertIn("claude --resume keeps the session id", text)
+
+    def test_collect_instruction_names_each_desk_by_repo_and_pr(self):
+        # A bare number resolves to whichever request the conversation is about,
+        # which can be the same number in another repository.
+        text = said(run([desk(2), desk(5), desk(7, "2026-09-10T00:00:00Z")]))
+        self.assertIn("/review-collect o/r#2", text)
+        self.assertIn("/review-collect o/r#5", text)
+        self.assertNotIn("/review-collect o/r#7", text)
+        mine = text.split("more review desk")[0]
+        for arg in re.findall(r"/review-collect (\S+)", mine):
+            self.assertRegex(arg, r"^o/r#\d+\b", mine)
+
+    def test_waiting_messages_are_answered_before_collecting(self):
+        text = said(run([desk(2)]))
+        self.assertLess(text.index("Messages still waiting"), text.index("/review-collect o/r#2"))
+        self.assertIn("before collecting any decision", text)
+
+    def test_stored_repo_must_match_the_entry(self):
+        text = said(run([desk(2)]))
+        self.assertIn('"repo" field', text)
 
     def test_unreadable_ledger_is_reported_not_swallowed(self):
         done = run("{not json")

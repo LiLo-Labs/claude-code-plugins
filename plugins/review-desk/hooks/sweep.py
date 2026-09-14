@@ -67,22 +67,30 @@ def message(waiting, here):
             'tool, in one batch per desk: action "read_db", db_op "get", '
             'collection "review", doc_id "pr-<number>"; db_op "get", collection '
             '"review/pr-<number>/context", doc_id "pickup"; and db_op "list", '
-            'collection "review/pr-<number>/replies". Then, for each:',
+            'collection "review/pr-<number>/replies". When the pr-<number> '
+            'document has a "repo" field naming a repository other than the '
+            "desk's, that URL is another repository's desk: act on nothing there, "
+            "and tell the user. Then, for each desk, in this order:",
             "- A recorded decision the pickup holds with the same decision and "
             "decidedAt and an outcome was handled; do not collect it again. A "
             "matching pickup with no outcome is a claim on the decision: when its "
             f'"session" is another session\'s (or it has none) and its "at" is more than '
             f"{STALE_CLAIM_MINUTES} minutes old, or its \"session\" is this "
             "session's own, it is stale, so take it over as /review-desk "
-            'describes under "When they decide", then follow /review-collect. Any '
-            "other recorded decision: follow /review-collect for that request.",
+            'describes under "When they decide". Any other recorded decision is '
+            "new: acknowledge it as that section describes.",
             "- Messages still waiting, meaning no reply document, or a reply at "
             '"working" that is a stale claim: its "session" is another '
             f'session\'s (or it has none) and its "at" is more than {STALE_CLAIM_MINUTES} minutes '
             'old, or its "session" is this session\'s own, whatever its age. '
             "claude --resume keeps the session id, and the turn that was "
             "answering it has stopped. Answer them as /review-desk describes "
-            'under "While they read".',
+            'under "While they read", before collecting any decision.',
+            "- Only then collect a decision you acknowledged or took over, naming "
+            "the desk in full: "
+            + ", ".join(f"/review-collect {e['repo']}#{e['pr']}" for e in mine)
+            + ". Never a bare number, which resolves to the request under "
+            "discussion and can be the same number in another repository.",
             "- Nothing left to collect, and the pull request is merged or closed: "
             'set its outcome ("merged" or "closed") and collectedAt in '
             "~/.review-desks.json, the time in UTC.",
