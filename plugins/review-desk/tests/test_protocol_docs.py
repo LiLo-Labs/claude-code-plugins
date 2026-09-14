@@ -64,7 +64,8 @@ class Collect(unittest.TestCase):
 
     def test_a_matching_pickup_means_already_handled(self):
         text = flat(section(self.doc, "Is it already handled"))
-        self.assertIn("The pickup holds the same `decision` and the same `decidedAt`", text)
+        self.assertIn("The pickup holds the same `decision` and the same `decidedAt`, and an `outcome`",
+                      text)
         self.assertIn("already collected", text)
         for forbidden in ("do not write the pickup", "do not post another comment",
                           "do not merge", "do not touch its `outcome`"):
@@ -74,6 +75,22 @@ class Collect(unittest.TestCase):
         order = [self.doc.index("## " + h) for h in
                  ("Read it back", "Is it already handled", "Write it into the request", "Act on it")]
         self.assertEqual(order, sorted(order))
+
+    def test_a_pickup_without_an_outcome_is_a_claim_taken_over_when_stale(self):
+        # A session that wrote the pickup and stopped before commenting or
+        # merging must not strand the decision.
+        text = flat(section(self.doc, "Is it already handled"))
+        self.assertIn("The pickup holds the same `decision` and `decidedAt` but no `outcome`", text)
+        self.assertIn("If it is stale, take it over", text)
+        self.assertIn("pinned with `if_version` from your read", text)
+
+    def test_the_pull_request_is_read_before_commenting_or_merging(self):
+        write = flat(section(self.doc, "Write it into the request"))
+        self.assertIn("gh pr view <n> --repo <owner/repo> --json state,mergeCommit,comments,commits", write)
+        self.assertIn("**Review desk decision:** <decision>, recorded <decidedAt>", write)
+        self.assertIn("If a comment already opens with that exact line", write)
+        act = flat(section(self.doc, "Act on it"))
+        self.assertIn("already `MERGED`, do not run `gh pr merge` again", act)
 
     def test_only_merged_or_closed_stamp_collected_at(self):
         text = flat(section(self.doc, "Record it in the ledger"))
@@ -101,8 +118,12 @@ class Desk(unittest.TestCase):
         waiting = flat(section(self.doc, "When they ask the working session"))
         self.assertIn("get `review/pr-<number>/context/pickup`", waiting)
         decide = flat(section(self.doc, "When they decide"))
-        self.assertIn("the pickup already holds the same `decision` and `decidedAt`", decide)
-        self.assertIn("already handled", decide)
+        self.assertIn("the pickup holds the same `decision` and `decidedAt` and an `outcome`", decide)
+        self.assertIn("so the decision was handled", decide)
+        # A matching pickup with no outcome is a claim, judged like a reply claim.
+        self.assertIn("A matching pickup with no `outcome` is a claim on the decision", decide)
+        self.assertIn('"session": "<this session\'s id>"', decide)
+        self.assertIn("Pin it with `if_version` from the pickup you read", decide)
 
     def test_stale_claim_rule_has_an_age_and_a_marker(self):
         text = section(self.doc, "When they ask the working session")
@@ -116,6 +137,10 @@ class Desk(unittest.TestCase):
         self.assertIn("`session` is the claim marker", body)
         self.assertIn("$CLAUDE_CODE_SESSION_ID", body)
         self.assertIn("its `session` is not this session's id, or it has no `session`", body)
+        # claude --resume keeps the id, so an own claim cannot be exempt by id alone.
+        self.assertIn("that you are not answering in this turn, whatever its age", body)
+        self.assertIn("`claude --resume` keeps the session id", body)
+        self.assertNotIn("that carries your own `session`, is not waiting", body)
         self.assertIn("pinned with `if_version`", body)
         # A progress rewrite renews the claim, or a long answer looks abandoned.
         self.assertIn('keeping `"status": "working"` and setting `at` to now', body)

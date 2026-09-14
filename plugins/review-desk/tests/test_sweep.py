@@ -120,12 +120,27 @@ class Sweep(unittest.TestCase):
         self.assertIn('doc_id "pickup"', text)
         self.assertIn("decidedAt", text)
         self.assertIn("do not collect it again", text)
+        self.assertIn("and an outcome", text)
+
+    def test_a_pickup_without_an_outcome_is_a_claim_that_can_go_stale(self):
+        # A session that acknowledged a decision and stopped before merging left
+        # a matching pickup; treating that as handled stranded the approval.
+        text = said(run([desk(1)]))
+        self.assertIn("matching pickup with no outcome is a claim", text)
+        self.assertIn("take it over", text)
 
     def test_a_stale_claim_counts_as_waiting(self):
         text = said(run([desk(1)]))
         self.assertIn('"working"', text)
         self.assertIn("more than 5 minutes old", text)
-        self.assertIn('"session" is not this session', text)
+        self.assertIn('"session" is another session\'s', text)
+
+    def test_own_claim_is_waiting_after_resume(self):
+        # claude --resume keeps the session id, so a rule that skipped this
+        # session's own claims left the resumed session unable to answer them.
+        text = said(run([desk(1)]))
+        self.assertIn('"session" is this session\'s own, whatever its age', text)
+        self.assertIn("claude --resume keeps the session id", text)
 
     def test_unreadable_ledger_is_reported_not_swallowed(self):
         done = run("{not json")

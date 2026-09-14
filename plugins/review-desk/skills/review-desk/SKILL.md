@@ -34,7 +34,8 @@ asked for.
    start picks the desk up.
 3. `/review-collect <pr>` — read the discussion, summarise it into the pull
    request, merge or revise. Each decision is collected once: a pickup already
-   holding it means later rings only answer messages. The desk stays open,
+   holding it and its outcome means later rings only answer messages, and a
+   pickup left without an outcome by a session that stopped is taken over. The desk stays open,
    listed at session start and after pushes, until the request is merged or
    closed.
 

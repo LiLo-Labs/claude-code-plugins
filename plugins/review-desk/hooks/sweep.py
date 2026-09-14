@@ -68,14 +68,21 @@ def message(waiting, here):
             'collection "review", doc_id "pr-<number>"; db_op "get", collection '
             '"review/pr-<number>/context", doc_id "pickup"; and db_op "list", '
             'collection "review/pr-<number>/replies". Then, for each:',
-            "- A recorded decision whose decision and decidedAt the pickup does "
-            "not already hold: follow /review-collect for that request. A pickup "
-            "that already holds both means the decision was handled; do not "
-            "collect it again.",
+            "- A recorded decision the pickup holds with the same decision and "
+            "decidedAt and an outcome was handled; do not collect it again. A "
+            "matching pickup with no outcome is a claim on the decision: when its "
+            f'"session" is another session\'s and its "at" is more than '
+            f"{STALE_CLAIM_MINUTES} minutes old, or its \"session\" is this "
+            "session's own, it is stale, so take it over as /review-desk "
+            'describes under "When they decide", then follow /review-collect. Any '
+            "other recorded decision: follow /review-collect for that request.",
             "- Messages still waiting, meaning no reply document, or a reply at "
-            f'"working" whose "at" is more than {STALE_CLAIM_MINUTES} minutes old '
-            'and whose "session" is not this session: answer them as /review-desk '
-            'describes under "While they read".',
+            '"working" that is a stale claim: its "session" is another '
+            f'session\'s and its "at" is more than {STALE_CLAIM_MINUTES} minutes '
+            'old, or its "session" is this session\'s own, whatever its age. '
+            "claude --resume keeps the session id, and the turn that was "
+            "answering it has stopped. Answer them as /review-desk describes "
+            'under "While they read".',
             "- Nothing left to collect, and the pull request is merged or closed: "
             'set its outcome ("merged" or "closed") and collectedAt in '
             "~/.review-desks.json, the time in UTC.",

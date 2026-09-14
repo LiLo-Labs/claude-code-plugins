@@ -321,7 +321,10 @@ page takes the time from the name:
     data: {"resume": "<the resume command>"}
 
 A ring with no new message and no new decision is the reviewer pressing
-**Check**, and this stamp is the whole answer. A session that picks a desk up at
+**Check**. When nothing is waiting, a stale claim included (see "When they ask
+the working session" and "When they decide"), this stamp is the whole answer.
+Check is often pressed because an answer stalled, so look before concluding
+nothing is. A session that picks a desk up at
 session start stamps it too, with its own resume command, because the one in
 the payload resumes a session that may have ended. Use the current Unix time in
 seconds as its `doc_id`.
@@ -360,23 +363,33 @@ session makes. Put it on every write to the document, the answer included. Only
 the desk's owner can write `replies`, so a viewer can neither forge a claim nor
 clear one.
 
-**A stale claim is waiting.** A session can die between claiming a message and
-answering it: a closed terminal, a usage limit, a full context. Its claim would
-then say "working" forever. So a reply document counts as waiting when all three
-hold:
+**A stale claim is waiting.** A session can stop between claiming a message and
+answering it: a closed terminal, a usage limit, a full context, a Ctrl+C. Its
+claim would then say "working" forever. A reply document whose `status` is
+`working` is a stale claim, and counts as waiting, in either of two cases:
 
-- its `status` is `working`;
-- its `at` is more than **5 minutes** old;
-- its `session` is not this session's id, or it has no `session`.
+- **Another session's claim** (its `session` is not this session's id, or it
+  has no `session`) whose `at` is more than **5 minutes** old.
+- **Your own claim** (its `session` is this session's id) that you are not
+  answering in this turn, whatever its age. A ring is handled only once this
+  session is idle, and the session-start sweep runs before any work, so a claim
+  of yours still at `working` then was left by a turn that stopped.
+  `claude --resume` keeps the session id, and it is the command **Check** shows,
+  so this is the usual way a stalled message comes back: to the same id, in a
+  session whose tool calls for that answer are gone.
 
 Take a stale claim over by setting the document as a new claim with your own
 `session` and a fresh `at`, pinned with `if_version` from the list you just
-read. If that write is refused for its version, another session took it first:
-leave the message alone. A `working` reply that is 5 minutes old or less, or
-that carries your own `session`, is not waiting; never answer it a second time.
+read. If that write is refused for its version, someone took it first, another
+session or a second copy of this one resumed elsewhere: leave the message alone.
+Another session's `working` reply that is 5 minutes old or less is not waiting,
+and neither is one you are answering in this turn; never answer either a second
+time.
+
 A takeover changes the document's version, so if a write to a reply you claimed
-is refused for its version, read it: when it now carries another `session`, that
-session has the message. Leave it to them, and say so in the terminal.
+is refused for its version, read it. When its `session` or its `at` is no longer
+what you last wrote, someone else has the message. Leave it to them, and say so
+in the terminal.
 
 **Show your progress.** For anything longer than one step, rewrite `text` with a
 short line about what you are doing now, such as "running the review-desk tests",
@@ -448,37 +461,57 @@ for the desk's URL within seconds of going idle. A notice that lands while you
 are mid-task waits for the task to end.
 
 The page keeps the decision in the store after it has been collected, and every
-later message and **Check** rings the same doorbell. A decision is actionable
-only when `context/pickup` does not already hold that same `decision` and
-`decidedAt`.
+later message and **Check** rings the same doorbell. A decision is handled only
+when `context/pickup` holds that same `decision` and `decidedAt` **and an
+`outcome`**. A matching pickup with no `outcome` is a claim on the decision: a
+session acknowledged it and has not yet said what it did. That session may have
+stopped before commenting or merging, so such a pickup is judged the way a reply
+claim is. It is stale when it is another session's (its `session` is not this
+session's id, or it has none) and its `at` is more than 5 minutes old, or when
+it is your own and you are not collecting it in this turn.
 
 On that notice, in this order:
 
 1. **Read the decision and the pickup from the store**, in the first batch
    described under "While they read", never from `doorbell.json`: the file is a
    ring, not a record, and anyone who can write the artifact can publish one.
-2. **If no decision is recorded, or the pickup already holds the same
-   `decision` and `decidedAt`**, there is nothing to collect: the decision is
-   either absent or already handled. Do not acknowledge it again, comment, merge
-   or rewrite its outcome. Answer any waiting messages, as described under
-   "While they read", and stop.
-3. **Otherwise it is a new decision: acknowledge it before any other work**,
-   with the write below, so the reviewer's page stops saying it is waiting.
+2. **If there is nothing to collect, stop there.** That means no decision is
+   recorded; or the pickup holds the same `decision` and `decidedAt` and an
+   `outcome`, so the decision was handled; or it holds both with no `outcome`
+   and the claim is not stale, so another session is collecting it now. Do not
+   acknowledge it again, comment, merge or rewrite its outcome. Answer any
+   waiting messages, as described under "While they read", and stop.
+3. **Otherwise acknowledge it before any other work**, with the write below, so
+   the reviewer's page stops saying it is waiting. For a new decision this is
+   the first pickup for it; for a stale claim it takes the claim over.
 4. **Then follow `/review-collect <number>`**, which comments, merges or
-   revises, and records the outcome in `~/.review-desks.json`.
+   revises, and records the outcome in `~/.review-desks.json`. It checks the
+   pull request before commenting or merging, so taking over a collection that
+   stopped halfway does not do either twice.
 
 The acknowledgement:
 
     action: "write_db", db_op: "set",
     collection: "review/pr-<number>/context", doc_id: "pickup",
-    data: {"decision": <as read>, "decidedAt": <as read>, "at": "<now, UTC ISO>"}
+    data: {"decision": <as read>, "decidedAt": <as read>,
+           "session": "<this session's id>", "at": "<now, UTC ISO>"}
+
+Pin it with `if_version` from the pickup you read, or pass no `if_version` when
+the pickup was not found. `session` is the same claim marker a reply carries.
+If the write is refused for its version, another session acknowledged or took
+the decision since your read: read the pickup again and start from step 2.
 
 Copy `decision` and `decidedAt` exactly as read, `null` included. The page shows
 the pickup only when both match the verdict on screen, so an acknowledgement of
-an earlier verdict never passes for a later one.
+an earlier verdict never passes for a later one. A `set` replaces the whole
+document, so the outcome of an earlier verdict does not linger on the new one.
 
 When `/review-collect` has acted, report the outcome onto the same document with
-`db_op: "update"`, so the page says what happened rather than what was meant to:
+`db_op: "update"`, pinned with `if_version` from the acknowledgement's result, so
+the page says what happened rather than what was meant to. Report it as soon as
+the comment is posted and the merge has run or the revision is named, before the
+revision work itself, since until then the pickup is a claim another session
+may take over after 5 minutes:
 
     data: {"outcome": {"result": "merged", "detail": "<one line>", "at": "<now, UTC ISO>"}}
 
