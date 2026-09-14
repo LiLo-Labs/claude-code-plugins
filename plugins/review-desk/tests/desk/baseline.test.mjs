@@ -32,6 +32,75 @@ test('the stub hands out deep-frozen snapshots', async () => {
   assert.deepEqual(frozen, [true, true, true, true]);
 });
 
+// The paths build_desk.py declares owner-only are the session's. A page write to
+// one is what db.d.ts says the host does with it: rejected invalid_argument.
+test('a page write to a session path is refused under the desk rules, and the page save is not', async () => {
+  const tryWrites = d => d.page.evaluate(async paths => {
+    const db = await claude.use('db');
+    const out = {};
+    for (const p of paths){
+      try { await db.doc(p).set({decision: 'approved', text: 'written by the page'}); out[p] = 'stored'; }
+      catch (e){ out[p] = e.code; }
+    }
+    return out;
+  }, ['review/pr-42/context/pickup', 'review/pr-42/replies/m1', 'review/pr-42/presence/1700000000',
+    'review/pr-42/documents/d1']);
+
+  desk = await open(browser);
+  await desk.page.waitForFunction('restore === "done"');
+  assert.deepEqual(Object.values(await tryWrites(desk)), Array(4).fill('invalid_argument'));
+  await desk.page.click('#ok');
+  const store = await desk.until((s, pr) => s[pr] && s[pr].decision === 'approved', desk.pr);
+  assert.deepEqual(Object.keys(store), [desk.pr]);
+  await desk.close();
+
+  // The rules never limit the owner, so the same writes land from an owner's view.
+  desk = await open(browser, {level: 'owner'});
+  await desk.page.waitForFunction('restore === "done"');
+  assert.deepEqual(Object.values(await tryWrites(desk)), Array(4).fill('stored'));
+});
+
+test('the stub update merges nested objects and replaces arrays, as db.d.ts says', async () => {
+  desk = await open(browser);
+  const doc = await desk.page.evaluate(async () => {
+    const ref = (await claude.use('db')).doc('review/pr-42');
+    await ref.set({a: {x: 1, y: {z: 2}}, list: [1, 2], keep: true});
+    await ref.update({a: {y: {w: 3}}, list: [3]});
+    return (await ref.get()).data();
+  });
+  assert.deepEqual(doc, {a: {x: 1, y: {z: 2, w: 3}}, list: [3], keep: true});
+});
+
+test('a view granted db but not artifact says it cannot ring, and a sent message is still stored', async () => {
+  desk = await open(browser, {capabilities: ['db']});
+  await desk.page.click('#fab');
+  await desk.page.waitForSelector('#aloneSlot >> text=This view cannot ring the working session');
+  await desk.page.fill('#box', 'Stored without a bell');
+  await desk.page.press('#box', 'Enter');
+  await desk.until((s, pr) => turnsIn(s, pr).some(m => m.content === 'Stored without a bell'), desk.pr);
+  await desk.page.waitForSelector('#stream >> text=could not ring the working session (unavailable)');
+  assert.equal(await desk.page.locator('#check').count(), 0, 'no Check without a bell');
+  assert.equal(await desk.page.textContent('#lostSlot'), '');
+  assert.deepEqual(await desk.rings(), []);
+  assert.deepEqual(desk.errors, []);
+});
+
+test('a view granted nothing says it cannot reach the store, and a sent message says it will not arrive', async () => {
+  desk = await open(browser, {capabilities: []});
+  await desk.page.click('#fab');
+  await desk.page.waitForSelector('#lostSlot >> text=this view cannot reach the store');
+  assert.equal(await desk.page.textContent('#aloneSlot'), '');
+  await desk.page.fill('#box', 'Nowhere to go');
+  await desk.page.press('#box', 'Enter');
+  await desk.page.waitForSelector('#stream >> text=This view cannot save messages');
+  // The property, not visibility: the host's reset hides [hidden], the harness
+  // skeleton does not carry it, and .presence sets its own display.
+  assert.equal(await desk.page.$eval('#presence', el => el.hidden), true);
+  assert.deepEqual(await desk.store(), {});
+  assert.deepEqual(await desk.rings(), []);
+  assert.deepEqual(desk.errors, []);
+});
+
 test('carried text containing </script> loads the desk', async () => {
   const data = payload({
     title: 'Quotes a </script> tag',
