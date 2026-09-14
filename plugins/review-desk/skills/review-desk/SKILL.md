@@ -42,9 +42,10 @@ asked for.
    holding it and its outcome means later rings only answer messages, and a
    pickup left without an outcome by a session that stopped is taken over.
 
-Always name the repository. A bare number resolves only within the current
-repository (the request under discussion, or else the working directory's
-remote), and the same number is often another repository's pull request too.
+Always name the repository. A bare number means the request under discussion in
+the conversation, which can belong to another repository, and only when the
+conversation says nothing the working directory's remote; the same number is
+often another repository's pull request too.
 
 The ledger entry is stamped `collectedAt` only when the pull request is merged
 or closed. A desk being revised or blocked stays open, listed at session start

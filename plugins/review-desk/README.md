@@ -16,9 +16,9 @@ reasoning lives with the code rather than evaporating.
     /review-desk <owner/repo>#<number>       # publish it, hand over the link
     /review-collect <owner/repo>#<number>    # answer, write the discussion in, act on the decision
 
-Both also take a pull request URL. A bare number resolves only within the
-current repository: the pull request the conversation has been about, or else
-the one the working directory's remote points at. Pull request numbers repeat
+Both also take a pull request URL. A bare number means the pull request the
+conversation has been about, which can belong to another repository; only when
+the conversation says nothing does the working directory's remote decide. Pull request numbers repeat
 across repositories, and `/review-collect` comments and can merge, so name the
 repository. A ring and the session-start hook always pass the full name.
 
