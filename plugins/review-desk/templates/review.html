@@ -675,12 +675,16 @@ let db = null, decided = null, reason = null;
 // message is still answered, by the next session to start.
 let bellOn = false;
 
-// What the page knows about the session: when it last handled a ring on this
-// desk (it stamps context/presence each time), and a check the reviewer asked
-// for. No answer is not proof the session is gone -- a busy one answers after
-// its current task -- so the page says both, and how to bring one back.
-let presence = null, checkedAt = null;
-const CHECK_WAIT = 45000;
+// What the page knows about the session. Every ring the session handles gets its
+// own stamp under review/pr-N/presence, named after that ring's artifact version.
+// A new document each time, so the session writes it blind -- no read first,
+// nothing to conflict with -- and the name starts with the epoch second of the
+// ring. No answer is not proof the session is gone: a busy one answers after its
+// current task, so the page says both, and how to bring one back.
+let lastHeard = 0, lastResume = '', stampsSeen = null, checkedAt = null, answeredAt = 0;
+// Measured: a ring reaches an idle session in about 16 seconds, and a one-write
+// answer adds about 5. 75 seconds leaves room for a session finishing a step.
+const CHECK_WAIT = 75000;
 
 const short =s => s.length > 42 ? s.slice(0, 40).trim() + '…' : s;
 
@@ -760,22 +764,23 @@ function drawPresence(){
   const el = $('presence');
   if (!db){ el.hidden = true; return; }
   el.hidden = false;
-  const heard = presence && presence.at ? Date.parse(presence.at) : 0;
   const asked = checkedAt ? Date.parse(checkedAt) : 0;
+  const heard = Math.max(answeredAt, lastHeard);
   let line, gone = false;
-  if (asked && heard < asked){
-    if (Date.now() - asked < CHECK_WAIT) line = 'Checking the working session…';
+  if (asked && answeredAt < asked){
+    if (Date.now() - asked < CHECK_WAIT) line = 'Checking the working session… '
+      + 'usually about 20 seconds, longer if it is busy with a task.';
     else {
       line = 'No answer to the check sent' + when(checkedAt) + '. The session may be '
         + 'busy with a task, or not running.';
       gone = true;
     }
   } else if (heard){
-    line = 'Working session last answered' + when(presence.at) + '.';
+    line = 'Working session last answered' + when(new Date(heard).toISOString()) + '.';
   } else {
     line = 'The working session has not answered on this desk yet.';
   }
-  const resume = [presence && presence.resume, DATA.resume].find(safeResume) || '';
+  const resume = [lastResume, DATA.resume].find(safeResume) || '';
   el.innerHTML = '<span class="'+(gone ? 'gone' : '')+'">'+esc(line)+'</span>'
     + (bellOn ? '<button class="check" id="check">Check</button>' : '')
     + (gone && resume
@@ -948,13 +953,19 @@ async function ask(){
   if (rung !== 'rung' && !slot.content){ slot.status = 'unsent'; slot.why = rung; }
   draw(); save();
 }
-$('send').addEventListener('click', ask);
+// A send that throws has to say so. Otherwise the reviewer is left looking at a
+// box that emptied and a chat that did not change.
+const send = () => ask().catch(e =>
+  sayLost('the message was not sent (' + ((e && e.message) || e) + ')'));
+$('send').addEventListener('click', send);
 $('box').addEventListener('input', e => {
   e.target.style.height = 'auto';
   e.target.style.height = Math.min(e.target.scrollHeight, 150) + 'px';
 });
 $('box').addEventListener('keydown', e => {
-  if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)){ e.preventDefault(); ask(); }
+  // Enter sends, as in every chat box; Shift+Enter is a new line. isComposing
+  // leaves an input method's own Enter (choosing a character) alone.
+  if (e.key === 'Enter' && !e.shiftKey && !e.isComposing){ e.preventDefault(); send(); }
 });
 
 /* ================= persistence and live document ================= */
@@ -1180,7 +1191,12 @@ paint(); draw();
     const had = snap.exists && snap.data();
     if (had){
       if (Array.isArray(had.threads) && had.threads.length){
-        threads = had.threads.map(t => ({...t, busy:false}));
+        // The store hands back frozen objects. Spreading a thread copies the
+        // thread but not its turns array, and pushing the next message onto that
+        // frozen array threw "object is not extensible" -- so every message sent
+        // after a reload was lost. Copy the turns too.
+        threads = had.threads.map(t => ({...t, busy: false,
+          turns: (t.turns || []).map(m => ({...m}))}));
         live = 0;
       }
       reason = had.reason || null;
@@ -1237,11 +1253,27 @@ paint(); draw();
     });
   } catch (e) {}
 
-  // The session's presence stamp: written whenever it handles a ring, with the
-  // command that resumes it.
+  // The session's presence stamps, one per ring it handled. The first snapshot is
+  // history, timed from the stamps' names; a stamp that arrives after it is an
+  // answer happening now, timed by this clock.
   try {
-    db.doc('review/pr-' + DATA.number + '/context/presence').onSnapshot(snap => {
-      presence = (snap.exists && snap.data()) || null;
+    db.collection('review/pr-' + DATA.number + '/presence').onSnapshot(snap => {
+      const first = stampsSeen === null;
+      if (first) stampsSeen = new Set();
+      let newest = 0;
+      snap.docs.forEach(d => {
+        const row = d.data() || {};
+        const t = (parseInt(String(d.id), 10) || 0) * 1000;
+        if (t >= newest){
+          newest = t;
+          if (typeof row.resume === 'string') lastResume = row.resume;
+        }
+        if (!stampsSeen.has(d.id)){
+          stampsSeen.add(d.id);
+          if (!first) answeredAt = Date.now();
+        }
+      });
+      lastHeard = Math.max(lastHeard, newest);
       drawPresence();
     });
   } catch (e) {}
