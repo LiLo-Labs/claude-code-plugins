@@ -1622,7 +1622,7 @@ async function record(){
   const slots = all.filter(m => m.via === 'session' && !held.has(m.answers));
   const at = decided ? decidedAt : undefined;
   const write = {ids: new Set(slots.map(m => m.answers)), at};
-  write.done = db.doc('review/pr-' + DATA.number).set({
+  const doc = {
     pr: DATA.number,
     ...(typeof DATA.repo === 'string' ? {repo: DATA.repo} : {}),
     title: DATA.title,
@@ -1631,15 +1631,46 @@ async function record(){
     reason: reason,
     decidedAt: decidedAt,
     ...(decided && decidedOn ? {decidedOn} : {}),
-    ...(decided && decisionRing && decisionRing.decidedAt === decidedAt ? {decisionRing} : {}),
     updatedAt: new Date().toISOString(),
-  }).then(() => {
+  };
+  const ringRecord = decided && decisionRing && decisionRing.decidedAt === decidedAt ? decisionRing : null;
+  const ref = db.doc('review/pr-' + DATA.number);
+  write.done = (ringRecord && ringRecord.pending && ringRecord !== ownPending
+    ? storedRing(ref, ringRecord) : Promise.resolve(ringRecord))
+    .then(r => ref.set({...doc, ...(r ? {decisionRing: r} : {})}))
+    .then(() => {
     write.ids.forEach(id => storedSlots.add(id));
     if (at !== undefined) storedDecidedAt = at;
   });
   inFlight.add(write);
   try { await write.done; } finally { inFlight.delete(write); }
   storedAnyway(at);
+}
+// The pending record decide() made, while it is still the one on screen. Only this
+// view knows its ring has not settled, so only this record is written as it stands.
+let ownPending = null;
+// What a save carries for a pending record this view restored rather than made.
+// The view that made it may since have stored its ring outcome, and this view has
+// no listener on the document to hear so. Carried as restored, a whole-document set
+// put pending back over that outcome, and rering then rang a decision that had
+// already rung. So the save reads the store first and carries what it holds for
+// this decision now: pending when the deciding view never replaced it, which keeps
+// that decision due. A failed read carries nothing, which as with an older page's
+// write leaves the decision unrung rather than rung twice. Only the gap between
+// that read and the set is left for a settled record to be overwritten in.
+async function storedRing(ref, mine){
+  let had;
+  try { const snap = await ref.get(); had = snap.exists && snap.data(); }
+  catch (e){ return null; }
+  if (!isRow(had) || had.decidedAt !== mine.decidedAt) return null;
+  const r = isRow(had.decisionRing) && had.decisionRing.decidedAt === mine.decidedAt
+    ? {...had.decisionRing} : null;
+  if (decisionRing === mine && !(r && r.pending)){
+    decisionRing = r;
+    rang = rangFrom(r);
+    if (showingDecided) drawDecided();
+  }
+  return r;
 }
 // Whether a write from this view has stored the slot for `id`, or the decision
 // stamped `at`, once every write already carrying it has landed or been refused.
@@ -1932,7 +1963,7 @@ async function decide(v, quiet, why){
     const at = decidedAt = new Date().toISOString();
     decidedOn = head;
     // Stored by the same write as the decision (see decisionRing).
-    decisionRing = {decidedAt: at, pending: true};
+    decisionRing = ownPending = {decidedAt: at, pending: true};
     rang = 'sending';
     drawDecided();
     // As in deliver(): a send during the retry wait may have stored this decision.
@@ -2503,17 +2534,21 @@ async function rering(){
     // another view stored is taken, so this view stops saying it will ring. This
     // view's own failed record stands in only when the store has none, as when the
     // save that carried it was refused: no other view can ring a decision the store
-    // holds no record for, so there is no second ring to race.
+    // holds no record for, so there is no second ring to race. A pending copy never
+    // stands in: the store holding none means a write dropped it, perhaps over a
+    // ring that went out, so this view takes the store's word that none is recorded.
     let ringTheDecision = false;
     if (decisionDue && stillHeld()){
       const same = isRow(fresh) && fresh.decision === held.decision && fresh.decidedAt === held.decidedAt;
       const rec = same && isRow(fresh.decisionRing) && fresh.decisionRing.decidedAt === held.decidedAt
         ? fresh.decisionRing : null;
-      const mine = decisionRing && decisionRing.decidedAt === held.decidedAt ? decisionRing : null;
+      const mine = decisionRing && decisionRing.decidedAt === held.decidedAt && !decisionRing.pending
+        ? decisionRing : null;
       const known = rec || mine;
       const collected = isRow(picked) && picked.decision === held.decision && picked.decidedAt === held.decidedAt;
       if (same && !collected && known && !known.rungAt && !known.again) ringTheDecision = true;
       else if (rec){ decisionRing = {...rec}; rang = rangFrom(decisionRing); }
+      else if (same && decisionRing && decisionRing.pending){ decisionRing = null; rang = rangFrom(null); }
     }
     if (!toRing.length && !ringTheDecision){ draw(); if (showingDecided) drawDecided(); return; }
 

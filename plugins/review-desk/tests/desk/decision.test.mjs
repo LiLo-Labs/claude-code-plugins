@@ -432,6 +432,35 @@ test('a decision whose ring succeeded, loaded again past RERING_AFTER, is never 
   assert.deepEqual((await desk.log()).filter(e => e.op === 'acquire'), []);
 });
 
+// A view that loaded the pending record keeps its copy: it has no listener on the
+// document. Its next save is a whole-document set, so what that save carries for
+// the ring decides whether the deciding view's settled record survives it.
+for (const settled of [true, false]) test(settled
+  ? 'a view that loaded a pending record and saves after the deciding view stored rungAt keeps rungAt and never rings'
+  : 'a view that loaded a pending record and saves before it is due keeps it pending and rings it once', async () => {
+  const decidedAt = new Date(Date.now() - 2000).toISOString();
+  const base = {pr: 42, title: 'Harness desk', decision: 'approved', reason: null, decidedAt, threads: []};
+  desk = await open(browser, {seed: {[PR]: {...base, decisionRing: {decidedAt, pending: true}}}});
+  await ready(desk);
+  const rungAt = Date.now();
+  // The deciding view's ring went out and its settled record landed; or that view
+  // closed first and the store still holds pending.
+  if (settled) await desk.write(PR, {...base, decisionRing: {decidedAt, rungAt}});
+  await desk.page.evaluate(() => { document.getElementById('box').value = 'one more thing'; return send(); });
+  const sent = (await desk.until(s => s[PR] && s[PR].threads.length && s[PR].threads[0].turns.length))[PR];
+  assert.ok(Date.now() < Date.parse(decidedAt) + RERING_AFTER, 'the send landed before the pending ring was due');
+  assert.deepEqual(sent.decisionRing, settled ? {decidedAt, rungAt} : {decidedAt, pending: true});
+  const wait = Date.parse(decidedAt) + RERING_AFTER + 3000 - Date.now();
+  await desk.page.waitForTimeout(Math.max(wait, 0));
+  if (!settled) await desk.until(s => s[PR].decisionRing && s[PR].decisionRing.rungAt, null, 5000);
+  await desk.page.waitForTimeout(1000);
+  assert.equal(decisionPublishes(await desk.log()).length, settled ? 0 : 1);
+  const last = (await desk.store())[PR].decisionRing;
+  if (settled) assert.deepEqual(last, {decidedAt, rungAt}, 'the settled record was replaced');
+  else assert.ok(last.rungAt && last.again && !last.pending);
+  if (settled) await lineSays('Waiting for the working session');
+});
+
 test('a view that cannot ring records a decision and says it could not notify the working session', async () => {
   desk = await open(browser, {capabilities: ['db']});
   await ready(desk);
