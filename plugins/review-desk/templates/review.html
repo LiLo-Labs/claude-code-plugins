@@ -1171,7 +1171,9 @@ function drawPresence(){
   const resume = [lastResume, DATA.resume].find(safeResume) || '';
   el.innerHTML = '<span class="'+(gone ? 'gone' : '')+'">'+esc(line)+'</span>'
     + (bellOn && !closedOutcome() ? '<button class="check" id="check">Check</button>' : '')
-    + (gone && resume
+    // A closed desk promises no session: the resume command would bring one
+    // back to a review that is over.
+    + (gone && resume && !closedOutcome()
       ? '<div class="resume"><code id="resumeCmd">'+esc(resume)+'</code>'
         + '<button class="check" id="copyResume">Copy</button></div>'
         + '<span>Run this on the computer to bring that session back. It picks up '

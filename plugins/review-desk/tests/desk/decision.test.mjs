@@ -383,6 +383,22 @@ test('Check with no answer inside the wait says so, and offers the resume comman
     assert.equal(await desk.page.evaluate(() => String(getSelection())), RESUME);
 });
 
+test('a desk that closes after an unanswered Check stops offering the resume command', async () => {
+  const stamp = String(Math.floor(Date.now() / 1000) - 60);
+  desk = await open(browser, {clock: true, seed: {[PR + '/presence/' + stamp]: {resume: RESUME}}});
+  await ready(desk);
+  await desk.page.click('#fab');
+  await desk.page.click('#check');
+  await desk.page.clock.fastForward(76000);
+  await desk.page.waitForSelector('#resumeCmd');
+  await desk.write(PR + '/context/pickup', {decision: 'approved', decidedAt: '2026-09-12T10:00:00.000Z',
+    session: 's1', at: '2026-09-12T10:01:00.000Z',
+    outcome: {result: 'merged', detail: 'Squash-merged as 1a2b3c4.', at: '2026-09-12T10:05:00.000Z'}});
+  await desk.page.waitForSelector('#outcomeBanner:not([hidden])');
+  assert.equal(await desk.page.locator('#resumeCmd, #copyResume').count(), 0);
+  assert.doesNotMatch(await desk.page.textContent('#presence'), /bring that session back|picks up this desk/);
+});
+
 test('a Check whose ring is refused says it could not ring the working session', async () => {
   desk = await open(browser, {publishError: ['rate_limited']});
   await ready(desk);
