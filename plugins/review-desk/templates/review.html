@@ -1473,8 +1473,9 @@ function restoreFailed(e){
 document.addEventListener('click', async e => {
   if (!(e.target.closest && e.target.closest('[data-retry-restore]'))) return;
   if (restore !== 'failed' || !db) return;
-  if (await restoreStored()) listenReplies();
+  const restored = await restoreStored();
   followPage();
+  if (restored) listenReplies();
 });
 
 // What restore keeps of the stored threads. review/pr-N is writable by any
@@ -1843,11 +1844,13 @@ paint(); draw();
   // so it waits for a successful restore; Try again starts it if the first
   // attempt failed. The page's other feeds start either way: the description,
   // the documents, presence and pickup do not depend on the stored threads, and
-  // waiting on a restore that threw left the page without any of them.
+  // waiting on a restore that threw left the page without any of them. They
+  // start before the replies listener, so a throw there cannot strand them: Try
+  // again only runs when the restore itself failed.
   let restored = false;
   try { restored = await restoreStored(); } catch (e){ restoreFailed(e); }
-  if (restored) listenReplies();
   followPage();
+  if (restored) listenReplies();
 })().catch(e => {
   // Anything else that throws while the view starts. Left unhandled, it stopped
   // the rest of startup silently, with restore still 'pending' and every control
