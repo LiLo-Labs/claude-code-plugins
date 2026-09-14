@@ -851,12 +851,16 @@ function drawCarry(){
     carried = null; unlight(); drawCarry();
   };
 }
+// The open thread counts too while the panel is closed. Skipping it left the
+// badge dark for the usual review, a single thread: ask, close the panel to keep
+// reading, and the answer arrived with nothing on screen saying so.
 function drawBadge(){
+  const open = document.body.classList.contains('open');
   const waiting = threads.reduce((n, t, i) =>
-    n + (i !== live && t.unread ? 1 : 0), 0);
+    n + (t.unread && (i !== live || !open) ? 1 : 0), 0);
   const d = $('dot');
   d.textContent = waiting || '';
-  d.classList.toggle('show', waiting > 0 && !document.body.classList.contains('open'));
+  d.classList.toggle('show', waiting > 0 && !open);
 }
 // The resume command is offered for the reviewer to copy and run on their own
 // computer, and the presence stamp it can come from is a document anyone who can
