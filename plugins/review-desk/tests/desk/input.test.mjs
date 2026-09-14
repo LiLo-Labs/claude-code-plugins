@@ -283,6 +283,125 @@ test('desktop: a selection at the top of the window keeps the pop inside it, cle
   assert.deepEqual(desk.errors, []);
 });
 
+/* ---------------- keyboard focus across repaints ---------------- */
+
+// What holds focus, as a selector-like name: an id, or the data-* key that names a
+// control. BODY is what a rebuild that drops focus leaves.
+const focused = d => d.page.evaluate(() => {
+  const a = document.activeElement;
+  if (!a || a === document.body) return 'BODY';
+  if (a.id) return '#' + a.id;
+  const k = Object.keys(a.dataset)[0];
+  return k ? '[data-' + k + '="' + a.dataset[k] + '"]' : a.tagName;
+});
+const ready = d => d.page.waitForFunction('restore === "done"', null, {timeout: 5000});
+const withDoc = () => payload({documents: [{name: 'docs/a.md', text: '# A\n\nAlpha'}]});
+const waitingSeed = () => ({[PR]: {pr: 42, title: 'Harness desk', decision: null, reason: null, decidedAt: null,
+  threads: [{id: 't1', name: 'Only', turns: [
+    {id: 'u1', role: 'user', content: 'Is the lease needed?', to: 'session'},
+    {role: 'assistant', via: 'session', answers: 'u1', status: 'sent', sentAt: 1000, rungAt: 1400}]}]}});
+
+test('Enter on a document tab keeps focus on the new tab, and a documents row arriving keeps it there', async () => {
+  desk = await open(browser, {data: withDoc()});
+  await ready(desk);
+  await desk.page.focus('[data-leaf="1"]');
+  await desk.page.keyboard.press('Enter');
+  await desk.page.waitForSelector('.leaf.on[data-leaf="1"]');
+  assert.equal(await focused(desk), '[data-leaf="1"]');
+
+  // A new document, which redraws the strip only, and a rewrite of the one on screen,
+  // which repaints the sheet and the strip.
+  await desk.document('docs~b.md', 'docs/b.md', '# B\n\nBeta', {at: new Date().toISOString()});
+  await desk.page.waitForSelector('[data-leaf="2"]');
+  assert.equal(await focused(desk), '[data-leaf="1"]');
+  await desk.document('docs~a.md', 'docs/a.md', '# A\n\nAlpha revised', {at: new Date().toISOString()});
+  await desk.page.waitForSelector('#sheet >> text=Alpha revised');
+  assert.equal(await focused(desk), '[data-leaf="1"]');
+  assert.deepEqual(desk.errors, []);
+});
+
+test('Enter on Approve focuses Confirm, and Enter on Confirm leaves focus on the recorded line through the ring', async () => {
+  desk = await open(browser);
+  await ready(desk);
+  await desk.page.focus('#ok');
+  await desk.page.keyboard.press('Enter');
+  await desk.page.waitForSelector('#approveConfirm');
+  assert.equal(await focused(desk), '#approveConfirm');
+  await desk.page.keyboard.press('Enter');
+  await desk.page.waitForFunction(() => window.__desk.rings().length === 1);
+  await desk.page.waitForSelector('#decide .pickup >> text=Waiting for the working session');
+  assert.ok(['#decisionLine', '#redo'].includes(await focused(desk)), 'focus is ' + await focused(desk));
+
+  // Change this goes back to the choice with focus on Approve, and Back from the
+  // reason form does the same.
+  await desk.page.focus('#redo');
+  await desk.page.keyboard.press('Enter');
+  await desk.page.waitForSelector('#ok');
+  assert.equal(await focused(desk), '#ok');
+  await desk.page.click('#changes');
+  await desk.page.focus('#back');
+  await desk.page.keyboard.press('Enter');
+  await desk.page.waitForSelector('#ok');
+  assert.equal(await focused(desk), '#ok');
+  assert.deepEqual(desk.errors, []);
+});
+
+test('Enter on Check keeps focus on Check', async () => {
+  desk = await open(browser);
+  await ready(desk);
+  await desk.page.click('#fab');
+  await desk.page.focus('#check');
+  await desk.page.keyboard.press('Enter');
+  await desk.page.waitForSelector('#presence >> text=Checking the working session');
+  await desk.page.waitForFunction(() => window.__desk.rings().length === 1);
+  assert.equal(await focused(desk), '#check');
+  assert.deepEqual(desk.errors, []);
+});
+
+test('a reply landing while a thread tab has focus keeps it, and Keep it returns focus to that thread\'s close button', async () => {
+  const seed = waitingSeed();
+  seed[PR].threads.push({id: 't2', name: 'Second', turns: [{id: 'u2', role: 'user', content: 'Two', to: 'session'}]});
+  desk = await open(browser, {seed});
+  await desk.page.click('#fab');
+  await desk.page.waitForSelector('text=Is the lease needed?');
+  await desk.page.focus('.tab[data-go="0"]');
+  await desk.reply('u1', 'Yes: two views ring otherwise.');
+  await desk.page.waitForSelector('.said.rich >> text=two views ring');
+  assert.equal(await focused(desk), '[data-go="0"]');
+
+  await desk.page.focus('.tab[data-go="1"]');
+  await desk.page.keyboard.press('Enter');
+  await desk.page.waitForSelector('.tab.on[data-go="1"]');
+  assert.equal(await focused(desk), '[data-go="1"]');
+
+  await desk.page.focus('[data-shut="1"]');
+  await desk.page.keyboard.press('Enter');
+  await desk.page.waitForSelector('#closeNo');
+  await desk.page.keyboard.press('Enter');
+  await desk.page.waitForSelector('#closeNo', {state: 'detached'});
+  assert.equal(await focused(desk), '[data-shut="1"]');
+  assert.deepEqual(desk.errors, []);
+});
+
+test('typing in the box is never interrupted by a reply, a document row, a presence stamp or a redrawn decision', async () => {
+  desk = await open(browser, {seed: waitingSeed(), data: withDoc()});
+  await desk.page.click('#fab');
+  await desk.page.waitForSelector('text=Is the lease needed?');
+  await desk.page.click('#box');
+  await desk.page.keyboard.type('first half ');
+  await desk.reply('u1', 'An answer while you type.');
+  await desk.document('docs~a.md', 'docs/a.md', '# A\n\nAlpha revised', {at: new Date().toISOString()});
+  await desk.presence(String(Math.floor(Date.now() / 1000)));
+  await desk.context('body', {text: '## Revised\n\nNew words.'});
+  await desk.page.waitForSelector('.said.rich >> text=An answer while you type.');
+  await desk.page.waitForSelector('.leaf[data-leaf="1"] .fresh.show');
+  await desk.page.waitForSelector('#presence >> text=Working session last answered');
+  await desk.page.keyboard.type('second half');
+  assert.equal(await focused(desk), '#box');
+  assert.equal(await desk.page.inputValue('#box'), 'first half second half');
+  assert.deepEqual(desk.errors, []);
+});
+
 /* ---------------- closing a thread ---------------- */
 
 const twoThreads = () => ({[PR]: {pr: 42, title: 'Harness desk', decision: null, reason: null,

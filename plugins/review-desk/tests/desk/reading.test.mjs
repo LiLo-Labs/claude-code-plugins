@@ -582,3 +582,45 @@ for (const scheme of ['dark', 'light']){
     assert.deepEqual(desk.errors, []);
   });
 }
+
+// The same measure for text drawn in --faint, which has no background of its own:
+// the colour it sits on is the nearest ancestor's that paints one.
+const faintContrasts = selectors => desk.page.evaluate(selectors => {
+  const rgb = css => css.match(/[\d.]+/g).map(Number);
+  const lum = css => {
+    const [r, g, b] = rgb(css).slice(0, 3).map(v => {
+      const c = v / 255;
+      return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+    });
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  };
+  const ground = el => {
+    for (let n = el; n; n = n.parentElement){
+      const bg = getComputedStyle(n).backgroundColor, a = rgb(bg);
+      if (a.length < 4 || a[3] > 0) return bg;
+    }
+    return 'rgb(255, 255, 255)';
+  };
+  return Object.fromEntries(selectors.map(sel => {
+    const el = document.querySelector(sel);
+    if (!el) return [sel, 'missing'];
+    const [hi, lo] = [lum(getComputedStyle(el).color), lum(ground(el))].sort((a, b) => b - a);
+    return [sel, Math.round((hi + 0.05) / (lo + 0.05) * 100) / 100];
+  }));
+}, selectors);
+
+for (const scheme of ['dark', 'light']){
+  test(`${scheme} mode: unopened document tabs, the hint, footer, meta line, speaker labels and section name clear 4.5:1`, async () => {
+    desk = await open(browser, {context: {colorScheme: scheme},
+      data: payload({documents: [{name: 'docs/a.md', text: '# A\n\nAlpha'}]})});
+    await desk.page.click('#fab');
+    await desk.page.waitForSelector('#stream .hint >> text=Ask the working session anything');
+    const got = await faintContrasts(['.leaf:not(.on)', '.hint', 'footer', '.meta', '.ptop .where']);
+    await desk.page.fill('#box', 'A turn, so a speaker label shows');
+    await desk.page.press('#box', 'Enter');
+    await desk.page.waitForSelector('.turn.mine .who');
+    Object.assign(got, await faintContrasts(['.who']));
+    for (const [sel, ratio] of Object.entries(got)) assert.ok(ratio >= 4.5, `${sel} is ${ratio}:1`);
+    assert.deepEqual(desk.errors, []);
+  });
+}

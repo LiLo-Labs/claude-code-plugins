@@ -3,7 +3,10 @@
 <style>
 :root{
   --paper:#f7f5f2; --card:#fffefc; --edge:#e3ded6; --rule:#ece7e0;
-  --ink:#22201d; --soft:#5f5a53; --faint:#948d84;
+  /* --faint is text too: unopened document tabs, the footer, the meta line, the
+     speaker labels, code comments. At #948d84 (light) and #7a7267 (dark) those read
+     at 2.7 to 3.9:1. Each value now clears 4.5:1 on --paper, --card and --rule. */
+  --ink:#22201d; --soft:#5f5a53; --faint:#6b645b;
   --mark:#9a4a2f; --good:#3f6b4a; --cool:#3d5a72; --lit:#f5e3b8;
   /* Text and glyphs drawn on --cool, --good or --mark. White suits the dark light-mode
      accents; the dark theme's accents are pastel, where white measured 2.6:1 on
@@ -17,14 +20,14 @@
 @media (prefers-color-scheme: dark){
   :root:not([data-theme="light"]){
     --paper:#15140f; --card:#1c1a16; --edge:#302c25; --rule:#2a2721;
-    --ink:#eee9e0; --soft:#a89f93; --faint:#7a7267;
+    --ink:#eee9e0; --soft:#a89f93; --faint:#978e82;
     --mark:#d4805f; --good:#7fb08c; --cool:#7fa5c4; --lit:#4a3c1c;
     --on-accent:#15140f;
   }
 }
 :root[data-theme="dark"]{
   --paper:#15140f; --card:#1c1a16; --edge:#302c25; --rule:#2a2721;
-  --ink:#eee9e0; --soft:#a89f93; --faint:#7a7267;
+  --ink:#eee9e0; --soft:#a89f93; --faint:#978e82;
   --mark:#d4805f; --good:#7fb08c; --cool:#7fa5c4; --lit:#4a3c1c;
   --on-accent:#15140f;
 }
@@ -822,15 +825,38 @@ function drawMeta(){
       : '');
 }
 
+// Replaces what `el` holds, and gives focus back to the same control when a control
+// inside `el` had it. Rebuilding a strip with innerHTML takes the focused node away,
+// and focus falls to <body>: a keyboard or VoiceOver user pressing a leaf, a thread
+// tab or Check was sent to the top of the page, and so was one resting on a control
+// a live update repainted. A control is matched by its id or by the data-* key that
+// names it. Focus anywhere else, the box included, is never touched: this acts only
+// when the rebuild itself dropped focus to <body>.
+const FOCUS_KEYS = ['leaf', 'go', 'shut', 'resend', 'edit', 'refollow'];
+function focusedIn(el){
+  const a = document.activeElement;
+  if (!a || a === document.body || !el.contains(a)) return null;
+  if (a.id) return '#' + CSS.escape(a.id);
+  const k = FOCUS_KEYS.find(k => k in a.dataset);
+  return k ? '[data-' + k + '="' + CSS.escape(a.dataset[k]) + '"]' : null;
+}
+function rebuild(el, html){
+  const key = focusedIn(el);
+  el.innerHTML = html;
+  if (!key || (document.activeElement && document.activeElement !== document.body)) return;
+  const again = el.querySelector(key);
+  if (again) again.focus({preventScroll: true});
+}
+
 // The tab strip alone. A change to a page the reviewer is not reading redraws only
 // this: paint() replaces the sheet on screen, and with it any highlight held in it,
 // the place it was scrolled to and any diagram, which falls back to its source
 // until mermaid draws it again.
 function drawLeaves(){
-  $('leaves').innerHTML = pages().map((p, i) =>
+  rebuild($('leaves'), pages().map((p, i) =>
     '<button class="leaf'+(i===leaf?' on':'')+'" data-leaf="'+i+'" title="'+esc(p.full||p.name)+'">'
     + esc(p.name)
-    + '<span class="fresh'+(freshOn[i]?' show':'')+'"></span></button>').join('');
+    + '<span class="fresh'+(freshOn[i]?' show':'')+'"></span></button>').join(''));
 }
 
 function paint(){
@@ -1007,7 +1033,7 @@ function drawTabs(){
   // thread otherwise changed nothing on screen.
   const writing = t => t.turns.some(m => m.via === 'session'
     && (sessionReplies.get(m.answers) || {}).status === 'working');
-  el.innerHTML = threads.map((t, i) =>
+  rebuild(el, threads.map((t, i) =>
     '<span class="tabpair"><button class="tab'+(i===live?' on':'')+'" data-go="'+i+'">'
     + (writing(t) ? '<span class="spin" title="The working session is writing a reply"></span>'
       : t.unread ? '<span class="unread" title="A reply you have not seen"></span>' : '')
@@ -1015,15 +1041,15 @@ function drawTabs(){
     + (threads.length > 1 && !shut ? '<button class="shut" data-shut="'+i+'" aria-label="Close '
         + esc(t.name) + '" title="Close this thread">×</button>' : '')
     + '</span>').join('')
-    + (shut ? '' : '<button class="add" id="more" title="New thread">+</button>');
+    + (shut ? '' : '<button class="add" id="more" title="New thread">+</button>'));
   if (shut) closing = null;
   const t = threads.find(x => x.id === closing);
   if (!t) closing = null;
-  $('closeSlot').innerHTML = t ? '<div class="lost closing">Close “' + esc(t.name)
+  rebuild($('closeSlot'), t ? '<div class="lost closing">Close “' + esc(t.name)
     + '”? Its conversation leaves the saved discussion, so it is not written into '
     + 'the pull request, and it cannot be brought back.'
     + '<span class="choices"><button id="closeYes">Close it</button>'
-    + '<button id="closeNo">Keep it</button></span></div>' : '';
+    + '<button id="closeNo">Keep it</button></span></div>' : '');
 }
 function closeThread(id){
   const i = threads.findIndex(t => t.id === id);
@@ -1128,23 +1154,21 @@ function said(m){
 function drawStream(toEnd){
   const t = threads[live], el = $('stream');
   const atEnd = toEnd || el.scrollHeight - el.scrollTop - el.clientHeight < 40;
-  if (!t.turns.length && restore === 'pending'){
-    el.innerHTML = '<div class="hint">Loading the saved discussion…</div>';
-  } else if (!t.turns.length && closedOutcome()){
-    el.innerHTML = '<div class="hint">Nothing was discussed in this thread.</div>';
-  } else if (!t.turns.length){
-    el.innerHTML = '<div class="hint">Ask the working session anything: it has '
+  rebuild(el, !t.turns.length && restore === 'pending'
+    ? '<div class="hint">Loading the saved discussion…</div>'
+    : !t.turns.length && closedOutcome()
+    ? '<div class="hint">Nothing was discussed in this thread.</div>'
+    : !t.turns.length
+    ? '<div class="hint">Ask the working session anything: it has '
       + 'the code, the tests and the conversation that made this change, and it '
       + 'can change the pull request. Highlight a passage first and it goes along '
-      + 'with the question, with the tab and section you were reading.</div>';
-  } else {
-    el.innerHTML = t.turns.map(m =>
+      + 'with the question, with the tab and section you were reading.</div>'
+    : t.turns.map(m =>
       (m.quote ? '<div class="quoted'+(m.role==='user'?' mine':'')+'">'+esc(m.quote)+'</div>' : '')
       + '<div class="turn '+(m.role==='user'?'mine':'theirs')+'">'
       + '<span class="who">'+(m.role==='user' ? 'you'
           : m.via==='session' ? 'working session' : 'claude')+'</span>'
-      + said(m) + '</div>').join('');
-  }
+      + said(m) + '</div>').join(''));
   if (atEnd) el.scrollTop = el.scrollHeight;
   $('seed').style.display = t.turns.length || closedOutcome() ? 'none' : 'flex';
   gate();
@@ -1239,7 +1263,7 @@ function drawPresence(){
     line = 'The working session has not answered on this desk yet.';
   }
   const resume = [lastResume, DATA.resume].find(safeResume) || '';
-  el.innerHTML = '<span class="'+(gone ? 'gone' : '')+'">'+esc(line)+'</span>'
+  rebuild(el, '<span class="'+(gone ? 'gone' : '')+'">'+esc(line)+'</span>'
     + (bellOn && !closedOutcome() ? '<button class="check" id="check">Check</button>' : '')
     // A closed desk promises no session: the resume command would bring one
     // back to a review that is over.
@@ -1248,7 +1272,7 @@ function drawPresence(){
         + '<button class="check" id="copyResume">Copy</button></div>'
         + '<span>Run this on the computer to bring that session back. It picks up '
         + 'this desk, and anything you sent meanwhile, as it starts.</span>'
-      : '');
+      : ''));
 }
 function draw(toEnd){ drawTabs(); drawStream(toEnd); drawCarry(); drawBadge(); drawPresence(); drawApproveAsk(); }
 
@@ -1313,8 +1337,18 @@ const SEEDS = DATA.openers && DATA.openers.length ? DATA.openers : [
 ];
 $('seed').innerHTML = SEEDS.map((q,i)=>'<button data-s="'+i+'">'+esc(q)+'</button>').join('');
 $('closeSlot').addEventListener('click', e => {
-  if (e.target.id === 'closeYes') closeThread(closing);
-  else if (e.target.id === 'closeNo'){ closing = null; drawTabs(); }
+  // The question goes away either way, so focus goes to what it was about: the
+  // thread's own close button when kept, the open thread's tab when closed.
+  if (e.target.id === 'closeYes'){
+    closeThread(closing);
+    const tab = document.querySelector('.tab.on');
+    if (tab) tab.focus({preventScroll: true});
+  } else if (e.target.id === 'closeNo'){
+    const i = threads.findIndex(t => t.id === closing);
+    closing = null; drawTabs();
+    const b = document.querySelector('[data-shut="' + i + '"]');
+    if (b) b.focus({preventScroll: true});
+  }
 });
 $('seed').addEventListener('click', e => {
   const b = e.target.closest('[data-s]'); if (!b) return;
@@ -1880,17 +1914,17 @@ function askReason(existing){
   if (closedOutcome()) return drawShut();
   showingDecided = false;
   showingRevised = false;
-  $('decide').innerHTML = '<div class="cap">What needs changing</div>'
+  rebuild($('decide'), '<div class="cap">What needs changing</div>'
     + '<div class="done"><textarea id="why" rows="4" placeholder="The part that is '
     + 'wrong, and what would make it right."></textarea>'
     + '<div class="verdict"><span class="note">This goes into the pull request '
     + 'with the discussion.</span>'
     + '<button class="btn" id="back">Back</button>'
-    + '<button class="btn yes" id="recordReason">Record it</button></div></div>';
+    + '<button class="btn yes" id="recordReason">Record it</button></div></div>');
   const why = $('why');
   why.value = existing || '';
   why.focus();
-  $('back').addEventListener('click', offerDecision);
+  $('back').addEventListener('click', backToChoice);
   $('recordReason').addEventListener('click', () => {
     if (!why.value.trim()){ why.focus(); return; }
     decide('needs changes', false, why.value.trim());
@@ -1906,13 +1940,13 @@ function askApprove(){
   if (closedOutcome()) return drawShut();
   showingDecided = false;
   showingRevised = false;
-  $('decide').innerHTML = '<div class="cap">Before it merges</div>'
+  rebuild($('decide'), '<div class="cap">Before it merges</div>'
     + '<div class="done confirming"><p class="ask" id="approveAsk"></p>'
     + '<p class="pickup" id="approvePending" hidden></p>'
     + '<div class="verdict"><span class="note">A merge cannot be undone from this '
     + 'page.</span>'
     + '<button class="btn" id="approveBack">Back</button>'
-    + '<button class="btn yes" id="approveConfirm">Confirm</button></div></div>';
+    + '<button class="btn yes" id="approveConfirm">Confirm</button></div></div>');
   drawApproveAsk();
   $('approveBack').addEventListener('click', backToChoice);
   $('approveConfirm').addEventListener('click', () => decide('approved'));
@@ -1921,7 +1955,9 @@ function askApprove(){
 }
 function backToChoice(){
   offerDecision();
-  $('ok').focus();
+  // A desk that closed meanwhile draws no Approve.
+  const ok = $('ok');
+  if (ok) ok.focus();
 }
 // Enter activates a button on keydown, and focus moves to Confirm as the step
 // opens, so the auto-repeat of one held Enter pressed Confirm too: measured in
@@ -1973,7 +2009,7 @@ function offerDecision(){
   showingDecided = false;
   const r = revisedOutcome();
   showingRevised = !!r;
-  $('decide').innerHTML = '<div class="cap">'
+  rebuild($('decide'), '<div class="cap">'
     + (r ? 'Revised, ready for another look' : 'When you have made up your mind') + '</div>'
     + '<div id="decideState"></div>'
     + (r ? '<div class="done revised"><p class="pickup">' + esc(outcomeLine(r)) + '</p>'
@@ -1983,7 +2019,7 @@ function offerDecision(){
     + 'working session, which writes the discussion into the pull request and '
     + 'merges or revises accordingly.</span>'
     + '<button class="btn yes" id="ok">Approve</button>'
-    + '<button class="btn" id="changes">Needs changes</button></div>';
+    + '<button class="btn" id="changes">Needs changes</button></div>');
   $('ok').addEventListener('click', askApprove);
   // The reason a revision answered is not the next one, so the form starts empty.
   $('changes').addEventListener('click', () => askReason(r ? '' : reason));
@@ -1998,6 +2034,10 @@ async function decide(v, quiet, why){
   // reaches decide another way, such as the reason panel's Record it.
   if (!quiet && (locked() || closedOutcome())) return;
 
+  // Confirm or Record it held focus, and the slab is about to be replaced. Focus
+  // goes to the line that says whether it was saved and rung, which a screen reader
+  // then reads; Change this, under it, would take a repeat of the same Enter.
+  const fromSlab = !quiet && $('decide').contains(document.activeElement);
   decided = v;
   reason = why || null;
   // A restored decision says what its stored ring record says; restore sets
@@ -2009,6 +2049,8 @@ async function decide(v, quiet, why){
     decisionRing = null;
     rang = 'sending';
     drawDecided();
+    const said = $('decisionLine');
+    if (fromSlab && said) said.focus({preventScroll: true});
     // As in deliver(): a send during the retry wait may have stored this decision.
     const kept = await saveNow(() => decisionStored(at));
     // Read `lost` straight after the refusal: a later save that succeeds clears
@@ -2123,20 +2165,20 @@ function drawDecided(){
   if (!decided || revisedOutcome()) return offerDecision();
   showingDecided = true;
   showingRevised = false;
-  $('decide').innerHTML = '<div class="cap">Recorded</div><div class="done">'
+  rebuild($('decide'), '<div class="cap">Recorded</div><div class="done">'
     + 'You marked this <b>'+esc(decided)+'</b>. The working session writes the '
     + 'discussion into pull request #'+DATA.number+', '
     + (decided === 'approved' ? 'merges it' : 'starts the revision')
     + ', and reports back here.'
     + (reason ? '<blockquote>'+esc(reason)+'</blockquote>' : '')
-    + '<p class="pickup">'+esc(pickupLine())+'</p>'
+    + '<p class="pickup" id="decisionLine" tabindex="-1">'+esc(pickupLine())+'</p>'
     + (staleApproval() ? '<p class="pickup" id="staleHead">You approved commit '
       + decidedOn.slice(0, 7) + '. The desk now shows ' + head.slice(0, 7)
       + ', pushed since, so the working session will not merge until you look at '
       + 'the new commits and decide again.</p>' : '')
     + '<div class="verdict"><button class="btn" id="redo">Change this</button></div>'
-    + '</div>';
-  $('redo').addEventListener('click', offerDecision);
+    + '</div>');
+  $('redo').addEventListener('click', backToChoice);
 }
 
 // A merged or closed pull request. No Change this: a decision recorded now reaches
@@ -2145,7 +2187,7 @@ function drawShut(){
   showingDecided = true;
   showingRevised = false;
   const o = closedOutcome();
-  $('decide').innerHTML = '<div class="cap">' + (o.result === 'merged' ? 'Merged' : 'Closed') + '</div>'
+  rebuild($('decide'), '<div class="cap">' + (o.result === 'merged' ? 'Merged' : 'Closed') + '</div>'
     + '<div class="done">'
     + (decided ? 'You marked this <b>' + esc(decided) + '</b>.' : 'No decision was recorded on this desk.')
     + (reason ? '<blockquote>' + esc(reason) + '</blockquote>' : '')
@@ -2153,7 +2195,7 @@ function drawShut(){
     + '<p class="pickup" id="shutNote">The review is over, so this desk takes no new decision or '
     + 'message. Anything more belongs on <a href="' + esc(DATA.url) + '" target="_blank" '
     + 'rel="noopener">the pull request</a>.</p>'
-    + '</div>';
+    + '</div>');
 }
 
 // What the outcome changes outside the decision slab: the banner under the title,
