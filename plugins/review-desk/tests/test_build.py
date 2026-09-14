@@ -87,6 +87,43 @@ class Render(unittest.TestCase):
             build_desk.render(build_desk.template() + "/*PAYLOAD*/", HOSTILE, "T")
 
 
+class Capabilities(unittest.TestCase):
+    def setUp(self):
+        self.caps = build_desk.capabilities(12)
+        self.rules = self.caps["db"]["rules"]
+        self.write = {r["path"]: r["write"] for r in self.rules}
+
+    def test_declares_db_and_artifact_only(self):
+        self.assertEqual(sorted(self.caps), ["artifact", "db"])
+        self.assertEqual(self.caps["artifact"], {})
+
+    def test_the_page_writes_its_own_document_at_interact(self):
+        self.assertEqual(self.write["review/pr-12"], "interact")
+
+    def test_session_paths_are_owner_only(self):
+        for name in ("replies", "presence", "context", "documents"):
+            self.assertEqual(self.write["review/pr-12/" + name], "owner", name)
+
+    def test_the_rering_lease_stays_page_writable(self):
+        # A rule covers its path and everything below; the nearest one decides.
+        lease = "review/pr-12/rering/lease"
+        nearest = max((p for p in self.write if lease == p or lease.startswith(p + "/")), key=len)
+        self.assertEqual(nearest, "review/pr-12")
+        self.assertEqual(self.write[nearest], "interact")
+
+    def test_rules_are_well_formed_and_within_the_limit(self):
+        self.assertLessEqual(len(self.rules), 64)
+        self.assertEqual(len(self.write), len(self.rules), "a path is declared twice")
+        for r in self.rules:
+            self.assertEqual(set(r), {"path", "write"})
+            self.assertRegex(r["path"], r"^[A-Za-z0-9_\-.~:@+]+(/[A-Za-z0-9_\-.~:@+]+)*$")
+            self.assertIn(r["write"], ("interact", "admin", "owner"))
+
+    def test_numbered_per_desk(self):
+        paths = [r["path"] for r in build_desk.capabilities(7)["db"]["rules"]]
+        self.assertTrue(all(p == "review/pr-7" or p.startswith("review/pr-7/") for p in paths))
+
+
 class Cli(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -109,6 +146,11 @@ class Cli(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         with open(out, encoding="utf-8") as f:
             self.assertTrue(f.read().startswith("<title>Hostile Text Review</title>"))
+        lines = result.stdout.splitlines()
+        self.assertEqual(lines[0], out)
+        self.assertTrue(lines[1].startswith("capabilities: "))
+        self.assertEqual(json.loads(lines[1][len("capabilities: "):]),
+                         build_desk.capabilities(HOSTILE["number"]))
 
     def test_payload_without_a_number_is_refused(self):
         payload = dict(HOSTILE)

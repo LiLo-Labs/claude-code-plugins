@@ -449,7 +449,11 @@ function markdown(src){
 }
 
 /* ================= render the page ================= */
-let documents = (DATA.documents || []).slice();
+// A document names the file it is and carries its text. A row without both, from
+// the payload or the store, is skipped: pages() splits every name, and one
+// undefined name threw on every repaint after it.
+const isDocument = d => !!d && typeof d.name === 'string' && typeof d.text === 'string';
+let documents = (DATA.documents || []).filter(isDocument).map(d => ({name: d.name, text: d.text}));
 // The description, which the working session can rewrite while the page is open.
 let bodyText = DATA.body || '';
 let leaf = 0, freshOn = {};
@@ -718,10 +722,27 @@ function drawTabs(){
     + '</button>').join('')
     + '<button class="add" id="more" title="New thread">+</button>';
 }
+// What the working session has said, by the id of the message it answers, taken
+// only from review/pr-N/replies. Under the desk's rules only the owner writes
+// there. review/pr-N itself stays writable by any viewer, and a slot's stored
+// `content` and `status` are only this page's cache of a reply. Rendering that
+// cache let a viewer write a slot's content into the discussion document and
+// have it shown as the working session's words. So said() shows only what this
+// map holds, and the cache is kept only so a reload does not flag every answered
+// thread unread and save the whole document again.
+const sessionReplies = new Map();
+let repliesIn = false;
+
 // A reply slot for the working session holds nothing until the session writes
 // to it, so what it shows meanwhile is where the message has got to.
-function sessionWait(m){
-  if (m.status === 'working') return 'The working session has this and is working on it.';
+function sessionWait(m, r){
+  if (r) return r.status === 'working' ? 'The working session has this and is working on it.'
+    : 'The working session marked this answered without writing a reply.';
+  // The stored slot says the session took this, but no reply document backs it.
+  if (m.status === 'working' || m.status === 'done') return repliesIn
+    ? 'The saved discussion says this was answered, but the working session has no '
+      + 'reply for it on this desk.'
+    : 'Loading the working session’s reply…';
   if (m.status === 'unsent' && m.why === 'unsaved') return 'Not saved, so this will not '
     + 'reach the working session. Tell it directly.';
   if (m.status === 'unsent') return 'Saved, but this view could not ring the working '
@@ -747,9 +768,10 @@ const heardSince = ms => answeredAt > ms || lastHeard + 1000 > ms;
 
 function said(m){
   if (m.via !== 'session') return '<div class="said">'+esc(m.content)+'</div>';
-  if (m.content) return '<div class="said rich">'+markdown(m.content)+'</div>'
-    + (m.status === 'working' ? '<span class="who">still working</span>' : '');
-  return '<div class="said">'+esc(sessionWait(m))+'</div>';
+  const r = sessionReplies.get(m.answers);
+  if (r && r.text) return '<div class="said rich">'+markdown(r.text)+'</div>'
+    + (r.status === 'working' ? '<span class="who">still working</span>' : '');
+  return '<div class="said">'+esc(sessionWait(m, r))+'</div>';
 }
 
 function drawStream(){
@@ -818,7 +840,7 @@ function drawPresence(){
       gone = true;
     }
   } else if (heard){
-    line = 'Working session last answered' + when(new Date(heard).toISOString()) + '.';
+    line = 'Working session last answered' + when(heard) + '.';
   } else {
     line = 'The working session has not answered on this desk yet.';
   }
@@ -1028,6 +1050,7 @@ $('box').addEventListener('keydown', e => {
 function tidy(t){
   // A reply slot still waiting on the session is kept: it holds when the
   // message was sent, and dropping it would lose the "sent" state on reload.
+  // An answered slot keeps its content as a cache only; see sessionReplies.
   return {id:t.id, name:t.name,
           turns:t.turns.filter(m => (m.content && m.content !== 'Thinking…')
                                     || m.via === 'session')};
@@ -1189,8 +1212,10 @@ async function decide(v, quiet, why){
 // The page cannot see whether a session is running, so it says only what it
 // knows: saved, rung, or picked up. "I will merge it" was a promise nothing
 // on this side could keep.
-const when = iso => {
-  const t = new Date(iso);
+// Takes an ISO string or epoch milliseconds. Anything a Date cannot hold says
+// nothing rather than throwing, as toISOString would.
+const when = at => {
+  const t = new Date(at);
   return isNaN(t) ? '' : ' at ' + t.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
 };
 
@@ -1278,6 +1303,8 @@ async function restoreStored(){
     // thread but not its turns array, and pushing the next message onto that
     // frozen array threw "object is not extensible" -- so every message sent
     // after a reload was lost. Copy the turns too.
+    // A session slot's content comes back too, but any viewer can write this
+    // document, so it is never shown: said() waits for the replies listener.
     threads = had.threads.map(t => ({...t, busy: false,
       turns: (t.turns || []).map(m => ({...m}))}));
     live = 0;
@@ -1303,13 +1330,20 @@ function listenReplies(){
   let first = true;
   try {
     db.collection('review/pr-' + DATA.number + '/replies').onSnapshot(snap => {
-      let touched = false;
+      // shown: what said() renders changed. touched: the cached slots changed
+      // too, which is a reply the stored discussion did not already hold.
+      let touched = false, shown = !repliesIn;
+      repliesIn = true;
       snap.docs.forEach(d => {
         const r = d.data();
         if (!r || typeof r.turn !== 'string') return;
         replied.add(r.turn);
         const text = typeof r.text === 'string' ? r.text : '';
         const status = r.status === 'done' ? 'done' : 'working';
+        const was = sessionReplies.get(r.turn);
+        if (!was || was.text !== text || was.status !== status){
+          sessionReplies.set(r.turn, {text, status}); shown = true;
+        }
         for (const t of threads){
           const at = t.turns.findIndex(m => m.id === r.turn);
           if (at < 0) continue;
@@ -1327,7 +1361,7 @@ function listenReplies(){
           break;
         }
       });
-      if (touched){ draw(); save(); }
+      if (touched){ draw(); save(); } else if (shown) draw();
       if (first){ first = false; rering(); }
     });
   } catch (e) {}
@@ -1509,6 +1543,15 @@ paint(); draw();
   // The session's presence stamps, one per ring it handled. The first snapshot is
   // history, timed from the stamps' names; a stamp that arrives after it is an
   // answer happening now, timed by this clock.
+  // A name that is not an epoch second, or is one a Date cannot hold, times
+  // nothing. lastHeard only grows, so one bad name used to stay for the life of
+  // the page and throw in every draw(). A stamp more than a day ahead of this
+  // clock is ignored too, or "last answered" would stay stuck on it; that costs
+  // only a reviewer whose clock is a day behind, who then sees live stamps only.
+  const stampTime = id => {
+    const t = parseInt(String(id), 10) * 1000;
+    return Number.isFinite(t) && t > 0 && t < Date.now() + 86400000 ? t : 0;
+  };
   try {
     db.collection('review/pr-' + DATA.number + '/presence').onSnapshot(snap => {
       const first = stampsSeen === null;
@@ -1516,8 +1559,8 @@ paint(); draw();
       let newest = 0;
       snap.docs.forEach(d => {
         const row = d.data() || {};
-        const t = (parseInt(String(d.id), 10) || 0) * 1000;
-        if (t >= newest){
+        const t = stampTime(d.id);
+        if (t && t >= newest){
           newest = t;
           if (typeof row.resume === 'string') lastResume = row.resume;
         }
@@ -1548,12 +1591,28 @@ paint(); draw();
   // The document, live. Revised from the working session with write_db, this
   // page shows the new text without anyone reloading -- which is the point:
   // you say what is wrong, it changes under you, and you confirm.
+  //
+  // Each snapshot is the whole collection, in document-id order. Two rows can
+  // name one file (an earlier session wrote it under another id), and applying
+  // every row let whichever id sorts last win, and flagged the tab fresh on
+  // every snapshot because the two texts always differ. So one row per name is
+  // chosen first: the newest `at`, with a row that has none older than any that
+  // does, and a tie going to the later id as before.
+  const writtenAt = row => {
+    const t = typeof row.at === 'string' ? Date.parse(row.at) : NaN;
+    return isNaN(t) ? -Infinity : t;
+  };
   try {
     db.collection('review/pr-' + DATA.number + '/documents')
       .onSnapshot(snap => {
         let touched = false; const changed = [];
+        const newest = new Map();
         snap.docs.forEach(d => {
-          const row = d.data(); if (!row || typeof row.text !== 'string') return;
+          const row = d.data(); if (!isDocument(row)) return;
+          const had = newest.get(row.name);
+          if (!had || writtenAt(row) >= writtenAt(had)) newest.set(row.name, row);
+        });
+        newest.forEach(row => {
           const at = documents.findIndex(x => x.name === row.name);
           if (at >= 0 && documents[at].text === row.text) return;
           if (at >= 0) documents[at] = {name: row.name, text: row.text};

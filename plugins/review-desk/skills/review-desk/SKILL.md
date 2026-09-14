@@ -27,7 +27,8 @@ asked for.
 ## How it goes
 
 1. `/review-desk <pr>` — gather the request, build the page, publish it with the
-   `db` and `artifact` capabilities, hand over the link.
+   capabilities object the build prints (`db` with its write rules, and
+   `artifact`), hand over the link.
 2. They read, ask, argue, and press **Approve** or **Needs changes**. The page
    rings the session watching it; with no session watching, the next session
    start picks the desk up.
@@ -56,7 +57,9 @@ and the pull request. While no session is running, a message waits for the next
 one to start, and the page says so. Say that at handover.
 
 **Without `db` nothing reaches the session.** The page still renders, but
-neither a message nor a decision can be stored. Declare both capabilities.
+neither a message nor a decision can be stored. Declare both capabilities, with
+the write rules the build prints, or anyone the desk is shared with can write a
+reply the page shows as the working session's.
 
 ## The rule that matters
 
