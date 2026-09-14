@@ -742,3 +742,112 @@ test('a decision whose retry is refused after a send stored it is rung once and 
   assert.equal(await desk.page.textContent('#lostSlot'), '');
   assert.deepEqual(desk.errors, []);
 });
+
+/* ---- a ring that fails ---- */
+// artifact.d.ts: retry upstream_error once after a short randomized delay; treat
+// rate_limited as a signal to slow down, never to retry-loop.
+const publishes = log => log.filter(e => e.op === 'publish');
+const refusedPublishes = log => log.filter(e => e.op === 'publish refused');
+const RING_BACKOFF = 5000, RING_LEASE = 20000;
+
+test('a message ring refused once as upstream_error is retried at once, rung within 2 s, and never told to wait for the next session', async () => {
+  desk = await open(browser, {publishError: ['upstream_error']});
+  await ready(desk);
+  await desk.page.click('#fab');
+  await watchFor(desk, '#stream', 'upstream_error');
+  await sendText(desk, 'Still there?');
+  const sent = Date.now();
+  await pollFor('no ring within 2 s', async () => (await desk.rings()).length === 1, 2000);
+  assert.ok(Date.now() - sent < 2500);
+
+  const log = await desk.log();
+  const [refused] = refusedPublishes(log), [rung] = publishes(log);
+  assert.equal(refusedPublishes(log).length, 1);
+  assert.equal(refused.code, 'upstream_error');
+  const gap = rung.at - refused.at;
+  assert.ok(gap >= 300 && gap <= 1250, 'rung again after ' + gap + ' ms');
+  const slot = slots(await desk.until(s => slots(s).some(m => m.rungAt)))[0];
+  assert.equal(slot.status, 'sent');
+  assert.equal(slot.why, undefined);
+
+  // The watching session answers the ring, as it does within seconds when idle.
+  await desk.presence(String(Math.floor(Date.now() / 1000)));
+  await desk.page.waitForSelector('#stream >> text=Sent to the working session');
+  assert.doesNotMatch(await desk.page.textContent('#stream'), /next session/);
+  assert.deepEqual(await seen(desk), {}, 'the stream never showed the failure');
+  await desk.page.waitForTimeout(800);
+  assert.equal((await desk.rings()).length, 1);
+  assert.deepEqual(desk.errors, []);
+});
+
+// Both views read the failed slot, as a view reloaded by another view's ring does,
+// and ask for the lease together. Takes about 25 s for the lease to run out.
+test('a message ring refused as rate_limited is rung again after the backoff, once, by one of two views', async () => {
+  pair = await openPair(browser, {publishError: ['rate_limited']});
+  const [a, b] = pair;
+  for (const v of pair) await ready(v);
+  await a.page.click('#fab');
+  await sendText(a, 'Rate limited?');
+  const failed = await a.until(s => slots(s).some(m => m.why === 'rate_limited'));
+  const {answers: id, sentAt} = slots(failed)[0];
+  await a.page.waitForSelector('#stream >> text=did not go out (rate_limited). This view rings it again in a few seconds');
+  await b.reload();
+  await ready(b);
+
+  await pollFor('never rung again', async () => publishes(await a.log()).length === 1, RING_BACKOFF + 5000);
+  const [rung] = publishes(await a.log());
+  assert.ok(rung.at - sentAt >= RING_BACKOFF, 'rung again ' + (rung.at - sentAt) + ' ms after the send');
+  assert.deepEqual(rung.ring.doorbell.turns, [id]);
+  assert.equal(rung.ring.doorbell.again, true);
+
+  await a.page.waitForTimeout(RING_LEASE + 3000);   // the other view waits the lease out
+  const log = await a.log();
+  assert.equal(ringsFor(publishes(log).map(e => e.ring), id).length, 1, 'no second ring from the other view');
+  assert.equal(refusedPublishes(log).length, 1);
+  assert.equal(new Set(log.filter(e => e.op === 'acquire').map(e => e.view)).size, 2, 'both views asked for the lease');
+  const slot = slots(await a.store()).find(m => m.answers === id);
+  assert.equal(slot.status, 'sent');
+  assert.ok(slot.rungAt);
+  await b.page.click('#fab');
+  await b.page.waitForSelector('#stream >> text=Saved and rung');
+  assert.deepEqual(a.errors, []);
+});
+
+// artifact.d.ts allows a failed publish one retry. The send's ring and its retry are
+// two; rering's one more try must not retry inside itself, which made four.
+test('a message whose ring always fails as upstream_error makes at most 3 publish attempts over 15 s', async () => {
+  desk = await open(browser, {publishError: 'upstream_error'});
+  await ready(desk);
+  await desk.page.click('#fab');
+  await sendText(desk, 'Anyone?');
+  await desk.until(s => slots(s).some(m => m.why === 'upstream_error' && m.again), null, 12000);
+  await desk.page.waitForSelector('#stream >> text=Check, at the top of this panel, rings it again');
+  await desk.page.waitForTimeout(15000 - RING_BACKOFF);
+  const log = await desk.log();
+  assert.equal(refusedPublishes(log).length, 3);
+  assert.deepEqual(publishes(log), []);
+  assert.deepEqual(desk.errors, []);
+});
+
+test('a message whose re-ring is refused as rate_limited again is not rung a third time, and its line points at Check', async () => {
+  pair = await openPair(browser, {publishError: ['rate_limited', 'rate_limited']});
+  const [a] = pair;
+  await ready(a);
+  await a.page.click('#fab');
+  await sendText(a, 'Still limited?');
+  await pollFor('the re-ring was never tried', async () => refusedPublishes(await a.log()).length === 2,
+    RING_BACKOFF + 5000);
+  await a.until(s => slots(s).some(m => m.why === 'rate_limited' && m.again));
+  await a.page.waitForSelector('#stream >> text=Check, at the top of this panel, rings it again');
+
+  // Loaded again, the view reads that the one re-ring is spent.
+  await a.reload();
+  await ready(a);
+  await a.page.click('#fab');
+  await a.page.waitForSelector('#stream >> text=could not ring the working session (rate_limited)');
+  await a.page.waitForTimeout(RING_BACKOFF + 1500);
+  const log = await a.log();
+  assert.equal(refusedPublishes(log).length, 2);
+  assert.deepEqual(publishes(log), []);
+  assert.deepEqual(a.errors, []);
+});

@@ -398,10 +398,13 @@ page takes the time from the name:
     data: {"resume": "<the resume command>"}
 
 A ring with no new message and no new decision is the reviewer pressing
-**Check**. When nothing is waiting, a stale claim included (see "When they ask
-the working session" and "When they decide"), this stamp is the whole answer.
-Check is often pressed because an answer stalled, so look before concluding
-nothing is. A session that picks a desk up at
+**Check**. A Check ping also answers every waiting message and collects a
+waiting decision: handle it as you would any other ring. The page offers Check
+to ring again when a message's or a decision's own ring did not go out, so the
+thing the reviewer is waiting on may be in the store with nothing else to wake
+you for it. Only when nothing is waiting, a stale claim included (see "When
+they ask the working session" and "When they decide"), is this stamp the whole
+answer. A session that picks a desk up at
 session start stamps it too, with its own resume command, because the one in
 the payload resumes a session that may have ended. Use the current Unix time in
 seconds as its `doc_id`.

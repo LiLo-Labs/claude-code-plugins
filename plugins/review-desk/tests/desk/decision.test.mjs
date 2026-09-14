@@ -5,7 +5,7 @@
 // outcome, and a presence stamp for each ring it handles.
 import {test, before, after, afterEach} from 'node:test';
 import assert from 'node:assert/strict';
-import {launch, open, payload, approve} from './harness.mjs';
+import {launch, open, openPair, payload, approve} from './harness.mjs';
 
 const PR = 'review/pr-42';
 const RESUME = 'cd ~/code/claude-code-plugins && claude --resume 0123abcd-4567-89ab-cdef-0123456789ab';
@@ -148,23 +148,178 @@ test('the pickup line follows the session: picked up, merged, blocked with its d
   assert.equal(await line(), 'The working session is revising: Adding the alias and a test for it.');
 });
 
-test('Approve whose ring is refused says the view could not notify the working session, with the code', async () => {
-  for (const code of ['rate_limited', 'not_granted', 'upstream_error', 'not_writer']){
+const refusedPublishes = log => log.filter(e => e.op === 'publish refused');
+const LATER = ' If no session is running, the next one to start picks it up.';
+
+test('Approve whose ring is refused as rate_limited or upstream_error records the failure and says it tries again', async () => {
+  for (const code of ['rate_limited', 'upstream_error']){
     desk = await open(browser, {publishError: code});
     await ready(desk);
     await approve(desk);
-    await desk.until(s => s[PR] && s[PR].decision === 'approved');
-    await lineSays('could not notify');
-    assert.equal(await line(), 'Saved, but this view could not notify the working session (' + code
-      + '). If no session is running, the next one to start picks it up.', code);
+    const doc = (await desk.until(s => s[PR] && s[PR].decisionRing && s[PR].decisionRing.why === code))[PR];
+    assert.equal(doc.decisionRing.decidedAt, doc.decidedAt);
+    assert.equal(await line(), 'Saved, but the working session was not notified (' + code
+      + '). This view tries again in a few seconds.' + LATER, code);
     assert.deepEqual(await desk.rings(), [], code);
-    assert.equal((await desk.log()).filter(e => e.op === 'publish refused').length, 1, code + ' was retried');
-    if (code !== 'not_writer'){
+    // artifact.d.ts: retry only upstream_error, once; rate_limited slows down instead.
+    assert.equal(refusedPublishes(await desk.log()).length, code === 'upstream_error' ? 2 : 1, code);
+    if (code === 'rate_limited'){
       assert.deepEqual(await desk.missing(), []);
       assert.deepEqual(desk.errors, []);
       await desk.close();
     }
   }
+});
+
+test('a decision whose re-ring is refused again is not tried a third time, and the line points at Check', async () => {
+  desk = await open(browser, {publishError: 'rate_limited'});
+  await ready(desk);
+  await approve(desk);
+  await desk.until(s => s[PR] && s[PR].decisionRing && s[PR].decisionRing.again, null, 10000);
+  await lineSays('Check in the panel rings it again');
+  assert.equal(await line(), 'Saved, but this view could not notify the working session (rate_limited). '
+    + 'Check in the panel rings it again.' + LATER);
+  await desk.page.waitForTimeout(6500);              // past another backoff
+  assert.equal(refusedPublishes(await desk.log()).length, 2);
+});
+
+// artifact.d.ts: a read-only view still resolves the namespace, and its first
+// not_writer or not_granted is the read-only signal.
+test('a view refused as not_writer or not_granted stops ringing: the banner shows, Check goes, and nothing publishes again', async () => {
+  for (const code of ['not_writer', 'not_granted']){
+    desk = await open(browser, {publishError: code});
+    await ready(desk);
+    await desk.page.click('#fab');
+    await desk.page.waitForSelector('#check');
+    assert.equal(await desk.page.textContent('#aloneSlot'), '', code + ': nothing says read-only before a publish');
+
+    await desk.page.fill('#box', 'First message');
+    await desk.page.press('#box', 'Enter');
+    await desk.page.waitForSelector('#aloneSlot .lost >> text=This view cannot ring the working session');
+    assert.ok(await desk.page.isVisible('#aloneSlot .lost'), code);
+    assert.equal(await desk.page.locator('#check').count(), 0, code + ': Check is gone');
+    await desk.page.waitForSelector('#stream >> text=This view cannot ring the working session, so the next session to start answers it');
+
+    await desk.page.fill('#box', 'Second message');
+    await desk.page.press('#box', 'Enter');
+    await desk.page.click('#shut');
+    await approve(desk);
+    const doc = (await desk.until(s => s[PR] && s[PR].decision === 'approved' && s[PR].decisionRing
+      && s[PR].threads[0].turns.filter(m => m.via === 'session' && m.why === 'readonly').length === 2))[PR];
+    assert.equal(doc.decisionRing.why, 'readonly');
+    await lineSays('cannot notify');
+    assert.equal(await line(), 'Saved. This view cannot notify the working session, so the next session to start picks it up.');
+    await desk.page.waitForTimeout(600);
+
+    assert.equal(refusedPublishes(await desk.log()).length, 1, code + ': only the first attempt publishes');
+    assert.deepEqual(await desk.rings(), [], code);
+    for (const sel of ['#panel', '#decide'])
+      assert.doesNotMatch(await desk.page.textContent(sel), new RegExp('\\(' + code + '\\)|' + code), code + ' in ' + sel);
+    if (code === 'not_writer'){
+      assert.deepEqual(await desk.missing(), []);
+      assert.deepEqual(desk.errors, []);
+      await desk.close();
+    }
+  }
+});
+
+// Records every pickup line the decision slab is drawn with, at the moment it is
+// written, with the page's clock then. A MutationObserver read
+// the text only when its callback ran, after the stub had loaded, rung and redrawn
+// in one burst of microtasks, so an intermediate line was never seen.
+const recordLines = () => {
+  window.__lines = [];
+  const html = Object.getOwnPropertyDescriptor(Element.prototype, 'innerHTML');
+  Object.defineProperty(Element.prototype, 'innerHTML', {...html, set(v){
+    const m = this.id === 'decide' && /<p class="pickup">([^<]*)<\/p>/.exec(String(v));
+    if (m) window.__lines.push({text: m[1], at: Date.now()});
+    return html.set.call(this, v);
+  }});
+};
+const decisionPublishes = log => log.filter(e => e.op === 'publish' && e.ring.doorbell && e.ring.doorbell.kind === 'decision');
+// Lines that said the view was waiting, drawn before `until` (a publish's `at`,
+// which the stub stamps with the same page clock, or Infinity for any at all).
+const waitingBefore = (lines, until) => lines.filter(l => /Waiting for the working session/.test(l.text) && l.at < until);
+const pollFor = async (what, fn, timeout) => {
+  for (const end = Date.now() + timeout;;){
+    if (await fn()) return;
+    if (Date.now() > end) throw new Error(what);
+    await new Promise(r => setTimeout(r, 100));
+  }
+};
+
+test('a decision whose ring failed twice as upstream_error is rung once by the reloaded view, which never says it is waiting first', async () => {
+  const [a, b] = await openPair(browser, {publishError: ['upstream_error', 'upstream_error'], init: recordLines});
+  desk = a;
+  await ready(a); await ready(b);
+  await approve(a);
+  const {decidedAt} = (await a.until(s => s[PR] && s[PR].decisionRing
+    && s[PR].decisionRing.why === 'upstream_error'))[PR];
+  assert.equal(refusedPublishes(await a.log()).length, 2);
+  assert.match(await line(), /^Saved, but the working session was not notified \(upstream_error\)\./);
+  assert.deepEqual(waitingBefore(await a.page.evaluate('window.__lines'), Infinity), []);
+
+  // The tab reloads before its own retry, as a closed iPad tab reopened would.
+  const reloadedAt = Date.now();
+  await a.reload();
+  await ready(a);
+  await pollFor('the reloaded view never rang the decision', async () =>
+    decisionPublishes(await a.log()).length === 1, 20000);
+  const [ring] = decisionPublishes(await a.log());
+  assert.equal(ring.view, 'view-a');
+  assert.ok(ring.at - reloadedAt < 20000, 'rung ' + (ring.at - reloadedAt) + ' ms after the reload');
+  assert.deepEqual([ring.ring.doorbell.decision, ring.ring.doorbell.decidedAt], ['approved', decidedAt]);
+  const stored = (await a.until(s => s[PR].decisionRing && s[PR].decisionRing.rungAt))[PR];
+  assert.equal(stored.decisionRing.decidedAt, decidedAt);
+  assert.ok(stored.decisionRing.again, 'the one re-ring is spent');
+  await lineSays('Waiting for the working session');
+  assert.deepEqual(waitingBefore(await a.page.evaluate('window.__lines'), ring.at), []);
+
+  // The other view loads the rung record: it says waiting, and nothing rings again.
+  await b.reload();
+  await ready(b);
+  await b.page.waitForSelector('#decide .pickup >> text=Waiting for the working session');
+  await a.page.waitForTimeout(6500);                 // past the backoff
+  assert.equal(decisionPublishes(await a.log()).length, 1);
+  assert.equal(refusedPublishes(await a.log()).length, 2);
+  assert.deepEqual(await b.missing(), []);
+});
+
+// A desk an older page wrote has no decisionRing. From before pickup stamps it has
+// no pickup either, though its decision was collected long ago: a ring would make a
+// session treat it as new and comment on the pull request a second time. So it is
+// never rung, and its line claims neither that a session is waiting nor that none
+// was told.
+const NEUTRAL = 'Saved. What the working session did with it shows here once it reports back.';
+test('a stored decision with no recorded ring is never rung on load, pickup or not, and never says it is waiting', async () => {
+  const decidedAt = '2026-09-12T10:00:00.000Z';
+  const seed = {[PR]: {pr: 42, title: 'Harness desk', decision: 'approved', reason: null, decidedAt, threads: []}};
+  const earlierPickup = {[PR + '/context/pickup']: {decision: 'needs changes',
+    decidedAt: '2026-09-11T10:00:00.000Z', session: 's', at: '2026-09-11T10:01:00.000Z'}};
+  for (const [name, s, capabilities] of [['no pickup', seed], ['an earlier decision\'s pickup', {...seed, ...earlierPickup}],
+      ['a view that cannot ring', seed, ['db']]]){
+    desk = await open(browser, {seed: s, init: recordLines, ...(capabilities ? {capabilities} : {})});
+    await ready(desk);
+    // A page that rang it did so at once: decidedAt is two days old, well past
+    // RERING_AFTER and RING_BACKOFF.
+    await desk.page.waitForTimeout(3000);
+    assert.deepEqual(await desk.rings(), [], name);
+    assert.deepEqual((await desk.log()).filter(e => e.op === 'publish refused' || e.op === 'acquire'), [], name);
+    assert.equal(await line(), NEUTRAL, name);
+    assert.deepEqual(waitingBefore(await desk.page.evaluate('window.__lines'), Infinity), [], name);
+    assert.equal((await desk.store())[PR].decisionRing, undefined, name + ': nothing is written for it');
+    assert.deepEqual(await desk.missing(), []);
+    assert.deepEqual(desk.errors, []);
+    await desk.close();
+  }
+
+  // The same decision picked up already: nothing rings, and the pickup line shows.
+  desk = await open(browser, {seed: {...seed, [PR + '/context/pickup']: {decision: 'approved',
+    decidedAt, session: 's', at: '2026-09-12T10:01:00.000Z'}}});
+  await lineSays('Picked up by the working session');
+  await desk.page.waitForTimeout(1500);
+  assert.deepEqual(await desk.rings(), []);
+  assert.deepEqual(await desk.missing(), []);
 });
 
 test('a view that cannot ring records a decision and says it could not notify the working session', async () => {
@@ -284,9 +439,13 @@ test('Approve then Confirm stores approved with decidedAt, decidedOn and repo, a
   await ready(desk);
   const before = new Date().toISOString();
   await approve(desk);
-  const doc = (await desk.until(s => s[PR] && s[PR].decision === 'approved'))[PR];
+  const doc = (await desk.until(s => s[PR] && s[PR].decision === 'approved' && s[PR].decisionRing))[PR];
   assert.deepEqual(Object.keys(doc).sort(),
-    ['decidedAt', 'decidedOn', 'decision', 'pr', 'reason', 'repo', 'threads', 'title', 'updatedAt']);
+    ['decidedAt', 'decidedOn', 'decision', 'decisionRing', 'pr', 'reason', 'repo', 'threads', 'title', 'updatedAt']);
+  // The ring's outcome is stored with the decision it rang for, so a later load
+  // knows whether anything was told.
+  assert.deepEqual(Object.keys(doc.decisionRing).sort(), ['decidedAt', 'rungAt']);
+  assert.equal(doc.decisionRing.decidedAt, doc.decidedAt);
   assert.equal(doc.decidedOn, HEAD);
   assert.equal(doc.repo, 'LiLo-Labs/claude-code-plugins');
   assert.equal(doc.reason, null);
