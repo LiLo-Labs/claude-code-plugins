@@ -1,7 +1,8 @@
 // What the page stores, and when. review/pr-N holds the reviewer's turns and where
 // each message has got to; the working session's words live only in replies/.
 // Nothing but a reviewer's own action writes review/pr-N, so an open view that
-// only watches never rewrites what another view saved. And every live listener
+// only watches never rewrites what another view saved. A view that sees another
+// view's save land stops saving and asks to be reloaded. And every live listener
 // says so when it dies, instead of leaving the panel waiting for good.
 import {test, before, after, afterEach} from 'node:test';
 import assert from 'node:assert/strict';
@@ -850,4 +851,229 @@ test('a message whose re-ring is refused as rate_limited again is not rung a thi
   assert.equal(refusedPublishes(log).length, 2);
   assert.deepEqual(publishes(log), []);
   assert.deepEqual(a.errors, []);
+});
+
+/* ---- a view another tab or device has overtaken ---- */
+// Every save is a whole-document set, so a view holding threads older than the
+// store's replaces whatever landed since. A view that sees a save it did not make
+// says so, and every save path it has stops.
+const STALE = 'This desk changed in another tab or device. Reload to see the latest and continue.';
+// Resolves once this view's listener on review/pr-N has had its first snapshot.
+const watchingDesk = d => d.page.waitForFunction('!!FEEDS.desk && FEEDS.desk.ever', null, {timeout: 5000});
+const setsFrom = (log, view, from = 0) => prSets(log, from).filter(e => e.view === view);
+const notStale = async d => {
+  assert.equal(await d.page.evaluate('outdated'), false);
+  assert.equal(await d.page.textContent('#stalePage'), '');
+  assert.equal(await d.page.textContent('#staleSlot'), '');
+};
+
+test('a view opened before another view saves is told it is out of date, and its Send, Approve, Needs changes and closing a thread write nothing', async () => {
+  pair = await openPair(browser, {seed: leanDesk()});
+  const [a, b] = pair;
+  for (const v of pair){ await ready(v); await watchingDesk(v); }
+  await b.page.click('#fab');
+  await b.page.click('#ok');                        // B is on the Confirm step
+  await a.page.click('#fab');
+  await sendText(a, 'Q from view A');
+  await a.until(s => asked(s).includes('Q from view A')
+    && slots(s).some(m => !['u1', 'u2'].includes(m.answers) && m.rungAt));
+
+  await b.page.waitForSelector('#staleSlot .lost');
+  for (const sel of ['#stalePage', '#staleSlot']){
+    assert.equal(await b.page.textContent(sel + ' .lost'), STALE + 'Reload');
+    assert.equal(await b.page.locator(sel + ' button[data-reload]').count(), 1);
+  }
+  const from = (await b.log()).length;
+
+  // Send: Enter, a forced click and a direct call.
+  await sendText(b, 'Typed in view B');
+  assert.ok(await b.page.isDisabled('#send'));
+  await b.page.click('#send', {force: true});
+  await b.page.evaluate(() => send());
+  assert.equal(await b.page.inputValue('#box'), 'Typed in view B');
+  // Approve, through the Confirm step that was already open.
+  assert.ok(await b.page.isDisabled('#approveConfirm'));
+  await b.page.click('#approveConfirm', {force: true});
+  await b.page.evaluate(() => decide('approved'));
+  // Needs changes: the buttons are off and say why beside them, and a reason form
+  // that was already open records nothing and keeps the reason.
+  await b.page.click('#approveBack');
+  assert.ok(await b.page.isDisabled('#ok'));
+  assert.ok(await b.page.isDisabled('#changes'));
+  assert.equal(await b.page.textContent('#decideState'), STALE + 'Reload');
+  await b.page.evaluate(() => askReason(''));
+  await b.page.fill('#why', 'View B wants changes');
+  await b.page.click('#recordReason');
+  assert.equal(await b.page.inputValue('#why'), 'View B wants changes');
+  // Closing a thread asks nothing and closes nothing.
+  await b.page.click('[data-shut="1"]');
+  assert.equal(await b.page.locator('#closeYes').count(), 0);
+  await b.page.evaluate(() => closeThread(threads[1].id));
+  assert.equal(await b.page.locator('#tabs .tab').count(), 2);
+
+  await b.page.waitForTimeout(1500);                // past the debounce and a retry delay
+  assert.deepEqual(setsFrom(await b.log(), 'view-b', from), []);
+  const store = await b.store();
+  assert.deepEqual(asked(store), ['Why a lease?', 'Q from view A', 'What did you reject?']);
+  assert.equal(store[PR].decision, null);
+  assert.equal(store[PR].threads.length, 2);
+  assert.equal(store[PR].writer, await a.page.evaluate('viewId'));
+  await notStale(a);
+  assert.deepEqual(b.errors, []);
+});
+
+test('a view\'s own saves never mark it out of date: two quick sends, then an Approve', async () => {
+  desk = await open(browser, {seed: leanDesk()});
+  await ready(desk);
+  await watchingDesk(desk);
+  await desk.page.click('#fab');
+  await sendText(desk, 'First quick question');
+  await sendText(desk, 'Second quick question');
+  await desk.until(s => slots(s).filter(m => m.rungAt).length === 4, null, 5000);
+  await desk.page.click('#shut');
+  await approve(desk);
+  await desk.until(s => s[PR].decision === 'approved' && s[PR].decisionRing && s[PR].decisionRing.rungAt);
+  await desk.page.waitForTimeout(1000);
+
+  const self = await desk.page.evaluate('viewId');
+  const snaps = await desk.snapshots(PR);
+  assert.ok(snaps.some(s => s.hasPendingWrites && s.writer === self), 'no pending snapshot of its own save');
+  assert.ok(snaps.some(s => !s.hasPendingWrites && !s.fromCache && s.writer === self), 'no confirmed echo');
+  await notStale(desk);
+  const store = await desk.store();
+  assert.deepEqual(asked(store), ['Why a lease?', 'First quick question', 'Second quick question', 'What did you reject?']);
+  assert.equal(store[PR].writer, self);
+  assert.equal(typeof store[PR].writtenAt, 'string');
+  assert.equal(await desk.page.isDisabled('#redo'), false);
+  assert.deepEqual(desk.errors, []);
+});
+
+test('a view whose save is refused as unavailable and stored on the retry is not marked out of date', async () => {
+  desk = await open(browser, {seed: leanDesk(), setFailures: {[PR]: ['unavailable']}});
+  await ready(desk);
+  await watchingDesk(desk);
+  await desk.page.click('#fab');
+  await sendText(desk, 'Stored on the retry');
+  await desk.until(s => asked(s).includes('Stored on the retry')
+    && slots(s).some(m => !['u1', 'u2'].includes(m.answers) && m.rungAt), null, 4000);
+  await desk.page.waitForTimeout(1000);
+
+  assert.equal(refusals(await desk.log()).length, 1);
+  const self = await desk.page.evaluate('viewId');
+  const snaps = await desk.snapshots(PR);
+  // The refused set showed as pending, then the restored document came back.
+  const pending = snaps.findIndex(s => s.hasPendingWrites);
+  assert.ok(pending >= 0 && snaps.slice(pending + 1).some(s => !s.hasPendingWrites && s.writer === undefined),
+    'no rollback snapshot: ' + JSON.stringify(snaps));
+  assert.ok(snaps.some(s => !s.hasPendingWrites && s.writer === self));
+  await notStale(desk);
+  assert.equal(await desk.page.isDisabled('#send'), false);
+  assert.deepEqual(desk.errors, []);
+});
+
+test('an out-of-date view keeps what was typed, and Reload loads the latest discussion and clears the banner', async () => {
+  pair = await openPair(browser);
+  const [a, b] = pair;
+  for (const v of pair){ await ready(v); await watchingDesk(v); await v.page.click('#fab'); }
+  await sendText(a, 'Asked in view A');
+  await a.until(s => slots(s).some(m => m.rungAt));
+  await b.page.waitForSelector('#staleSlot .lost');
+
+  await sendText(b, 'Typed in view B');
+  await b.page.waitForTimeout(600);
+  assert.equal(await b.page.inputValue('#box'), 'Typed in view B');
+  assert.equal(await b.page.locator('#stream .turn').count(), 0);
+
+  await b.page.evaluate(() => { window.__beforeReload = true; });
+  await b.page.click('#staleSlot [data-reload]');
+  await b.page.waitForFunction('!window.__beforeReload && typeof restore !== "undefined" && restore === "done"',
+    null, {timeout: 8000});
+  await watchingDesk(b);
+  await notStale(b);
+  await b.page.click('#fab');
+  await b.page.waitForSelector('#stream >> text=Asked in view A');
+  assert.equal(await b.page.inputValue('#box'), '');
+
+  // Current again, B saves; now A is the view behind.
+  await sendText(b, 'Asked in view B after reloading');
+  await b.until(s => asked(s).includes('Asked in view B after reloading') && slots(s).length === 2);
+  await a.page.waitForSelector('#staleSlot .lost');
+  assert.deepEqual(asked(await a.store()), ['Asked in view A', 'Asked in view B after reloading']);
+  await notStale(b);
+  assert.deepEqual(a.errors, []);
+});
+
+test('a document an older page saved, with no writer, changing under the view marks it out of date', async () => {
+  const seed = leanDesk();
+  seed[PR].updatedAt = '2026-09-13T10:00:00.000Z';
+  desk = await open(browser, {seed});
+  await ready(desk);
+  await watchingDesk(desk);
+  await desk.page.click('#fab');
+  await notStale(desk);
+
+  // An older page in another tab saves the whole document: updatedAt, no writer.
+  const older = JSON.parse(JSON.stringify(seed[PR]));
+  older.threads[0].turns.push({id: 'u3', role: 'user', content: 'Asked from an older page', to: 'session'});
+  older.updatedAt = '2026-09-13T10:05:00.000Z';
+  const from = (await desk.log()).length;
+  await desk.write(PR, older);
+  await desk.page.waitForSelector('#staleSlot .lost');
+
+  await sendText(desk, 'Not saved over the older page');
+  await desk.page.waitForTimeout(1000);
+  assert.deepEqual(prSets(await desk.log(), from).filter(e => e.by === 'page'), []);
+  assert.deepEqual((await desk.store())[PR], older);
+  assert.equal(await desk.page.inputValue('#box'), 'Not saved over the older page');
+  assert.deepEqual(desk.errors, []);
+});
+
+test('a first snapshot served from cache does not mark the view out of date', async () => {
+  const seed = leanDesk();
+  Object.assign(seed[PR], {writer: 'v-another-tab', writtenAt: '2026-09-13T10:05:00.000Z'});
+  // What this device cached before that tab's last save.
+  const cached = {...seed[PR], threads: seed[PR].threads.slice(0, 1), writtenAt: '2026-09-13T10:00:00.000Z'};
+  desk = await open(browser, {seed, cacheFirst: {[PR]: cached}});
+  await ready(desk);
+  await watchingDesk(desk);
+  await pollFor('no definitive snapshot followed the cached one', async () => {
+    const s = await desk.snapshots(PR);
+    return s.length >= 2 && s[0].fromCache && !s[1].fromCache;
+  }, 5000);
+  await desk.page.waitForTimeout(300);
+  await notStale(desk);
+
+  await desk.page.click('#fab');
+  await sendText(desk, 'Sent after a cached snapshot');
+  await desk.until(s => asked(s).includes('Sent after a cached snapshot'));
+  await desk.page.waitForTimeout(600);
+  await notStale(desk);
+  assert.deepEqual(desk.errors, []);
+});
+
+test('the review document\'s feed dying shows the dead-feed line and does not mark the view out of date', async () => {
+  desk = await open(browser, {seed: leanDesk()});
+  await ready(desk);
+  await watchingDesk(desk);
+  await desk.kill(PR);
+  await desk.page.waitForSelector('#pageFeeds .lost');
+  assert.match(await desk.page.textContent('#pageFeeds'),
+    /This view stopped receiving changes made to this desk in other tabs or devices \(unavailable\)/);
+  await notStale(desk);
+  await desk.page.waitForFunction(() => !document.querySelector('#pageFeeds .lost'), null, {timeout: 8000});
+  assert.equal(await desk.subscribes(PR), 2);
+  await desk.page.click('#fab');
+  await sendText(desk, 'Sent after the feed came back');
+  await desk.until(s => asked(s).includes('Sent after the feed came back'));
+  await desk.page.waitForTimeout(600);
+  await notStale(desk);
+
+  // Revoked, it stays dead with no Try again, and the view still saves.
+  await desk.kill(PR, 'revoked');
+  await desk.page.waitForSelector('#pageFeeds .lost');
+  assert.equal(await desk.page.locator('#pageFeeds button').count(), 0);
+  await sendText(desk, 'Sent with the feed revoked');
+  await desk.until(s => asked(s).includes('Sent with the feed revoked'));
+  await notStale(desk);
+  assert.deepEqual(desk.errors, []);
 });
