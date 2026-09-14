@@ -379,7 +379,7 @@ class Desk(unittest.TestCase):
         self.assertIn('"cwd": "<launch directory>", "head": "<headRefOid>", '
                       '"branch": "<headRefName>", "collectedAt": null}', down)
         self.assertIn("its `head` and `branch` to this publish's", down)
-        self.assertIn("Every later rewrite of `context/body` for a push sets the entry's `head`",
+        self.assertIn("Every later head sync, whether a rewrite of `context/body` for a push, a republish, or `/review-collect` bringing the desk to a moved head, sets the entry's `head`",
                       down)
         self.assertIn("An entry written before these fields were recorded has neither and still works",
                       down)
