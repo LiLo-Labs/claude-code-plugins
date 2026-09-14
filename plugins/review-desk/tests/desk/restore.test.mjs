@@ -113,6 +113,123 @@ test('while the stored document loads, Approve, Send and the openers write nothi
   assert.deepEqual(desk.errors, []);
 });
 
+// Whether some element outside the chat panel is on screen and says `source`.
+// The panel is closed in these tests, so its banner is not on screen; what the
+// reviewer sees has to come from the page itself.
+const onPage = source => {
+  const re = new RegExp(source);
+  return [...document.querySelectorAll('body *')].some(el => !el.closest('#panel')
+    && el.checkVisibility() && re.test(el.innerText || ''));
+};
+const shownOnPage = (desk, source, timeout = 5000) =>
+  desk.page.waitForFunction(onPage, source, {timeout});
+const enabled = (desk, sel, timeout = 5000) =>
+  desk.page.waitForFunction(s => !document.querySelector(s).disabled, sel, {timeout});
+const PAGE_FEEDS = ['/context/body', '/presence', '/context/pickup', '/documents'];
+
+test('with the panel closed, a failed restore says so beside the decision, and Try again there loads it', async () => {
+  desk = await open(browser, {seed: decidedDesk(), getFailures: 2});
+  await shownOnPage(desk, 'could not be read');
+  assert.equal(await desk.page.evaluate(() => document.body.classList.contains('open')), false);
+  assert.ok(await desk.page.isDisabled('#ok'));
+  assert.ok(await desk.page.isDisabled('#changes'));
+  const retry = desk.page.locator('#decide').getByRole('button', {name: 'Try again'});
+  assert.ok(await retry.isVisible());
+
+  await retry.click();
+  // The stored decision comes back, so the slab turns to it.
+  await desk.page.waitForSelector('#decide >> text=approved');
+  assert.equal(await desk.page.evaluate(onPage, 'could not be read'), false);
+  assert.equal(await desk.page.textContent('#lostSlot'), '');
+  await desk.page.click('#redo');
+  await enabled(desk, '#ok');
+  assert.equal(reads(await desk.log()), 3);
+  assert.deepEqual(writes(await desk.log()), []);
+  assert.deepEqual(desk.errors, []);
+});
+
+test('Try again beside the decision enables Approve when the store has nothing saved yet', async () => {
+  desk = await open(browser, {seed: {}, getFailures: 2});
+  await shownOnPage(desk, 'could not be read');
+  await desk.page.locator('#decide').getByRole('button', {name: 'Try again'}).click();
+  await enabled(desk, '#ok');
+  assert.equal(await desk.page.textContent('#decideState'), '');
+  assert.deepEqual(desk.errors, []);
+});
+
+test('with the panel closed, a slow restore says the saved discussion is loading beside the decision', async () => {
+  desk = await open(browser, {seed: decidedDesk(), getDelay: 4000});
+  await desk.page.waitForTimeout(1000);
+  assert.ok(await desk.page.evaluate(onPage, 'Loading the saved discussion'));
+  assert.ok(await desk.page.isDisabled('#ok'));
+  await desk.page.waitForSelector('#decide >> text=approved', {timeout: 6000});
+  assert.equal(await desk.page.evaluate(onPage, 'Loading the saved discussion'), false);
+  assert.deepEqual(desk.errors, []);
+});
+
+test('malformed stored threads do not stop the page: controls come on and every listener starts', async () => {
+  const seed = {[PR]: {pr: 42, title: 'Harness desk', threads: [null, {turns: {}}]}};
+  desk = await open(browser, {seed});
+  await enabled(desk, '#ok');
+  await enabled(desk, '#send');
+  await desk.page.waitForFunction(paths => paths.every(p =>
+    window.__desk.log().some(e => e.op === 'subscribe' && e.path === p)),
+    [...PAGE_FEEDS, '/replies'].map(p => PR + p));
+  assert.equal(await desk.page.evaluate(onPage, 'could not be read|Loading the saved'), false);
+  await desk.page.waitForTimeout(600);
+  assert.deepEqual(writes(await desk.log()), []);
+  assert.deepEqual(await desk.store(), seed);
+  assert.deepEqual(desk.errors, []);
+});
+
+test('bad threads and turns are skipped in memory, and the store keeps them until the reviewer sends', async () => {
+  const seed = {[PR]: {pr: 42, title: 'Harness desk', threads: [
+    null, 'stray',
+    {id: 't1', name: 'Kept', turns: [null, 7, ['x'],
+      {id: 'm-old', role: 'user', content: 'Still here', to: 'session'}]},
+    {turns: {}}]}};
+  desk = await open(browser, {seed});
+  await desk.page.click('#fab');
+  await desk.page.waitForSelector('#stream >> text=Still here');
+  assert.deepEqual(await desk.page.$$eval('#tabs .tab', b => b.map(x => x.textContent)), ['Kept', 'Thread 2']);
+  await desk.page.waitForTimeout(600);
+  assert.deepEqual(writes(await desk.log()), [], 'restoring writes nothing back');
+  assert.deepEqual(await desk.store(), seed);
+
+  await desk.page.fill('#box', 'Asked after the odd load');
+  await desk.page.press('#box', 'Enter');
+  const store = await desk.until(s => asked(s).includes('Asked after the odd load'));
+  assert.deepEqual(asked(store), ['Still here', 'Asked after the odd load']);
+  assert.deepEqual(store[PR].threads.map(t => t.name), ['Kept', 'Thread 2']);
+  assert.deepEqual(desk.errors, []);
+});
+
+test('a restore that throws before it reads still shows Try again, and the page feeds start', async () => {
+  // db.doc throws once, on the main document, as a store refusing the path would.
+  const init = () => {
+    const real = window.claude;
+    let thrown = false;
+    window.claude = {use: async name => {
+      const got = await real.use(name);
+      if (name !== 'db' || !got) return got;
+      return {collection: p => got.collection(p), doc: p => {
+        if (!thrown && p === 'review/pr-42'){ thrown = true; throw new TypeError('stubbed doc throw'); }
+        return got.doc(p);
+      }};
+    }};
+  };
+  desk = await open(browser, {seed: decidedDesk(), init});
+  await shownOnPage(desk, 'could not be read \\(stubbed doc throw\\)');
+  await desk.page.waitForFunction(paths => paths.every(p =>
+    window.__desk.log().some(e => e.op === 'subscribe' && e.path === p)),
+    PAGE_FEEDS.map(p => PR + p));
+  await desk.page.locator('#decide').getByRole('button', {name: 'Try again'}).click();
+  await desk.page.waitForSelector('#decide >> text=approved');
+  assert.equal(await desk.subscribes(PR + '/replies'), 1);
+  for (const p of PAGE_FEEDS) assert.equal(await desk.subscribes(PR + p), 1, 'started once: ' + p);
+  assert.deepEqual(desk.errors, []);
+});
+
 test('a stored message with no recorded ring is rung again once, and not on the next load', async () => {
   const seed = {[PR]: {pr: 42, threads: [{id: 't1', name: 'Earlier', turns: [
     {id: 'm-lost', role: 'user', content: 'Saved but never rung', to: 'session'},
@@ -290,6 +407,18 @@ test('when the lease holder never stores an outcome, the slot is rung once into 
   const stored = turnsIn(store).find(m => m.answers === 'm-a');
   assert.equal(stored.status, 'sent');
   assert.equal(stored.why, undefined);
+  assert.deepEqual(desk.errors, []);
+});
+
+// The re-ring outcome is written by the view on its own, not by the reviewer, so
+// it must leave entries it cannot read exactly as they are stored.
+test('a re-ring into a document with malformed threads stores its outcome and keeps them as they were', async () => {
+  const slot = {status: 'unsent', why: 'conflict', sentAt: Date.now() - 60000};
+  desk = await open(browser, {seed: {[PR]: unrungDesk(slot, [null, {turns: {}}])}});
+  const store = await desk.until(s => s[PR].threads[0].turns.some(m => m.answers === 'm-a' && m.rungAt));
+  assert.equal(store[PR].threads[1], null);
+  assert.deepEqual(store[PR].threads[2], {turns: {}});
+  assert.equal((await desk.rings()).length, 1);
   assert.deepEqual(desk.errors, []);
 });
 

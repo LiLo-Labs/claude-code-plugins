@@ -250,6 +250,8 @@ body.open #panel{display:flex}
   border-radius:5px;cursor:pointer}
 .btn:disabled,.seed button:disabled{opacity:.45;cursor:default}
 #pageFeeds .lost{margin:14px 0 0}
+#decideState .lost{margin:14px 18px 0}
+#decideState .restoring{padding:14px 18px 0;font-size:13.5px;color:var(--soft)}
 
 .compose{display:flex;gap:8px;padding:11px 13px;border-top:1px solid var(--rule);
   align-items:flex-end;flex-shrink:0}
@@ -305,6 +307,7 @@ footer{padding:22px 0 0;font-size:12.5px;color:var(--faint);line-height:1.6}
 
   <div class="slab" id="decide">
     <div class="cap">When you have made up your mind</div>
+    <div id="decideState"></div>
     <div class="verdict">
       <span class="note">Recorded here. I pick it up, write the discussion into
       the pull request, and merge or revise accordingly.</span>
@@ -869,6 +872,26 @@ function gate(){
   sendBtn.disabled = blocked() || threads[live].busy;
   document.querySelectorAll('#seed button, #ok, #changes')
     .forEach(b => { b.disabled = blocked(); });
+  drawDecideState();
+}
+// Why Approve and Needs changes are off, said beside them. The panel's banner
+// alone left a reviewer with the panel closed looking at two dimmed buttons and
+// nothing else. Rewritten only when what it says changes, so a draw() landing
+// between a press on Try again and its click does not replace the button.
+function drawDecideState(){
+  const el = $('decideState');
+  if (!el) return;
+  const say = restore === 'pending' ? 'pending' : restore === 'failed' ? 'failed:' + unreadWhy : '';
+  if (el.dataset.say === say) return;
+  el.dataset.say = say;
+  el.innerHTML = restore === 'pending'
+    ? '<div class="restoring">Loading the saved discussion… Approve and Needs changes '
+      + 'come on once it has loaded.</div>'
+    : restore === 'failed'
+    ? '<div class="lost">Not loaded — the saved discussion could not be read ('
+      + esc(unreadWhy) + '). Approve and Needs changes are off until it loads, so '
+      + 'nothing stored is replaced.<button data-retry-restore>Try again</button></div>'
+    : '';
 }
 function drawCarry(){
   $('carrySlot').innerHTML = carried
@@ -1343,6 +1366,7 @@ function askReason(existing){
 function offerDecision(){
   showingDecided = false;
   $('decide').innerHTML = '<div class="cap">When you have made up your mind</div>'
+    + '<div id="decideState"></div>'
     + '<div class="verdict"><span class="note">Recorded here and sent to the '
     + 'working session, which writes the discussion into the pull request and '
     + 'merges or revises accordingly.</span>'
@@ -1430,16 +1454,53 @@ function drawDecided(){
 /* ================= restore ================= */
 // A failed read gets its own banner, not sayLost's: nothing typed here is at
 // risk, and reading again is the fix rather than the danger.
+// The same failure is also said in the decision slab (drawDecideState), so each
+// Try again is found by attribute rather than by one id.
+let unreadWhy = '';
 function sayUnread(why){
   lost = 'unread';
+  unreadWhy = why;
   $('lostSlot').innerHTML = '<div class="lost">Not loaded — the saved discussion '
     + 'could not be read (' + esc(why) + '). Sending and deciding are off until it '
-    + 'loads, so nothing stored is replaced.<button id="retryRestore">Try again</button></div>';
+    + 'loads, so nothing stored is replaced.<button data-retry-restore>Try again</button></div>';
 }
-$('lostSlot').addEventListener('click', async e => {
-  if (e.target.id !== 'retryRestore' || restore !== 'failed') return;
-  if (await restoreStored()) listenReplies();
+function restoreFailed(e){
+  restore = 'failed';
+  sayUnread((e && (e.code || e.message)) || 'the read failed');
+  try { draw(); } catch (x) {}
+  return false;
+}
+document.addEventListener('click', async e => {
+  if (!(e.target.closest && e.target.closest('[data-retry-restore]'))) return;
+  if (restore !== 'failed' || !db) return;
+  const restored = await restoreStored();
+  followPage();
+  if (restored) listenReplies();
 });
+
+// What restore keeps of the stored threads. review/pr-N is writable by any
+// viewer, by write_db, and by older and newer versions of this page, so a thread
+// may be null or carry turns that are not an array. Mapping one of those threw,
+// and restore never finished: every control stayed off with no banner. A thread
+// that is not an object and a turn that is not an object are skipped, and a
+// thread's missing turns, id or name are filled in. This is the in-memory copy
+// only. Nothing is written back until the reviewer sends, decides or closes a
+// thread, so another view that reads the stored shape differently still finds it.
+const isRow = v => !!v && typeof v === 'object' && !Array.isArray(v);
+function restoredThreads(stored){
+  // The store hands back frozen objects. Spreading a thread copies the thread but
+  // not its turns array, and pushing the next message onto that frozen array threw
+  // "object is not extensible" -- so every message sent after a reload was lost.
+  // Copy the turns too.
+  // A desk saved before 0.8.0 also stores each session slot's content. Any viewer
+  // can write this document, so that copy is never shown, and it is dropped here
+  // so the next save leaves it out.
+  return stored.filter(isRow).map((t, i) => ({...t, busy: false,
+    id: typeof t.id === 'string' && t.id ? t.id : 't' + (i + 1) + '-restored',
+    name: typeof t.name === 'string' && t.name ? t.name : 'Thread ' + (i + 1),
+    turns: (Array.isArray(t.turns) ? t.turns : []).filter(isRow)
+      .map(m => m.via === 'session' ? leanSlot(m) : {...m})}));
+}
 
 // db.d.ts calls `unavailable` transient and asks verbs to retry once after a
 // short randomized delay. Any other failure gets the same one retry: it is
@@ -1447,47 +1508,41 @@ $('lostSlot').addEventListener('click', async e => {
 // would leave every control off with no banner and no way out, so each attempt
 // is given RESTORE_WAIT and then counts as failed.
 const RESTORE_WAIT = 10000;
+// Never rejects: anything that throws while reading or applying the stored
+// document leaves restore 'failed', with the banner and Try again, rather than
+// 'pending' with no way out.
 async function restoreStored(){
   restore = 'pending';
-  draw();
-  const ref = db.doc('review/pr-' + DATA.number);
-  const read = () => Promise.race([ref.get(), new Promise((_, no) =>
-    setTimeout(() => no({code: 'timed out'}), RESTORE_WAIT))]);
   let snap;
   try {
+    draw();
+    const ref = db.doc('review/pr-' + DATA.number);
+    const read = () => Promise.race([ref.get(), new Promise((_, no) =>
+      setTimeout(() => no({code: 'timed out'}), RESTORE_WAIT))]);
     try { snap = await read(); }
     catch (e){
       await new Promise(r => setTimeout(r, 300 + Math.random() * 700));
       snap = await read();
     }
   } catch (e) {
-    restore = 'failed';
-    sayUnread((e && (e.code || e.message)) || 'the read failed');
+    return restoreFailed(e);
+  }
+  try {
+    const had = snap.exists && snap.data();
+    const kept = had && Array.isArray(had.threads) ? restoredThreads(had.threads) : [];
+    if (kept.length){ threads = kept; live = 0; }
+    restore = 'done';
+    if (lost === 'unread'){ lost = null; $('lostSlot').innerHTML = ''; }
+    if (had){
+      reason = had.reason || null;
+      decidedAt = had.decidedAt || null;
+      if (had.decision) decide(had.decision, true, had.reason);
+    }
     draw();
-    return false;
+    return true;
+  } catch (e) {
+    return restoreFailed(e);
   }
-  const had = snap.exists && snap.data();
-  if (had && Array.isArray(had.threads) && had.threads.length){
-    // The store hands back frozen objects. Spreading a thread copies the
-    // thread but not its turns array, and pushing the next message onto that
-    // frozen array threw "object is not extensible" -- so every message sent
-    // after a reload was lost. Copy the turns too.
-    // A desk saved before 0.8.0 also stores each session slot's content. Any
-    // viewer can write this document, so that copy is never shown, and it is
-    // dropped here so the next save leaves it out.
-    threads = had.threads.map(t => ({...t, busy: false,
-      turns: (t.turns || []).map(m => m && m.via === 'session' ? leanSlot(m) : {...m})}));
-    live = 0;
-  }
-  restore = 'done';
-  if (lost === 'unread'){ lost = null; $('lostSlot').innerHTML = ''; }
-  if (had){
-    reason = had.reason || null;
-    decidedAt = had.decidedAt || null;
-    if (had.decision) decide(had.decision, true, had.reason);
-  }
-  draw();
-  return true;
 }
 
 /* ================= live listeners ================= */
@@ -1732,15 +1787,19 @@ async function rering(){
       const snap = await ref.get();
       const had = snap.exists && snap.data();
       if (!had || !Array.isArray(had.threads)) return;
-      // The store hands back frozen objects; copy down to the turns before editing.
-      // A pre-0.8.0 slot's content copy is left out here too.
+      // The store hands back frozen objects; each session slot is rebuilt by
+      // leanSlot before it is edited, which also leaves out a pre-0.8.0 content
+      // copy. Everything else, a malformed thread or turn included, is written
+      // back exactly as it was read: this write is the view's own, not the
+      // reviewer's, and must not drop what another view may still read.
       const doc = {...had, updatedAt: new Date().toISOString(),
-        threads: had.threads.map(t => ({...t, turns: (t.turns || []).map(x =>
-          x && x.via === 'session' ? leanSlot(x) : {...x})}))};
+        threads: had.threads.map(t => isRow(t) && Array.isArray(t.turns)
+          ? {...t, turns: t.turns.map(x => isRow(x) && x.via === 'session' ? leanSlot(x) : x)}
+          : t)};
       const outcome = new Map(toRing.map(m => [m.answers, m]));
       let changed = false;
-      for (const x of doc.threads.flatMap(t => t.turns)){
-        const m = x.via === 'session' && outcome.get(x.answers);
+      for (const x of doc.threads.flatMap(t => isRow(t) && Array.isArray(t.turns) ? t.turns : [])){
+        const m = isRow(x) && x.via === 'session' && outcome.get(x.answers);
         if (!m || replied.has(x.answers) || x.rungAt || x.status === 'working'
             || x.status === 'done') continue;
         x.status = m.status;
@@ -1783,8 +1842,28 @@ paint(); draw();
   if (!db){ restore = 'nostore'; draw(); sayLost('this view cannot reach the store'); return; }
   // The replies listener adds slots to the restored threads and starts rering,
   // so it waits for a successful restore; Try again starts it if the first
-  // attempt failed.
-  if (await restoreStored()) listenReplies();
+  // attempt failed. The page's other feeds start either way: the description,
+  // the documents, presence and pickup do not depend on the stored threads, and
+  // waiting on a restore that threw left the page without any of them. They
+  // start before the replies listener, so a throw there cannot strand them: Try
+  // again only runs when the restore itself failed.
+  let restored = false;
+  try { restored = await restoreStored(); } catch (e){ restoreFailed(e); }
+  followPage();
+  if (restored) listenReplies();
+})().catch(e => {
+  // Anything else that throws while the view starts. Left unhandled, it stopped
+  // the rest of startup silently, with restore still 'pending' and every control
+  // off. A view with a store gets the not-loaded banner and Try again, which
+  // reads again and starts whatever did not start.
+  if (!db){ restore = 'nostore'; sayLost('this view cannot reach the store'); try { draw(); } catch (x) {} return; }
+  if (blocked()){ restoreFailed(e); return; }
+  sayLost('this view did not finish starting (' + ((e && (e.code || e.message)) || e) + ')');
+});
+
+// Started once, by startup or by Try again.
+function followPage(){
+  if (FEEDS.body) return;
 
   // The description, rewritten by the working session when the pull request
   // changes under review.
@@ -1884,5 +1963,5 @@ paint(); draw();
         paint();
         setTimeout(() => { freshOn = {}; paint(); }, 5000);
       });
-})();
+}
 </script>
