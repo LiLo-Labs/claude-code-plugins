@@ -44,6 +44,12 @@ h1.doctitle{font-family:var(--doc);font-weight:600;font-size:30px;
 .meta{font-family:var(--mono);font-size:11.5px;color:var(--faint)}
 .meta a{color:var(--cool)}
 .meta .newer{color:var(--mark)}
+/* What became of the pull request, once it is over. Not styled as an error:
+   a merge is the review ending as it should. */
+.banner{margin:12px 0 0;padding:10px 14px;background:var(--card);
+  border:1px solid var(--edge);border-left:3px solid var(--good);border-radius:6px;
+  font-size:14px;line-height:1.5}
+.banner.unmerged{border-left-color:var(--faint)}
 
 .slab{background:var(--card);border:1px solid var(--edge);border-radius:6px;
   margin:18px 0;overflow:hidden}
@@ -276,6 +282,9 @@ body.open #panel{display:flex}
 #decideState .lost{margin:14px 18px 0}
 #decideState .restoring{padding:14px 18px 0;font-size:13.5px;color:var(--soft)}
 
+.shutNote{margin:0 13px 8px;padding:9px 11px;border:1px solid var(--edge);
+  border-radius:7px;font-size:13px;line-height:1.45;color:var(--soft);flex-shrink:0}
+textarea:disabled{opacity:.6;cursor:default}
 .compose{display:flex;gap:8px;padding:11px 13px;border-top:1px solid var(--rule);
   align-items:flex-end;flex-shrink:0}
 textarea{flex:1;font-family:var(--ui);font-size:16px;line-height:1.45;
@@ -307,6 +316,9 @@ textarea:focus{outline:2px solid var(--cool);outline-offset:-1px;
 .done .verdict{padding:14px 0 0}
 .done b{color:var(--good)}
 .done .pickup{margin:12px 0 0;font-size:13.5px;color:var(--soft)}
+.done.revised{padding-bottom:0}
+.done.revised .pickup{margin:0 0 8px;color:var(--good);font-weight:600}
+.done .pickup a{color:var(--cool)}
 .done .ask{margin:0}
 .confirming .btn{min-width:44px;min-height:44px}
 footer{padding:22px 0 0;font-size:12.5px;color:var(--faint);line-height:1.6}
@@ -325,6 +337,7 @@ footer{padding:22px 0 0;font-size:12.5px;color:var(--faint);line-height:1.6}
   <div class="tag" id="repoTag"></div>
   <h1 class="doctitle" id="title"></h1>
   <div class="meta" id="meta"></div>
+  <div class="banner" id="outcomeBanner" hidden></div>
   <div id="pageFeeds"></div>
 
   <div class="leaves" id="leaves"></div>
@@ -372,6 +385,7 @@ footer{padding:22px 0 0;font-size:12.5px;color:var(--faint);line-height:1.6}
   <div id="feedSlot"></div>
   <div id="lostSlot"></div>
   <div id="carrySlot"></div>
+  <div id="closedSlot"></div>
   <div class="compose">
     <textarea id="box" rows="1" enterkeyhint="send" placeholder="Ask the working session&hellip;"></textarea>
     <button class="send" id="send">Send</button>
@@ -892,9 +906,15 @@ let bellOn = false;
 // publish refusal says the view cannot write. The first one is permanent for the
 // view: ringing is off from then on (see goReadOnly), and nothing publishes again.
 let readOnly = false;
+let alone = false;
 function sayAlone(){
-  $('aloneSlot').innerHTML = '<div class="lost">This view cannot ring the working '
-    + 'session. What you send is saved, and the next session to start answers it.</div>';
+  alone = true;
+  drawAlone();
+}
+// A closed desk sends nothing, so it has nothing to say about who would answer.
+function drawAlone(){
+  $('aloneSlot').innerHTML = alone && !closedOutcome() ? '<div class="lost">This view cannot ring the working '
+    + 'session. What you send is saved, and the next session to start answers it.</div>' : '';
 }
 function goReadOnly(){
   if (readOnly) return;
@@ -922,14 +942,18 @@ const short =s => s.length > 42 ? s.slice(0, 40).trim() + '…' : s;
 let closing = null;
 function drawTabs(){
   const el = $('tabs');
+  // A closed desk's discussion is the record of the review: no thread is added
+  // to it, and none is closed out of it.
+  const shut = !!closedOutcome();
   el.innerHTML = threads.map((t, i) =>
     '<span class="tabpair"><button class="tab'+(i===live?' on':'')+'" data-go="'+i+'">'
     + (t.busy ? '<span class="spin"></span>' : '')
     + esc(t.name) + '</button>'
-    + (threads.length > 1 ? '<button class="shut" data-shut="'+i+'" aria-label="Close '
+    + (threads.length > 1 && !shut ? '<button class="shut" data-shut="'+i+'" aria-label="Close '
         + esc(t.name) + '" title="Close this thread">×</button>' : '')
     + '</span>').join('')
-    + '<button class="add" id="more" title="New thread">+</button>';
+    + (shut ? '' : '<button class="add" id="more" title="New thread">+</button>');
+  if (shut) closing = null;
   const t = threads.find(x => x.id === closing);
   if (!t) closing = null;
   $('closeSlot').innerHTML = t ? '<div class="lost closing">Close “' + esc(t.name)
@@ -966,6 +990,8 @@ const FEEDS = {};
 function sessionWait(m, r){
   if (r) return r.status === 'working' ? 'The working session has this and is working on it.'
     : 'The working session marked this answered without writing a reply.';
+  // No session collects a merged or closed desk, so no promise below would be kept.
+  if (closedOutcome()) return 'The desk closed before the working session answered this.';
   // Not "Saved" until the store has said so: the save and its retry can take a second.
   if (storing.has(m.answers)) return resending.has(m.answers) ? 'Sending again…' : 'Sending…';
   // Only this view's own failed save says this. A slot read back from the store is
@@ -1019,7 +1045,8 @@ function said(m){
   const r = sessionReplies.get(m.answers);
   if (r && r.text) return '<div class="said rich">'+markdown(r.text)+'</div>'
     + (r.status === 'working' ? '<span class="who">still working</span>' : '');
-  const id = esc(m.answers), held = !r && unsaved(m), again = !r && resending.has(m.answers);
+  const shut = !!closedOutcome();
+  const id = esc(m.answers), held = !r && !shut && unsaved(m), again = !r && !shut && resending.has(m.answers);
   return '<div class="said">'+esc(sessionWait(m, r))+'</div>'
     + (held || again ? '<button class="again" data-resend="'+id+'"'+(again ? ' disabled' : '')
         + '>Send again</button>' : '')
@@ -1037,6 +1064,8 @@ function drawStream(toEnd){
   const atEnd = toEnd || el.scrollHeight - el.scrollTop - el.clientHeight < 40;
   if (!t.turns.length && restore === 'pending'){
     el.innerHTML = '<div class="hint">Loading the saved discussion…</div>';
+  } else if (!t.turns.length && closedOutcome()){
+    el.innerHTML = '<div class="hint">Nothing was discussed in this thread.</div>';
   } else if (!t.turns.length){
     el.innerHTML = '<div class="hint">Ask the working session anything: it has '
       + 'the code, the tests and the conversation that made this change, and it '
@@ -1051,12 +1080,15 @@ function drawStream(toEnd){
       + said(m) + '</div>').join('');
   }
   if (atEnd) el.scrollTop = el.scrollHeight;
-  $('seed').style.display = t.turns.length ? 'none' : 'flex';
+  $('seed').style.display = t.turns.length || closedOutcome() ? 'none' : 'flex';
   gate();
 }
 function gate(){
-  sendBtn.disabled = blocked() || threads[live].busy;
-  document.querySelectorAll('#seed button, #ok, #changes, #approveConfirm')
+  const shut = !!closedOutcome();
+  sendBtn.disabled = blocked() || threads[live].busy || shut;
+  $('box').disabled = shut;
+  document.querySelectorAll('#seed button').forEach(b => { b.disabled = blocked() || shut; });
+  document.querySelectorAll('#ok, #changes, #approveConfirm')
     .forEach(b => { b.disabled = blocked(); });
   gateRetry();
   drawDecideState();
@@ -1064,10 +1096,10 @@ function gate(){
 // Send again stays off while its own save is on its way. Edit stays off while the
 // box holds a draft, which it would otherwise overwrite.
 function gateRetry(){
-  const draft = !!$('box').value.trim();
+  const draft = !!$('box').value.trim(), shut = !!closedOutcome();
   document.querySelectorAll('[data-resend]')
-    .forEach(b => { b.disabled = blocked() || resending.has(b.dataset.resend); });
-  document.querySelectorAll('[data-edit]').forEach(b => { b.disabled = blocked() || draft; });
+    .forEach(b => { b.disabled = blocked() || shut || resending.has(b.dataset.resend); });
+  document.querySelectorAll('[data-edit]').forEach(b => { b.disabled = blocked() || shut || draft; });
 }
 // Why Approve and Needs changes are off, said beside them. The panel's banner
 // alone left a reviewer with the panel closed looking at two dimmed buttons and
@@ -1138,7 +1170,7 @@ function drawPresence(){
   }
   const resume = [lastResume, DATA.resume].find(safeResume) || '';
   el.innerHTML = '<span class="'+(gone ? 'gone' : '')+'">'+esc(line)+'</span>'
-    + (bellOn ? '<button class="check" id="check">Check</button>' : '')
+    + (bellOn && !closedOutcome() ? '<button class="check" id="check">Check</button>' : '')
     + (gone && resume
       ? '<div class="resume"><code id="resumeCmd">'+esc(resume)+'</code>'
         + '<button class="check" id="copyResume">Copy</button></div>'
@@ -1268,7 +1300,8 @@ document.addEventListener('selectionchange', () => {
   const sel = document.getSelection();
   const text = sel ? String(sel).trim() : '';
   const pop = $('pop');
-  const range = text.length >= 3 && sel.rangeCount
+  // A closed desk takes no question, so it offers none about a passage.
+  const range = !closedOutcome() && text.length >= 3 && sel.rangeCount
     && !(sel.anchorNode && $('panel').contains(sel.anchorNode)) ? sel.getRangeAt(0) : null;
   const r = range && range.getBoundingClientRect();
   if (!r || (!r.width && !r.height)){
@@ -1333,7 +1366,7 @@ async function ask(){
   if (!q && !carried) return;
   // Enter still reaches here while Send is off. Leave the text in the box: a
   // message kept out of the store should not also vanish from the screen.
-  if (blocked()) return;
+  if (blocked() || closedOutcome()) return;
   // Always a new message. A message whose save failed never comes back through
   // the box: it stays in its own thread with Send again, so nothing typed here is
   // ever matched against it or sent in its place.
@@ -1543,6 +1576,9 @@ function sayKept(){
 // The session's pickup copies it back, so an acknowledgement of an earlier
 // verdict never reads as one for the verdict on screen.
 let decidedAt = null, pickup = null, rang = null, showingDecided = false;
+// Whether the slab is the choice offered under a revised outcome, which a change
+// to the pickup redraws as it does a recorded decision.
+let showingRevised = false;
 // The head the page was showing when the reviewer decided, stamped with
 // decidedAt. Null for a decision restored from a desk saved before it existed,
 // which /review-collect then merges as it always did.
@@ -1758,7 +1794,9 @@ async function ring(what, retry = true){
 // so only this branch asks, and it asks before recording, because the panel is
 // replaced once a decision is in and there is no way back to it.
 function askReason(existing){
+  if (closedOutcome()) return drawShut();
   showingDecided = false;
+  showingRevised = false;
   $('decide').innerHTML = '<div class="cap">What needs changing</div>'
     + '<div class="done"><textarea id="why" rows="4" placeholder="The part that is '
     + 'wrong, and what would make it right."></textarea>'
@@ -1782,7 +1820,9 @@ function askReason(existing){
 // The step adds a line above the buttons, so neither Confirm nor Back is under
 // the spot Approve was: a second tap there lands on no button.
 function askApprove(){
+  if (closedOutcome()) return drawShut();
   showingDecided = false;
+  showingRevised = false;
   $('decide').innerHTML = '<div class="cap">Before it merges</div>'
     + '<div class="done confirming"><p class="ask" id="approveAsk"></p>'
     + '<p class="pickup" id="approvePending" hidden></p>'
@@ -1842,17 +1882,28 @@ function drawApproveAsk(){
   el.hidden = !el.textContent;
 }
 
+// The choice. After a revision is pushed it is offered straight away, under what
+// was revised: the decision is the reviewer's again, and "Change this" would hide
+// that behind a button that reads as undoing something.
 function offerDecision(){
+  if (closedOutcome()) return drawShut();
   showingDecided = false;
-  $('decide').innerHTML = '<div class="cap">When you have made up your mind</div>'
+  const r = revisedOutcome();
+  showingRevised = !!r;
+  $('decide').innerHTML = '<div class="cap">'
+    + (r ? 'Revised, ready for another look' : 'When you have made up your mind') + '</div>'
     + '<div id="decideState"></div>'
+    + (r ? '<div class="done revised"><p class="pickup">' + esc(outcomeLine(r)) + '</p>'
+      + '<p class="ask">You had marked this <b>' + esc(decided) + '</b>' + (reason ? ':' : '.') + '</p>'
+      + (reason ? '<blockquote>' + esc(reason) + '</blockquote>' : '') + '</div>' : '')
     + '<div class="verdict"><span class="note">Recorded here and sent to the '
     + 'working session, which writes the discussion into the pull request and '
     + 'merges or revises accordingly.</span>'
     + '<button class="btn yes" id="ok">Approve</button>'
     + '<button class="btn" id="changes">Needs changes</button></div>';
   $('ok').addEventListener('click', askApprove);
-  $('changes').addEventListener('click', () => askReason(reason));
+  // The reason a revision answered is not the next one, so the form starts empty.
+  $('changes').addEventListener('click', () => askReason(r ? '' : reason));
   gate();
 }
 
@@ -1862,7 +1913,7 @@ async function decide(v, quiet, why){
   if (v === 'needs changes' && !why){ decided = v; return askReason(reason); }
   // The buttons are off until restore settles; this covers anything that
   // reaches decide another way, such as the reason panel's Record it.
-  if (!quiet && blocked()) return;
+  if (!quiet && (blocked() || closedOutcome())) return;
 
   decided = v;
   reason = why || null;
@@ -1889,29 +1940,66 @@ async function decide(v, quiet, why){
 // The page cannot see whether a session is running, so it says only what it
 // knows: saved, rung, or picked up. "I will merge it" was a promise nothing
 // on this side could keep.
-// Takes an ISO string or epoch milliseconds. Anything a Date cannot hold says
-// nothing rather than throwing, as toISOString would.
+//
+// when() takes an ISO string or epoch milliseconds. Anything a Date cannot hold
+// says nothing rather than throwing, as toISOString would. A time alone reads as
+// today, so a reviewer back on Monday took Friday's "last answered at 16:10" for
+// this afternoon. A time from another day says which day, in the reader's own
+// locale and timezone: " yesterday at 16:10", or " on Fri 11 Sep at 16:10", with
+// the year when it is not this one. Days are counted between local midnights,
+// rounded, so a day that DST makes 23 or 25 hours long still counts as one.
 const when = at => {
   const t = new Date(at);
-  return isNaN(t) ? '' : ' at ' + t.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
+  if (isNaN(t)) return '';
+  const time = t.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
+  const now = new Date();
+  const midnight = d => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const days = Math.round((midnight(now) - midnight(t)) / 86400000);
+  if (days === 0) return ' at ' + time;
+  if (days === 1) return ' yesterday at ' + time;
+  return ' on ' + t.toLocaleDateString([], {weekday: 'short', day: 'numeric', month: 'short',
+    ...(t.getFullYear() === now.getFullYear() ? {} : {year: 'numeric'})}) + ' at ' + time;
 };
+
+// The session's report of what it did, when the pickup carries one.
+const outcomeOf = p => isRow(p) && isRow(p.outcome) && typeof p.outcome.result === 'string'
+  && p.outcome.result ? p.outcome : null;
+const pickedUp = () => !!pickup && pickup.decision === decided && pickup.decidedAt === decidedAt;
+// Merged, or closed without merging: the review is over whichever decision the
+// pickup was for. /review-collect stamps the ledger and unwatches the desk for
+// both, and the sweep stops listing it, so nothing sent from the page after this
+// reaches a session. The page stops offering to send anything.
+const ENDS_REVIEW = ['merged', 'closed'];
+const closedOutcome = () => {
+  const o = outcomeOf(pickup);
+  return o && ENDS_REVIEW.includes(o.result) ? o : null;
+};
+// The revision a Needs changes asked for has been pushed and the desk rewritten
+// for it, so the decision is the reviewer's again. Only for the decision on screen:
+// deciding again leaves it behind, like any other pickup.
+const revisedOutcome = () => {
+  const o = pickedUp() && outcomeOf(pickup);
+  return o && o.result === 'revised' ? o : null;
+};
+function outcomeLine(o){
+  const said = o.detail ? ': ' + String(o.detail).replace(/[.\s]+$/, '') : '';
+  if (o.result === 'merged') return 'Merged by the working session' + when(o.at) + said + '.';
+  if (o.result === 'revising') return 'The working session is revising' + said + '.';
+  if (o.result === 'revised') return 'Revised' + when(o.at) + said + '.';
+  // /review-collect reports `closed` when GitHub shows the request closed
+  // without merging, and never as blocked; it is not a failure to finish.
+  if (o.result === 'closed') return 'Closed without merging' + when(o.at) + said + '.';
+  return 'The working session could not finish' + said + '.';
+}
 
 function pickupLine(){
   if (!db) return 'Saving is unavailable on this view, so no session will see '
     + 'this. Tell the working session directly.';
-  if (pickup && pickup.decision === decided && pickup.decidedAt === decidedAt){
+  if (pickedUp()){
     // The outcome is what actually happened after pickup. Without it a blocked
     // merge and a finished one look identical from here.
-    const o = pickup.outcome;
-    if (o && o.result){
-      const said = o.detail ? ': ' + String(o.detail).replace(/[.\s]+$/, '') : '';
-      if (o.result === 'merged') return 'Merged by the working session' + when(o.at) + said + '.';
-      if (o.result === 'revising') return 'The working session is revising' + said + '.';
-      // /review-collect reports `closed` when GitHub shows the request closed
-      // without merging, and never as blocked; it is not a failure to finish.
-      if (o.result === 'closed') return 'Closed without merging' + when(o.at) + said + '.';
-      return 'The working session could not finish' + said + '.';
-    }
+    const o = outcomeOf(pickup);
+    if (o) return outcomeLine(o);
     return 'Picked up by the working session' + when(pickup.at)
       + '. What it did shows here once it has acted.';
   }
@@ -1947,7 +2035,11 @@ function staleApproval(){
 }
 
 function drawDecided(){
+  if (closedOutcome()) return drawShut();
+  // A revised decision, and no decision at all, are the reviewer's to make.
+  if (!decided || revisedOutcome()) return offerDecision();
   showingDecided = true;
+  showingRevised = false;
   $('decide').innerHTML = '<div class="cap">Recorded</div><div class="done">'
     + 'You marked this <b>'+esc(decided)+'</b>. The working session writes the '
     + 'discussion into pull request #'+DATA.number+', '
@@ -1962,6 +2054,47 @@ function drawDecided(){
     + '<div class="verdict"><button class="btn" id="redo">Change this</button></div>'
     + '</div>';
   $('redo').addEventListener('click', offerDecision);
+}
+
+// A merged or closed pull request. No Change this: a decision recorded now reaches
+// no session, and a merge cannot be taken back from here anyway.
+function drawShut(){
+  showingDecided = true;
+  showingRevised = false;
+  const o = closedOutcome();
+  $('decide').innerHTML = '<div class="cap">' + (o.result === 'merged' ? 'Merged' : 'Closed') + '</div>'
+    + '<div class="done">'
+    + (decided ? 'You marked this <b>' + esc(decided) + '</b>.' : 'No decision was recorded on this desk.')
+    + (reason ? '<blockquote>' + esc(reason) + '</blockquote>' : '')
+    + '<p class="pickup">' + esc(outcomeLine(o)) + '</p>'
+    + '<p class="pickup" id="shutNote">The review is over, so this desk takes no new decision or '
+    + 'message. Anything more belongs on <a href="' + esc(DATA.url) + '" target="_blank" '
+    + 'rel="noopener">the pull request</a>.</p>'
+    + '</div>';
+}
+
+// What the outcome changes outside the decision slab: the banner under the title,
+// and, for a merged or closed request, the composer, the footer and every line
+// that says a session will pick something up.
+const FOOT = $('foot').innerHTML;
+let shutDrawn = false;
+function drawOutcome(){
+  const o = closedOutcome();
+  const banner = $('outcomeBanner');
+  banner.hidden = !o;
+  banner.className = 'banner' + (o && o.result === 'closed' ? ' unmerged' : '');
+  banner.textContent = !o ? '' : (o.result === 'merged' ? 'Merged' : 'Closed without merging')
+    + when(o.at) + (o.detail ? ': ' + String(o.detail).replace(/[.\s]+$/, '') : '')
+    + '. This review desk is closed.';
+  $('foot').innerHTML = o ? 'The review of this pull request is over. The panel keeps the '
+    + 'discussion with the working session to read, and takes no new messages.' : FOOT;
+  $('closedSlot').innerHTML = o ? '<div class="shutNote">This desk is closed: the pull request was '
+    + (o.result === 'merged' ? 'merged' : 'closed without merging') + '. The discussion stays '
+    + 'here to read, but nothing sent from here would reach a working session. Ask on the pull '
+    + 'request instead.</div>' : '';
+  $('box').placeholder = o ? 'This desk is closed' : 'Ask the working session…';
+  drawAlone();
+  if (!!o !== shutDrawn){ shutDrawn = !!o; draw(); }
 }
 
 /* ================= restore ================= */
@@ -2287,7 +2420,8 @@ const sessionSlots = doc => new Map(((doc && Array.isArray(doc.threads)) ? doc.t
 async function rering(){
   clearTimeout(reringTimer);
   reringTimer = null;
-  if (!bellOn || restore !== 'done') return;
+  // A merged or closed desk has no session watching it, so a ring wakes nobody.
+  if (!bellOn || restore !== 'done' || closedOutcome()) return;
   const now = Date.now();
   const waiting = threads.flatMap(t => t.turns).filter(m => unrung(m) && !unsaved(m)
     && !replied.has(m.answers) && !ringing.has(m.answers));
@@ -2547,7 +2681,8 @@ function followPage(){
   follow('pickup', 'the working session’s pickup of your decision', 'page',
     () => db.doc('review/pr-' + DATA.number + '/context/pickup'), snap => {
       pickup = (snap.exists && snap.data()) || null;
-      if (showingDecided) drawDecided();
+      drawOutcome();
+      if (closedOutcome() || showingDecided || showingRevised) drawDecided();
     });
 
   // The document, live. Revised from the working session with write_db, this

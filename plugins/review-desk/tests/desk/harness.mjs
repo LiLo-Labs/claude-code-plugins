@@ -400,7 +400,8 @@ export async function open(browser, options = {}){
   page.on('pageerror', e => errors.push(e.message));
   await page.addInitScript(installStub, stub);
   if (options.init) await page.addInitScript(options.init);
-  if (options.clock) await page.clock.install();
+  // `clock` may also be install()'s options, {time} starting the clock at a fixed moment.
+  if (options.clock) await page.clock.install(options.clock === true ? undefined : options.clock);
   // Nothing leaves the machine: fonts, highlight.js and mermaid are refused, which
   // the page is built to survive (it loses colour and drawings, nothing else).
   await page.route('**/*', route => {

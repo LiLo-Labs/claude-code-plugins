@@ -118,12 +118,14 @@ test('the pickup line follows the session: picked up, merged, blocked with its d
   await lineSays('Picked up by the working session');
   assert.match(await line(), /^Picked up by the working session at .+\. What it did shows here once it has acted\.$/);
 
+  // Blocked last: merged and closed close the desk, and blocked opens it again for
+  // Change this below.
   const outcomes = [
     [{result: 'merged', detail: 'Squash-merged as 1a2b3c4.'}, /^Merged by the working session at .+: Squash-merged as 1a2b3c4\.$/],
-    [{result: 'blocked', detail: 'A required check failed: tests (webkit).'},
-      /^The working session could not finish: A required check failed: tests \(webkit\)\.$/],
     [{result: 'closed', detail: 'The pull request was closed on GitHub.'},
       /^Closed without merging at .+: The pull request was closed on GitHub\.$/],
+    [{result: 'blocked', detail: 'A required check failed: tests (webkit).'},
+      /^The working session could not finish: A required check failed: tests \(webkit\)\.$/],
   ];
   const seen = new Set();
   for (const [outcome, expected] of outcomes){
@@ -358,7 +360,9 @@ test('Check rings kind ping, and a presence stamp written after it says the sess
 });
 
 test('Check with no answer inside the wait says so, and offers the resume command to copy', async () => {
-  const stamp = String(Math.floor(Date.now() / 1000) - 3600);
+  // A minute old, so the line reads "at <time>" at any hour; an hour old crossed
+  // midnight when the suite ran just after it, and the line then named yesterday.
+  const stamp = String(Math.floor(Date.now() / 1000) - 60);
   desk = await open(browser, {clock: true, seed: {[PR + '/presence/' + stamp]: {resume: RESUME}}});
   await ready(desk);
   await desk.page.click('#fab');
@@ -543,4 +547,188 @@ test('a held Enter on Approve stops at the confirm step, and a fresh Enter on Co
   assert.equal(await focused(), 'approveConfirm');
   await desk.page.keyboard.press('Enter');
   await desk.until(s => s[PR] && s[PR].decision === 'approved');
+});
+
+/* ---- outcomes that change what the desk offers ---- */
+// A desk whose pull request is over: a decision collected, the session's outcome
+// merged or closed, one question answered and one never answered.
+const shutDesk = (result, detail) => {
+  const decidedAt = '2026-09-12T10:00:00.000Z';
+  return {
+    [PR]: {pr: 42, title: 'Harness desk', decision: 'approved', reason: null, decidedAt,
+      decisionRing: {decidedAt, rungAt: Date.parse(decidedAt) + 1000},
+      threads: [{id: 't1', name: 'Asked', turns: [...slot('m1'), ...slot('m2')]}]},
+    [PR + '/replies/m1']: {turn: 'm1', status: 'done', text: 'Answered before the merge.', at: '2026-09-12T10:02:00.000Z'},
+    [PR + '/context/pickup']: {decision: 'approved', decidedAt, session: 's1', at: '2026-09-12T10:01:00.000Z',
+      outcome: {result, detail, at: '2026-09-12T10:05:00.000Z'}},
+  };
+};
+
+test('a merged or closed desk says so under the title, drops Change this, promises no session, and disables the composer', async () => {
+  const cases = [
+    ['merged', 'Squash-merged as 1a2b3c4.', ['db', 'artifact'],
+      /^Merged .+: Squash-merged as 1a2b3c4\. This review desk is closed\.$/, 'merged'],
+    // Without the doorbell the page also has its "cannot ring" banner to withhold.
+    ['closed', 'The pull request was closed on GitHub.', ['db'],
+      /^Closed without merging .+: The pull request was closed on GitHub\. This review desk is closed\.$/,
+      'closed without merging'],
+  ];
+  for (const [result, detail, capabilities, named, was] of cases){
+    desk = await open(browser, {seed: shutDesk(result, detail), capabilities});
+    await ready(desk);
+    await desk.page.waitForSelector('#outcomeBanner:not([hidden])');
+    assert.match(await desk.page.textContent('#outcomeBanner'), named, result);
+    assert.equal(await desk.page.evaluate(() => document.getElementById('meta').nextElementSibling.id),
+      'outcomeBanner', result + ': the banner sits under the title and meta line');
+    assert.equal(await desk.page.locator('#redo').count(), 0, result + ': no Change this');
+    assert.equal(await desk.page.locator('#decide button').count(), 0, result + ': no decision buttons');
+    assert.match(await line(), result === 'merged' ? /^Merged by the working session/ : /^Closed without merging/);
+
+    // The discussion still reads: the question, its answer, and the one never answered.
+    await desk.page.click('#fab');
+    await desk.page.waitForSelector('#stream >> text=Answered before the merge.');
+    assert.match(await desk.page.textContent('#stream'), /Question m1[\s\S]*Question m2/);
+    assert.match(await desk.page.textContent('#stream'), /The desk closed before the working session answered this\./);
+    assert.equal(await desk.page.isDisabled('#box'), true, result);
+    assert.equal(await desk.page.isDisabled('#send'), true, result);
+    assert.equal(await desk.page.locator('#check, #more, [data-resend]').count(), 0, result);
+    assert.equal(await desk.page.textContent('#closedSlot'), 'This desk is closed: the pull request was ' + was
+      + '. The discussion stays here to read, but nothing sent from here would reach a working session. '
+      + 'Ask on the pull request instead.');
+
+    const visible = await desk.page.evaluate(() => document.body.innerText);
+    assert.doesNotMatch(visible, /next session|next one to start/i, result);
+
+    // Enter reaches send() whatever the button says; it still stores and rings nothing.
+    const before = await desk.store();
+    await desk.page.evaluate(() => { document.getElementById('box').value = 'After the merge'; return send(); });
+    await desk.page.waitForTimeout(600);
+    assert.deepEqual(await desk.store(), before, result);
+    assert.deepEqual(await desk.rings(), [], result);
+    if (result === 'merged'){
+      assert.deepEqual(await desk.missing(), []);
+      assert.deepEqual(desk.errors, []);
+      await desk.close();
+    }
+  }
+});
+
+test('a closed desk whose pickup is taken away, as for a reopened pull request, offers the composer and decisions again', async () => {
+  desk = await open(browser, {seed: shutDesk('closed', 'Closed on GitHub.')});
+  await ready(desk);
+  await desk.page.waitForSelector('#outcomeBanner:not([hidden])');
+  await desk.write(PR + '/context/pickup', null);
+  await desk.page.waitForSelector('#redo');
+  assert.equal(await desk.page.isHidden('#outcomeBanner'), true);
+  assert.equal(await desk.page.isEnabled('#box'), true);
+  assert.equal(await desk.page.textContent('#closedSlot'), '');
+});
+
+test('a revised outcome says Revised with its detail, and offers Approve and Needs changes without Change this', async () => {
+  desk = await open(browser, {init: noConfirm});
+  await ready(desk);
+  await needsChanges('Rename the flag, it reads as a boolean.');
+  const {decidedAt} = (await desk.until(s => s[PR] && s[PR].decision === 'needs changes'))[PR];
+  await lineSays('Waiting for the working session');
+  const pickup = outcome => desk.context('pickup', {decision: 'needs changes', decidedAt, session: 's1',
+    at: new Date().toISOString(), outcome: {...outcome, at: new Date().toISOString()}});
+
+  await pickup({result: 'revising', detail: 'Renaming the flag.'});
+  await lineSays('The working session is revising');
+  assert.equal(await desk.page.locator('#redo').count(), 1, 'revising still has only Change this');
+  assert.equal(await desk.page.locator('#ok').count(), 0);
+
+  await pickup({result: 'revised', detail: 'Pushed 1a2b3c4 and 5d6e7f8: the flag is now retry_limit.'});
+  await lineSays('Revised');
+  assert.match(await line(), /^Revised at .+: Pushed 1a2b3c4 and 5d6e7f8: the flag is now retry_limit\.$/);
+  assert.equal(await desk.page.locator('#redo').count(), 0, 'no Change this in front of the choice');
+  assert.equal(await desk.page.isEnabled('#ok'), true);
+  assert.equal(await desk.page.isEnabled('#changes'), true);
+  assert.equal(await desk.page.textContent('#decide blockquote'), 'Rename the flag, it reads as a boolean.');
+  assert.equal(await desk.page.isEnabled('#box'), true, 'revised is not a closed desk');
+
+  // The reason form starts empty, and Back comes back to the revised choice.
+  await desk.page.click('#changes');
+  assert.equal(await desk.page.inputValue('#why'), '');
+  await desk.page.click('#back');
+  await lineSays('Revised');
+  await desk.page.click('#ok');
+  await desk.page.click('#approveBack');
+  await lineSays('Revised');
+
+  await approve(desk);
+  const again = (await desk.until(s => s[PR] && s[PR].decision === 'approved'))[PR];
+  assert.ok(again.decidedAt > decidedAt);
+  await lineSays('Waiting for the working session');
+  assert.equal(await desk.page.locator('#redo').count(), 1);
+});
+
+test('a desk loaded with a revised pickup opens on the choice, not behind Change this', async () => {
+  const decidedAt = '2026-09-14T09:00:00.000Z';
+  desk = await open(browser, {seed: {
+    [PR]: {pr: 42, title: 'Harness desk', decision: 'needs changes', reason: 'Split the migration out.', decidedAt,
+      decisionRing: {decidedAt, rungAt: Date.parse(decidedAt) + 1000}, threads: []},
+    [PR + '/context/pickup']: {decision: 'needs changes', decidedAt, session: 's1', at: '2026-09-14T09:01:00.000Z',
+      outcome: {result: 'revised', detail: 'Pushed 9f8e7d6.', at: '2026-09-14T09:30:00.000Z'}},
+  }});
+  await ready(desk);
+  await lineSays('Revised');
+  assert.match(await line(), /^Revised .+: Pushed 9f8e7d6\.$/);
+  assert.equal(await desk.page.locator('#redo').count(), 0);
+  assert.equal(await desk.page.isEnabled('#ok'), true);
+  assert.equal(await desk.page.textContent('#decide .cap'), 'Revised, ready for another look');
+  await desk.page.waitForTimeout(1500);
+  assert.deepEqual(await desk.rings(), [], 'a revised decision is collected; nothing rings it');
+});
+
+/* ---- every time on the page says which day ---- */
+// Pinned: en-GB in London, with the page's clock at Monday 14 September 2026, 14:05
+// local time (BST). Three days back is Friday 11 September at the same time.
+const LONDON = {locale: 'en-GB', timezoneId: 'Europe/London'};
+const NOW = Date.UTC(2026, 8, 14, 13, 5);
+const DAY = 86400000;
+const iso = ms => new Date(ms).toISOString();
+const epoch = ms => String(Math.floor(ms / 1000));
+// ICU names September "Sep" or "Sept" in en-GB depending on its version, and may
+// put a comma after the weekday.
+const FRIDAY = 'on Fri,? 11 Sept? at 14:05';
+// The presence line is drawn while the panel is closed, so it is attached, not visible.
+const answered = () => desk.page.waitForSelector('#presence >> text=Working session last answered', {state: 'attached'});
+
+test('a presence stamp and a merge three days old name the day, yesterday says yesterday, and a minute ago is the time alone', async () => {
+  const decidedAt = iso(NOW - 3 * DAY - 600000);
+  desk = await open(browser, {context: LONDON, clock: {time: NOW}, seed: {
+    [PR + '/presence/' + epoch(NOW - 3 * DAY)]: {},
+    [PR]: {pr: 42, title: 'Harness desk', decision: 'approved', reason: null, decidedAt,
+      decisionRing: {decidedAt, rungAt: Date.parse(decidedAt) + 1000}, threads: []},
+    [PR + '/context/pickup']: {decision: 'approved', decidedAt, session: 's1', at: iso(NOW - 3 * DAY - 300000),
+      outcome: {result: 'merged', detail: 'Squash-merged as 1a2b3c4.', at: iso(NOW - 3 * DAY)}},
+  }});
+  await ready(desk);
+  await answered();
+  assert.match(await desk.page.textContent('#presence span'), new RegExp('^Working session last answered ' + FRIDAY + '\\.$'));
+  await lineSays('Merged by the working session');
+  assert.match(await line(), new RegExp('^Merged by the working session ' + FRIDAY + ': Squash-merged as 1a2b3c4\\.$'));
+  assert.match(await desk.page.textContent('#outcomeBanner'), new RegExp('^Merged ' + FRIDAY + ': '));
+  await desk.close();
+
+  desk = await open(browser, {context: LONDON, clock: {time: NOW}, seed: {
+    [PR + '/presence/' + epoch(NOW - DAY)]: {}}});
+  await ready(desk);
+  await answered();
+  assert.equal(await desk.page.textContent('#presence span'), 'Working session last answered yesterday at 14:05.');
+  await desk.close();
+
+  const today = iso(NOW - 120000);
+  desk = await open(browser, {context: LONDON, clock: {time: NOW}, seed: {
+    [PR + '/presence/' + epoch(NOW - 60000)]: {},
+    [PR]: {pr: 42, title: 'Harness desk', decision: 'approved', reason: null, decidedAt: today,
+      decisionRing: {decidedAt: today, rungAt: Date.parse(today) + 1000}, threads: []},
+    [PR + '/context/pickup']: {decision: 'approved', decidedAt: today, session: 's1', at: iso(NOW - 60000)},
+  }});
+  await ready(desk);
+  await answered();
+  assert.equal(await desk.page.textContent('#presence span'), 'Working session last answered at 14:04.');
+  await lineSays('Picked up by the working session');
+  assert.equal(await line(), 'Picked up by the working session at 14:04. What it did shows here once it has acted.');
 });
