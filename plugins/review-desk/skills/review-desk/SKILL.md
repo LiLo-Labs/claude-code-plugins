@@ -38,7 +38,9 @@ asked for.
 3. `/review-collect <owner/repo>#<number>` — answer every message still waiting
    before anything is written to the pull request, then summarise the
    discussion into it and merge or revise. An approval followed by a later
-   message is not merged. Each decision is collected once: a pickup already
+   message is not merged, and neither is one whose recorded head commit
+   (`decidedOn`) is no longer the pull request's head; a merge passes that
+   commit to `gh pr merge --match-head-commit`. Each decision is collected once: a pickup already
    holding it and its outcome means later rings only answer messages, and a
    pickup left without an outcome by a session that stopped is taken over.
 

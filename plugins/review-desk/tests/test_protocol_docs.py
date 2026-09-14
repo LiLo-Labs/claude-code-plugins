@@ -161,6 +161,52 @@ class Collect(unittest.TestCase):
         self.assertIn("What GitHub shows wins", text)
         self.assertIn("ever reported as `blocked`", text)
 
+    def test_an_approval_merges_only_the_commit_the_reviewer_read(self):
+        # Approve used to merge whatever the head was when the ring was handled,
+        # so a push after the decision was merged unread.
+        first = flat(section(self.doc, "Answer what is waiting first"))
+        query = re.search(r"gh pr view <n> --repo <owner/repo> --json (\S+)", first)
+        self.assertTrue(query, first)
+        self.assertEqual(query.group(0), flat(self.doc)[flat(self.doc).index("gh pr view"):][:len(query.group(0))],
+                         "the head is read in the first gh pr view")
+        self.assertIn("headRefOid", query.group(1).split(","))
+        self.assertIn("state", query.group(1).split(","))
+        rule = re.search(r"\*\*Approved, with a `decidedOn` that is not the `headRefOid` you read:\*\*(.*?)- \*\*",
+                         first)
+        self.assertTrue(rule, first)
+        body = rule.group(1)
+        self.assertIn("Do not merge", body)
+        self.assertIn('"result": "blocked"', body)
+        self.assertIn("(<decidedOn, 7 chars>..<headRefOid, 7 chars>)", body)
+        self.assertIn("decide again", body)
+        self.assertIn("Record `blocked` in the ledger", body)
+        # MERGED and CLOSED are read, and win, before the head is compared.
+        self.assertLess(first.index("If `state` is `MERGED`"), first.index(rule.group(0)))
+        self.assertIn("whatever was pushed after they approved", first)
+        act = flat(section(self.doc, "Act on it"))
+        self.assertIn("gh pr merge <n> --repo <owner/repo> --match-head-commit <decidedOn>", act)
+        self.assertLess(act.index("already `MERGED`, do not run `gh pr merge` again"),
+                        act.index("--match-head-commit <decidedOn>"))
+        # The flag's meaning is gh's own help text, quoted, not a paraphrase.
+        self.assertIn('"Commit SHA that the pull request head must match to allow merge"', act)
+        self.assertIn("A refused merge is `blocked`", act)
+        self.assertIn("`--match-head-commit` refuses is `blocked`", act)
+
+    def test_a_desk_without_decided_on_merges_as_before_without_asking(self):
+        act = flat(section(self.doc, "Act on it"))
+        legacy = act[act.index("A desk published before `decidedOn` existed"):]
+        self.assertIn("Merge it as before, after the same state and later-message checks", legacy)
+        self.assertIn("--match-head-commit <headRefOid>", legacy)
+        self.assertIn("Do not stall it and do not ask in the terminal", legacy)
+        read_back = flat(section(self.doc, "Read it back"))
+        self.assertIn("`decidedOn`, the pull request's head commit the page was showing", read_back)
+        self.assertIn("A desk published before `decidedOn` existed stores none", read_back)
+
+    def test_a_head_block_is_not_cleared_from_the_terminal(self):
+        exception = flat(section(self.doc, "Is it already handled"))
+        self.assertIn("or for commits pushed after approving: those clear only when the reviewer decides again",
+                      exception)
+
     def test_desk_is_found_through_the_ledger_by_repo_and_pr(self):
         text = flat(section(self.doc, "Read it back"))
         self.assertLess(text.index("~/.review-desks.json"), text.index('action: "list"'))
@@ -300,6 +346,18 @@ class Desk(unittest.TestCase):
         self.assertEqual(check, sorted(check))
         self.assertGreater(check[0], causes[-1])
         self.assertIn("`set` under `review/pr-<number>/presence`", para)
+
+    def test_a_pushed_revision_writes_the_head_the_page_shows(self):
+        text = flat(section(self.doc, "Changing the desk and the pull request"))
+        self.assertIn('{"text": "<the description>", "head": "<the pull request\'s head commit>"}', text)
+        self.assertIn("Rewrite `context/body` after every push", text)
+        self.assertIn("gh pr view <n> --repo <owner/repo> --json headRefOid", text)
+        self.assertIn("stores it as `decidedOn`", text)
+        self.assertIn("A push after **Approve** therefore blocks the merge", text)
+        publish = flat(section(self.doc, "Publish"))
+        self.assertIn('"head": "<the payload\'s headRefOid>"', publish)
+        decide = flat(section(self.doc, "When they decide"))
+        self.assertIn("an approval whose `decidedOn` is not the pull request's head", decide)
 
     def test_document_id_is_capped_and_oversize_text_is_excerpted(self):
         text = flat(section(self.doc, "Changing the desk and the pull request"))

@@ -39,7 +39,7 @@ costs the reviewer their trust in every desk after it.
 Use `gh` for everything, passing `--repo` explicitly once you have resolved it,
 so the answer does not change with the working directory:
 
-    gh pr view <n> --repo <owner/repo> --json number,title,url,body,additions,deletions,changedFiles,headRefName,baseRefName
+    gh pr view <n> --repo <owner/repo> --json number,title,url,body,additions,deletions,changedFiles,headRefName,headRefOid,baseRefName
 
 Then the markdown files the request touches, because those are documents meant
 to be read rather than diffed:
@@ -82,12 +82,19 @@ the same path. The payload is a JSON object:
       "number":    12,
       "title":     "…",
       "url":       "https://github.com/…",
+      "headRefOid": "the head commit from that query, all 40 hex characters",
       "summary":   "34 files, no code" — a short honest size,
       "body":      "the pull request description, markdown, with its diagrams",
       "documents": [{"name": "docs/design/0002-x.md", "text": "…"}],
       "openers":   ["four questions worth asking about THIS request"],
       "resume":    "cd <repository path> && claude --resume <this session's id>"
     }
+
+`headRefOid` is the commit the reviewer is reading. Copy it as `gh` printed it:
+the build script refuses anything but 40 lowercase hex characters. The page
+shows it, and when the reviewer decides it stores it beside the decision as
+`decidedOn`. `/review-collect` merges an approval only while the pull request's
+head is still that commit.
 
 There is no briefing field. The page's chat reaches this session, which already
 knows why the change exists, what was rejected, and what was verified; say it in
@@ -191,7 +198,7 @@ one batch:
 
 Then, in one batch with the publish:
 
-- set `context/body` to `{"text": "<the new body>"}`, pinned with `if_version`
+- set `context/body` to `{"text": "<the new body>", "head": "<the payload's headRefOid>"}`, pinned with `if_version`
   from that read, or with no `if_version` when it was not found;
 - set each carried file's document to `{"name", "text", "at": "<now, UTC ISO>"}`,
   under the id "Changing the desk and the pull request" describes, pinned with
@@ -464,12 +471,27 @@ When a message asked for it, name the commit in the reply to that message.
 Then rewrite the desk so it shows the pull request as it now is. Each of these
 lands on the open page without a reload, and a changed tab is marked:
 
-    review/pr-<number>/context/body                   {"text": "<the description>"}
+    review/pr-<number>/context/body                   {"text": "<the description>", "head": "<the pull request's head commit>"}
     review/pr-<number>/documents/<path, / written ~>  {"name": "<path as carried>", "text": "...", "at": "<now, UTC ISO>"}
 
 A document whose `name` matches a carried file replaces that tab; a new name adds
 one. Rewrite the description whenever a change makes it wrong, diagrams
 included.
+
+Rewrite `context/body` after every push, even one the description does not need
+to mention, with `head` set to the commit GitHub now has, all 40 hex characters,
+read after the push:
+
+    gh pr view <n> --repo <owner/repo> --json headRefOid
+
+The page shows that commit, says the desk now reflects a newer one than it was
+published with, and stores it as `decidedOn` when the reviewer next decides.
+`/review-collect` merges an approval only while the pull request's head is
+still `decidedOn`. A push after **Approve** therefore blocks the merge until the
+reviewer looks and decides again, and so does a push whose `head` never reached
+the desk: the page goes on showing the old commit, and an approval of it does
+not match. Writing `head` promptly is what keeps that second case from costing
+the reviewer a second tap.
 
 Each file has one document, and its id is the path with every `/` written as
 `~`: `docs/design/0002-x.md` is `docs~design~0002-x.md`. Any other character a
@@ -567,7 +589,8 @@ On that notice, in this order:
    before commenting or merging, so taking over a collection that stopped
    halfway does not do either twice. An approval with a reviewer's message later
    than `decidedAt` is not merged: it records `blocked` and asks the reviewer to
-   decide again.
+   decide again. Nor is an approval whose `decidedOn` is not the pull request's
+   head, since commits the reviewer never saw would be merged with it.
 
 The acknowledgement:
 
