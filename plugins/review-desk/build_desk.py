@@ -3,6 +3,8 @@
 
     python3 build_desk.py payload.json "Design 0001 Review" --out desk.html
 
+It prints the page's path, then the capabilities object to publish it with.
+
 The payload goes inside an inline <script>, and the HTML parser ends that
 script at the first "</script" it meets -- inside a JSON string too. A carried
 file that quotes a script tag used to cut the page's code in half and leave the
@@ -69,6 +71,26 @@ def page_script(page):
     return page[open_tag:page.index("</script>", start)]
 
 
+# Who may write where in the desk's store (db.d.ts, ACCESS RULES). Without rules
+# every viewer the desk is shared with writes every path, so one could write a
+# reply the page labels "working session", or a pickup reading "Merged". Those
+# paths are written only by the session, which writes as the artifact's owner.
+# The page itself writes review/pr-N and its rering lease at interact, so that
+# subtree stays open. Rules are fixed at publish: a desk published before these
+# existed stays open until it is republished with them.
+SESSION_PATHS = ("replies", "presence", "context", "documents")
+MAX_RULES = 64
+
+
+def capabilities(number):
+    base = "review/pr-%d" % number
+    rules = [{"path": base, "write": "interact"}]
+    rules += [{"path": base + "/" + name, "write": "owner"} for name in SESSION_PATHS]
+    if len(rules) > MAX_RULES:
+        raise BuildError("the store allows at most %d rules" % MAX_RULES)
+    return {"db": {"rules": rules}, "artifact": {}}
+
+
 def check_payload(payload):
     if not isinstance(payload, dict):
         raise BuildError("the payload must be a JSON object")
@@ -96,6 +118,7 @@ def main(argv=None):
     with open(args.out, "w", encoding="utf-8") as f:
         f.write(page)
     print(args.out)
+    print("capabilities: " + json.dumps(capabilities(payload["number"])))
     return 0
 
 
