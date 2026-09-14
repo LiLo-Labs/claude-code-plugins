@@ -199,7 +199,9 @@ one batch:
 Then, in one batch with the publish:
 
 - set `context/body` to `{"text": "<the new body>", "head": "<the payload's headRefOid>"}`, pinned with `if_version`
-  from that read, or with no `if_version` when it was not found;
+  from that read, or with no `if_version` when it was not found. When the ledger
+  entry's `head` is not the payload's, open the text with the `## Changed since
+  you opened this` section "Changing the desk and the pull request" describes;
 - set each carried file's document to `{"name", "text", "at": "<now, UTC ISO>"}`,
   under the id "Changing the desk and the pull request" describes, pinned with
   `if_version` when the list held it;
@@ -304,14 +306,32 @@ nobody.
 ## Write it down
 
 Append an entry to `~/.review-desks.json`, creating the file with an empty list
-if it is absent. Each entry is `{"repo": "owner/name", "pr": <number>, "url":
-"<artifact url>", "cwd": "<launch directory>", "collectedAt": null}`. `cwd` is
-the absolute path of the directory this session was launched in, the working
-directory Claude Code named when the session started, not a directory you later
-ran `cd` into. If an entry for this request already exists, keep that one
+if it is absent. Each entry is:
+
+    {"repo": "owner/name", "pr": <number>, "url": "<artifact url>",
+     "cwd": "<launch directory>", "head": "<headRefOid>", "branch": "<headRefName>",
+     "collectedAt": null}
+
+`cwd` is the absolute path of the directory this session was launched in, the
+working directory Claude Code named when the session started, not a directory
+you later ran `cd` into. `head` is the `headRefOid` this publish wrote into the
+payload and `context/body`, the commit the desk shows, and `branch` is the
+`headRefName` from the same `gh pr view`, the branch the pull request's commits
+are pushed to. If an entry for this request already exists, keep that one
 rather than adding a second, and set its `cwd` to this session's launch
-directory. If it has `collectedAt` set and the pull request is still open, set
-`collectedAt` and `outcome` back to null, so the desk is listed again.
+directory and its `head` and `branch` to this publish's. If it has
+`collectedAt` set and the pull request is still open, set `collectedAt` and
+`outcome` back to null, so the desk is listed again.
+
+`head` moves with the desk. Every later rewrite of `context/body` for a push
+sets the entry's `head` to the head that rewrite wrote, as "Changing the desk
+and the pull request" describes, so the entry always names the commit the desk
+shows, and the next `## Changed since you opened this` section starts from it.
+`branch` is how the after-push hook tells the desks in one repository apart: it
+lists a desk whose entry records a `branch` only when that branch is pushed. An
+entry written before these fields were recorded has neither and still works:
+the hook lists it for every push to its repository, and its section starts from
+the `head` its stored `context/body` carries.
 
 The reviewer decides on a page, often on a tablet, often when nothing is
 running here. This file is how a later session finds out: when a session starts
@@ -523,10 +543,42 @@ Open the description with a `## Changed since you opened this` section: one line
 per commit pushed since the desk was published, its short hash and what it
 changed. This is how a change nobody asked for on the page reaches the reviewer.
 The page draws a reply only beside the message it answers, and drops one that
-answers nothing, so a reply cannot carry it. After every `git push` the plugin's
-hook lists the open desks for every repository the checkout's remotes name, so
-a push to a fork reaches the upstream's desk, and points back here, so a change
-made from the terminal does not leave a desk out of date.
+answers nothing, so a reply cannot carry it.
+
+Compute those commits from the ledger; never recall or guess them. The entry in
+`~/.review-desks.json` whose `repo` and `pr` match records `head`, the commit
+the desk showed before this rewrite, and `branch`. In the checkout you pushed
+from:
+
+    git fetch origin <branch>
+    git log --reverse --format='%h %s' <head>..origin/<branch>
+
+`origin` stands for the remote the branch lives on, which in a fork checkout is
+the fork. When that fails, because `head` is not in the checkout after a
+force-push or there is no checkout, ask GitHub, with `headRefOid` the head you
+just read:
+
+    gh api repos/<owner/repo>/compare/<head>...<headRefOid> --jq '.commits[] | .sha[0:7] + " " + (.commit.message | split("\n")[0])'
+
+When both fail, the branch's history was rewritten past `head`: say so in one
+line, and list the pull request's commits as they now stand. An entry written
+before `head` was recorded has none; start from the `head` in the stored
+`context/body` instead, and when that is absent too, say the list starts at
+this push.
+
+`context/body` is replaced whole, so read it first and keep the lines its
+section already has, adding the new commits below them. Skip a commit whose
+short hash is already listed, since `/review-collect` writes this section too
+when it brings the desk to a new head. Once the write has landed, set the
+entry's `head` to the `headRefOid` it wrote, and its `branch` to `headRefName`
+when the entry has none. Not before: a ledger `head` ahead of the desk drops
+those commits from the next section.
+
+After every `git push` the plugin's hook lists the open desks for every
+repository the checkout's remotes name, so a push to a fork reaches the
+upstream's desk. Of those, a desk whose entry records a `branch` is listed only
+when the push updates that branch. The hook points back here, so a change made
+from the terminal does not leave a desk out of date.
 
 Change a desk through these writes, never by republishing it. Every doorbell
 ring is a new version saved from inside the page, so once the reviewer has sent
