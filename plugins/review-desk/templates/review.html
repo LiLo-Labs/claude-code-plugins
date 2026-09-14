@@ -383,8 +383,50 @@ const esc = s => String(s).replace(/[&<>"]/g, c =>
   ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 
 /* ================= markdown ================= */
+// Whether `attr`, a URL as it will sit between the quotes of an href, may be a
+// link. The description, carried files and replies are written by whoever opened
+// the pull request, so a javascript:, data: or vbscript: target is theirs to
+// choose. Only http, https and mailto, or a target with no scheme at all (a
+// fragment, or a relative path), become links; the host's sandbox is not relied on.
+//
+// The decision is made on the URL the browser will follow, not the text as
+// written: the attribute is decoded by the HTML parser itself, so a named
+// reference such as &colon; or &Tab; counts as the character it stands for.
+// The URL parser then drops leading spaces and control characters, and tabs and
+// newlines anywhere, so those are dropped here too. A colon before any / ? or #
+// is read as ending a scheme even where the URL parser would not call it one,
+// which only ever refuses; docs/a:b.md stays a link.
+//
+// The check is repeated on each further decoding until the text stops changing.
+// An author who types java&#x09;script: gets, after escaping and one decoding,
+// the literal text java&#x09;script:, whose # hides the colon from the rule
+// above; one decoding more is javascript:. A target still changing after four
+// decodings is refused rather than decoded without end.
+const LINK_SCHEMES = ['http', 'https', 'mailto'];
+const schemeAllowed = url => {
+  url = url.replace(/^[\u0000-\u0020]+/, '').replace(/[\t\n\r]/g, '');
+  const end = url.search(/[:/?#]/);
+  return end < 0 || url[end] !== ':' || LINK_SCHEMES.includes(url.slice(0, end).toLowerCase());
+};
+function safeHref(attr){
+  let url = String(attr);
+  for (let layer = 0; layer < 4; layer++){
+    const probe = document.createElement('template');
+    probe.innerHTML = '<a href="' + url.replace(/"/g, '&quot;') + '"></a>';
+    const decoded = probe.content.firstChild.getAttribute('href') || '';
+    if (!schemeAllowed(decoded)) return false;
+    if (decoded === url) return true;
+    url = decoded;
+  }
+  return false;
+}
+// `href` and `text` are already escaped; `href` is a placeholder until inline() ends.
+const link = (href, text) => '<a href="' + href + '" target="_blank" rel="noopener noreferrer">' + text + '</a>';
+
 function inline(s){
-  let t = esc(s);
+  // \u0000 marks the placeholders below. The browser would turn an author's \u0000 into
+  // U+FFFD anyway; removing it here means every placeholder is one this made.
+  let t = esc(String(s).replace(/\u0000/g, ''));
 
   // Code spans are lifted out before anything else runs and put back at the
   // end. Emphasis used to run straight over them, so the template's payload
@@ -392,21 +434,29 @@ function inline(s){
   // about most -- rendered with its asterisks eaten and the reader saw /PAYLOAD/.
   // (The marker itself must appear once in this file; build_desk.py checks.)
   const kept = [];
-  t = t.replace(/`([^`]+)`/g, (m, a) => {
-    kept.push('<code>' + a + '</code>');
-    return '\u0000' + (kept.length - 1) + '\u0000';
-  });
+  const keep = html => { kept.push(html); return '\u0000' + (kept.length - 1) + '\u0000'; };
+  t = t.replace(/`([^`]+)`/g, (m, a) => keep('<code>' + a + '</code>'));
 
-  t = t.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g,
-    (m,a,b) => '<a href="'+b+'" target="_blank" rel="noopener">'+a+'</a>');
-  t = t.replace(/(^|[\s(])(https?:\/\/[^\s<)]+)/g,
-    (m,pre,u) => pre+'<a href="'+u+'" target="_blank" rel="noopener">'+u+'</a>');
+  // Comments go before any link is built, and each approved href is lifted out
+  // like a code span, so the href that ships is exactly the text safeHref passed.
+  // Stripping comments afterwards let a target of javascript, then a comment
+  // holding a slash, then :x pass the check as a relative path and lose the comment
+  // from inside the finished href; bold markers inside a target were likewise
+  // rewritten after the check.
+  t = t.replace(/&lt;!--[\s\S]*?--&gt;/g, '');
+
+  // A link the author's target cannot vouch for stays as the markdown they wrote,
+  // so the reviewer sees where it pointed. A code span is never part of a target,
+  // so both patterns stop at a placeholder.
+  t = t.replace(/\[([^\]]+)\]\(([^)\s\u0000]+)\)/g,
+    (m,a,b) => safeHref(b) ? link(keep(b), a) : m);
+  t = t.replace(/(^|[\s(])(https?:\/\/[^\s<)\u0000]+)/g,
+    (m,pre,u) => safeHref(u) ? pre + link(keep(u), u) : m);
   t = t.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
   // Emphasis needs whitespace or a line start in front of it, so a bare
   // asterisk inside a path or a glob is left alone.
   t = t.replace(/(^|[\s(])\*([^*\s][^*]*)\*(?=[\s.,;:!?)]|$)/g,
     (m,pre,body) => pre+'<em>'+body+'</em>');
-  t = t.replace(/&lt;!--[\s\S]*?--&gt;/g, '');
 
   return t.replace(/\u0000(\d+)\u0000/g, (m, i) => kept[+i]);
 }
