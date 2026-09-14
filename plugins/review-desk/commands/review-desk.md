@@ -325,9 +325,10 @@ directory and its `head` and `branch` to this publish's. If it has
 `collectedAt` set and the pull request is still open, set `collectedAt` and
 `outcome` back to null, so the desk is listed again.
 
-`head` moves with the desk. Every later rewrite of `context/body` for a push
-sets the entry's `head` to the head that rewrite wrote, as "Changing the desk
-and the pull request" describes, so the entry always names the commit the desk
+`head` moves with the desk. Every later head sync, whether a rewrite of
+`context/body` for a push, a republish, or `/review-collect` bringing the desk
+to a moved head, sets the entry's `head` to the head it wrote, as "Changing the
+desk and the pull request" describes, so the entry always names the commit the desk
 shows, and the next `## Changed since you opened this` section starts from it.
 `branch` is how the after-push hook tells the desks in one repository apart: it
 lists a desk whose entry records a `branch` only when that branch is pushed. An
