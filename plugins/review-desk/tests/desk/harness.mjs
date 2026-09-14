@@ -15,6 +15,12 @@
 //   The page writes as `level`, 'interact' unless a test says otherwise: rules never
 //   limit the owner, so a page that passed only as the owner would fail for anyone
 //   the desk is shared with. The session's writes (desk.write) are the owner's.
+// - A page's set shows at once to that view's own listeners on the document with
+//   hasPendingWrites true, then lands for every view; a refused set is followed by
+//   the stored document again, as db.d.ts's latency compensation describes. The
+//   echo of an earlier set lands with hasPendingWrites false even while a later one
+//   is pending, which the real store may not do. `cacheFirst` gives a document
+//   subscription a fromCache first snapshot.
 //
 // Known gaps, each something the page does not depend on today: rules that set
 // `read` or use {self} are refused at open() rather than half-enforced; the 64
@@ -71,7 +77,7 @@ const PUBLISH_CODES = ['conflict', 'not_writer', 'not_declared', 'too_large', 'i
 // Runs in every frame before any of its scripts. Serialised by Playwright, so it
 // may use only its argument.
 function installStub({seed, capabilities, publishError, getDelay, getFailures, leases: held,
-    subscribeFailures, setFailures, setDelay, rules, level, levels}){
+    subscribeFailures, setFailures, setDelay, rules, level, levels, cacheFirst}){
   const frozen = v => {
     if (v && typeof v === 'object'){ Object.values(v).forEach(frozen); Object.freeze(v); }
     return v;
@@ -88,6 +94,8 @@ function installStub({seed, capabilities, publishError, getDelay, getFailures, l
       leases: new Map(Object.entries(held || {}).map(([p, ms]) =>
         [p, {holder: 'another-view', expires: Date.now() + ms}])),
       docSubs: new Map(), colSubs: new Map(), log: [], counter: {version: 0},
+      // Every document snapshot delivered to a listener, with its metadata.
+      snaps: [],
       // `setFailures` maps a document path to the codes its next sets are refused
       // with, one code per set, from any view. failSets() adds to it mid-test.
       setRefusals: new Map(Object.entries(setFailures || {}).map(([p, c]) => [p, c.slice()])),
@@ -96,9 +104,11 @@ function installStub({seed, capabilities, publishError, getDelay, getFailures, l
       publishRefusals: Array.isArray(publishError) ? publishError.slice() : [],
     };
   }
-  const {store, leases, docSubs, colSubs, log, counter, setRefusals, publishRefusals} = shared;
+  const {store, leases, docSubs, colSubs, log, counter, setRefusals, publishRefusals, snaps} = shared;
   const view = window === window.top ? 'page' : window.name;
   const rings = [], missing = [];
+  // Paths whose fromCache first snapshot this frame has had.
+  const cached = new Set();
   let failuresLeft = getFailures || 0;
   // `subscribeFailures` maps a path to the codes its next subscribes die with,
   // one code per subscribe, before any snapshot is delivered.
@@ -152,9 +162,10 @@ function installStub({seed, capabilities, publishError, getDelay, getFailures, l
     },
   });
 
-  const docSnap = p => frozen({id: p.split('/').pop(), exists: store.has(p),
-    data: (d => () => d)(store.has(p) ? frozen(clone(store.get(p))) : undefined),
-    metadata: {fromCache: false, hasPendingWrites: false}});
+  const snapOf = (p, exists, body, meta = {}) => frozen({id: p.split('/').pop(), exists,
+    data: (d => () => d)(exists ? frozen(clone(body)) : undefined),
+    metadata: {fromCache: false, hasPendingWrites: false, ...meta}});
+  const docSnap = p => snapOf(p, store.has(p), store.get(p));
   const colSnap = c => {
     const docs = [...store.keys()].filter(k => parentOf(k) === c).sort()
       .map(k => docSnap(k));
@@ -162,16 +173,25 @@ function installStub({seed, capabilities, publishError, getDelay, getFailures, l
       docChanges: () => { missing.push('QuerySnapshot.docChanges'); throw new TypeError('stub has no docChanges'); },
       metadata: {fromCache: false, hasPendingWrites: false}});
   };
+  const deliver = (sub, snap) => {
+    if (sub.doc){
+      const d = snap.exists ? snap.data() : null;
+      snaps.push({path: sub.key, view: sub.view, exists: snap.exists, ...snap.metadata,
+        writer: d ? d.writer : undefined, at: Date.now()});
+    }
+    sub.next(snap);
+  };
   const notify = p => {
-    (docSubs.get(p) || []).slice().forEach(s => s.next(docSnap(p)));
+    (docSubs.get(p) || []).slice().forEach(s => deliver(s, docSnap(p)));
     const c = parentOf(p);
     (colSubs.get(c) || []).slice().forEach(s => s.next(colSnap(c)));
   };
   // db.d.ts: a document body is at most 256 KiB serialized, and an oversize
   // write rejects invalid_argument.
   const MAX_BODY = 256 * 1024;
+  const tooLarge = data => new TextEncoder().encode(JSON.stringify(data)).length > MAX_BODY;
   const put = (p, data, who) => {
-    if (data !== null && new TextEncoder().encode(JSON.stringify(data)).length > MAX_BODY)
+    if (data !== null && tooLarge(data))
       throw fail('invalid_argument', 'document body over 256 KiB');
     if (data === null) store.delete(p); else store.set(p, clone(data));
     log.push({op: data === null ? 'delete' : 'set', path: p, by: who, view, data: data && clone(data),
@@ -187,11 +207,24 @@ function installStub({seed, capabilities, publishError, getDelay, getFailures, l
       setTimeout(() => error && error({code, message: 'stubbed ' + code}), 0);
       return () => {};
     }
-    const sub = {next, error};
+    const sub = {next, error, view, key, doc: map === docSubs};
     const list = map.get(key) || []; map.set(key, list); list.push(sub);
-    setTimeout(() => list.includes(sub) && next(snap()), 0);
+    const fromCache = sub.doc && Object.prototype.hasOwnProperty.call(cacheFirst, key) && !cached.has(key);
+    if (fromCache) cached.add(key);
+    setTimeout(() => {
+      if (fromCache && list.includes(sub))
+        deliver(sub, snapOf(key, cacheFirst[key] !== null, cacheFirst[key], {fromCache: true}));
+      if (list.includes(sub)) deliver(sub, snap());
+    }, 0);
     return () => { const i = list.indexOf(sub); if (i >= 0) list.splice(i, 1); };
   };
+  // This view's own listeners on a document, which alone see its unconfirmed write.
+  const ownSubs = p => (docSubs.get(p) || []).filter(s => s.view === view);
+  const showPending = (p, data) => {
+    const body = clone(data);
+    setTimeout(() => ownSubs(p).forEach(s => deliver(s, snapOf(p, true, body, {hasPendingWrites: true}))), 0);
+  };
+  const showRollback = p => setTimeout(() => ownSubs(p).forEach(s => deliver(s, docSnap(p))), 0);
 
   const docRef = p => {
     if (segments(p).length % 2) throw new TypeError('document path needs an even number of segments: ' + p);
@@ -211,7 +244,12 @@ function installStub({seed, capabilities, publishError, getDelay, getFailures, l
       set: async data => {
         guard(p, 'set');
         const refused = (setRefusals.get(p) || []).shift();
+        // A body refused at call time never shows as pending; one the store refuses
+        // shows, and is then taken back.
+        const shown = isObject(data) && !tooLarge(data);
+        if (shown) showPending(p, data);
         if (refused){
+          if (shown) showRollback(p);
           log.push({op: 'refused', path: p, code: refused, view, at: Date.now()});
           throw fail(refused, 'stubbed ' + refused);
         }
@@ -285,6 +323,7 @@ function installStub({seed, capabilities, publishError, getDelay, getFailures, l
   window.__desk = {
     store: () => Object.fromEntries([...store].map(([k, v]) => [k, clone(v)])),
     log: () => clone(log), rings: () => clone(rings), missing: () => missing.slice(),
+    snapshots: p => clone(snaps.filter(s => !p || s.path === p)),
     // A write from outside the page, as the session's write_db lands.
     write: (p, data) => put(p, data, 'session'),
     failSets: (p, codes) => {
@@ -326,7 +365,7 @@ const skeleton = html => '<!doctype html><html><head>'
 // capabilities object build_desk.py printed, whose db rules the stub enforces.
 function stubOptions({seed = {}, capabilities = ['db', 'artifact'], publishError = null,
     getDelay = 0, getFailures = 0, leases = {}, subscribeFailures = {}, setFailures = {}, setDelay = 0,
-    level = 'interact'}, declared){
+    level = 'interact', cacheFirst = {}}, declared){
   const unknown = capabilities.filter(c => !['db', 'artifact'].includes(c));
   if (unknown.length) throw new Error('the stub grants only db and artifact, not ' + unknown);
   const codes = publishError === null ? [] : [].concat(publishError).filter(c => c !== null);
@@ -340,7 +379,7 @@ function stubOptions({seed = {}, capabilities = ['db', 'artifact'], publishError
       throw new Error('the stub enforces only path and write levels, not ' + JSON.stringify(r));
   }
   return {seed, capabilities, publishError, getDelay, getFailures, leases, subscribeFailures, setFailures,
-    setDelay, rules, level, levels: LEVELS};
+    setDelay, rules, level, levels: LEVELS, cacheFirst};
 }
 
 // Everything a test does to one view. `frame` is a Page for a lone desk, or the
@@ -352,6 +391,8 @@ function deskFor(frame, {page, errors, pr, html, close}){
     log: () => frame.evaluate(() => window.__desk.log()),
     rings: () => frame.evaluate(() => window.__desk.rings()),
     missing: () => frame.evaluate(() => window.__desk.missing()),
+    // Document snapshots delivered to listeners, in any view, on `p` or on every path.
+    snapshots: p => frame.evaluate(p => window.__desk.snapshots(p), p),
     write: (p, v) => frame.evaluate(([p, v]) => window.__desk.write(p, v), [p, v]),
     failSets: (p, codes) => frame.evaluate(([p, c]) => window.__desk.failSets(p, c), [p, codes]),
     // Loads this view again, as another view's ring does on the host. In
