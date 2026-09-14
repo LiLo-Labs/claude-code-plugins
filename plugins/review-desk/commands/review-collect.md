@@ -168,8 +168,9 @@ Stamp `collectedAt` with the current UTC time only when the outcome is `merged`
 or `closed`. Those are the only outcomes that end a review. For `revising` and
 `blocked`, leave `collectedAt` null: the reviewer can still send a message or
 press **Change this**, the revision's pushes still need the desk rewritten, and
-both hooks list a desk only while it is open. An entry stamped with a `revising`
-or `blocked` outcome by an older version is still treated as open.
+both hooks list a desk only while it is open. The hooks go by the outcome, so an
+entry that carries a stamp next to a `revising` or `blocked` outcome, for
+example one edited by hand, is still treated as open.
 
 Once `collectedAt` is stamped, the desk needs no watch. Pass `action: "unwatch"`
 with its URL, so the slot is free for the next desk this session publishes.

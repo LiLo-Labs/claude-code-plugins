@@ -100,10 +100,11 @@ class Sweep(unittest.TestCase):
         self.assertEqual(sum(l.endswith(" [watch]") for l in listed), 4)
 
     def test_revising_desk_stays_open_even_when_stamped(self):
-        # A ledger from before 0.9.0 stamped collectedAt on a Needs-changes
-        # pickup too, which hid the desk while the revision was under review.
-        # Only merged and closed end a review; a stamp with no outcome is an
-        # entry from before outcomes were recorded, and stays closed.
+        # The outcome decides, not the stamp: a stamp next to a revising or
+        # blocked outcome (a hand edit, or a session that stamped too early)
+        # must not hide a desk still under review. Only merged and closed end a
+        # review; a stamp with no outcome predates recorded outcomes and stays
+        # closed.
         stamped = "2026-09-10T00:00:00Z"
         entries = [dict(desk(n, stamped), outcome=o) for n, o in
                    ((1, "revising"), (2, "blocked"), (3, "merged"), (4, "closed"), (5, None))]

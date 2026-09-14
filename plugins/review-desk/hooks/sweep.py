@@ -71,14 +71,14 @@ def message(waiting, here):
             "- A recorded decision the pickup holds with the same decision and "
             "decidedAt and an outcome was handled; do not collect it again. A "
             "matching pickup with no outcome is a claim on the decision: when its "
-            f'"session" is another session\'s and its "at" is more than '
+            f'"session" is another session\'s (or it has none) and its "at" is more than '
             f"{STALE_CLAIM_MINUTES} minutes old, or its \"session\" is this "
             "session's own, it is stale, so take it over as /review-desk "
             'describes under "When they decide", then follow /review-collect. Any '
             "other recorded decision: follow /review-collect for that request.",
             "- Messages still waiting, meaning no reply document, or a reply at "
             '"working" that is a stale claim: its "session" is another '
-            f'session\'s and its "at" is more than {STALE_CLAIM_MINUTES} minutes '
+            f'session\'s (or it has none) and its "at" is more than {STALE_CLAIM_MINUTES} minutes '
             'old, or its "session" is this session\'s own, whatever its age. '
             "claude --resume keeps the session id, and the turn that was "
             "answering it has stopped. Answer them as /review-desk describes "

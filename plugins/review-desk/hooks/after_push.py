@@ -44,11 +44,12 @@ TERMINAL = ("merged", "closed")
 
 
 def is_open(entry):
-    """A well-formed ledger entry nobody has closed. collectedAt alone is not
-    enough: a ledger written before 0.9.0 stamped it on a revising desk too, so
-    an entry whose recorded outcome is not terminal stays open. An entry stamped
-    with no outcome at all predates outcomes and is left closed, since nothing
-    here can tell a merged one from a revising one."""
+    """A well-formed ledger entry nobody has closed. The recorded outcome decides:
+    an entry whose outcome is not terminal stays open even if it carries a
+    collectedAt stamp (a hand edit, or a session that stamped too early). An
+    entry stamped with no outcome at all was written before outcomes were
+    recorded and is left closed, since nothing here can tell a merged one from
+    a revising one."""
     if not isinstance(entry, dict):
         return False
     if not (entry.get("repo") and entry.get("pr") and entry.get("url")):
