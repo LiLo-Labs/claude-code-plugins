@@ -196,10 +196,12 @@ if it is absent. Each entry is `{"repo": "owner/name", "pr": <number>, "url":
 exists, leave it alone rather than adding a second.
 
 The reviewer decides on a page, often on a tablet, often when nothing is
-running here. This file is how a later session finds out: the plugin's
-session-start sweep lists every entry whose `collectedAt` is still null. Without
-an entry the decision waits until somebody remembers to look, which is the
-failure this whole arrangement exists to prevent.
+running here. This file is how a later session finds out: when a session starts
+or resumes in a repository, the plugin's session-start sweep lists that
+repository's entries whose `collectedAt` is still null, and counts the ones
+waiting in other repositories. Without an entry the decision waits until
+somebody remembers to look, which is the failure this whole arrangement exists
+to prevent.
 
 Give the reviewer the link and nothing else. Do not summarise the request in
 chat; the page is the summary, and repeating it there defeats the point.
@@ -281,10 +283,8 @@ as inference.
 ### Changing the desk and the pull request
 
 When a message asks for a change, or the conversation here settles one, change
-the pull request first. Make the change, run what verifies it, commit and push,
-and name the commit in your reply. After every `git push` the plugin's hook
-lists the open desks for that repository, so a change made from the terminal
-does not leave a desk out of date.
+the pull request first. Make the change, run what verifies it, commit and push.
+When a message asked for it, name the commit in the reply to that message.
 
 Then rewrite the desk so it shows the pull request as it now is. Each of these
 lands on the open page without a reload, and a changed tab is marked:
@@ -295,6 +295,14 @@ lands on the open page without a reload, and a changed tab is marked:
 A document whose `name` matches a carried file replaces that tab; a new name adds
 one. Rewrite the description whenever a change makes it wrong, diagrams
 included.
+
+Open the description with a `## Changed since you opened this` section: one line
+per commit pushed since the desk was published, its short hash and what it
+changed. This is how a change nobody asked for on the page reaches the reviewer.
+The page draws a reply only beside the message it answers, and drops one that
+answers nothing, so a reply cannot carry it. After every `git push` the plugin's
+hook lists the open desks for that repository and points back here, so a change
+made from the terminal does not leave a desk out of date.
 
 Change a desk through these writes, never by republishing it. Every doorbell
 ring is a new version saved from inside the page, so once the reviewer has sent
@@ -346,4 +354,5 @@ to unblock it and one who assumes it landed.
 
 A session holds at most five artifact watches, and a watch ends with its
 session. A ring nobody is watching goes unheard, and the session-start sweep
-lists the desk for the next session instead. Nothing is lost; it waits.
+lists the desk for the next session started in its repository instead. Nothing
+is lost; it waits.

@@ -83,7 +83,8 @@ reviewer's page otherwise goes on saying the decision was picked up.
 When you have acted on a decision -- the comment posted, and merged or not --
 set `collectedAt` on that request's entry in `~/.review-desks.json` to the
 current UTC time. An entry that stays null is listed again by the plugin's
-session-start sweep every time a session starts, so leaving it means nagging;
+session-start sweep every time a session starts in that repository, so leaving
+it means nagging;
 stamping one you did not act on means the decision is silently dropped.
 
 Do not merge on a decision you inferred rather than read. The whole arrangement

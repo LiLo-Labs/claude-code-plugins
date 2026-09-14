@@ -15,7 +15,8 @@ class AfterPush(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.home = self.tmp.name
-        self.repo = os.path.join(self.home, "work", "plugins")
+        self.work = os.path.join(self.home, "work")
+        self.repo = os.path.join(self.work, "repo")
         os.makedirs(self.repo)
         subprocess.run(["git", "init", "-q", self.repo], check=True)
         self.remote("https://github.com/o/r.git")
@@ -37,9 +38,9 @@ class AfterPush(unittest.TestCase):
         with open(os.path.join(self.home, ".review-desks.json"), "w") as f:
             json.dump(entries, f)
 
-    def run_hook(self, command, cwd=None):
-        event = {"tool_name": "Bash", "tool_input": {"command": command},
-                 "cwd": cwd or self.repo}
+    def run_hook(self, command, cwd=None, event_name="PostToolUse"):
+        event = {"hook_event_name": event_name, "tool_name": "Bash",
+                 "tool_input": {"command": command}, "cwd": cwd or self.repo}
         done = subprocess.run([sys.executable, HOOK], input=json.dumps(event),
                               env=dict(os.environ, HOME=self.home),
                               capture_output=True, text=True, timeout=10)
@@ -50,15 +51,41 @@ class AfterPush(unittest.TestCase):
         return json.loads(out)["hookSpecificOutput"]["additionalContext"]
 
     def test_not_a_push_says_nothing(self):
-        self.assertEqual(self.run_hook("git status"), "")
-        self.assertEqual(self.run_hook("git pull --ff-only"), "")
-        # Found by running the hook in a real session: the words alone matched.
-        self.assertEqual(self.run_hook("echo git push"), "")
-        self.assertEqual(self.run_hook('git commit -m "before the git push"'), "")
+        for command in [
+            "git status",
+            "git pull --ff-only",
+            # Found by running the hook in a real session: the words alone matched.
+            "echo git push",
+            'git commit -m "before the git push"',
+            'git commit -m "push later"',
+            "rtk git status",
+            "timeout 60 git fetch",
+            "command -v git",
+        ]:
+            with self.subTest(command=command):
+                self.assertEqual(self.run_hook(command), "")
 
     def test_push_after_other_commands_is_seen(self):
         self.assertIn("#7", self.said(self.run_hook("git add -A && git commit -qm x && git push")))
         self.assertIn("#7", self.said(self.run_hook("GIT_TRACE=0 git push")))
+        self.assertIn("#7", self.said(self.run_hook("git add -A\ngit push 2>&1 | tail -3")))
+
+    def test_wrapped_push_is_seen(self):
+        # RTK's PreToolUse hook rewrites `git push` before it runs, and PostToolUse
+        # is shown the rewritten command.
+        for command in [
+            "rtk git push",
+            "GIT_TRACE=0 rtk git push -q",
+            "rtk proxy git push",
+            "timeout 60 git push",
+            "timeout -s KILL 60 git push",
+            'GIT_SSH_COMMAND="ssh -i k" git push',
+            "env -u GIT_DIR GIT_TRACE=1 nice -n 5 command git push",
+            "git -c core.x=y push",
+            "git --no-pager -c a=b push origin HEAD",
+        ]:
+            with self.subTest(command=command):
+                self.assertIn("#7", self.said(self.run_hook(command)))
 
     def test_push_lists_only_open_desks_for_that_repo(self):
         text = self.said(self.run_hook("git push origin my-branch"))
@@ -68,9 +95,27 @@ class AfterPush(unittest.TestCase):
         self.assertNotIn("#9", text)
         self.assertIn("Changing the desk and the pull request", text)
 
+    def test_instruction_points_at_the_body_not_a_reply(self):
+        # The page only draws a session's answer against a message the reviewer
+        # sent, and a push from the terminal has none.
+        text = self.said(self.run_hook("git push"))
+        self.assertIn("context/body", text)
+        self.assertIn('"Changed since you opened this"', text)
+        self.assertNotIn("reply", text.lower())
+
     def test_push_run_elsewhere_is_resolved_from_cd_and_dash_c(self):
         self.assertIn("#7", self.said(self.run_hook(f"cd {self.repo} && git push", cwd=self.home)))
         self.assertIn("#7", self.said(self.run_hook(f"git -C {self.repo} push", cwd=self.home)))
+        self.assertIn("#7", self.said(self.run_hook("cd repo && rtk git push origin HEAD", cwd=self.work)))
+        self.assertIn("#7", self.said(self.run_hook("git -c a=b -C repo push", cwd=self.work)))
+
+    def test_cd_after_the_push_does_not_move_it(self):
+        self.assertEqual(self.run_hook(f"git push && cd {self.repo}", cwd=self.home), "")
+
+    def test_failed_command_answers_as_the_event_it_came_from(self):
+        out = json.loads(self.run_hook("rtk git push && false", event_name="PostToolUseFailure"))
+        self.assertEqual(out["hookSpecificOutput"]["hookEventName"], "PostToolUseFailure")
+        self.assertIn("#7", out["hookSpecificOutput"]["additionalContext"])
 
     def test_ssh_remote_is_recognised(self):
         self.remote("git@github.com:o/r.git")
