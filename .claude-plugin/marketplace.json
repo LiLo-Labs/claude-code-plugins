@@ -150,7 +150,7 @@
       "name": "review-desk",
       "source": "./plugins/review-desk",
       "description": "Review a pull request as a conversation instead of a diff. Publishes the request as a page you can talk to Claude inside, then writes the discussion back to the PR and merges on your approval.",
-      "version": "0.6.1",
+      "version": "0.6.2",
       "author": {
         "name": "LiLo Labs"
       },
