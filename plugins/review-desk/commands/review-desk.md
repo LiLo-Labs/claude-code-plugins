@@ -171,6 +171,29 @@ cannot tell which page belongs to this request, read the candidates and find the
 one holding a document at `review/pr-<number>`. That document is the identity,
 not the title.
 
+**Publishing into an existing desk also rewrites what its store shows.** The
+page lets the store win over the payload: a stored `context/body` replaces the
+description you just built, and a stored document replaces the carried file of
+the same name, even when both are older. So when the desk already exists, write
+the new content into the store in the same step as the publish. First read, in
+one batch:
+
+    action: "read_db", db_op: "get",  collection: "review/pr-<number>/context", doc_id: "body"
+    action: "read_db", db_op: "list", collection: "review/pr-<number>/documents"
+
+Then, in one batch with the publish:
+
+- set `context/body` to `{"text": "<the new body>"}`, pinned with `if_version`
+  from that read, or with no `if_version` when it was not found;
+- set each carried file's document to `{"name", "text", "at": "<now, UTC ISO>"}`,
+  under the id "Changing the desk and the pull request" describes, pinned with
+  `if_version` when the list held it;
+- delete, pinned with `if_version`, each stored document whose `name` is no
+  longer carried, or the page adds it back as an extra tab.
+
+A write refused for its version means another session wrote that document since
+your read. Read that one document again and redo the write.
+
 Then publish with the **Artifact** tool, passing as `capabilities` exactly the
 object the build script printed after the page's path. For pull request 12 it is:
 
@@ -222,20 +245,43 @@ of the page — and a one-sentence `description`, which becomes the subtitle on
 the gallery card. Between the title, the icon and that sentence, the reviewer
 can find this desk again a month later.
 
+### Check the watch line
+
+Publishing tries to start a watch on the desk, and the Artifact result has a
+watch line saying whether it began, was skipped, or was already connected. Read
+it before you tell the reviewer anything. A session holds at most five artifact
+watches, and a watch the session asked for, such as one the session-start sweep
+started, is never evicted to make room, so the publish's own watch can be
+skipped at the limit. Nothing else tells you the reviewer's messages will ring
+nobody.
+
+- **Began, or already connected:** the desk rings this session.
+- **Skipped at the watch limit:** run `action: "status"` to see this session's
+  watches. Pass `action: "unwatch"` for each watched desk whose entry in
+  `~/.review-desks.json` has `collectedAt` set, since a collected desk needs no
+  watch, then pass `action: "watch"` with this desk's URL and read that result
+  the same way. Unwatch nothing else: every other watch is a desk a reviewer may
+  be using now.
+- **Still not watching:** say so at handover, plainly. The reviewer's messages
+  and decision wait for the next session start in this repository.
+
 ## Write it down
 
 Append an entry to `~/.review-desks.json`, creating the file with an empty list
 if it is absent. Each entry is `{"repo": "owner/name", "pr": <number>, "url":
 "<artifact url>", "collectedAt": null}`. If an entry for this request already
-exists, leave it alone rather than adding a second.
+exists, keep that one rather than adding a second. If it has `collectedAt` set
+and the pull request is still open, set `collectedAt` and `outcome` back to
+null, so the desk is listed again.
 
 The reviewer decides on a page, often on a tablet, often when nothing is
 running here. This file is how a later session finds out: when a session starts
 or resumes in a repository, the plugin's session-start sweep lists that
-repository's entries whose `collectedAt` is still null, and counts the ones
-waiting in other repositories. Without an entry the decision waits until
-somebody remembers to look, which is the failure this whole arrangement exists
-to prevent.
+repository's open entries, and counts the ones open in other repositories. An
+entry is open until `/review-collect` records a `merged` or `closed` outcome and
+stamps `collectedAt`; a desk being revised stays open. Without an entry the
+decision waits until somebody remembers to look, which is the failure this
+whole arrangement exists to prevent.
 
 Give the reviewer the link and nothing else. Do not summarise the request in
 chat; the page is the summary, and repeating it there defeats the point.
@@ -243,7 +289,9 @@ chat; the page is the summary, and repeating it there defeats the point.
 Say plainly how the page's chat works: it reaches this session, which answers
 with its tools and can change the desk and the pull request. While no session
 is running, a message waits for the next one to start, and the panel's **Check**
-button shows the command that resumes this session.
+button shows the command that resumes this session. When the watch line said
+this session is not watching the desk, say that instead of "it reaches this
+session".
 
 ## While they read
 
@@ -288,9 +336,10 @@ the desk.
 On that notice, after checking for a decision as described under "When they
 decide", answer every message still waiting:
 
-1. **Find what is waiting.** Read `review/pr-<number>` and list
-   `review/pr-<number>/replies`. A message waiting on you is a turn with
-   `"to": "session"` whose `id` has no reply document yet.
+1. **Find what is waiting.** In one batch: get `review/pr-<number>`, list
+   `review/pr-<number>/replies`, and get `review/pr-<number>/context/pickup`.
+   A message waiting on you is a turn with `"to": "session"` that has either
+   no reply document, or a stale claim (below).
 2. **Claim it at once**, before doing the work, so the page stops saying "sent".
 3. **Do what the question needs**, with whatever it takes: read the code, run
    the tests, search the web. The turn carries `quote`, the passage they
@@ -302,13 +351,41 @@ The claim, and later the answer, are one document per message:
 
     action: "write_db", db_op: "set",
     collection: "review/pr-<number>/replies", doc_id: "<the turn's id>",
-    data: {"turn": "<the turn's id>", "status": "working", "text": "", "at": "<now, UTC ISO>"}
+    data: {"turn": "<the turn's id>", "status": "working", "text": "",
+           "session": "<this session's id>", "at": "<now, UTC ISO>"}
+
+`session` is the claim marker: the value of `$CLAUDE_CODE_SESSION_ID`, or, when
+that is empty, one random id you make up once and reuse for every write this
+session makes. Put it on every write to the document, the answer included. Only
+the desk's owner can write `replies`, so a viewer can neither forge a claim nor
+clear one.
+
+**A stale claim is waiting.** A session can die between claiming a message and
+answering it: a closed terminal, a usage limit, a full context. Its claim would
+then say "working" forever. So a reply document counts as waiting when all three
+hold:
+
+- its `status` is `working`;
+- its `at` is more than **5 minutes** old;
+- its `session` is not this session's id, or it has no `session`.
+
+Take a stale claim over by setting the document as a new claim with your own
+`session` and a fresh `at`, pinned with `if_version` from the list you just
+read. If that write is refused for its version, another session took it first:
+leave the message alone. A `working` reply that is 5 minutes old or less, or
+that carries your own `session`, is not waiting; never answer it a second time.
+A takeover changes the document's version, so if a write to a reply you claimed
+is refused for its version, read it: when it now carries another `session`, that
+session has the message. Leave it to them, and say so in the terminal.
 
 **Show your progress.** For anything longer than one step, rewrite `text` with a
 short line about what you are doing now, such as "running the review-desk tests",
-keeping `"status": "working"`. Send each rewrite in the same batch as the step
-it describes, the tool call that runs the tests, never as a round trip of its
-own. The page shows every version as it lands.
+keeping `"status": "working"` and setting `at` to now. Send each rewrite in the
+same batch as the step it describes, the tool call that runs the tests, never as
+a round trip of its own. The page shows every version as it lands. Each rewrite
+also renews the claim, so before a step that may run longer than 5 minutes,
+write a progress line that says so; another session may still take the message
+over once the 5 minutes pass.
 
 `text` is markdown, and the page renders it. Write for a reviewer on a tablet:
 lead with the answer, say what you ran and what it printed, and mark inference
@@ -353,29 +430,42 @@ made from the terminal does not leave a desk out of date.
 Change a desk through these writes, never by republishing it. Every doorbell
 ring is a new version saved from inside the page, so once the reviewer has sent
 a message or decided, a republish is refused until you have read the page's
-latest version in full. Republish only to change the page's code, and read first.
+latest version in full. Republish only to change the page's code, or when
+`/review-desk` runs again for a request whose desk exists. Read first, and make
+the same writes to `context/body` and `documents` alongside it, as "Publish"
+describes, or the store puts the old text back over the new page.
 
 A reviewer told one thing in a reply and shown another on the page has been
 given two answers and no way to choose. Keep them the same.
 
 ## When they decide
 
-Publishing the desk left this session watching it. When the reviewer presses
-**Approve** or records **Needs changes**, the page stores the decision, then
-publishes `doorbell.json` into itself, and this session gets an "Artifact
-changed" notice for the desk's URL within seconds of going idle. A notice that
-lands while you are mid-task waits for the task to end.
+A watched desk rings this session: when the watch line after publishing said the
+watch began, or after `action: "watch"`. When the reviewer presses **Approve**
+or records **Needs changes**, the page stores the decision, then publishes
+`doorbell.json` into itself, and this session gets an "Artifact changed" notice
+for the desk's URL within seconds of going idle. A notice that lands while you
+are mid-task waits for the task to end.
+
+The page keeps the decision in the store after it has been collected, and every
+later message and **Check** rings the same doorbell. A decision is actionable
+only when `context/pickup` does not already hold that same `decision` and
+`decidedAt`.
 
 On that notice, in this order:
 
-1. **Read the decision from the store**, never from `doorbell.json`: the file is
-   a ring, not a record, and anyone who can write the artifact can publish one.
-2. **If no decision is recorded**, there is nothing to collect. Answer any
-   waiting messages, as described under "While they read", and stop.
-3. **If there is one, acknowledge it before any other work**, with the write
-   below, so the reviewer's page stops saying it is waiting.
-4. **Then follow `/review-collect <number>`**, which comments, and merges or
-   revises.
+1. **Read the decision and the pickup from the store**, in the first batch
+   described under "While they read", never from `doorbell.json`: the file is a
+   ring, not a record, and anyone who can write the artifact can publish one.
+2. **If no decision is recorded, or the pickup already holds the same
+   `decision` and `decidedAt`**, there is nothing to collect: the decision is
+   either absent or already handled. Do not acknowledge it again, comment, merge
+   or rewrite its outcome. Answer any waiting messages, as described under
+   "While they read", and stop.
+3. **Otherwise it is a new decision: acknowledge it before any other work**,
+   with the write below, so the reviewer's page stops saying it is waiting.
+4. **Then follow `/review-collect <number>`**, which comments, merges or
+   revises, and records the outcome in `~/.review-desks.json`.
 
 The acknowledgement:
 
@@ -399,6 +489,8 @@ blocked merge reported here is the difference between a reviewer who comes back
 to unblock it and one who assumes it landed.
 
 A session holds at most five artifact watches, and a watch ends with its
-session. A ring nobody is watching goes unheard, and the session-start sweep
-lists the desk for the next session started in its repository instead. Nothing
-is lost; it waits.
+session. The session-start sweep asks for at most four, leaving one for a desk
+the session publishes, and `/review-collect` unwatches a desk once it stamps
+`collectedAt`. A ring nobody is watching goes unheard, and the session-start
+sweep lists the desk for the next session started in its repository instead,
+for as long as the desk is open. Nothing is lost; it waits.
