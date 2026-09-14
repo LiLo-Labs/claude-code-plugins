@@ -38,7 +38,7 @@ export function build(data, title = 'Harness Desk'){
 
 // Runs in the page before any of its scripts. Serialised by Playwright, so it
 // may use only its argument.
-function installStub({seed, capabilities, publishError}){
+function installStub({seed, capabilities, publishError, getDelay, getFailures}){
   const frozen = v => {
     if (v && typeof v === 'object'){ Object.values(v).forEach(frozen); Object.freeze(v); }
     return v;
@@ -47,7 +47,7 @@ function installStub({seed, capabilities, publishError}){
   const store = new Map(Object.entries(seed || {}).map(([k, v]) => [k, clone(v)]));
   const docSubs = new Map(), colSubs = new Map();
   const log = [], rings = [], missing = [];
-  let version = 0;
+  let version = 0, failuresLeft = getFailures || 0;
 
   const fail = (code, message) => Object.assign(new Error(message), {code});
   const segments = p => {
@@ -99,7 +99,14 @@ function installStub({seed, capabilities, publishError}){
     if (segments(p).length % 2) throw new TypeError('document path needs an even number of segments: ' + p);
     return strict('doc', {
       id: p.split('/').pop(), path: p,
-      get: async () => docSnap(p),
+      // getDelay holds every document read; getFailures rejects the first N of
+      // them with `unavailable`, the code db.d.ts calls transient.
+      get: async () => {
+        log.push({op: 'get', path: p});
+        if (getDelay) await new Promise(r => setTimeout(r, getDelay));
+        if (failuresLeft > 0){ failuresLeft--; throw fail('unavailable', 'stubbed unavailable'); }
+        return docSnap(p);
+      },
       set: async data => {
         if (!data || typeof data !== 'object' || Array.isArray(data))
           throw fail('invalid_argument', 'body must be an object');
@@ -155,13 +162,13 @@ export async function launch(){
 
 // Opens a desk. `seed` is the store as it stands before the page loads.
 export async function open(browser, {data = payload(), title, seed = {},
-    capabilities = ['db', 'artifact'], publishError = null} = {}){
+    capabilities = ['db', 'artifact'], publishError = null, getDelay = 0, getFailures = 0} = {}){
   const html = build(data, title);
   const context = await browser.newContext();
   const page = await context.newPage();
   const errors = [];
   page.on('pageerror', e => errors.push(e.message));
-  await page.addInitScript(installStub, {seed, capabilities, publishError});
+  await page.addInitScript(installStub, {seed, capabilities, publishError, getDelay, getFailures});
   // Nothing leaves the machine: fonts, highlight.js and mermaid are refused, which
   // the page is built to survive (it loses colour and drawings, nothing else).
   await page.route('**/*', route => {
