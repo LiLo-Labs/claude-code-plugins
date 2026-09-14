@@ -22,6 +22,18 @@
           }
         ]
       }
+    ],
+    "PostToolUseFailure": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/after_push.py\"",
+            "timeout": 10
+          }
+        ]
+      }
     ]
   }
 }

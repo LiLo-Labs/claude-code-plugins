@@ -281,10 +281,8 @@ as inference.
 ### Changing the desk and the pull request
 
 When a message asks for a change, or the conversation here settles one, change
-the pull request first. Make the change, run what verifies it, commit and push,
-and name the commit in your reply. After every `git push` the plugin's hook
-lists the open desks for that repository, so a change made from the terminal
-does not leave a desk out of date.
+the pull request first. Make the change, run what verifies it, commit and push.
+When a message asked for it, name the commit in the reply to that message.
 
 Then rewrite the desk so it shows the pull request as it now is. Each of these
 lands on the open page without a reload, and a changed tab is marked:
@@ -295,6 +293,14 @@ lands on the open page without a reload, and a changed tab is marked:
 A document whose `name` matches a carried file replaces that tab; a new name adds
 one. Rewrite the description whenever a change makes it wrong, diagrams
 included.
+
+Open the description with a `## Changed since you opened this` section: one line
+per commit pushed since the desk was published, its short hash and what it
+changed. This is how a change nobody asked for on the page reaches the reviewer.
+The page draws a reply only beside the message it answers, and drops one that
+answers nothing, so a reply cannot carry it. After every `git push` the plugin's
+hook lists the open desks for that repository and points back here, so a change
+made from the terminal does not leave a desk out of date.
 
 Change a desk through these writes, never by republishing it. Every doorbell
 ring is a new version saved from inside the page, so once the reviewer has sent
