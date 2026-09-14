@@ -1,0 +1,75 @@
+name: review-desk
+
+# review-desk has its own workflow so its overall conclusion is about
+# review-desk alone. In the shared tests.yml a failing job from another plugin
+# turned every run red, and a broken desk page looked the same as a pass.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'plugins/review-desk/**'
+      - '.github/workflows/review-desk.yml'
+  pull_request:
+    paths:
+      - 'plugins/review-desk/**'
+      - '.github/workflows/review-desk.yml'
+
+jobs:
+  review-desk:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: plugins/review-desk
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      # A glob, so a new tests/test_*.py cannot be left out of CI. Every suite
+      # runs even after one fails, so one failure does not hide another.
+      - name: Run the Python suites
+        run: |
+          status=0
+          for t in tests/test_*.py; do
+            echo "::group::$t"
+            python3 "$t" || { echo "::error::$t failed"; status=1; }
+            echo "::endgroup::"
+          done
+          exit $status
+
+  # The desk page itself, with window.claude stubbed. Real-host behaviour still
+  # needs a person: automation cannot click inside the artifact iframe.
+  review-desk-page:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: plugins/review-desk
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          # 22, not 20: test:webkit uses --test-skip-pattern (Node 22.1+).
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: plugins/review-desk/package-lock.json
+      - name: Check the page's script parses
+        run: |
+          python3 -c "import build_desk as b; print(b.page_script(b.template().replace(b.MARKER, '{}')))" > "$RUNNER_TEMP/desk-script.js"
+          node --check "$RUNNER_TEMP/desk-script.js"
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium webkit
+      - name: Run the page tests in Chromium
+        run: npm test
+      # The reviewer reads on an iPad, and every iPad browser is WebKit. Every
+      # suite runs there: scroll-keeping, IntersectionObserver, the CSS Highlight
+      # API and storage all behave differently by engine, not only input events.
+      #
+      # Two storage.test.mjs tests are skipped here by name ("too large"): each
+      # fills #box with 270 KiB, and on ubuntu WebKit that fill plus the Enter
+      # press overran Playwright's 30 s action timeout (56 s and 54 s, run
+      # 34832569736), while Chromium and macOS WebKit finish them in about 20 s.
+      # The rest of storage.test.mjs still runs in WebKit. --test-skip-pattern
+      # needs Node 22; Node 20's --test-name-pattern cannot exclude a single
+      # test, because each file's own name matches and runs all its tests.
+      - name: Run the page tests in WebKit
+        run: npm run test:webkit
