@@ -231,6 +231,10 @@ body.open #panel{display:flex}
 .lost{margin:0 13px 8px;padding:9px 11px;border:1px solid var(--mark);
   border-radius:7px;font-size:13px;line-height:1.45;color:var(--mark);
   flex-shrink:0}
+.lost button{margin-left:6px;border:1px solid var(--mark);background:var(--paper);
+  color:var(--mark);font-family:var(--ui);font-size:12px;padding:3px 9px;
+  border-radius:5px;cursor:pointer}
+.btn:disabled,.seed button:disabled{opacity:.45;cursor:default}
 
 .compose{display:flex;gap:8px;padding:11px 13px;border-top:1px solid var(--rule);
   align-items:flex-end;flex-shrink:0}
@@ -675,6 +679,18 @@ let live = 0;
 let carried = null;
 let db = null, decided = null, reason = null;
 
+// Every save is a whole-document set, and set replaces what is stored. So a save
+// built before the stored document was read -- still loading, or the read failed
+// -- replaces the discussion and the decision with this page's empty defaults.
+// Nothing writes until `restore` is 'done'; while it is 'pending' or 'failed',
+// Send, the openers, Approve and Needs changes are off. 'nostore' is a view
+// with no store at all, which says so on every send and decision instead.
+let restore = 'pending';
+const blocked = () => restore === 'pending' || restore === 'failed';
+// Held from load: the reason panel reuses the id "send" for its own button, and
+// it comes first in the page, so looking the id up later can find that one.
+const sendBtn = $('send');
+
 // Whether this view can ring the working session. Without the doorbell a saved
 // message is still answered, by the next session to start.
 let bellOn = false;
@@ -710,9 +726,24 @@ function sessionWait(m){
     + 'reach the working session. Tell it directly.';
   if (m.status === 'unsent') return 'Saved, but this view could not ring the working '
     + 'session (' + (m.why || 'unknown') + '). The next session to start will answer it.';
+  // No rungAt: saved, but no ring is recorded yet. Either the ring is going out
+  // now, or rering will send it. Saying "rung" here would be untrue.
+  if (!m.rungAt) return bellOn ? 'Saved. Ringing the working session.'
+    : 'Saved, but this view cannot ring the working session. The next session to '
+      + 'start will answer it.';
+  // A stored 'sent' proves the message was saved, not that the ring went out or
+  // that anything is listening. Only a presence stamp from after the send shows a
+  // session is answering rings here, so until one arrives the page promises nothing.
+  if (!heardSince(m.sentAt || 0)) return 'Saved and rung. No working session has '
+    + 'answered on this desk since, so it may be busy or not running. The next '
+    + 'session to start answers it.';
   return 'Sent to the working session. It answers within seconds if it is idle, after '
     + 'its current task if it is busy, and at its next start if none is running.';
 }
+// A live stamp is timed by this clock when it arrives. One from the first
+// snapshot is history, timed by its name: the epoch second of the ring, which
+// can fall up to a second before a send made in that same second.
+const heardSince = ms => answeredAt > ms || lastHeard + 1000 > ms;
 
 function said(m){
   if (m.via !== 'session') return '<div class="said">'+esc(m.content)+'</div>';
@@ -723,7 +754,9 @@ function said(m){
 
 function drawStream(){
   const t = threads[live], el = $('stream');
-  if (!t.turns.length){
+  if (!t.turns.length && restore === 'pending'){
+    el.innerHTML = '<div class="hint">Loading the saved discussion…</div>';
+  } else if (!t.turns.length){
     el.innerHTML = '<div class="hint">Ask the working session anything: it has '
       + 'the code, the tests and the conversation that made this change, and it '
       + 'can change the pull request. Highlight a passage first and it goes along '
@@ -738,7 +771,12 @@ function drawStream(){
   }
   el.scrollTop = el.scrollHeight;
   $('seed').style.display = t.turns.length ? 'none' : 'flex';
-  $('send').disabled = t.busy;
+  gate();
+}
+function gate(){
+  sendBtn.disabled = blocked() || threads[live].busy;
+  document.querySelectorAll('#seed button, #ok, #changes')
+    .forEach(b => { b.disabled = blocked(); });
 }
 function drawCarry(){
   $('carrySlot').innerHTML = carried
@@ -924,6 +962,9 @@ async function ask(){
   const box = $('box');
   const q = box.value.trim();
   if (!q && !carried) return;
+  // Enter still reaches here while Send is off. Leave the text in the box: a
+  // message kept out of the store should not also vanish from the screen.
+  if (blocked()) return;
   const quote = carried; carried = null; unlight();
   box.value = ''; box.style.height = 'auto';
 
@@ -952,10 +993,21 @@ async function ask(){
                 status: 'sent', content: '', sentAt: Date.now()};
   t.turns.push(slot);
   draw();
-  const kept = await saveNow();
-  const rung = kept ? await ring({kind: 'message', turn: turn.id}) : 'unsaved';
-  if (rung !== 'rung' && !slot.content){ slot.status = 'unsent'; slot.why = rung; }
-  draw(); save();
+  // rering must not ring for a slot this view is still ringing for.
+  ringing.add(turn.id);
+  try {
+    const kept = await saveNow();
+    const rung = kept ? await ring({kind: 'message', turn: turn.id}) : 'unsaved';
+    if (rung === 'rung') slot.rungAt = Date.now();
+    else if (!slot.content){ slot.status = 'unsent'; slot.why = rung; }
+    draw();
+    // Stored at once, not after the debounce. A tab closed now, or a reload from a
+    // republish, can still lose this write. Then the store keeps 'sent' with no
+    // rungAt, or 'unsent' with why 'conflict'. rering rings for either one.
+    if (kept) await saveNow(); else save();
+  } finally {
+    ringing.delete(turn.id);
+  }
 }
 // A send that throws has to say so. Otherwise the reviewer is left looking at a
 // box that emptied and a chat that did not change.
@@ -1004,7 +1056,11 @@ function sayKept(){
 // verdict never reads as one for the verdict on screen.
 let decidedAt = null, pickup = null, rang = null, showingDecided = false;
 
+// Counts whole-document writes from this view, so rering can tell whether one
+// went out while its own read-modify-write was in flight.
+let records = 0;
 function record(){
+  records++;
   return db.doc('review/pr-' + DATA.number).set({
     pr: DATA.number, title: DATA.title,
     threads: threads.map(tidy),
@@ -1015,8 +1071,11 @@ function record(){
   });
 }
 
+// Both savers refuse until the stored document has been read (see `restore`).
+// The banner for a failed read is already up, so they add nothing to it.
 async function save(){
   if (!db){ sayLost('this view cannot reach the store'); return; }
+  if (restore !== 'done') return;
   clearTimeout(saving);
   saving = setTimeout(async () => {
     try {
@@ -1032,6 +1091,7 @@ async function save(){
 // and a session answering the bell must find the decision already stored.
 async function saveNow(){
   if (!db){ sayLost('this view cannot reach the store'); return false; }
+  if (restore !== 'done') return false;
   clearTimeout(saving);
   try {
     await record();
@@ -1103,12 +1163,16 @@ function offerDecision(){
     + '<button class="btn" id="changes">Needs changes</button></div>';
   $('ok').addEventListener('click', () => decide('approved'));
   $('changes').addEventListener('click', () => askReason(reason));
+  gate();
 }
 
 async function decide(v, quiet, why){
   // A verdict restored from the store with no reason on it was recorded before
   // there was anywhere to put one. Ask now rather than stranding it.
   if (v === 'needs changes' && !why){ decided = v; return askReason(reason); }
+  // The buttons are off until restore settles; this covers anything that
+  // reaches decide another way, such as the reason panel's Record it.
+  if (!quiet && blocked()) return;
 
   decided = v;
   reason = why || null;
@@ -1169,57 +1233,81 @@ function drawDecided(){
   $('redo').addEventListener('click', offerDecision);
 }
 
-offerDecision();
+/* ================= restore ================= */
+// A failed read gets its own banner, not sayLost's: nothing typed here is at
+// risk, and reading again is the fix rather than the danger.
+function sayUnread(why){
+  lost = 'unread';
+  $('lostSlot').innerHTML = '<div class="lost">Not loaded — the saved discussion '
+    + 'could not be read (' + esc(why) + '). Sending and deciding are off until it '
+    + 'loads, so nothing stored is replaced.<button id="retryRestore">Try again</button></div>';
+}
+$('lostSlot').addEventListener('click', async e => {
+  if (e.target.id !== 'retryRestore' || restore !== 'failed') return;
+  if (await restoreStored()) listenReplies();
+});
 
-paint(); draw();
-
-(async () => {
-  // Reaching the runtime at all can fail, and an unhandled rejection here used
-  // to kill the rest of this block silently -- leaving a page that looked
-  // fine, answered nothing, and stored nothing.
-  try { db = await claude.use('db'); } catch (e) { db = null; }
-  bellOn = !!(await bellReady);
-
-  // Without the doorbell the session is not told straight away, but a saved
-  // message still reaches the next session to start. This lives in its own
-  // slot, not the not-saved banner, which clears on the first successful write.
-  if (!bellOn && db){
-    $('aloneSlot').innerHTML = '<div class="lost">This view cannot ring the working '
-      + 'session. What you send is saved, and the next session to start answers it.</div>';
+// db.d.ts calls `unavailable` transient and asks verbs to retry once after a
+// short randomized delay. Any other failure gets the same one retry: it is
+// cheap, and the alternative is a read-only desk. A read that never settles
+// would leave every control off with no banner and no way out, so each attempt
+// is given RESTORE_WAIT and then counts as failed.
+const RESTORE_WAIT = 10000;
+async function restoreStored(){
+  restore = 'pending';
+  draw();
+  const ref = db.doc('review/pr-' + DATA.number);
+  const read = () => Promise.race([ref.get(), new Promise((_, no) =>
+    setTimeout(() => no({code: 'timed out'}), RESTORE_WAIT))]);
+  let snap;
+  try {
+    try { snap = await read(); }
+    catch (e){
+      await new Promise(r => setTimeout(r, 300 + Math.random() * 700));
+      snap = await read();
+    }
+  } catch (e) {
+    restore = 'failed';
+    sayUnread((e && (e.code || e.message)) || 'the read failed');
+    draw();
+    return false;
+  }
+  const had = snap.exists && snap.data();
+  if (had && Array.isArray(had.threads) && had.threads.length){
+    // The store hands back frozen objects. Spreading a thread copies the
+    // thread but not its turns array, and pushing the next message onto that
+    // frozen array threw "object is not extensible" -- so every message sent
+    // after a reload was lost. Copy the turns too.
+    threads = had.threads.map(t => ({...t, busy: false,
+      turns: (t.turns || []).map(m => ({...m}))}));
+    live = 0;
+  }
+  restore = 'done';
+  if (lost === 'unread'){ lost = null; $('lostSlot').innerHTML = ''; }
+  if (had){
+    reason = had.reason || null;
+    decidedAt = had.decidedAt || null;
+    if (had.decision) decide(had.decision, true, had.reason);
   }
   draw();
+  return true;
+}
 
-  if (!db){ sayLost('this view cannot reach the store'); return; }
-  try {
-    const snap = await db.doc('review/pr-' + DATA.number).get();
-    const had = snap.exists && snap.data();
-    if (had){
-      if (Array.isArray(had.threads) && had.threads.length){
-        // The store hands back frozen objects. Spreading a thread copies the
-        // thread but not its turns array, and pushing the next message onto that
-        // frozen array threw "object is not extensible" -- so every message sent
-        // after a reload was lost. Copy the turns too.
-        threads = had.threads.map(t => ({...t, busy: false,
-          turns: (t.turns || []).map(m => ({...m}))}));
-        live = 0;
-      }
-      reason = had.reason || null;
-      decidedAt = had.decidedAt || null;
-      if (had.decision) decide(had.decision, true, had.reason);
-    }
-  } catch (e) {}
-  draw();
-
-  // Answers from the working session: one document per message, keyed by the
-  // message's id, rewritten as the session works. A reply with no slot waiting
-  // (the page reloaded before the slot was saved) is added after the
-  // message rather than dropped.
+// Answers from the working session: one document per message, keyed by the
+// message's id, rewritten as the session works. A reply with no slot waiting
+// (the page reloaded before the slot was saved) is added after the
+// message rather than dropped. Every delivery also adds to `replied`, the
+// messages the session has already claimed, which rering skips.
+const replied = new Set();
+function listenReplies(){
+  let first = true;
   try {
     db.collection('review/pr-' + DATA.number + '/replies').onSnapshot(snap => {
       let touched = false;
       snap.docs.forEach(d => {
         const r = d.data();
         if (!r || typeof r.turn !== 'string') return;
+        replied.add(r.turn);
         const text = typeof r.text === 'string' ? r.text : '';
         const status = r.status === 'done' ? 'done' : 'working';
         for (const t of threads){
@@ -1240,8 +1328,169 @@ paint(); draw();
         }
       });
       if (touched){ draw(); save(); }
+      if (first){ first = false; rering(); }
     });
   } catch (e) {}
+}
+
+// A message whose ring never went out. Nothing else wakes an idle session for
+// it, so this view rings once and stores rungAt. There are two ways to get here:
+// - 'sent' with no rungAt. The slot was saved, but the ring outcome was not:
+//   the tab closed, or a republish reloaded the view. Such a slot is left alone
+//   until it is RERING_AFTER old, because the view that sent it is usually still
+//   ringing and storing rungAt. A slot that is too young gets a timer for the
+//   moment it comes of age, not just a check at load. A republish reloads the
+//   view seconds after the send, so a check at load alone would never ring for it.
+// - 'unsent' with why 'conflict'. The ring was refused because a newer version
+//   was already live and the view was being reloaded (artifact.d.ts), so the
+//   view that sent it is not ringing for it any more.
+//
+// What this view read at load is not enough to decide. Every ring is a publish
+// that reloads the other open views, so a view is usually reading a slot just
+// before the ringing view stores rungAt for it. The page has no live copy of
+// the main document, so three things stop a second ring:
+// - A lease. db.d.ts: acquire is set-if-not-busy and expires on its own. Only
+//   the holder rings, so two views that load the same slot do not both ring,
+//   and a view reloaded by the holder's ring finds the lease still held.
+// - A fresh read under the lease. A slot the store already shows as rung,
+//   answered or gone is taken from the store and not rung.
+// - The outcome is written into a fresh read of the stored document, not this
+//   view's load-time copy. Writing that copy would undo whatever another view
+//   saved since, such as a closed thread.
+// A second ring can still happen if the sending view takes longer than
+// RERING_AFTER to store rungAt. It costs one extra wake-up and a reload of the
+// other views, not a second answer: the session answers only turns with no
+// reply document.
+const RERING_AFTER = 10000;
+const RING_LEASE = 20000;
+const viewId = 'v' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+const ringing = new Set();
+let reringTimer = null;
+// Capped, so a sentAt or lease expiry from a clock that runs ahead only means
+// another check later, not a timer set hours out.
+function reringIn(ms){
+  clearTimeout(reringTimer);
+  reringTimer = setTimeout(rering, Math.min(Math.max(ms, 0), RING_LEASE) + 50);
+}
+const unrung = m => m.via === 'session' && !m.content && !m.rungAt
+  && (m.status === 'sent' || (m.status === 'unsent' && m.why === 'conflict'));
+const sessionSlots = doc => new Map(((doc && Array.isArray(doc.threads)) ? doc.threads : [])
+  .flatMap(t => (t && Array.isArray(t.turns)) ? t.turns : [])
+  .filter(m => m && m.via === 'session' && typeof m.answers === 'string')
+  .map(m => [m.answers, m]));
+
+async function rering(){
+  clearTimeout(reringTimer);
+  reringTimer = null;
+  if (!bellOn || restore !== 'done') return;
+  const now = Date.now();
+  const waiting = threads.flatMap(t => t.turns).filter(m => unrung(m)
+    && !replied.has(m.answers) && !ringing.has(m.answers));
+  const due = waiting.filter(m => m.status === 'unsent' || now - (m.sentAt || 0) > RERING_AFTER);
+  const young = waiting.filter(m => !due.includes(m));
+  if (young.length) reringIn(Math.min(...young.map(m => (m.sentAt || 0) + RERING_AFTER)) - now);
+  if (!due.length) return;
+
+  const ids = due.map(m => m.answers);
+  ids.forEach(id => ringing.add(id));
+  try {
+    const ref = db.doc('review/pr-' + DATA.number);
+    // A store that cannot grant leases still gets the fresh read below, which
+    // covers a view reloaded by a ring that has already stored rungAt.
+    let lease = null;
+    try {
+      lease = await ref.collection('rering').doc('lease')
+        .acquire({holder: viewId, ttlMs: RING_LEASE});
+    } catch (e) {}
+    if (lease && !lease.acquired){
+      const until = Date.parse(lease.expiresAt || '') || now + RING_LEASE;
+      reringIn(until - Date.now() + Math.random() * 500);
+      return;
+    }
+
+    let stored;
+    try { stored = sessionSlots((await ref.get()).data()); }
+    catch (e){ reringIn(RERING_AFTER); return; }
+    const toRing = due.filter(m => {
+      const s = stored.get(m.answers);
+      if (!s) return false;
+      if (unrung(s)) return true;
+      for (const k of ['status', 'why', 'rungAt', 'content']){
+        if (k in s) m[k] = s[k]; else delete m[k];
+      }
+      return false;
+    });
+    if (!toRing.length){ draw(); return; }
+
+    const rung = await ring({kind: 'message', turns: toRing.map(m => m.answers), again: true});
+    toRing.forEach(m => {
+      // A reply that landed during the ring has taken over this slot.
+      if (m.content || m.status === 'working') return;
+      if (rung === 'rung'){ m.status = 'sent'; delete m.why; m.rungAt = Date.now(); }
+      else { m.status = 'unsent'; m.why = rung; }
+    });
+    draw();
+
+    try {
+      // set is last-writer-wins with no transactions (db.d.ts), so this write can
+      // land after a save this view made while it was reading, and drop the turn
+      // that save stored: say, a message sent right after load. That save was
+      // taken from this view's threads, which already carry the outcome above.
+      // So when one went out, this view saves its own threads again instead,
+      // after this write if this write is already on its way.
+      const before = records;
+      const snap = await ref.get();
+      const had = snap.exists && snap.data();
+      if (!had || !Array.isArray(had.threads)) return;
+      // The store hands back frozen objects; copy down to the turns before editing.
+      const doc = {...had, updatedAt: new Date().toISOString(),
+        threads: had.threads.map(t => ({...t, turns: (t.turns || []).map(x => ({...x}))}))};
+      const outcome = new Map(toRing.map(m => [m.answers, m]));
+      let changed = false;
+      for (const x of doc.threads.flatMap(t => t.turns)){
+        const m = x.via === 'session' && outcome.get(x.answers);
+        if (!m || x.content || x.rungAt || x.status === 'working' || x.status === 'done') continue;
+        x.status = m.status;
+        if (m.rungAt) x.rungAt = m.rungAt;
+        if (m.why) x.why = m.why; else delete x.why;
+        changed = true;
+      }
+      if (!changed) return;
+      if (records !== before){ await saveNow(); return; }
+      await ref.set(doc);
+      if (records !== before) await saveNow(); else sayKept();
+    } catch (e) {
+      sayLost((e && (e.code || e.message)) || 'the write was refused');
+    }
+  } finally {
+    ids.forEach(id => ringing.delete(id));
+  }
+}
+
+offerDecision();
+
+paint(); draw();
+
+(async () => {
+  // Reaching the runtime at all can fail, and an unhandled rejection here used
+  // to kill the rest of this block silently -- leaving a page that looked
+  // fine, answered nothing, and stored nothing.
+  try { db = await claude.use('db'); } catch (e) { db = null; }
+  bellOn = !!(await bellReady);
+
+  // Without the doorbell the session is not told straight away, but a saved
+  // message still reaches the next session to start. This lives in its own
+  // slot, not the not-saved banner, which clears on the first successful write.
+  if (!bellOn && db){
+    $('aloneSlot').innerHTML = '<div class="lost">This view cannot ring the working '
+      + 'session. What you send is saved, and the next session to start answers it.</div>';
+  }
+  draw();
+
+  if (!db){ restore = 'nostore'; draw(); sayLost('this view cannot reach the store'); return; }
+  // The replies listener rewrites threads and saves, so it waits for a
+  // successful restore; Try again starts it if the first attempt failed.
+  if (await restoreStored()) listenReplies();
 
   // The description, rewritten by the working session when the pull request
   // changes under review.
@@ -1279,6 +1528,10 @@ paint(); draw();
       });
       lastHeard = Math.max(lastHeard, newest);
       drawPresence();
+      // A stamp can turn a waiting "Saved and rung" into "Sent". Only then is the
+      // stream redrawn, since a redraw scrolls it to the bottom.
+      if (threads[live].turns.some(m => m.via === 'session' && m.status === 'sent' && !m.content))
+        drawStream();
     });
   } catch (e) {}
 
