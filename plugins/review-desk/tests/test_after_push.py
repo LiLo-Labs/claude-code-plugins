@@ -177,6 +177,42 @@ class AfterPush(unittest.TestCase):
         self.assertNotIn("#4", text)
         self.assertNotIn("#6", text)
 
+    def test_revised_desk_is_listed_as_open(self):
+        # A revision pushed and reported is still under review: the reviewer has
+        # yet to decide again, and a further fixup still needs the desk rewritten.
+        self.ledger([
+            {"repo": "o/r", "pr": 3, "url": "https://x/3",
+             "collectedAt": "2026-09-01T00:00:00Z", "outcome": "revised"},
+            {"repo": "o/r", "pr": 4, "url": "https://x/4", "collectedAt": None, "outcome": "revised"},
+        ])
+        text = self.said(self.run_hook("git push"))
+        self.assertIn("#3 https://x/3", text)
+        self.assertIn("#4 https://x/4", text)
+
+    def test_a_revising_desk_is_told_to_write_revised_with_the_pushed_commits(self):
+        self.ledger([
+            {"repo": "o/r", "pr": 3, "url": "https://x/3", "collectedAt": None, "outcome": "revising"},
+            {"repo": "o/r", "pr": 7, "url": "https://x/7", "collectedAt": None},
+        ])
+        text = self.said(self.run_hook("git push"))
+        revision = next(l for l in text.splitlines() if l.startswith("Being revised after Needs changes:"))
+        self.assertIn("o/r#3.", revision)
+        self.assertNotIn("#7", revision)
+        self.assertIn('{"outcome": {"result": "revised", "detail": "<the commits pushed for the revision, '
+                      'by short hash, and what they changed>"', revision)
+        self.assertIn("Once this push's context/body write has landed", revision)
+        self.assertIn('still holds that needs changes decision with outcome "revising" or "revised"', revision)
+        self.assertIn("pinned with if_version", revision)
+        self.assertIn("set the entry's outcome to \"revised\"", revision)
+        self.assertIn('under "Changing the desk and the pull request"', revision)
+
+    def test_a_desk_not_being_revised_gets_no_revised_instruction(self):
+        for outcome in (None, "blocked"):
+            with self.subTest(outcome=outcome):
+                self.ledger([{"repo": "o/r", "pr": 7, "url": "https://x/7", "collectedAt": None,
+                              "outcome": outcome}])
+                self.assertNotIn('"revised"', self.said(self.run_hook("git push")))
+
     def test_repo_without_open_desks_says_nothing(self):
         self.remote("https://github.com/o/quiet.git")
         self.assertEqual(self.run_hook("git push"), "")

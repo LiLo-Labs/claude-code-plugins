@@ -115,7 +115,7 @@ class Collect(unittest.TestCase):
         rule = re.search(r"Stamp `collectedAt`[^.]*only when the outcome is ([^.]*)\.", text)
         self.assertTrue(rule, text)
         self.assertEqual(set(re.findall(r"`(\w+)`", rule.group(1))), set(after_push.TERMINAL))
-        self.assertIn("For `revising` and `blocked`, leave `collectedAt` null", text)
+        self.assertIn("For `revising`, `revised` and `blocked`, leave `collectedAt` null", text)
         # No other passage in either doc tells a session to stamp it.
         for name in ("review-collect.md", "review-desk.md"):
             for sentence in re.split(r"(?<=[.;:])\s", flat(read(name))):
@@ -599,6 +599,39 @@ class Outcomes(unittest.TestCase):
                     self.assertIn("`closed`", sentence)
                     self.assertIn("closed without merging", sentence)
         self.assertIn("closed", after_push.TERMINAL)
+
+    def test_review_desk_lists_revised_and_says_when_to_write_it(self):
+        # After Needs changes the page said "revising" forever: no outcome told
+        # the reviewer the revision was pushed and ready to judge again.
+        doc = read("review-desk.md")
+        decide = flat(section(doc, "When they decide"))
+        # The listing follows a code block, so it starts mid-sentence once folded.
+        start = decide.index("`result` is `merged`")
+        listing = decide[start:decide.index(". ", start)]
+        self.assertIn("`revised`, naming the commits pushed for that work", listing)
+        self.assertIn("once the revision is pushed and the desk rewritten for it", listing)
+        change = flat(section(doc, "Changing the desk and the pull request"))
+        rule = "**A pushed revision is reported as `revised`.**"
+        self.assertIn(rule, change)
+        para = change[change.index(rule):]
+        self.assertIn("once `context/body` with the new `head` has landed", para)
+        self.assertIn("still holds that decision, the same `decision` and `decidedAt`, with outcome "
+                      "`revising` or `revised`", para)
+        self.assertIn('"result": "revised"', para)
+        self.assertIn("set the ledger entry's `outcome` to `revised`, leaving `collectedAt` null", para)
+        collect = flat(section(read("review-collect.md"), "Act on it"))
+        self.assertIn("report outcome `revised`, naming the pushed commits", collect)
+        # Open for both hooks: revised is not terminal.
+        self.assertNotIn("revised", after_push.TERMINAL)
+        self.assertIn("revising", after_push.REVISION)
+        self.assertIn("revised", after_push.REVISION)
+
+    def test_a_closed_pickup_is_cleared_when_a_reopened_request_is_republished(self):
+        # The page keeps a desk closed while its pickup says closed, so a reopened
+        # pull request's republished desk would take no message or decision.
+        down = flat(section(read("review-desk.md"), "Write it down"))
+        self.assertIn("holds outcome `closed`, as it does for a pull request reopened after closing, "
+                      "delete that pickup too", down)
 
 
 if __name__ == "__main__":

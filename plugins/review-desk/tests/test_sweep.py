@@ -192,10 +192,13 @@ class Sweep(unittest.TestCase):
         # closed.
         stamped = "2026-09-10T00:00:00Z"
         entries = [dict(desk(n, stamped), outcome=o) for n, o in
-                   ((1, "revising"), (2, "blocked"), (3, "merged"), (4, "closed"), (5, None))]
+                   ((1, "revising"), (2, "blocked"), (3, "merged"), (4, "closed"), (5, None),
+                    (6, "revised"))]
         text = said(run(entries))
         self.assertIn("o/r#1 https://x/1", text)
         self.assertIn("o/r#2 https://x/2", text)
+        # A revision pushed and reported waits for the reviewer's next decision.
+        self.assertIn("o/r#6 https://x/6", text)
         for n in (3, 4, 5):
             self.assertNotIn(f"https://x/{n}", text)
 
