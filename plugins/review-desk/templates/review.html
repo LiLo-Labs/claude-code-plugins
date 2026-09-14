@@ -183,8 +183,16 @@ body.open #panel{display:flex}
   animation:pulse 1.1s ease-in-out infinite}
 .tab.on .spin{background:#fff}
 @keyframes pulse{0%,100%{opacity:.3}50%{opacity:1}}
-.tab .x{opacity:.5;font-size:13px}
-.tab .x:hover{opacity:1}
+.tabpair{display:flex;align-items:center;flex-shrink:0}
+/* Its own button beside the tab, 44px square by its box rather than its glyph.
+   Inside the tab it was an 8px glyph at the tab's right edge: a finger switching
+   threads on an iPad landed on it, and a keyboard could not reach it at all. */
+.shut{min-width:44px;min-height:44px;padding:0;border:none;background:none;
+  color:var(--faint);font-size:17px;line-height:1;cursor:pointer;border-radius:22px;
+  display:flex;align-items:center;justify-content:center}
+.shut:hover{color:var(--ink);background:var(--rule)}
+.closing .choices{display:flex;gap:8px;margin-top:8px}
+.closing .choices button{margin:0;min-height:44px;padding:0 16px;font-size:13px}
 .tabs .add{border:1px dashed var(--edge);background:none;color:var(--faint);
   font-size:15px;padding:4px 10px;border-radius:13px;cursor:pointer}
 
@@ -323,6 +331,7 @@ footer{padding:22px 0 0;font-size:12.5px;color:var(--faint);line-height:1.6}
   </div>
   <div class="presence" id="presence" hidden></div>
   <div class="tabs" id="tabs"></div>
+  <div id="closeSlot"></div>
   <div class="stream" id="stream"></div>
   <div class="seed" id="seed"></div>
   <div id="aloneSlot"></div>
@@ -330,7 +339,7 @@ footer{padding:22px 0 0;font-size:12.5px;color:var(--faint);line-height:1.6}
   <div id="lostSlot"></div>
   <div id="carrySlot"></div>
   <div class="compose">
-    <textarea id="box" rows="1" placeholder="Ask the working session&hellip;"></textarea>
+    <textarea id="box" rows="1" enterkeyhint="send" placeholder="Ask the working session&hellip;"></textarea>
     <button class="send" id="send">Send</button>
   </div>
 </aside>
@@ -630,6 +639,9 @@ function paint(){
   $('repoTag').textContent = (DATA.repo ? DATA.repo + ' · ' : '') + 'review desk';
   $('meta').innerHTML = 'pull request <a href="'+esc(DATA.url)+'" target="_blank" rel="noopener">#'
     + DATA.number + '</a>' + (DATA.summary ? ' · ' + esc(DATA.summary) : '');
+  // The sheet is about to be replaced: a leaf switch, or a document or the
+  // description changing. A selection held from it points at nodes that are gone.
+  forget();
   const all = pages();
   if (leaf >= all.length) leaf = 0;
   $('leaves').innerHTML = all.map((p, i) =>
@@ -715,15 +727,37 @@ const CHECK_WAIT = 75000;
 
 const short =s => s.length > 42 ? s.slice(0, 40).trim() + '…' : s;
 
+// The id of the thread whose close is waiting on the reviewer's say-so, if any.
+let closing = null;
 function drawTabs(){
   const el = $('tabs');
   el.innerHTML = threads.map((t, i) =>
-    '<button class="tab'+(i===live?' on':'')+'" data-go="'+i+'">'
+    '<span class="tabpair"><button class="tab'+(i===live?' on':'')+'" data-go="'+i+'">'
     + (t.busy ? '<span class="spin"></span>' : '')
-    + esc(t.name)
-    + (threads.length > 1 ? '<span class="x" data-shut="'+i+'">×</span>' : '')
-    + '</button>').join('')
+    + esc(t.name) + '</button>'
+    + (threads.length > 1 ? '<button class="shut" data-shut="'+i+'" aria-label="Close '
+        + esc(t.name) + '" title="Close this thread">×</button>' : '')
+    + '</span>').join('')
     + '<button class="add" id="more" title="New thread">+</button>';
+  const t = threads.find(x => x.id === closing);
+  if (!t) closing = null;
+  $('closeSlot').innerHTML = t ? '<div class="lost closing">Close “' + esc(t.name)
+    + '”? Its conversation leaves the saved discussion, so it is not written into '
+    + 'the pull request, and it cannot be brought back.'
+    + '<span class="choices"><button id="closeYes">Close it</button>'
+    + '<button id="closeNo">Keep it</button></span></div>' : '';
+}
+function closeThread(id){
+  const i = threads.findIndex(t => t.id === id);
+  closing = null;
+  if (i < 0 || threads.length < 2){ drawTabs(); return; }
+  if (threads[i].abort) threads[i].abort.abort();
+  threads.splice(i, 1);
+  // Closing a thread before the open one would otherwise shift a different
+  // thread under the reviewer.
+  if (i < live) live--;
+  if (live >= threads.length) live = threads.length - 1;
+  draw(); save();
 }
 // What the working session has said, by the id of the message it answers, taken
 // only from review/pr-N/replies. Under the desk's rules only the owner writes
@@ -898,12 +932,14 @@ $('presence').addEventListener('click', async e => {
 $('tabs').addEventListener('click', e => {
   const shut = e.target.closest('[data-shut]');
   if (shut){
-    e.stopPropagation();
-    const i = +shut.dataset.shut;
-    if (threads[i].abort) threads[i].abort.abort();
-    threads.splice(i, 1);
-    if (live >= threads.length) live = threads.length - 1;
-    draw(); save(); return;
+    const t = threads[+shut.dataset.shut];
+    if (!t) return;
+    // Closing removes the thread from the stored document on the next save, and
+    // nothing rebuilds it, so a thread with anything in it asks first. Asked on
+    // the page, not with confirm(): in a frame sandboxed without allow-modals
+    // confirm() returns false at once, and closing would silently never work.
+    if (t.turns.length){ closing = t.id; drawTabs(); $('closeNo').focus(); return; }
+    closeThread(t.id); return;
   }
   if (e.target.closest('#more')){
     threads.push({id:'t'+(threads.length+1)+'-'+Date.now(),
@@ -921,13 +957,40 @@ const SEEDS = DATA.openers && DATA.openers.length ? DATA.openers : [
   "What breaks if I say no?",
 ];
 $('seed').innerHTML = SEEDS.map((q,i)=>'<button data-s="'+i+'">'+esc(q)+'</button>').join('');
+$('closeSlot').addEventListener('click', e => {
+  if (e.target.id === 'closeYes') closeThread(closing);
+  else if (e.target.id === 'closeNo'){ closing = null; drawTabs(); }
+});
 $('seed').addEventListener('click', e => {
   const b = e.target.closest('[data-s]'); if (!b) return;
-  $('box').value = SEEDS[+b.dataset.s]; ask();
+  const box = $('box'), opener = SEEDS[+b.dataset.s];
+  // With a draft in the box the opener joins it and nothing is sent. Replacing
+  // and sending threw away a half-written question: on an iPad the chips sit
+  // just above the box, where a tap meant for the text lands. It goes at the end
+  // rather than at the caret, which is wherever the reviewer last left it and
+  // would split a word.
+  if (box.value.trim()){
+    box.value = box.value.replace(/\s+$/, '') + '\n' + opener;
+    fit(box);
+    box.focus();
+    box.setSelectionRange(box.value.length, box.value.length);
+    return;
+  }
+  box.value = opener;
+  send();
 });
 
 /* ================= selection ================= */
 let pending = '', pendingRange = null;
+// A press on the pop or the panel button can itself dismiss the selection before
+// its click arrives, as a tap on an iPad does. A collapse within PRESS_GRACE of
+// such a press keeps the passage for that click; any other collapse drops it.
+let pressedAt = 0;
+const PRESS_GRACE = 1000;
+function forget(){
+  pending = ''; pendingRange = null;
+  $('pop').style.display = 'none';
+}
 
 /* The native selection disappears as soon as the composer takes focus, so the
    passage being discussed is painted separately and stays lit until the
@@ -952,20 +1015,30 @@ document.addEventListener('selectionchange', () => {
   const sel = document.getSelection();
   const text = sel ? String(sel).trim() : '';
   const pop = $('pop');
-  if (!text || text.length < 3 || (sel.anchorNode &&
-      $('panel').contains(sel.anchorNode))){
-    pop.style.display = 'none'; return;
+  const range = text.length >= 3 && sel.rangeCount
+    && !(sel.anchorNode && $('panel').contains(sel.anchorNode)) ? sel.getRangeAt(0) : null;
+  const r = range && range.getBoundingClientRect();
+  if (!r || (!r.width && !r.height)){
+    // A selection the reviewer dismissed is dropped. Kept, it was attached to
+    // the next question whenever the panel was next opened, however much later.
+    if (Date.now() - pressedAt > PRESS_GRACE) forget(); else pop.style.display = 'none';
+    return;
   }
-  const range = sel.getRangeAt(0);
-  const r = range.getBoundingClientRect();
-  if (!r.width && !r.height){ pop.style.display='none'; return; }
   pending = text.length > 700 ? text.slice(0, 700) + '…' : text;
   pendingRange = range.cloneRange();
   pop.style.display = 'block';
-  pop.style.top = (window.scrollY + r.top - 42) + 'px';
-  pop.style.left = Math.max(10, window.scrollX + r.left + r.width/2 - 62) + 'px';
+  // Above the selection with a mouse. On a touch screen iPadOS puts its own
+  // Copy / Look Up menu above the selection, so the pop goes below instead,
+  // clear of the lower selection handle, and kept inside the window.
+  const w = pop.offsetWidth, h = pop.offsetHeight;
+  const top = matchMedia('(pointer: coarse)').matches
+    ? Math.min(r.bottom + 16, innerHeight - h - 10) : r.top - h - 10;
+  pop.style.top = (window.scrollY + top) + 'px';
+  pop.style.left = (window.scrollX
+    + Math.max(10, Math.min(r.left + r.width/2 - w/2, innerWidth - w - 10))) + 'px';
 });
 $('pop').addEventListener('mousedown', e => e.preventDefault());
+['pop', 'fab'].forEach(id => $(id).addEventListener('pointerdown', () => { pressedAt = Date.now(); }));
 $('pop').addEventListener('click', () => {
   take();
   document.getSelection().removeAllRanges();
@@ -1045,14 +1118,24 @@ async function ask(){
 const send = () => ask().catch(e =>
   sayLost('the message was not sent (' + ((e && e.message) || e) + ')'));
 $('send').addEventListener('click', send);
-$('box').addEventListener('input', e => {
-  e.target.style.height = 'auto';
-  e.target.style.height = Math.min(e.target.scrollHeight, 150) + 'px';
-});
+function fit(box){
+  box.style.height = 'auto';
+  box.style.height = Math.min(box.scrollHeight, 150) + 'px';
+}
+$('box').addEventListener('input', e => fit(e.target));
 $('box').addEventListener('keydown', e => {
-  // Enter sends, as in every chat box; Shift+Enter is a new line. isComposing
-  // leaves an input method's own Enter (choosing a character) alone.
-  if (e.key === 'Enter' && !e.shiftKey && !e.isComposing){ e.preventDefault(); send(); }
+  // Enter sends, as in every chat box; Shift+Enter is a new line. An input
+  // method's own Enter (choosing a character) is left alone. isComposing alone
+  // does not catch it on WebKit, Safari on iPad included: the Enter that commits
+  // a composition arrives after compositionend with isComposing false, and only
+  // keyCode 229 marks it.
+  // Enter sends on touch screens too. An iPad with a hardware keyboard also
+  // reports a coarse pointer, so making Return a newline there would take
+  // Enter-to-send from exactly the reviewer this page is built for. The software
+  // key is labelled Send instead (enterkeyhint on the box).
+  if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && e.keyCode !== 229){
+    e.preventDefault(); send();
+  }
 });
 
 /* ================= persistence and live document ================= */
