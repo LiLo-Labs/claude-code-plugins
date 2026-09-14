@@ -218,6 +218,11 @@ body.open #panel{display:flex}
 .turn.mine .quoted{border-left:none;border-right:2px solid var(--mark);
   padding:5px 10px 5px 0;text-align:right;align-self:flex-end}
 .hint{color:var(--faint);font-size:14px;line-height:1.55}
+.turn .again{min-height:44px;padding:0 14px;border:1px solid var(--mark);
+  background:var(--paper);color:var(--mark);font-family:var(--ui);font-size:13px;
+  border-radius:8px;cursor:pointer}
+.turn .again:disabled{opacity:.45;cursor:default}
+.turn .again + .again{margin-left:8px}
 
 /* The working session writes markdown, so its replies are rendered, not shown raw. */
 .said.rich{white-space:normal}
@@ -798,8 +803,12 @@ const FEEDS = {};
 function sessionWait(m, r){
   if (r) return r.status === 'working' ? 'The working session has this and is working on it.'
     : 'The working session marked this answered without writing a reply.';
-  if (m.status === 'unsent' && m.why === 'unsaved') return 'Not saved, so this will not '
-    + 'reach the working session. Tell it directly.';
+  // Not "Saved" until the store has said so: the save and its retry can take a second.
+  if (storing.has(m.answers)) return resending.has(m.answers) ? 'Sending again…' : 'Sending…';
+  // Only this view's own failed save says this. A slot read back from the store is
+  // saved whatever it was marked (see restoredThreads).
+  if (unsaved(m)) return 'Not saved, so this has not reached the working session. '
+    + 'Send again stores it and rings the session; Edit puts it back in the box to reword.';
   // A dead replies listener delivers nothing more, so "Loading" or "Sent" here
   // would never change. Say that an answer may be waiting that this view cannot see.
   const rf = FEEDS.replies;
@@ -837,7 +846,11 @@ function said(m){
   const r = sessionReplies.get(m.answers);
   if (r && r.text) return '<div class="said rich">'+markdown(r.text)+'</div>'
     + (r.status === 'working' ? '<span class="who">still working</span>' : '');
-  return '<div class="said">'+esc(sessionWait(m, r))+'</div>';
+  const id = esc(m.answers), held = !r && unsaved(m), again = !r && resending.has(m.answers);
+  return '<div class="said">'+esc(sessionWait(m, r))+'</div>'
+    + (held || again ? '<button class="again" data-resend="'+id+'"'+(again ? ' disabled' : '')
+        + '>Send again</button>' : '')
+    + (held ? '<button class="again" data-edit="'+id+'">Edit</button>' : '');
 }
 
 // The stream follows new text only for a reader already at its end. A reply is
@@ -872,7 +885,16 @@ function gate(){
   sendBtn.disabled = blocked() || threads[live].busy;
   document.querySelectorAll('#seed button, #ok, #changes')
     .forEach(b => { b.disabled = blocked(); });
+  gateRetry();
   drawDecideState();
+}
+// Send again stays off while its own save is on its way. Edit stays off while the
+// box holds a draft, which it would otherwise overwrite.
+function gateRetry(){
+  const draft = !!$('box').value.trim();
+  document.querySelectorAll('[data-resend]')
+    .forEach(b => { b.disabled = blocked() || resending.has(b.dataset.resend); });
+  document.querySelectorAll('[data-edit]').forEach(b => { b.disabled = blocked() || draft; });
 }
 // Why Approve and Needs changes are off, said beside them. The panel's banner
 // alone left a reviewer with the panel closed looking at two dimmed buttons and
@@ -1138,6 +1160,9 @@ async function ask(){
   // Enter still reaches here while Send is off. Leave the text in the box: a
   // message kept out of the store should not also vanish from the screen.
   if (blocked()) return;
+  // Always a new message. A message whose save failed never comes back through
+  // the box: it stays in its own thread with Send again, so nothing typed here is
+  // ever matched against it or sent in its place.
   const quote = carried; carried = null; unlight();
   box.value = ''; box.style.height = 'auto';
 
@@ -1145,7 +1170,7 @@ async function ask(){
   // passage the reviewer highlighted; and where they were reading, because that
   // is half of what they meant.
   const turn = {id: 'm' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
-    role: 'user', content: q || 'What do you make of this?', quote,
+    role: 'user', content: q || NO_QUESTION, quote,
     reading: place(), at: new Date().toISOString(), to: 'session'};
   t.turns.push(turn);
   if (t.turns.length === 1) t.name = short(q || 'Highlighted');
@@ -1165,11 +1190,37 @@ async function ask(){
   const slot = {role: 'assistant', via: 'session', answers: turn.id,
                 status: 'sent', sentAt: Date.now()};
   t.turns.push(slot);
+  storing.add(turn.id);
   draw(true);
+  await deliver(turn, slot);
+}
+const NO_QUESTION = 'What do you make of this?';
+const unsaved = m => !!m && m.via === 'session' && m.status === 'unsent' && m.why === 'unsaved';
+const slotFor = id => threads.flatMap(t => t.turns)
+  .find(m => m.via === 'session' && m.answers === id) || null;
+const turnFor = id => threads.flatMap(t => t.turns)
+  .find(m => m.role === 'user' && m.id === id) || null;
+// Messages whose save is on its way, so their line says Sending rather than
+// Saved; and of those, the ones Send again started, whose button stays on
+// screen, disabled, until the save settles.
+const storing = new Set(), resending = new Set();
+
+// Stored first, then the doorbell. A save that still fails after saveNow's retry
+// leaves the slot unsent with why 'unsaved'. The message stays in its thread,
+// marked not saved, with Send again and Edit. No other write carries it (see
+// record), so it reaches the store and the session only through Send again.
+async function deliver(turn, slot){
   // rering must not ring for a slot this view is still ringing for.
   ringing.add(turn.id);
   try {
-    const kept = await saveNow();
+    // A send made during saveNow's retry wait writes the whole document, this
+    // slot included, because the slot was not yet marked unsaved when that write
+    // was built. When that write stores it and the retry is then refused, the
+    // store holds the message, so it is kept and rung here.
+    const kept = await saveNow(() => storedBy(turn.id));
+    storing.delete(turn.id); resending.delete(turn.id);
+    // Not drawn on a refusal: the slot still says 'sent' until the line below.
+    if (kept) draw();
     const rung = kept ? await ring({kind: 'message', turn: turn.id}) : 'unsaved';
     if (rung === 'rung') slot.rungAt = Date.now();
     else if (!replied.has(turn.id)){ slot.status = 'unsent'; slot.why = rung; }
@@ -1177,21 +1228,60 @@ async function ask(){
     // Stored at once, not after the debounce. A tab closed now, or a reload from a
     // republish, can still lose this write. Then the store keeps 'sent' with no
     // rungAt, or 'unsent' with why 'conflict'. rering rings for either one.
-    if (kept) await saveNow(); else save();
+    if (kept) await saveNow();
   } finally {
-    ringing.delete(turn.id);
+    ringing.delete(turn.id); storing.delete(turn.id); resending.delete(turn.id);
   }
+}
+// The only way a message whose save failed is sent again: the same turn and the
+// same slot, so the stored conversation never holds the message twice. A click
+// while that save or its retry is on its way finds the slot no longer unsaved,
+// and the id in `ringing`, and does nothing.
+async function resend(id){
+  const slot = slotFor(id), turn = turnFor(id);
+  if (!turn || !unsaved(slot) || blocked() || ringing.has(id)) return;
+  slot.status = 'sent'; delete slot.why; slot.sentAt = Date.now();
+  storing.add(id); resending.add(id);
+  draw();
+  await deliver(turn, slot);
+}
+// Takes a message whose save failed back out of the conversation and puts its
+// words in the box to be reworded, in one step. Only into an empty box, so
+// nothing the reviewer is typing is overwritten. No write has it in flight:
+// deliver marks a slot unsaved only after every write carrying it has settled,
+// and record leaves it out of every write after that. So once taken out here,
+// nothing stores it.
+function edit(id){
+  const box = $('box'), slot = slotFor(id), turn = turnFor(id);
+  if (!turn || !unsaved(slot) || blocked() || ringing.has(id) || box.value.trim()) return;
+  const t = threads.find(x => x.turns.includes(turn));
+  t.turns = t.turns.filter(m => m !== turn && m !== slot);
+  box.value = turn.content === NO_QUESTION && turn.quote ? '' : turn.content;
+  if (turn.quote && !carried) carried = turn.quote;
+  if (lost === HELD) sayKept();
+  fit(box);
+  draw(true);
+  box.focus();
 }
 // A send that throws has to say so. Otherwise the reviewer is left looking at a
 // box that emptied and a chat that did not change.
-const send = () => ask().catch(e =>
-  sayLost('the message was not sent (' + ((e && e.message) || e) + ')'));
+const sendFailed = e => sayLost('the message was not sent (' + ((e && e.message) || e) + ')');
+const send = () => ask().catch(sendFailed);
 $('send').addEventListener('click', send);
+$('stream').addEventListener('click', e => {
+  const b = e.target.closest && e.target.closest('[data-resend], [data-edit]');
+  if (!b || b.disabled) return;
+  if ('resend' in b.dataset) resend(b.dataset.resend).catch(sendFailed);
+  else edit(b.dataset.edit);
+});
 function fit(box){
   box.style.height = 'auto';
   box.style.height = Math.min(box.scrollHeight, 150) + 'px';
 }
-$('box').addEventListener('input', e => fit(e.target));
+$('box').addEventListener('input', e => {
+  fit(e.target);
+  gateRetry();
+});
 $('box').addEventListener('keydown', e => {
   // Enter sends, as in every chat box; Shift+Enter is a new line. An input
   // method's own Enter (choosing a character) is left alone. isComposing alone
@@ -1219,11 +1309,15 @@ $('box').addEventListener('keydown', e => {
 const SLOT_KEYS = ['role', 'via', 'answers', 'status', 'why', 'sentAt', 'rungAt'];
 const leanSlot = m => Object.fromEntries(SLOT_KEYS.filter(k => k in m).map(k => [k, m[k]]));
 
-function tidy(t){
+// `held` is the ids of messages whose own save failed. They and their slots are
+// left out, so a write made for something else never stores one behind the
+// reviewer: the page says it was not saved, and only Send again sends it.
+function tidy(t, held = new Set()){
   // A reply slot still waiting on the session is kept: it holds when the
   // message was sent, and dropping it would lose the "sent" state on reload.
   return {id:t.id, name:t.name,
-          turns:t.turns.filter(m => (m.content && m.content !== 'Thinking…')
+          turns:t.turns.filter(m => !held.has(m.via === 'session' ? m.answers : m.id))
+                       .filter(m => (m.content && m.content !== 'Thinking…')
                                     || m.via === 'session')
                        .map(m => m.via === 'session' ? leanSlot(m) : m)};
 }
@@ -1254,7 +1348,11 @@ function sayRefused(e){
     + 'no message or decision reaches the working session. Closing a thread with × '
     + 'removes it from what is saved; copy anything you want to keep first.</div>';
 }
+// A write for something else does not make a held-back message safe. While one is
+// on screen the banner says so, since it is what a reload would lose.
+const HELD = 'a message here could not be stored. Use Send again on it, or Edit to reword it';
 function sayKept(){
+  if (threads.some(t => t.turns.some(unsaved))) return sayLost(HELD);
   if (lost === null) return;
   lost = null;
   const el = $('lostSlot');
@@ -1269,27 +1367,101 @@ let decidedAt = null, pickup = null, rang = null, showingDecided = false;
 // Counts whole-document writes from this view, so rering can tell whether one
 // went out while its own read-modify-write was in flight.
 let records = 0;
-function record(){
+// Session slot ids and the decidedAt that some successful write from this view
+// stored, and the writes still in flight with what each carries. A save that is
+// refused can then ask whether another write stored the same thing anyway.
+const storedSlots = new Set();
+let storedDecidedAt = null;
+const inFlight = new Set();
+async function record(){
   records++;
-  return db.doc('review/pr-' + DATA.number).set({
+  // Everything this write carries, which is never a message marked unsaved when
+  // the write is built. A retry calls record() again, so it leaves out whatever
+  // was marked, or taken out by Edit, during its wait.
+  const all = threads.flatMap(t => t.turns);
+  const held = new Set(all.filter(unsaved).map(m => m.answers));
+  const slots = all.filter(m => m.via === 'session' && !held.has(m.answers));
+  const at = decided ? decidedAt : undefined;
+  const write = {ids: new Set(slots.map(m => m.answers)), at};
+  write.done = db.doc('review/pr-' + DATA.number).set({
     pr: DATA.number, title: DATA.title,
-    threads: threads.map(tidy),
+    threads: threads.map(t => tidy(t, held)),
     decision: decided,
     reason: reason,
     decidedAt: decidedAt,
     updatedAt: new Date().toISOString(),
+  }).then(() => {
+    write.ids.forEach(id => storedSlots.add(id));
+    if (at !== undefined) storedDecidedAt = at;
   });
+  inFlight.add(write);
+  try { await write.done; } finally { inFlight.delete(write); }
+  storedAnyway(at);
+}
+// Whether a write from this view has stored the slot for `id`, or the decision
+// stamped `at`, once every write already carrying it has landed or been refused.
+// Waiting matters: a refusal can arrive while a covering write is still on its way.
+async function covered(has, stored){
+  await Promise.allSettled([...inFlight].filter(has).map(w => w.done));
+  return stored();
+}
+const storedBy = id => covered(w => w.ids.has(id), () => storedSlots.has(id));
+const decisionStored = at => covered(w => w.at === at, () => storedDecidedAt === at);
+
+// A decision whose own save failed, stored by a later write: a send, closing a
+// thread. Every write carries the decision, so the store now holds it, and the
+// page stops saying it was not saved and rings for it, as it would have at once.
+// A message is never stored this way: record leaves an unsaved one out.
+function storedAnyway(at){
+  if (at === undefined || !decided || decidedAt !== at
+      || !(rang === 'unsaved' || rang === 'too large')) return;
+  rang = 'sending';
+  if (showingDecided) drawDecided();
+  ring().then(r => {
+    if (decidedAt !== at || rang !== 'sending') return;
+    rang = r;
+    if (showingDecided) drawDecided();
+  });
+}
+// A slot read from the store marked unsaved. Desks saved by 0.10.2 and earlier
+// hold these: a debounced save stored the message after its own save failed.
+// Being in the store proves it saved, so it is marked saved, not yet rung, and
+// due now rather than after RERING_AFTER, since no view is still ringing for it.
+// rering takes an id out of here once the slot is rung or the store shows it
+// needs no ring.
+const lateStored = new Set();
+function storedLate(m){
+  m.status = 'sent'; delete m.why;
+  lateStored.add(m.answers);
+  return m;
+}
+
+// db.d.ts: `unavailable` is transient, and a verb that fails with it is retried
+// once after a short randomized delay; an unknown code counts as unavailable.
+// These are the codes it says a retry cannot fix.
+const NO_RETRY = new Set(['invalid_argument', 'resource_exhausted', 'quota_exceeded',
+  'revoked', 'not_granted', 'capability_disabled', 'capability_removed', 'transform_error']);
+async function recordRetried(){
+  try { await record(); }
+  catch (e){
+    if (e && NO_RETRY.has(e.code)) throw e;
+    // record() is called again rather than resent, so the retry stores the
+    // threads as they are now, with anything sent during the wait.
+    await new Promise(r => setTimeout(r, 300 + Math.random() * 700));
+    await record();
+  }
 }
 
 // Both savers refuse until the stored document has been read (see `restore`).
-// The banner for a failed read is already up, so they add nothing to it.
+// The banner for a failed read is already up, so they add nothing to it. A
+// failure that the retry recovers says nothing: the banner is for what is lost.
 async function save(){
   if (!db){ sayLost('this view cannot reach the store'); return; }
   if (restore !== 'done') return;
   clearTimeout(saving);
   saving = setTimeout(async () => {
     try {
-      await record();
+      await recordRetried();
       sayKept();
     } catch (e) {
       sayRefused(e);
@@ -1299,15 +1471,22 @@ async function save(){
 
 // A decision cannot sit out the debounce: the doorbell rings straight after it,
 // and a session answering the bell must find the decision already stored.
-async function saveNow(){
+// `stored`, when given, asks whether another write stored what this save was for.
+// If so, a refusal is not reported: the banner would say the thing was lost while
+// the store holds it, and a refusal that lands after the covering write would
+// leave that banner up, since no later save comes to clear it. The refused write
+// may still have carried something newer, so the document as it is now is saved
+// once more, and the banner says whatever that write says.
+async function saveNow(stored){
   if (!db){ sayLost('this view cannot reach the store'); return false; }
   if (restore !== 'done') return false;
   clearTimeout(saving);
   try {
-    await record();
+    await recordRetried();
     sayKept();
     return true;
   } catch (e) {
+    if (stored && await stored()){ await saveNow(); return true; }
     sayRefused(e);
     return false;
   }
@@ -1389,12 +1568,15 @@ async function decide(v, quiet, why){
   reason = why || null;
   rang = null;
   if (!quiet){
-    decidedAt = new Date().toISOString();
+    const at = decidedAt = new Date().toISOString();
     rang = 'sending';
     drawDecided();
+    // As in deliver(): a send during the retry wait may have stored this decision.
+    const kept = await saveNow(() => decisionStored(at));
     // Read `lost` straight after the refusal: a later save that succeeds clears
     // it, and the line under the buttons must keep saying why this one failed.
-    rang = (await saveNow()) ? await ring() : lost === 'too large' ? 'too large' : 'unsaved';
+    const why = lost === 'too large' ? 'too large' : 'unsaved';
+    rang = kept ? await ring() : why;
   }
   drawDecided();
 }
@@ -1495,11 +1677,14 @@ function restoredThreads(stored){
   // A desk saved before 0.8.0 also stores each session slot's content. Any viewer
   // can write this document, so that copy is never shown, and it is dropped here
   // so the next save leaves it out.
+  // A slot stored as unsaved was written by a later save after its own failed.
+  // Read back from the store, it is saved, and waits to be rung.
   return stored.filter(isRow).map((t, i) => ({...t, busy: false,
     id: typeof t.id === 'string' && t.id ? t.id : 't' + (i + 1) + '-restored',
     name: typeof t.name === 'string' && t.name ? t.name : 'Thread ' + (i + 1),
     turns: (Array.isArray(t.turns) ? t.turns : []).filter(isRow)
-      .map(m => m.via === 'session' ? leanSlot(m) : {...m})}));
+      .map(m => m.via !== 'session' ? {...m}
+        : unsaved(m) ? storedLate(leanSlot(m)) : leanSlot(m))}));
 }
 
 // db.d.ts calls `unavailable` transient and asks verbs to retry once after a
@@ -1717,8 +1902,13 @@ function reringIn(ms){
   clearTimeout(reringTimer);
   reringTimer = setTimeout(rering, Math.min(Math.max(ms, 0), RING_LEASE) + 50);
 }
+// A third way: 'unsent' with why 'unsaved', in the store. Pages up to 0.10.2 let a
+// later write store a message whose own save had failed; being in the store
+// proves it saved. The same mark in this view's memory means only that this view
+// could not store it, so rering never starts from one (see `waiting`).
 const unrung = m => m.via === 'session' && !replied.has(m.answers) && !m.rungAt
-  && (m.status === 'sent' || (m.status === 'unsent' && m.why === 'conflict'));
+  && (m.status === 'sent'
+      || (m.status === 'unsent' && (m.why === 'conflict' || m.why === 'unsaved')));
 const sessionSlots = doc => new Map(((doc && Array.isArray(doc.threads)) ? doc.threads : [])
   .flatMap(t => (t && Array.isArray(t.turns)) ? t.turns : [])
   .filter(m => m && m.via === 'session' && typeof m.answers === 'string')
@@ -1729,9 +1919,10 @@ async function rering(){
   reringTimer = null;
   if (!bellOn || restore !== 'done') return;
   const now = Date.now();
-  const waiting = threads.flatMap(t => t.turns).filter(m => unrung(m)
+  const waiting = threads.flatMap(t => t.turns).filter(m => unrung(m) && !unsaved(m)
     && !replied.has(m.answers) && !ringing.has(m.answers));
-  const due = waiting.filter(m => m.status === 'unsent' || now - (m.sentAt || 0) > RERING_AFTER);
+  const due = waiting.filter(m => m.status === 'unsent' || lateStored.has(m.answers)
+    || now - (m.sentAt || 0) > RERING_AFTER);
   const young = waiting.filter(m => !due.includes(m));
   if (young.length) reringIn(Math.min(...young.map(m => (m.sentAt || 0) + RERING_AFTER)) - now);
   if (!due.length) return;
@@ -1763,12 +1954,15 @@ async function rering(){
       for (const k of ['status', 'why', 'rungAt']){
         if (k in s) m[k] = s[k]; else delete m[k];
       }
+      if (unsaved(m)){ m.status = 'sent'; delete m.why; }
+      lateStored.delete(m.answers);
       return false;
     });
     if (!toRing.length){ draw(); return; }
 
     const rung = await ring({kind: 'message', turns: toRing.map(m => m.answers), again: true});
     toRing.forEach(m => {
+      lateStored.delete(m.answers);
       // A reply that landed during the ring has taken over this slot.
       if (replied.has(m.answers)) return;
       if (rung === 'rung'){ m.status = 'sent'; delete m.why; m.rungAt = Date.now(); }
