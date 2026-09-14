@@ -461,6 +461,105 @@ for (const settled of [true, false]) test(settled
   if (settled) await lineSays('Waiting for the working session');
 });
 
+// A save from a view holding a pending record it restored reads the store before
+// its set. Round trips vary, so a later save's read can come back first. These wrap
+// the page's db so the next read of the document is held `ms`, taking its snapshot
+// when the read is made as the harness getDelay does.
+const slowNextRead = (d, ms) => d.page.evaluate(ms => {
+  const real = db;
+  let held = false;
+  db = new Proxy(real, {get: (t, k) => k !== 'doc' ? t[k] : p => new Proxy(t.doc(p), {get: (r, m) =>
+    m !== 'get' || held || p !== 'review/pr-42' ? r[m] : async () => {
+      held = true;
+      const snap = await r.get();
+      await new Promise(x => setTimeout(x, ms));
+      return snap;
+    }})});
+}, ms);
+const pendingSeed = (decidedAt, turns = []) => ({[PR]: {pr: 42, title: 'Harness desk', decision: 'approved',
+  reason: null, decidedAt, decisionRing: {decidedAt, pending: true},
+  threads: [{id: 't1', name: 'One', turns}]}});
+
+test('two overlapping saves from a view holding a restored pending record land in the order they were made', async () => {
+  const decidedAt = new Date(Date.now() - 60000).toISOString();
+  // A view that cannot ring never replaces the restored pending record, so every
+  // save it makes reads the store first.
+  desk = await open(browser, {capabilities: ['db'],
+    seed: pendingSeed(decidedAt, [{id: 'm0', role: 'user', content: 'zero', to: 'session'}])});
+  await ready(desk);
+  await slowNextRead(desk, 400);
+  await desk.page.evaluate(() => {
+    threads[0].turns.push({id: 'm1', role: 'user', content: 'first', to: 'session'});
+    const one = record();
+    threads[0].turns.push({id: 'm2', role: 'user', content: 'second', to: 'session'});
+    return Promise.all([one, record()]);
+  });
+  const sets = (await desk.log()).filter(e => e.op === 'set' && e.path === PR)
+    .map(e => e.data.threads[0].turns.map(m => m.id).join(','));
+  assert.deepEqual(sets, ['m0,m1', 'm0,m1,m2'], 'the older set landed last');
+  const doc = (await desk.store())[PR];
+  assert.deepEqual(doc.threads[0].turns.map(m => m.id), ['m0', 'm1', 'm2']);
+  assert.deepEqual(doc.decisionRing, {decidedAt, pending: true});
+});
+
+test('a save whose read is slow, made before a restored pending decision is re-rung, does not land over the settled record', async () => {
+  // Due a few seconds after load, so the save below starts before rering does and
+  // its held read outlasts rering's whole read, ring and set.
+  const decidedAt = new Date(Date.now() - RERING_AFTER + 5000).toISOString();
+  desk = await open(browser, {seed: pendingSeed(decidedAt)});
+  await ready(desk);
+  assert.deepEqual(decisionPublishes(await desk.log()), []);
+  await slowNextRead(desk, 8000);
+  await desk.page.evaluate(() => { record(); });
+  await pollFor('the pending decision was never re-rung', async () =>
+    decisionPublishes(await desk.log()).length === 1, 15000);
+  // Past the held read and the save waiting on it.
+  await pollFor('the held save never landed', async () =>
+    (await desk.page.evaluate(() => inFlight.size)) === 0, 15000);
+  await desk.page.waitForTimeout(500);
+  const left = await desk.store();
+  const r = left[PR].decisionRing;
+  assert.ok(r.rungAt && r.again && !r.pending, 'the store holds ' + JSON.stringify(r));
+  assert.deepEqual(await desk.missing(), []);
+  assert.deepEqual(desk.errors, []);
+  await desk.close();
+
+  desk = await open(browser, {seed: left});
+  await ready(desk);
+  await desk.page.waitForTimeout(3000);
+  assert.deepEqual(decisionPublishes(await desk.log()), []);
+});
+
+test('a save whose read is slow, made before rering stores a message ring, does not put the unrung slot back', async () => {
+  // The message comes due before the pending decision. rering's set of its rungAt
+  // must not go out ahead of the held save, which carries the slot as it was.
+  const decidedAt = new Date(Date.now() - 2000).toISOString();
+  desk = await open(browser, {seed: pendingSeed(decidedAt, [
+    {id: 'm1', role: 'user', content: 'Saved', to: 'session'},
+    {role: 'assistant', via: 'session', answers: 'm1', status: 'sent', content: '',
+     sentAt: Date.now() - RERING_AFTER + 4000}])});
+  await ready(desk);
+  await slowNextRead(desk, 8000);
+  await desk.page.evaluate(() => { record(); });
+  const messageRings = async () => (await desk.log()).filter(e => e.op === 'publish'
+    && e.ring.doorbell && e.ring.doorbell.kind === 'message');
+  await pollFor('the message was never re-rung', async () => (await messageRings()).length === 1, 15000);
+  await pollFor('the held save never landed', async () =>
+    (await desk.page.evaluate(() => inFlight.size)) === 0, 15000);
+  await desk.page.waitForTimeout(500);
+  const left = await desk.store();
+  const slot = left[PR].threads[0].turns.find(m => m.answers === 'm1');
+  assert.ok(slot.rungAt, 'the store holds the slot unrung: ' + JSON.stringify(slot));
+  assert.deepEqual(desk.errors, []);
+  await desk.close();
+
+  desk = await open(browser, {seed: left});
+  await ready(desk);
+  await desk.page.waitForTimeout(2000);
+  assert.deepEqual((await desk.log()).filter(e => e.op === 'publish' && e.ring.doorbell
+    && e.ring.doorbell.kind === 'message'), []);
+});
+
 test('a view that cannot ring records a decision and says it could not notify the working session', async () => {
   desk = await open(browser, {capabilities: ['db']});
   await ready(desk);

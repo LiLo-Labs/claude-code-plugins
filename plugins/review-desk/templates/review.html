@@ -1633,12 +1633,27 @@ async function record(){
     ...(decided && decidedOn ? {decidedOn} : {}),
     updatedAt: new Date().toISOString(),
   };
-  const ringRecord = decided && decisionRing && decisionRing.decidedAt === decidedAt ? decisionRing : null;
   const ref = db.doc('review/pr-' + DATA.number);
-  write.done = (ringRecord && ringRecord.pending && ringRecord !== ownPending
-    ? storedRing(ref, ringRecord) : Promise.resolve(ringRecord))
-    .then(r => ref.set({...doc, ...(r ? {decisionRing: r} : {})}))
-    .then(() => {
+  const ringNow = () => doc.decision && decisionRing && decisionRing.decidedAt === doc.decidedAt
+    ? decisionRing : null;
+  const restoredPending = r => !!(r && r.pending && r !== ownPending);
+  const send = r => ref.set({...doc, ...(r ? {decisionRing: r} : {})});
+  let sent;
+  if (!queued && !restoredPending(ringNow())) sent = send(ringNow());
+  else {
+    queued++;
+    const turn = unsent.then(async () => {
+      try {
+        const r = ringNow();
+        const carried = restoredPending(r) ? await storedRing(ref, r) : r;
+        // rering may have stored this view's ring outcome during the read.
+        return {landed: send(ringNow() === r ? carried : ringNow())};
+      } finally { queued--; }
+    });
+    unsent = turn.then(() => {}, () => {});
+    sent = turn.then(t => t.landed);
+  }
+  write.done = sent.then(() => {
     write.ids.forEach(id => storedSlots.add(id));
     if (at !== undefined) storedDecidedAt = at;
   });
@@ -1646,6 +1661,16 @@ async function record(){
   try { await write.done; } finally { inFlight.delete(write); }
   storedAnyway(at);
 }
+// Sets from this view go out in the order record() was called: set is
+// last-writer-wins, so an older whole document sent after a newer one drops what
+// the newer one stored. A save that reads the store first (see storedRing) would
+// otherwise send its set whenever its read came back, after a later save's. So
+// while any save is waiting on a read, every later one waits its turn behind it;
+// `unsent` settles once the last of them has sent its set, and `queued` counts
+// those not yet sent. A view with no restored pending record sends at once, as it
+// always did. rering waits on the same queue before it counts `records`.
+let unsent = Promise.resolve();
+let queued = 0;
 // The pending record decide() made, while it is still the one on screen. Only this
 // view knows its ring has not settled, so only this record is written as it stands.
 let ownPending = null;
@@ -1657,7 +1682,8 @@ let ownPending = null;
 // this decision now: pending when the deciding view never replaced it, which keeps
 // that decision due. A failed read carries nothing, which as with an older page's
 // write leaves the decision unrung rather than rung twice. Only the gap between
-// that read and the set is left for a settled record to be overwritten in.
+// that read and the set is left for a settled record to be overwritten in. The
+// read delays the set, so record() keeps this view's sets in order (see unsent).
 async function storedRing(ref, mine){
   let had;
   try { const snap = await ref.get(); had = snap.exists && snap.data(); }
@@ -2586,7 +2612,10 @@ async function rering(){
       // that save stored: say, a message sent right after load. That save was
       // taken from this view's threads, which already carry the outcome above.
       // So when one went out, this view saves its own threads again instead,
-      // after this write if this write is already on its way.
+      // after this write if this write is already on its way. That rests on every
+      // save counted in `before` having sent its set already, which a save waiting
+      // on its read of the store has not (see unsent), so this waits them out.
+      while (queued) await unsent;
       const before = records;
       const snap = await ref.get();
       const had = snap.exists && snap.data();
