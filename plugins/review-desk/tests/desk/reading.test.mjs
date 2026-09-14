@@ -220,6 +220,113 @@ test('after many repaints the message says the section of the page on screen, an
   assert.deepEqual(desk.errors, []);
 });
 
+/* ---------------- how markdown renders ---------------- */
+
+// The description and the session's replies go through the one renderer, so
+// these read the rendered DOM rather than the markup string: what the reviewer
+// sees is the shape the browser built.
+const describe = async (body, options = {}) => {
+  desk = await open(browser, {data: payload({body}), ...options});
+  await desk.page.waitForSelector('#sheet > *');
+};
+// A compact outline of an element's children: tag, attributes that matter here,
+// and text for leaves, so a test states the whole shape it expects.
+const shape = sel => desk.page.$eval(sel, root => {
+  const walk = el => [...el.childNodes].map(n => {
+    if (n.nodeType === 3) return n.textContent;
+    const tag = n.tagName.toLowerCase() + (n.getAttribute('start') ? '[start=' + n.getAttribute('start') + ']' : '')
+      + (n.className ? '.' + n.className : '');
+    return n.children.length || n.tagName === 'CODE' ? {[tag]: walk(n)} : {[tag]: n.textContent};
+  });
+  return walk(root);
+});
+
+test('a loose numbered list, blank lines between its steps, is one list counting 1, 2, 3', async () => {
+  await describe('1. Run the tests\n\n2. Open the desk\n\n3. Approve');
+  assert.deepEqual(await shape('#sheet'),
+    [{ol: [{li: 'Run the tests'}, {li: 'Open the desk'}, {li: 'Approve'}]}]);
+
+  // Steps that carry on past a blank line stay in their item, and a list that
+  // does not start at 1 keeps its number.
+  await desk.context('body', {text: '3. Build it\n\n   The build takes a minute.\n\n4. Ship it'});
+  await desk.page.waitForSelector('#sheet ol[start="3"]');
+  assert.deepEqual(await shape('#sheet'), [{'ol[start=3]': [
+    {li: [{p: 'Build it'}, {p: 'The build takes a minute.'}]}, {li: 'Ship it'}]}]);
+  assert.deepEqual(desk.errors, []);
+});
+
+test('a fenced block inside a list item is a code block in that item, newlines and all', async () => {
+  await describe('Test plan:\n\n'
+    + '1. Install\n   ```bash\n   npm ci\n     npm test -- --watch\n   ```\n'
+    + '2. Open the desk\n\n'
+    + '   ```\n   untagged\n\n   second line\n   ```\n'
+    + '3. Approve\n');
+  const items = desk.page.locator('#sheet ol > li');
+  assert.equal(await desk.page.locator('#sheet ol').count(), 1);
+  assert.equal(await items.count(), 3);
+
+  const code = items.nth(0).locator(':scope > pre > code');
+  assert.equal(await code.textContent(), 'npm ci\n  npm test -- --watch');
+  assert.equal(await code.getAttribute('class'), 'language-bash');
+  // Only a tagged block is marked for the highlighter.
+  const plain = items.nth(1).locator(':scope > pre > code');
+  assert.equal(await plain.textContent(), 'untagged\n\nsecond line');
+  assert.equal(await plain.getAttribute('class'), null);
+  assert.equal(await items.nth(2).textContent(), 'Approve');
+  assert.ok(!(await desk.page.textContent('#sheet')).includes('```'), 'a fence mark shows as text');
+
+  // A bulleted item takes the same, indented by the bullet's two columns.
+  await desk.context('body', {text: '- Install\n  ```bash\n  npm ci\n  npm test\n  ```\n- Run'});
+  await desk.page.waitForFunction(() => document.querySelector('#sheet ul'));
+  assert.deepEqual(await shape('#sheet'), [{ul: [
+    {li: ['Install', {pre: [{'code.language-bash': ['npm ci\nnpm test']}]}]}, {li: 'Run'}]}]);
+  assert.deepEqual(desk.errors, []);
+});
+
+test('tight lists, nested bullets, wrapped items and a list followed by a paragraph keep their shape', async () => {
+  await describe([
+    '- one', '- two', '- three', '',
+    'Between.', '',
+    '- parent', '  - child a', '  - child b', '- sibling', '',
+    '1. wrapped item that', '   carries on', '2. next', '',
+    'After the list, with a blank line.', '',
+    '- tight', 'Straight after, no blank line.', '',
+    '    indented code after a paragraph',
+  ].join('\n'));
+  assert.deepEqual(await shape('#sheet'), [
+    {ul: [{li: 'one'}, {li: 'two'}, {li: 'three'}]},
+    {p: 'Between.'},
+    {ul: [{li: ['parent', {ul: [{li: 'child a'}, {li: 'child b'}]}]}, {li: 'sibling'}]},
+    {ol: [{li: 'wrapped item that carries on'}, {li: 'next'}]},
+    {p: 'After the list, with a blank line.'},
+    {ul: [{li: 'tight'}]},
+    {p: 'Straight after, no blank line.'},
+    {pre: [{code: ['indented code after a paragraph']}]},
+  ]);
+  assert.deepEqual(desk.errors, []);
+});
+
+test('inside list items, markup is escaped, links open away, and a mermaid fence stays a diagram source', async () => {
+  await describe('- <img src=x onerror="window.__ran=1"> and **bold**\n'
+    + '- see [the docs](https://example.com/docs)\n'
+    + '- a diagram\n  ```mermaid\n  graph TD\n    A["<b>x</b>"] --> B\n  ```\n'
+    + '- code\n  ```\n  <script>window.__ran=1</script>\n  ```');
+  assert.equal(await desk.page.locator('#sheet img, #sheet script, #sheet b').count(), 0);
+  assert.equal(await desk.page.evaluate(() => window.__ran), undefined);
+  assert.ok((await desk.page.textContent('#sheet li:nth-child(1)')).startsWith('<img src=x'));
+  assert.equal(await desk.page.textContent('#sheet li:nth-child(1) strong'), 'bold');
+  const link = desk.page.locator('#sheet li:nth-child(2) a');
+  assert.equal(await link.getAttribute('href'), 'https://example.com/docs');
+  assert.equal(await link.getAttribute('target'), '_blank');
+  assert.equal(await link.getAttribute('rel'), 'noopener');
+  // The harness refuses the mermaid script, so the source block stays, marked for it.
+  assert.equal(await desk.page.textContent('#sheet li:nth-child(3) pre > code.language-mermaid'),
+    'graph TD\n  A["<b>x</b>"] --> B');
+  assert.equal(await desk.page.textContent('#sheet li:nth-child(4) pre > code'),
+    '<script>window.__ran=1</script>');
+  assert.deepEqual(desk.errors, []);
+});
+
 /* ---------------- contrast ---------------- */
 
 // WCAG 2 contrast of each element's computed text colour on its computed
