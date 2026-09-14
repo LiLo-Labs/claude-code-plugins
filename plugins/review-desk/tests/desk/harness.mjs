@@ -70,7 +70,7 @@ const PUBLISH_CODES = ['conflict', 'not_writer', 'not_declared', 'too_large', 'i
 
 // Runs in every frame before any of its scripts. Serialised by Playwright, so it
 // may use only its argument.
-function installStub({seed, capabilities, publishError, getDelay, getFailures, leases: held,
+function installStub({seed, capabilities, publishError, publishHang, getDelay, getFailures, leases: held,
     subscribeFailures, setFailures, setDelay, rules, level, levels}){
   const frozen = v => {
     if (v && typeof v === 'object'){ Object.values(v).forEach(frozen); Object.freeze(v); }
@@ -267,6 +267,12 @@ function installStub({seed, capabilities, publishError, getDelay, getFailures, l
   const db = strict('db', {doc: docRef, collection: colRef});
   const artifact = strict('artifact', {
     publish: async files => {
+      // publishHang: a publish that never settles, as one cut off by the tab
+      // closing or being suspended. Nothing is rung, and the page never learns so.
+      if (publishHang){
+        log.push({op: 'publish hung', view, at: Date.now()});
+        return new Promise(() => {});
+      }
       const code = Array.isArray(publishError) ? publishRefusals.shift() : publishError;
       if (code){
         log.push({op: 'publish refused', code, view, at: Date.now()});
@@ -324,7 +330,7 @@ const skeleton = html => '<!doctype html><html><head>'
 // `capabilities` is what this view is granted: ['db', 'artifact'], ['db'] for a
 // view that cannot ring, [] for one that cannot reach the store. `declared` is the
 // capabilities object build_desk.py printed, whose db rules the stub enforces.
-function stubOptions({seed = {}, capabilities = ['db', 'artifact'], publishError = null,
+function stubOptions({seed = {}, capabilities = ['db', 'artifact'], publishError = null, publishHang = false,
     getDelay = 0, getFailures = 0, leases = {}, subscribeFailures = {}, setFailures = {}, setDelay = 0,
     level = 'interact'}, declared){
   const unknown = capabilities.filter(c => !['db', 'artifact'].includes(c));
@@ -339,8 +345,8 @@ function stubOptions({seed = {}, capabilities = ['db', 'artifact'], publishError
     if (extra.length || r.path.includes('{self}') || !LEVELS.includes(r.write))
       throw new Error('the stub enforces only path and write levels, not ' + JSON.stringify(r));
   }
-  return {seed, capabilities, publishError, getDelay, getFailures, leases, subscribeFailures, setFailures,
-    setDelay, rules, level, levels: LEVELS};
+  return {seed, capabilities, publishError, publishHang: !!publishHang, getDelay, getFailures, leases,
+    subscribeFailures, setFailures, setDelay, rules, level, levels: LEVELS};
 }
 
 // Everything a test does to one view. `frame` is a Page for a lone desk, or the
