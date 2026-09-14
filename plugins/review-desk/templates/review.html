@@ -493,7 +493,10 @@ function render(page){
 // the parser stays a parser and a missing library costs nothing but colour.
 function paintCode(){
   if (!window.hljs) return;
-  document.querySelectorAll('.md pre code:not(.language-mermaid)').forEach(el => {
+  // Only a block that names its language is highlighted. Left to guess,
+  // highlight.js coloured the command docs' untagged JSON and shell lines as CSS
+  // or VB.NET, which reads worse than no colour at all.
+  document.querySelectorAll('.md pre code[class*="language-"]:not(.language-mermaid)').forEach(el => {
     try { hljs.highlightElement(el); } catch (e) {}
   });
 }
