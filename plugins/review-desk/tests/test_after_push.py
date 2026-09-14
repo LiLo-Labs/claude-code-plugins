@@ -44,7 +44,7 @@ class AfterPush(unittest.TestCase):
         done = subprocess.run([sys.executable, HOOK], input=json.dumps(event),
                               env=dict(os.environ, HOME=self.home),
                               capture_output=True, text=True, timeout=10)
-        self.assertEqual(done.returncode, 0)
+        self.assertEqual((done.returncode, done.stderr), (0, ""))
         return done.stdout
 
     def said(self, out):
@@ -170,6 +170,41 @@ class AfterPush(unittest.TestCase):
     def test_repo_without_open_desks_says_nothing(self):
         self.remote("https://github.com/o/quiet.git")
         self.assertEqual(self.run_hook("git push"), "")
+
+    def test_hand_edited_shapes_are_not_listed(self):
+        desk = {"repo": "o/r", "url": "https://x/7", "collectedAt": None}
+        bad = [
+            dict(desk, pr=11, repo=["o", "r"]), dict(desk, pr=12, repo={"o": "r"}),
+            dict(desk, pr=13, repo=42), dict(desk, pr=14, repo="no-slash"),
+            dict(desk, pr="15"), dict(desk, pr=-16), dict(desk, pr=True),
+            dict(desk, pr=18, url=42),
+        ]
+        self.ledger(bad + [dict(desk, pr=7)])
+        for event_name in ("PostToolUse", "PostToolUseFailure"):
+            with self.subTest(event_name=event_name):
+                text = self.said(self.run_hook("git push", event_name=event_name))
+                self.assertEqual([l for l in text.splitlines() if l.startswith("- ")],
+                                 ["- o/r#7 https://x/7"])
+
+    def test_no_json_content_raises(self):
+        values = [None, True, 0, -1, 1.5, "", "x", "o/r", [], ["o", "r"], {}, {"a": 1}]
+        fields = ("repo", "pr", "url", "cwd", "collectedAt", "outcome")
+        entries = [{"repo": "o/r", "pr": 7, "url": "https://x/7", field: v}
+                   for field in fields for v in values]
+        for ledger in (entries + values, {"repo": "o/r"}, 7, None):
+            with self.subTest(ledger=str(ledger)[:60]):
+                self.ledger(ledger)
+                self.run_hook("git push")
+        with open(os.path.join(self.home, ".review-desks.json"), "w") as f:
+            f.write("[" * 100000 + "]" * 100000)
+        self.assertEqual(self.run_hook("git push"), "")
+        for event in ([], "x", {"tool_input": "git push"}, {"tool_input": {"command": 5}},
+                      {"tool_input": {"command": "git push"}, "cwd": 5}):
+            with self.subTest(event=event):
+                done = subprocess.run([sys.executable, HOOK], input=json.dumps(event),
+                                      env=dict(os.environ, HOME=self.home),
+                                      capture_output=True, text=True, timeout=10)
+                self.assertEqual((done.returncode, done.stderr), (0, ""))
 
     def test_missing_ledger_says_nothing(self):
         os.remove(os.path.join(self.home, ".review-desks.json"))

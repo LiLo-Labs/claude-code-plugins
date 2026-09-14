@@ -155,7 +155,9 @@ def main():
             entries = json.load(f)
     except FileNotFoundError:
         return 0
-    except (OSError, ValueError) as err:
+    except (OSError, ValueError, RecursionError) as err:
+        # RecursionError: valid JSON nested deeper than the decoder allows
+        # before Python 3.14. Reported like any other unreadable ledger.
         print(context(
             f"~/.review-desks.json could not be read ({err}). Review desk "
             "decisions recorded there cannot be collected until it is fixed; "
