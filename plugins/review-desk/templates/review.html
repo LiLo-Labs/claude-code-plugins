@@ -888,6 +888,22 @@ const sendBtn = $('send');
 // Whether this view can ring the working session. Without the doorbell a saved
 // message is still answered, by the next session to start.
 let bellOn = false;
+// artifact.d.ts: a read-only view still gets the artifact namespace, so only a
+// publish refusal says the view cannot write. The first one is permanent for the
+// view: ringing is off from then on (see goReadOnly), and nothing publishes again.
+let readOnly = false;
+function sayAlone(){
+  $('aloneSlot').innerHTML = '<div class="lost">This view cannot ring the working '
+    + 'session. What you send is saved, and the next session to start answers it.</div>';
+}
+function goReadOnly(){
+  if (readOnly) return;
+  readOnly = true;
+  bellOn = false;
+  sayAlone();
+  draw();
+  if (showingDecided) drawDecided();
+}
 
 // What the page knows about the session. Every ring the session handles gets its
 // own stamp under review/pr-N/presence, named after that ring's artifact version.
@@ -967,8 +983,18 @@ function sessionWait(m, r){
   // The stored slot says the session took this, but no reply document backs it.
   if (m.status === 'working' || m.status === 'done') return 'The saved discussion says '
     + 'this was answered, but the working session has no reply for it on this desk.';
-  if (m.status === 'unsent') return 'Saved, but this view could not ring the working '
-    + 'session (' + (m.why || 'unknown') + '). The next session to start will answer it.';
+  if (m.status === 'unsent'){
+    // 'readonly' is this page's word, not an artifact.d.ts code, so it is never shown.
+    if (bellOn && ringsLater(m)) return 'Saved, but the ring to the working session did not go out'
+      + (m.why === 'readonly' ? '' : ' (' + m.why + ')') + '. This view rings it again in a few seconds.';
+    if (m.why === 'readonly') return 'Saved. This view cannot ring the working session, so the '
+      + 'next session to start answers it.';
+    // A conflict means this view is being reloaded to a newer version, which rings it.
+    return 'Saved, but this view could not ring the working session (' + (m.why || 'unknown') + ').'
+      + (bellOn && m.why !== 'conflict' ? ' Check, at the top of this panel, rings it again, and a '
+        + 'running session answers every waiting message when it hears one.' : '')
+      + ' The next session to start will answer it.';
+  }
   // No rungAt: saved, but no ring is recorded yet. Either the ring is going out
   // now, or rering will send it. Saying "rung" here would be untrue.
   if (!m.rungAt) return bellOn ? 'Saved. Ringing the working session.'
@@ -1132,7 +1158,8 @@ $('presence').addEventListener('click', async e => {
     if (rung !== 'rung'){
       checkedAt = null;
       drawPresence();
-      $('presence').querySelector('span').textContent =
+      // A read-only view has just lost Check and gained the banner that says why.
+      if (rung !== 'readonly') $('presence').querySelector('span').textContent =
         'Could not ring the working session (' + rung + ').';
       return;
     }
@@ -1379,6 +1406,10 @@ async function deliver(turn, slot){
   } finally {
     ringing.delete(turn.id); storing.delete(turn.id); resending.delete(turn.id);
   }
+  // A ring that failed for a reason another try can get past gets that try, once,
+  // after RING_BACKOFF, from rering under the lease. Scheduled only once the id has
+  // left `ringing`, which rering skips.
+  if (bellOn && ringsLater(slot)) reringIn(dueAt(slot) - Date.now());
 }
 // The only way a message whose save failed is sent again: the same turn and the
 // same slot, so the stored conversation never holds the message twice. A click
@@ -1453,7 +1484,9 @@ $('box').addEventListener('keydown', e => {
 // reply changed, so every open view rewrote the whole document from its own
 // possibly stale threads each time the session reported progress. And
 // /review-collect had to be told not to trust it.
-const SLOT_KEYS = ['role', 'via', 'answers', 'status', 'why', 'sentAt', 'rungAt'];
+// `again` is when a view last rang for the slot after its own ring failed: the one
+// such try each slot gets (see rering).
+const SLOT_KEYS = ['role', 'via', 'answers', 'status', 'why', 'sentAt', 'rungAt', 'again'];
 const leanSlot = m => Object.fromEntries(SLOT_KEYS.filter(k => k in m).map(k => [k, m[k]]));
 
 // `held` is the ids of messages whose own save failed. They and their slots are
@@ -1514,6 +1547,15 @@ let decidedAt = null, pickup = null, rang = null, showingDecided = false;
 // decidedAt. Null for a decision restored from a desk saved before it existed,
 // which /review-collect then merges as it always did.
 let decidedOn = null;
+// What became of the ring for the decision on screen, stored beside it:
+// {decidedAt, rungAt} once a ring went out, or {decidedAt, why} when it did not,
+// with `again` once a view has spent the one re-ring (see rering). Keyed by
+// decidedAt, so a record left over from an earlier decision never counts. Null
+// while nothing is recorded, which is every decision stored before 0.14: rering
+// treats that like a message slot with no rungAt, and rings once it is old enough.
+let decisionRing = null;
+// What `rang` a recorded ring outcome restores to.
+const rangFrom = r => !r ? null : r.rungAt ? 'rung' : String(r.why || 'upstream_error');
 
 // Counts whole-document writes from this view, so rering can tell whether one
 // went out while its own read-modify-write was in flight.
@@ -1543,6 +1585,7 @@ async function record(){
     reason: reason,
     decidedAt: decidedAt,
     ...(decided && decidedOn ? {decidedOn} : {}),
+    ...(decided && decisionRing && decisionRing.decidedAt === decidedAt ? {decisionRing} : {}),
     updatedAt: new Date().toISOString(),
   }).then(() => {
     write.ids.forEach(id => storedSlots.add(id));
@@ -1571,11 +1614,25 @@ function storedAnyway(at){
       || !(rang === 'unsaved' || rang === 'too large')) return;
   rang = 'sending';
   if (showingDecided) drawDecided();
-  ring().then(r => {
-    if (decidedAt !== at || rang !== 'sending') return;
-    rang = r;
-    if (showingDecided) drawDecided();
-  });
+  ringDecision(at);
+}
+// Rings for the decision stamped `at` once it is stored, and stores what became of
+// the ring beside it, at once as deliver() does for a message: a later load then
+// knows whether anything was told, and rering rings again for one that was not.
+const DECISION = ' decision';        // its key in `ringing`; no turn id has a space
+async function ringDecision(at){
+  ringing.add(DECISION);
+  let r;
+  try { r = await ring(); } finally { ringing.delete(DECISION); }
+  if (decidedAt !== at || rang !== 'sending') return;
+  rang = r;
+  decisionRing = r === 'rung' ? {decidedAt: at, rungAt: Date.now()} : {decidedAt: at, why: r};
+  if (showingDecided) drawDecided();
+  await saveNow();
+  // Not after a conflict: this view is being reloaded, and a lease it took now would
+  // hold off the reloaded view's ring for RING_LEASE.
+  const due = decisionDueAt();
+  if (bellOn && due !== null && r !== 'conflict') reringIn(due - Date.now());
 }
 // A slot read from the store marked unsaved. Desks saved by 0.10.2 and earlier
 // hold these: a debounced save stored the message after its own save failed.
@@ -1660,17 +1717,35 @@ const bellReady = (async () => {
 
 // `what` says what rang it -- a decision by default, or a message -- for anyone
 // reading the version history. The session never acts on it.
+//
+// artifact.d.ts: branch on the code. Retry only upstream_error, once, after a short
+// randomized delay, and treat an unknown code as upstream_error. rate_limited is
+// never retried here: rering tries once more after RING_BACKOFF. The read-only
+// codes are permanent for the view, and the first one turns ringing off, so the
+// view never publishes again and returns 'readonly' from then on.
+const READ_ONLY = new Set(['not_writer', 'not_granted', 'not_declared', 'consent_required',
+  'capability_disabled', 'capability_removed']);
+const NOT_TRANSIENT = new Set([...READ_ONLY, 'conflict', 'too_large', 'invalid_content',
+  'read_only_path', 'rate_limited', 'transform_error']);
 async function ring(what){
   const bell = await bellReady;
   if (!bell) return 'unavailable';
-  try {
-    await bell.publish({'doorbell.json': JSON.stringify(Object.assign(
-      {pr: DATA.number, at: new Date().toISOString()},
-      what || {kind: 'decision', decision: decided, decidedAt: decidedAt}))});
-    return 'rung';
-  } catch (e) {
-    return (e && e.code) || 'failed';
+  const says = what || {kind: 'decision', decision: decided, decidedAt: decidedAt};
+  let code = null;
+  for (let tries = 0; tries < 2; tries++){
+    if (tries) await new Promise(r => setTimeout(r, 300 + Math.random() * 700));
+    if (readOnly) return 'readonly';
+    try {
+      await bell.publish({'doorbell.json': JSON.stringify(Object.assign(
+        {pr: DATA.number, at: new Date().toISOString()}, says))});
+      return 'rung';
+    } catch (e) {
+      code = (e && typeof e.code === 'string' && e.code) || 'upstream_error';
+      if (READ_ONLY.has(code)){ goReadOnly(); return 'readonly'; }
+      if (NOT_TRANSIENT.has(code)) return code;
+    }
   }
+  return code;
 }
 
 // "Needs changes" without saying what to change is the one verdict nobody can
@@ -1786,10 +1861,13 @@ async function decide(v, quiet, why){
 
   decided = v;
   reason = why || null;
-  rang = null;
+  // A restored decision says what its stored ring record says; restore sets
+  // decisionRing before it calls here.
+  rang = rangFrom(decisionRing);
   if (!quiet){
     const at = decidedAt = new Date().toISOString();
     decidedOn = head;
+    decisionRing = null;
     rang = 'sending';
     drawDecided();
     // As in deliver(): a send during the retry wait may have stored this decision.
@@ -1797,7 +1875,8 @@ async function decide(v, quiet, why){
     // Read `lost` straight after the refusal: a later save that succeeds clears
     // it, and the line under the buttons must keep saying why this one failed.
     const why = lost === 'too large' ? 'too large' : 'unsaved';
-    rang = kept ? await ring() : why;
+    if (kept) await ringDecision(at);
+    else if (decidedAt === at && rang === 'sending') rang = why;
   }
   drawDecided();
 }
@@ -1838,9 +1917,20 @@ function pickupLine(){
     + 'so no session will see this. Close a thread you no longer need and decide '
     + 'again, or tell the working session directly.';
   const later = ' If no session is running, the next one to start picks it up.';
-  if (rang === 'rung' || rang === null) return 'Waiting for the working session.' + later;
+  // Waiting only once a ring is recorded. A decision with none may never have been
+  // told to anyone: the tab closed during the ring, or a page before 0.14 stored it.
+  if (rang === 'rung') return 'Waiting for the working session.' + later;
+  const retry = decisionDueAt() !== null;
+  if (bellOn && retry && rang === null) return 'Saved. No ring is recorded for it yet, so this '
+    + 'view rings the working session.' + later;
+  // 'readonly' is this page's word, not an artifact.d.ts code, so it is never shown.
+  if (bellOn && retry) return 'Saved, but the working session was not notified'
+    + (rang === 'readonly' ? '' : ' (' + rang + ')') + '. This view tries again in a few seconds.' + later;
+  if (rang === null && bellOn) return 'Saved. No ring is recorded for it.' + later;
+  if (rang === null || rang === 'readonly') return 'Saved. This view cannot notify the working '
+    + 'session, so the next session to start picks it up.';
   return 'Saved, but this view could not notify the working session ('
-    + rang + ').' + later;
+    + rang + ').' + (bellOn ? ' Check in the panel rings it again.' : '') + later;
 }
 
 // An approval of a head the page no longer shows. Not said once the pickup
@@ -1958,6 +2048,10 @@ async function restoreStored(){
       reason = had.reason || null;
       decidedAt = had.decidedAt || null;
       decidedOn = isHead(had.decidedOn) ? had.decidedOn : null;
+      // A copy: the store hands back frozen objects. A record stamped for another
+      // decidedAt, or none at all, leaves this decision with no recorded ring.
+      decisionRing = isRow(had.decisionRing) && typeof decidedAt === 'string'
+        && had.decisionRing.decidedAt === decidedAt ? {...had.decisionRing} : null;
       if (had.decision) decide(had.decision, true, had.reason);
     }
     draw();
@@ -2130,22 +2224,56 @@ function listenReplies(){
 // reply document.
 const RERING_AFTER = 10000;
 const RING_LEASE = 20000;
+// How long after a ring fails with a code another try can get past (rate_limited,
+// upstream_error after ring()'s own retry, or a view that could not ring at all)
+// before a view rings once more. artifact.d.ts asks a rate-limited page to slow
+// down, and a transient failure a second old is likely still failing. Measured
+// from sentAt, or from decidedAt for a decision.
+const RING_BACKOFF = 5000;
 const viewId = 'v' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 const ringing = new Set();
-let reringTimer = null;
+let reringTimer = null, reringAt = 0;
 // Capped, so a sentAt or lease expiry from a clock that runs ahead only means
-// another check later, not a timer set hours out.
+// another check later, not a timer set hours out. A check already due sooner is
+// kept: a failed send asking for one in RING_BACKOFF must not push back a slot
+// that comes of age before then.
 function reringIn(ms){
+  const at = Date.now() + Math.min(Math.max(ms, 0), RING_LEASE) + 50;
+  if (reringTimer && reringAt <= at) return;
   clearTimeout(reringTimer);
-  reringTimer = setTimeout(rering, Math.min(Math.max(ms, 0), RING_LEASE) + 50);
+  reringAt = at;
+  reringTimer = setTimeout(rering, at - Date.now());
 }
 // A third way: 'unsent' with why 'unsaved', in the store. Pages up to 0.10.2 let a
 // later write store a message whose own save had failed; being in the store
 // proves it saved. The same mark in this view's memory means only that this view
 // could not store it, so rering never starts from one (see `waiting`).
+// A fourth: 'unsent' with any other why, a ring that failed with a code another
+// try can get past. Such a slot gets one more ring, after RING_BACKOFF, and the
+// view that makes it stores `again`, so no view and no later load rings it a third
+// time. A conflict is left unbounded as before: the view that got it is being
+// reloaded, and the reload is what rings.
 const unrung = m => m.via === 'session' && !replied.has(m.answers) && !m.rungAt
   && (m.status === 'sent'
-      || (m.status === 'unsent' && (m.why === 'conflict' || m.why === 'unsaved')));
+      || (m.status === 'unsent' && (m.why === 'conflict' || m.why === 'unsaved' || !m.again)));
+const ringsLater = m => unrung(m) && m.status === 'unsent' && m.why !== 'conflict' && m.why !== 'unsaved';
+const dueAt = m => m.status === 'unsent'
+  ? (ringsLater(m) ? (m.sentAt || 0) + RING_BACKOFF : 0)
+  : lateStored.has(m.answers) ? 0 : (m.sentAt || 0) + RERING_AFTER;
+// When the decision on screen is due a ring from rering, or null when it is not:
+// it has none recorded (a tab closed during the ring, or a page before 0.14 stored
+// it), or its ring failed and the one re-ring is not spent. Never while this view
+// is saving or ringing for it, and never once the pickup shows it was collected.
+function decisionDueAt(){
+  if (!decided || typeof decidedAt !== 'string' || ringing.has(DECISION)) return null;
+  if (decided === 'needs changes' && !reason) return null;
+  if (rang === 'sending' || rang === 'unsaved' || rang === 'too large') return null;
+  if (pickup && pickup.decision === decided && pickup.decidedAt === decidedAt) return null;
+  const r = decisionRing, at = Date.parse(decidedAt) || 0;
+  if (!r) return at + RERING_AFTER;
+  if (r.rungAt || r.again) return null;
+  return r.why === 'conflict' ? at : at + RING_BACKOFF;
+}
 const sessionSlots = doc => new Map(((doc && Array.isArray(doc.threads)) ? doc.threads : [])
   .flatMap(t => (t && Array.isArray(t.turns)) ? t.turns : [])
   .filter(m => m && m.via === 'session' && typeof m.answers === 'string')
@@ -2158,14 +2286,20 @@ async function rering(){
   const now = Date.now();
   const waiting = threads.flatMap(t => t.turns).filter(m => unrung(m) && !unsaved(m)
     && !replied.has(m.answers) && !ringing.has(m.answers));
-  const due = waiting.filter(m => m.status === 'unsent' || lateStored.has(m.answers)
-    || now - (m.sentAt || 0) > RERING_AFTER);
+  const due = waiting.filter(m => dueAt(m) <= now);
   const young = waiting.filter(m => !due.includes(m));
-  if (young.length) reringIn(Math.min(...young.map(m => (m.sentAt || 0) + RERING_AFTER)) - now);
-  if (!due.length) return;
+  if (young.length) reringIn(Math.min(...young.map(dueAt)) - now);
+  // The decision goes through the same lease and fresh read as the messages.
+  const decisionAt = decisionDueAt();
+  if (decisionAt !== null && decisionAt > now) reringIn(decisionAt - now);
+  const decisionDue = decisionAt !== null && decisionAt <= now;
+  if (!due.length && !decisionDue) return;
 
   const ids = due.map(m => m.answers);
   ids.forEach(id => ringing.add(id));
+  if (decisionDue) ringing.add(DECISION);
+  const held = {decision: decided, decidedAt};
+  const stillHeld = () => decided === held.decision && decidedAt === held.decidedAt;
   try {
     const ref = db.doc('review/pr-' + DATA.number);
     // A store that cannot grant leases still gets the fresh read below, which
@@ -2181,31 +2315,68 @@ async function rering(){
       return;
     }
 
-    let stored;
-    try { stored = sessionSlots((await ref.get()).data()); }
-    catch (e){ reringIn(RERING_AFTER); return; }
+    // For a decision, the pickup is read fresh too: the listener's copy may not
+    // have arrived, and a decision already collected is never rung.
+    let fresh, picked = null;
+    try {
+      const [snap, p] = await Promise.all([ref.get(),
+        decisionDue ? ref.collection('context').doc('pickup').get() : null]);
+      fresh = snap.data();
+      picked = p && p.exists ? p.data() : null;
+    } catch (e){ reringIn(RERING_AFTER); return; }
+    const stored = sessionSlots(fresh);
     const toRing = due.filter(m => {
       const s = stored.get(m.answers);
       if (!s) return false;
       if (unrung(s)) return true;
-      for (const k of ['status', 'why', 'rungAt']){
+      for (const k of ['status', 'why', 'rungAt', 'again']){
         if (k in s) m[k] = s[k]; else delete m[k];
       }
       if (unsaved(m)){ m.status = 'sent'; delete m.why; }
       lateStored.delete(m.answers);
       return false;
     });
-    if (!toRing.length){ draw(); return; }
+    // Rung only when the store still holds this decision, with no ring recorded for
+    // it or a failed one whose re-ring is not spent, and no pickup for it. A record
+    // another view stored is taken, so this view stops saying it will ring.
+    let ringTheDecision = false;
+    if (decisionDue && stillHeld()){
+      const same = isRow(fresh) && fresh.decision === held.decision && fresh.decidedAt === held.decidedAt;
+      const rec = same && isRow(fresh.decisionRing) && fresh.decisionRing.decidedAt === held.decidedAt
+        ? fresh.decisionRing : null;
+      const collected = isRow(picked) && picked.decision === held.decision && picked.decidedAt === held.decidedAt;
+      if (same && !collected && !(rec && (rec.rungAt || rec.again))) ringTheDecision = true;
+      else if (rec){ decisionRing = {...rec}; rang = rangFrom(decisionRing); }
+    }
+    if (!toRing.length && !ringTheDecision){ draw(); if (showingDecided) drawDecided(); return; }
 
-    const rung = await ring({kind: 'message', turns: toRing.map(m => m.answers), again: true});
-    toRing.forEach(m => {
-      lateStored.delete(m.answers);
-      // A reply that landed during the ring has taken over this slot.
-      if (replied.has(m.answers)) return;
-      if (rung === 'rung'){ m.status = 'sent'; delete m.why; m.rungAt = Date.now(); }
-      else { m.status = 'unsent'; m.why = rung; }
-    });
+    if (toRing.length){
+      const rung = await ring({kind: 'message', turns: toRing.map(m => m.answers), again: true});
+      toRing.forEach(m => {
+        lateStored.delete(m.answers);
+        // A reply that landed during the ring has taken over this slot.
+        if (replied.has(m.answers)) return;
+        if (rung === 'rung'){ m.status = 'sent'; delete m.why; m.rungAt = Date.now(); }
+        else {
+          m.status = 'unsent'; m.why = rung;
+          // A view that cannot ring at all spends nothing: one that can still tries.
+          if (rung !== 'readonly') m.again = Date.now();
+        }
+      });
+    }
+    let decisionOutcome = null;
+    if (ringTheDecision && stillHeld()){
+      const r = await ring({kind: 'decision', decision: held.decision, decidedAt: held.decidedAt, again: true});
+      if (r !== 'readonly' && stillHeld()){
+        decisionRing = decisionOutcome = r === 'rung'
+          ? {decidedAt: held.decidedAt, rungAt: Date.now(), again: Date.now()}
+          : {decidedAt: held.decidedAt, why: r, again: Date.now()};
+        rang = rangFrom(decisionRing);
+      }
+    }
     draw();
+    if (showingDecided) drawDecided();
+    if (!toRing.length && !decisionOutcome) return;
 
     try {
       // set is last-writer-wins with no transactions (db.d.ts), so this write can
@@ -2217,26 +2388,32 @@ async function rering(){
       const before = records;
       const snap = await ref.get();
       const had = snap.exists && snap.data();
-      if (!had || !Array.isArray(had.threads)) return;
+      if (!isRow(had)) return;
       // The store hands back frozen objects; each session slot is rebuilt by
       // leanSlot before it is edited, which also leaves out a pre-0.8.0 content
       // copy. Everything else, a malformed thread or turn included, is written
       // back exactly as it was read: this write is the view's own, not the
       // reviewer's, and must not drop what another view may still read.
       const doc = {...had, updatedAt: new Date().toISOString(),
-        threads: had.threads.map(t => isRow(t) && Array.isArray(t.turns)
+        ...(Array.isArray(had.threads) ? {threads: had.threads.map(t => isRow(t) && Array.isArray(t.turns)
           ? {...t, turns: t.turns.map(x => isRow(x) && x.via === 'session' ? leanSlot(x) : x)}
-          : t)};
+          : t)} : {})};
       const outcome = new Map(toRing.map(m => [m.answers, m]));
       let changed = false;
-      for (const x of doc.threads.flatMap(t => isRow(t) && Array.isArray(t.turns) ? t.turns : [])){
+      for (const x of (Array.isArray(doc.threads) ? doc.threads : [])
+          .flatMap(t => isRow(t) && Array.isArray(t.turns) ? t.turns : [])){
         const m = isRow(x) && x.via === 'session' && outcome.get(x.answers);
         if (!m || replied.has(x.answers) || x.rungAt || x.status === 'working'
             || x.status === 'done') continue;
         x.status = m.status;
         if (m.rungAt) x.rungAt = m.rungAt;
         if (m.why) x.why = m.why; else delete x.why;
+        if (m.again) x.again = m.again;
         changed = true;
+      }
+      if (decisionOutcome && doc.decision === held.decision && doc.decidedAt === held.decidedAt){
+        const r = isRow(doc.decisionRing) && doc.decisionRing.decidedAt === held.decidedAt ? doc.decisionRing : null;
+        if (!(r && r.rungAt)){ doc.decisionRing = {...decisionOutcome}; changed = true; }
       }
       if (!changed) return;
       if (records !== before){ await saveNow(); return; }
@@ -2247,6 +2424,7 @@ async function rering(){
     }
   } finally {
     ids.forEach(id => ringing.delete(id));
+    if (decisionDue) ringing.delete(DECISION);
   }
 }
 
@@ -2264,10 +2442,7 @@ paint(); draw();
   // Without the doorbell the session is not told straight away, but a saved
   // message still reaches the next session to start. This lives in its own
   // slot, not the not-saved banner, which clears on the first successful write.
-  if (!bellOn && db){
-    $('aloneSlot').innerHTML = '<div class="lost">This view cannot ring the working '
-      + 'session. What you send is saved, and the next session to start answers it.</div>';
-  }
+  if (!bellOn && db) sayAlone();
   draw();
 
   if (!db){ restore = 'nostore'; draw(); sayLost('this view cannot reach the store'); return; }
