@@ -1191,7 +1191,12 @@ paint(); draw();
     const had = snap.exists && snap.data();
     if (had){
       if (Array.isArray(had.threads) && had.threads.length){
-        threads = had.threads.map(t => ({...t, busy:false}));
+        // The store hands back frozen objects. Spreading a thread copies the
+        // thread but not its turns array, and pushing the next message onto that
+        // frozen array threw "object is not extensible" -- so every message sent
+        // after a reload was lost. Copy the turns too.
+        threads = had.threads.map(t => ({...t, busy: false,
+          turns: (t.turns || []).map(m => ({...m}))}));
         live = 0;
       }
       reason = had.reason || null;
