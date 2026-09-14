@@ -1205,7 +1205,10 @@ async function deliver(turn, slot){
   // rering must not ring for a slot this view is still ringing for.
   ringing.add(turn.id);
   try {
-    const kept = await saveNow();
+    // A send made during saveNow's retry wait writes the whole document, this
+    // slot included. When that write stores it and the retry is then refused,
+    // the store holds the message, so it is kept and rung here.
+    const kept = await saveNow() || await storedBy(turn.id);
     const rung = kept ? await ring({kind: 'message', turn: turn.id}) : 'unsaved';
     if (rung === 'rung') slot.rungAt = Date.now();
     else if (!replied.has(turn.id)){ slot.status = 'unsent'; slot.why = rung; }
@@ -1320,27 +1323,50 @@ let decidedAt = null, pickup = null, rang = null, showingDecided = false;
 // Counts whole-document writes from this view, so rering can tell whether one
 // went out while its own read-modify-write was in flight.
 let records = 0;
+// Session slot ids and the decidedAt that some successful write from this view
+// stored, and the writes still in flight with what each carries. A save that is
+// refused can then ask whether another write stored the same thing anyway.
+const storedSlots = new Set();
+let storedDecidedAt = null;
+const inFlight = new Set();
 async function record(){
   records++;
-  // What this write stores that the page has told the reviewer was not saved.
-  const late = threads.flatMap(t => t.turns).filter(unsaved);
-  const lateDecision = rang === 'unsaved' || rang === 'too large' ? decidedAt : undefined;
-  await db.doc('review/pr-' + DATA.number).set({
+  // Everything this write carries. A slot marked unsaved in memory, now or by the
+  // time this lands, is in the store once it does.
+  const slots = threads.flatMap(t => t.turns).filter(m => m.via === 'session');
+  const at = decided ? decidedAt : undefined;
+  const write = {ids: new Set(slots.map(m => m.answers)), at};
+  write.done = db.doc('review/pr-' + DATA.number).set({
     pr: DATA.number, title: DATA.title,
     threads: threads.map(tidy),
     decision: decided,
     reason: reason,
     decidedAt: decidedAt,
     updatedAt: new Date().toISOString(),
+  }).then(() => {
+    write.ids.forEach(id => storedSlots.add(id));
+    if (at !== undefined) storedDecidedAt = at;
   });
-  storedAnyway(late, lateDecision);
+  inFlight.add(write);
+  try { await write.done; } finally { inFlight.delete(write); }
+  storedAnyway(slots, at);
 }
+// Whether a write from this view has stored the slot for `id`, or the decision
+// stamped `at`, once every write already carrying it has landed or been refused.
+// Waiting matters: a refusal can arrive while a covering write is still on its way.
+async function covered(has, stored){
+  await Promise.allSettled([...inFlight].filter(has).map(w => w.done));
+  return stored();
+}
+const storedBy = id => covered(w => w.ids.has(id), () => storedSlots.has(id));
+const decisionStored = at => covered(w => w.at === at, () => storedDecidedAt === at);
 
 // A message or decision whose own save failed, stored by a later write: a send
 // in another thread, closing a thread, a decision. The store now holds it, so the
 // page stops saying it was not saved and rings for it, as it would have at once.
 // The message goes through rering, under its lease and fresh read, because another
-// view that loaded it meanwhile may be ringing for it too.
+// view that loaded it meanwhile may be ringing for it too. `late` is every slot
+// the write carried; only those marked unsaved by now are picked up.
 function storedAnyway(late, at){
   late = late.filter(unsaved);
   if (late.length){
@@ -1494,12 +1520,14 @@ async function decide(v, quiet, why){
   reason = why || null;
   rang = null;
   if (!quiet){
-    decidedAt = new Date().toISOString();
+    const at = decidedAt = new Date().toISOString();
     rang = 'sending';
     drawDecided();
     // Read `lost` straight after the refusal: a later save that succeeds clears
     // it, and the line under the buttons must keep saying why this one failed.
-    rang = (await saveNow()) ? await ring() : lost === 'too large' ? 'too large' : 'unsaved';
+    const kept = await saveNow(), why = lost === 'too large' ? 'too large' : 'unsaved';
+    // As in deliver(): a send during the retry wait may have stored this decision.
+    rang = kept || await decisionStored(at) ? await ring() : why;
   }
   drawDecided();
 }

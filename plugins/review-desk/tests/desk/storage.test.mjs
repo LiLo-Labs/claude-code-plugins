@@ -548,3 +548,90 @@ test('a message left unsaved is rung once when a later save stores it, and a vie
   assert.equal(turnsIn(store).length, 2);
   assert.deepEqual(a.errors, []);
 });
+
+/* ---- a refused retry while another write is storing the same thing ---- */
+// Every set carries the whole document. A send made during a refused save's retry
+// wait stores that save's message or decision too, whatever the retry then does.
+const ringsOf = (rings, kind) => rings.filter(r => r.doorbell && r.doorbell.kind === kind);
+const sendDuring = (d, text) => d.page.evaluate(text => new Promise(r => setTimeout(() => {
+  document.getElementById('box').value = text; send(); r();
+}, 20)), text);
+
+test('a message whose retry is refused after a later send stored it is rung once and never shown as not saved', async () => {
+  // X refused; Y's save and its rungAt save land; X's retry refused.
+  desk = await open(browser, {setFailures: {[PR]: ['unavailable', null, null, 'unavailable']}});
+  await ready(desk);
+  await desk.page.click('#fab');
+  await watchFor(desk, '#stream', 'Not saved');
+  await sendText(desk, 'Question X');
+  await sendDuring(desk, 'Question Y');
+  await desk.until(s => slots(s).length === 2 && slots(s).every(m => m.status === 'sent' && m.rungAt),
+    null, 4000);
+  await desk.page.waitForTimeout(1200);
+
+  assert.equal(refusals(await desk.log()).length, 2, 'both of X\'s sets were refused');
+  const store = await desk.store();
+  assert.deepEqual(asked(store), ['Question X', 'Question Y']);
+  assert.equal(turnsIn(store).length, 4);
+  const rings = await desk.rings();
+  assert.equal(rings.length, 2);
+  for (const m of turnsIn(store).filter(m => m.role === 'user'))
+    assert.equal(ringsFor(rings, m.id).length, 1, m.content);
+  assert.deepEqual(await seen(desk), {});
+  assert.equal(await desk.page.locator('[data-resend]').count(), 0);
+  assert.equal(await desk.page.inputValue('#box'), '');
+  assert.equal(await desk.page.textContent('#lostSlot'), '');
+  assert.deepEqual(desk.errors, []);
+});
+
+test('a message whose retry is refused while a later send is still storing it waits for that write, and is rung once', async () => {
+  // Accepted sets take 1.5 s to land, longer than the longest retry delay, so X's
+  // retry is refused while Y's first save, which carries X, is on its way.
+  desk = await open(browser, {setDelay: 1500, setFailures: {[PR]: ['unavailable', null, 'unavailable']}});
+  await ready(desk);
+  await desk.page.click('#fab');
+  await watchFor(desk, '#stream', 'Not saved');
+  await sendText(desk, 'Question X');
+  await sendDuring(desk, 'Question Y');
+  await desk.until(s => slots(s).length === 2 && slots(s).every(m => m.status === 'sent' && m.rungAt),
+    null, 8000);
+  await desk.page.waitForTimeout(2000);
+
+  const log = await desk.log();
+  const refused = refusals(log);
+  assert.equal(refused.length, 2);
+  assert.ok(refused[1].at < prSets(log)[0].at, 'the retry was refused before the covering write landed');
+  const store = await desk.store();
+  assert.deepEqual(asked(store), ['Question X', 'Question Y']);
+  assert.equal(turnsIn(store).length, 4);
+  const rings = await desk.rings();
+  assert.equal(rings.length, 2);
+  for (const m of turnsIn(store).filter(m => m.role === 'user'))
+    assert.equal(ringsFor(rings, m.id).length, 1, m.content);
+  assert.deepEqual(await seen(desk), {});
+  assert.equal(await desk.page.locator('[data-resend]').count(), 0);
+  assert.equal(await desk.page.inputValue('#box'), '');
+  assert.deepEqual(desk.errors, []);
+});
+
+test('a decision whose retry is refused after a send stored it is rung once and never shown as not saved', async () => {
+  desk = await open(browser, {setFailures: {[PR]: ['unavailable', null, null, 'unavailable']}});
+  await ready(desk);
+  await watchFor(desk, '#decide', 'Not saved');
+  await desk.page.click('#fab');
+  await desk.page.evaluate(() => { decide('approved'); });
+  await sendDuring(desk, 'One more thing');
+  await desk.page.waitForFunction(() => window.__desk.rings().length === 2, null, {timeout: 4000});
+  await desk.page.waitForTimeout(1200);
+
+  assert.equal(refusals(await desk.log()).length, 2, 'both of the decision\'s own sets were refused');
+  const store = await desk.store();
+  assert.equal(store[PR].decision, 'approved');
+  const rings = await desk.rings();
+  assert.equal(rings.length, 2);
+  assert.equal(ringsOf(rings, 'decision').length, 1);
+  assert.equal(ringsOf(rings, 'message').length, 1);
+  await desk.page.waitForSelector('#decide .pickup >> text=Waiting for the working session', {state: 'attached'});
+  assert.deepEqual(await seen(desk), {});
+  assert.deepEqual(desk.errors, []);
+});

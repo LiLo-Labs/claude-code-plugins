@@ -41,7 +41,7 @@ export function build(data, title = 'Harness Desk'){
 // Runs in every frame before any of its scripts. Serialised by Playwright, so it
 // may use only its argument.
 function installStub({seed, capabilities, publishError, getDelay, getFailures, leases: held,
-    subscribeFailures, setFailures}){
+    subscribeFailures, setFailures, setDelay}){
   const frozen = v => {
     if (v && typeof v === 'object'){ Object.values(v).forEach(frozen); Object.freeze(v); }
     return v;
@@ -155,6 +155,13 @@ function installStub({seed, capabilities, publishError, getDelay, getFailures, l
         }
         if (!data || typeof data !== 'object' || Array.isArray(data))
           throw fail('invalid_argument', 'body must be an object');
+        // setDelay holds a set the store accepts before it lands, so a refusal of
+        // another set can arrive while this one is still on its way.
+        if (setDelay){
+          const body = clone(data);
+          await new Promise(r => setTimeout(r, setDelay));
+          return put(p, body, 'page');
+        }
         put(p, data, 'page');
       },
       update: async data => {
@@ -245,8 +252,8 @@ const skeleton = html => '<!doctype html><html><head>'
   + '</head><body>' + html;
 
 const stubOptions = ({seed = {}, capabilities = ['db', 'artifact'], publishError = null,
-    getDelay = 0, getFailures = 0, leases = {}, subscribeFailures = {}, setFailures = {}}) =>
-  ({seed, capabilities, publishError, getDelay, getFailures, leases, subscribeFailures, setFailures});
+    getDelay = 0, getFailures = 0, leases = {}, subscribeFailures = {}, setFailures = {}, setDelay = 0}) =>
+  ({seed, capabilities, publishError, getDelay, getFailures, leases, subscribeFailures, setFailures, setDelay});
 
 // Everything a test does to one view. `frame` is a Page for a lone desk, or the
 // view's Frame in openPair(); both answer the calls the tests make.
