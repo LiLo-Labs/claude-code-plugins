@@ -1145,12 +1145,19 @@ async function ask(){
   // message kept out of the store should not also vanish from the screen.
   if (blocked()) return;
   // A message whose save failed has its text put back in the box. Sending that
-  // text as it stands sends the message again; it does not ask it a second time.
-  const again = q && !carried && t.turns.find(m => m.role === 'user' && m.content === q
-    && unsaved(slotFor(m.id)));
-  if (again){ box.value = ''; fit(box); return resend(again.id); }
-  const quote = carried; carried = null; unlight();
-  box.value = ''; box.style.height = 'auto';
+  // text as it stands, from any thread, sends the message again; it does not ask
+  // it a second time. Every save carries every thread, so a second copy would
+  // store the first one too, and both would be rung.
+  const again = q && !carried && threads.flatMap(x => x.turns).find(m => m.role === 'user'
+    && m.content === q && unsaved(slotFor(m.id)));
+  if (again){ box.value = ''; reboxed = null; fit(box); return resend(again.id); }
+  // The text put back, edited or asked about a new highlight, replaces the message
+  // it came from. Left in place, the unsaved original would be stored by this send
+  // and rung beside its revision, after the page said it never went.
+  const old = reboxedTurn();
+  if (old) retract(old);
+  const quote = old && !carried ? old.quote : carried; carried = null; unlight();
+  box.value = ''; reboxed = null; box.style.height = 'auto';
 
   // Every message carries an id, so the reply written elsewhere can find it; the
   // passage the reviewer highlighted; and where they were reading, because that
@@ -1184,17 +1191,31 @@ const unsaved = m => !!m && m.via === 'session' && m.status === 'unsent' && m.wh
 const slotFor = id => threads.flatMap(t => t.turns)
   .find(m => m.via === 'session' && m.answers === id) || null;
 // The reviewer's text, back in the box once nothing else is there. Whatever they
-// have started typing since is theirs and stays.
+// have started typing since is theirs and stays. `reboxed` is the message the box
+// text came from, until the box is emptied: text typed after that is a new message.
+let reboxed = null;
 function rebox(turn){
   const box = $('box');
   if (box.value.trim() || (turn.quote && turn.content === NO_QUESTION)) return;
-  box.value = turn.content; fit(box);
+  box.value = turn.content; reboxed = turn.id; fit(box);
 }
 // And out of the box again once that message is stored, so a second Send does
 // not ask it twice.
 function unbox(turn){
   const box = $('box');
+  if (turn && reboxed === turn.id) reboxed = null;
   if (turn && box.value.trim() === turn.content){ box.value = ''; fit(box); }
+}
+const reboxedTurn = () => {
+  const turn = reboxed && threads.flatMap(t => t.turns).find(m => m.role === 'user' && m.id === reboxed);
+  return turn && unsaved(slotFor(turn.id)) && !ringing.has(turn.id) ? turn : null;
+};
+// A message that was never stored, and its slot, out of its thread. storedAnyway
+// ignores a slot no longer in any thread, so a write already carrying it cannot
+// bring it back to be rung.
+function retract(turn){
+  const t = threads.find(x => x.turns.includes(turn));
+  if (t) t.turns = t.turns.filter(m => m !== turn && !(m.via === 'session' && m.answers === turn.id));
 }
 
 // Stored first, then the doorbell. A save that still fails after saveNow's retry
@@ -1245,7 +1266,10 @@ function fit(box){
   box.style.height = 'auto';
   box.style.height = Math.min(box.scrollHeight, 150) + 'px';
 }
-$('box').addEventListener('input', e => fit(e.target));
+$('box').addEventListener('input', e => {
+  if (!e.target.value.trim()) reboxed = null;
+  fit(e.target);
+});
 $('box').addEventListener('keydown', e => {
   // Enter sends, as in every chat box; Shift+Enter is a new line. An input
   // method's own Enter (choosing a character) is left alone. isComposing alone
@@ -1368,7 +1392,7 @@ const decisionStored = at => covered(w => w.at === at, () => storedDecidedAt ===
 // view that loaded it meanwhile may be ringing for it too. `late` is every slot
 // the write carried; only those marked unsaved by now are picked up.
 function storedAnyway(late, at){
-  late = late.filter(unsaved);
+  late = late.filter(m => unsaved(m) && slotFor(m.answers) === m);
   if (late.length){
     late.forEach(m => { storedLate(m); unbox(threads.flatMap(t => t.turns).find(x => x.id === m.answers)); });
     draw();

@@ -469,6 +469,72 @@ test('Enter on the text put back after a refused send sends that message again, 
   assert.deepEqual(desk.errors, []);
 });
 
+test('the text put back after a refused send, sent from another thread, sends that message again, not a second copy', async () => {
+  desk = await open(browser, {setFailures: {[PR]: ['unavailable', 'unavailable']}});
+  await ready(desk);
+  await desk.page.click('#fab');
+  await sendText(desk, 'Is this safe?');
+  await desk.page.waitForSelector('[data-resend]', {timeout: 3000});
+  await desk.page.click('#more');
+  assert.equal(await desk.page.inputValue('#box'), 'Is this safe?');
+  await desk.page.press('#box', 'Enter');
+  await desk.until(s => slots(s).some(m => m.rungAt), null, 3000);
+  await desk.page.waitForTimeout(1200);
+  const store = await desk.store();
+  assert.deepEqual(asked(store), ['Is this safe?']);
+  assert.equal(turnsIn(store).length, 2);
+  assert.equal(store[PR].threads[0].turns.length, 2, 'in the thread it was first asked in');
+  const rings = await desk.rings();
+  assert.equal(rings.length, 1);
+  assert.equal(ringsFor(rings, turnsIn(store)[0].id).length, 1);
+  assert.equal(await desk.page.inputValue('#box'), '');
+  assert.deepEqual(desk.errors, []);
+});
+
+test('edited text put back after a refused send replaces that message, and only the edit is stored and rung', async () => {
+  desk = await open(browser, {setFailures: {[PR]: ['unavailable', 'unavailable']}});
+  await ready(desk);
+  await desk.page.click('#fab');
+  await sendText(desk, 'Is this safe?');
+  await desk.page.waitForSelector('[data-resend]', {timeout: 3000});
+  await sendText(desk, 'Is this safe to ship?');
+  await desk.until(s => slots(s).some(m => m.rungAt), null, 3000);
+  await desk.page.waitForTimeout(1200);
+  const store = await desk.store();
+  assert.deepEqual(asked(store), ['Is this safe to ship?']);
+  assert.equal(turnsIn(store).length, 2);
+  const rings = await desk.rings();
+  assert.equal(rings.length, 1);
+  assert.equal(ringsFor(rings, turnsIn(store)[0].id).length, 1);
+  assert.equal(await desk.page.locator('#stream .turn.mine').count(), 1);
+  assert.equal(await desk.page.locator('[data-resend]').count(), 0);
+  assert.doesNotMatch(await desk.page.textContent('#stream'), /Not saved/);
+  assert.deepEqual(desk.errors, []);
+});
+
+// Emptying the box ends the link to the refused message. A new question then saves
+// the whole document, the refused message included, and it is rung like any
+// message a later write stored.
+test('a new question typed after emptying the put-back text leaves the refused message, which that save stores and rings', async () => {
+  desk = await open(browser, {setFailures: {[PR]: ['unavailable', 'unavailable']}});
+  await ready(desk);
+  await desk.page.click('#fab');
+  await sendText(desk, 'Is this safe?');
+  await desk.page.waitForSelector('[data-resend]', {timeout: 3000});
+  await desk.page.fill('#box', '');
+  await sendText(desk, 'Something else');
+  await desk.until(s => slots(s).length === 2 && slots(s).every(m => m.rungAt), null, 4000);
+  await desk.page.waitForTimeout(1200);
+  const store = await desk.store();
+  assert.deepEqual(asked(store), ['Is this safe?', 'Something else']);
+  assert.equal(turnsIn(store).length, 4);
+  const rings = await desk.rings();
+  for (const m of turnsIn(store).filter(m => m.role === 'user'))
+    assert.equal(ringsFor(rings, m.id).length, 1, m.content);
+  assert.doesNotMatch(await desk.page.textContent('#stream'), /Not saved/);
+  assert.deepEqual(desk.errors, []);
+});
+
 test('Approve whose first save is refused as unavailable is stored on the retry and rung, never shown as not saved', async () => {
   desk = await open(browser, {setFailures: {[PR]: ['unavailable']}});
   await ready(desk);
