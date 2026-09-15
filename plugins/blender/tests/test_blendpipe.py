@@ -429,8 +429,15 @@ def test_headless_agent():
     # does not stop: it errors, reasons, retries, and burns every turn it was
     # given. Nine minutes of exactly that is why this check exists.
     listening = agent.blender_listening
+    installed = agent.shutil.which
     try:
         agent.blender_listening = lambda **_kw: False
+        # run() checks for the claude CLI before it ever reaches the preflight
+        # under test, and no CI runner has claude installed. Without this stub
+        # both checks below read the PATH error instead of the one they assert
+        # on, and the suite passes only on a machine that happens to have the
+        # CLI -- green here, red on every push.
+        agent.shutil.which = lambda name: "/usr/bin/" + name
         try:
             agent.run("anything")
             refused = ""
@@ -438,6 +445,7 @@ def test_headless_agent():
             refused = str(exc)
     finally:
         agent.blender_listening = listening
+        agent.shutil.which = installed
     check("refuses to start when Blender is not listening", "not reachable" in refused, refused[:70])
     check("and names the address it tried", "9876" in refused, refused[:70])
 
