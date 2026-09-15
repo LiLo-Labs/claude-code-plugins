@@ -139,25 +139,71 @@ test('two open views: A sends Q2, B receives reply updates, and the store still 
   assert.deepEqual(b.errors, []);
 });
 
+// A message is measured before it joins a thread (see the test after this one), so
+// what the store refuses here is a reason that takes a 250 KiB discussion over the
+// cap, on a desk with a second thread to close.
 test('a save refused as invalid_argument says the conversation is too large, and closing a thread recovers', async () => {
-  desk = await open(browser);
+  const seed = leanDesk();
+  seed[PR].threads[0].turns[0] = {...seed[PR].threads[0].turns[0], content: 'x'.repeat(250 * 1024)};
+  desk = await open(browser, {seed});
+  await ready(desk);
+  await desk.page.click('#changes');
+  await desk.page.fill('#why', 'y'.repeat(8 * 1024));
+  await desk.page.click('#recordReason');
+  // In the panel, which is closed, so attached rather than visible.
+  await desk.page.waitForSelector('#lostSlot .lost', {state: 'attached'});
+  const banner = await desk.page.textContent('#lostSlot');
+  assert.match(banner, /too large to save/);
+  assert.match(banner, /Closing a thread with ×/);
+  assert.doesNotMatch(banner, /Not saved/);
+  assert.equal((await desk.store())[PR].decision, null);
+  assert.deepEqual(await desk.rings(), []);
+
+  // The banner's advice works: close the oversized thread, and the decision it was
+  // holding back is stored and rung.
   await desk.page.click('#fab');
-  // Over the store's 256 KiB body cap, which the stub enforces as db.d.ts states.
-  await desk.page.fill('#box', 'x'.repeat(270 * 1024));
+  await desk.page.click('[data-shut="0"]');
+  await desk.page.click('#closeYes');
+  await desk.until(s => s[PR].threads.length === 1 && s[PR].decision === 'needs changes');
+  await desk.page.waitForFunction(() => !document.querySelector('#lostSlot .lost'));
+  await desk.page.waitForFunction(() => window.__desk.rings().some(r => r.doorbell && r.doorbell.kind === 'decision'));
+  assert.deepEqual(desk.errors, []);
+});
+
+// Set from script rather than typed or filled: 270 KiB through the keyboard, or
+// through fill(), takes minutes in WebKit.
+const putInBox = (d, text) => d.page.$eval('#box', (el, text) => {
+  el.value = text;
+  el.dispatchEvent(new Event('input', {bubbles: true}));
+}, text);
+
+test('a message over the store\'s cap in the only thread is refused before it joins the thread, stays in the box, and Approve still stores and rings', async () => {
+  desk = await open(browser);
+  await ready(desk);
+  await desk.page.click('#fab');
+  const big = 'x'.repeat(270 * 1024);
+  await putInBox(desk, big);
   await desk.page.press('#box', 'Enter');
   await desk.page.waitForSelector('#lostSlot .lost');
   const banner = await desk.page.textContent('#lostSlot');
-  assert.match(banner, /too large to save/);
-  assert.doesNotMatch(banner, /Not saved/);
-  assert.equal((await desk.store())[PR], undefined);
+  assert.match(banner, /^Not sent: with this message the saved discussion would be \d+ KiB, over the store’s 256 KiB limit/);
+  assert.match(banner, /It is still in the box/);
+  assert.equal(await desk.page.locator('[data-shut]').count(), 0, 'one thread, so no close control');
+  assert.doesNotMatch(banner, /×|[Cc]los(e|ing) a thread/);
+  assert.equal((await desk.page.inputValue('#box')).length, big.length);
+  assert.equal(await desk.page.locator('#stream .turn').count(), 0, 'the message never joined the thread');
+  assert.deepEqual((await desk.log()).filter(e => e.op === 'set' || e.op === 'refused'), [], 'nothing was written or refused');
   assert.deepEqual(await desk.rings(), []);
 
-  // The banner's advice works: open another thread, close the oversized one.
-  await desk.page.click('#more');
-  await desk.page.click('[data-shut="0"]');
-  await desk.page.click('#closeYes');
-  await desk.until(s => !!s[PR]);
-  await desk.page.waitForFunction(() => !document.querySelector('#lostSlot .lost'));
+  await desk.page.click('#shut');
+  await approve(desk);
+  const doc = (await desk.until(s => s[PR] && s[PR].decision === 'approved'))[PR];
+  assert.deepEqual(doc.threads.flatMap(t => t.turns), []);
+  await desk.page.waitForFunction(() => window.__desk.rings().some(r => r.doorbell && r.doorbell.kind === 'decision'));
+  await desk.page.waitForSelector('#decide .pickup >> text=Waiting for the working session');
+  for (const sel of ['#decide', '#lostSlot'])
+    assert.doesNotMatch(await desk.page.textContent(sel), /×|[Cc]los(e|ing) a thread/, sel);
+  assert.equal((await desk.page.inputValue('#box')).length, big.length, 'the box still holds the words');
   assert.deepEqual(desk.errors, []);
 });
 
@@ -992,7 +1038,10 @@ test('an out-of-date view keeps what was typed, and Reload loads the latest disc
   await notStale(b);
   await b.page.click('#fab');
   await b.page.waitForSelector('#stream >> text=Asked in view A');
-  assert.equal(await b.page.inputValue('#box'), '');
+  // Never saved, so the reload hands the words back in the box (sessionStorage),
+  // not in the discussion.
+  assert.equal(await b.page.inputValue('#box'), 'Typed in view B');
+  assert.equal(await b.page.locator('#stream >> text=Typed in view B').count(), 0);
 
   // Current again, B saves; now A is the view behind.
   await sendText(b, 'Asked in view B after reloading');

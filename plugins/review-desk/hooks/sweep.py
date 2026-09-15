@@ -12,7 +12,7 @@ itself -- only the Artifact tool can -- so it hands the session the list and
 what to do with it.
 
 Desks for other repositories are only counted. Every listed desk costs a
-database read before the user's first request, and a session opened in an
+database read on the session's first turn, and a session opened in an
 unrelated repository should not pay that for every desk on the machine.
 hooks.json runs this on startup and resume only, so /clear and /compact do not
 send a session back through the sweep in the middle of its work.
@@ -261,7 +261,9 @@ def message(waiting, repos, cwd=None):
             lines.append(f"- {e['repo']}#{e['pr']} {e['url']}{mark}")
         lines += [
             "",
-            "Before the user's first request, read each desk with the Artifact "
+            "Nothing starts a turn at session start, a resumed session included: "
+            "this runs on the session's first turn, whatever its message asks, "
+            "before that message is taken up. Read each desk with the Artifact "
             'tool, in one batch per desk: action "read_db", db_op "get", '
             'collection "review", doc_id "pr-<number>"; db_op "get", collection '
             '"review/pr-<number>/context", doc_id "pickup"; and db_op "list", '
@@ -288,7 +290,9 @@ def message(waiting, repos, cwd=None):
             "the desk in full: "
             + ", ".join(f"/review-collect {e['repo']}#{e['pr']}" for e in mine)
             + ". Never a bare number, which resolves to the request under "
-            "discussion and can be the same number in another repository.",
+            "discussion and can be the same number in another repository. "
+            "Before any merge, tell the user in one line which pull request "
+            "you are about to merge: they may have typed about something else.",
             "- Nothing left to collect, and the pull request is merged or closed: "
             'set its outcome ("merged" or "closed") and collectedAt in '
             "~/.review-desks.json, the time in UTC.",

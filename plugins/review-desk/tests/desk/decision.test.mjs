@@ -161,7 +161,7 @@ test('Approve whose ring is refused as rate_limited or upstream_error records th
     const doc = (await desk.until(s => s[PR] && s[PR].decisionRing && s[PR].decisionRing.why === code))[PR];
     assert.equal(doc.decisionRing.decidedAt, doc.decidedAt);
     assert.equal(await line(), 'Saved, but the working session was not notified (' + code
-      + '). This view tries again in a few seconds.' + LATER, code);
+      + '). This view tries again in a few seconds, and Check in the panel rings it too.' + LATER, code);
     assert.deepEqual(await desk.rings(), [], code);
     // artifact.d.ts: retry only upstream_error, once; rate_limited slows down instead.
     assert.equal(refusedPublishes(await desk.log()).length, code === 'upstream_error' ? 2 : 1, code);
@@ -233,7 +233,9 @@ const recordLines = () => {
   window.__lines = [];
   const html = Object.getOwnPropertyDescriptor(Element.prototype, 'innerHTML');
   Object.defineProperty(Element.prototype, 'innerHTML', {...html, set(v){
-    const m = this.id === 'decide' && /<p class="pickup">([^<]*)<\/p>/.exec(String(v));
+    // The first pickup paragraph, whatever attributes it carries (the recorded line
+    // has an id and tabindex so focus can rest on it).
+    const m = this.id === 'decide' && /<p class="pickup"[^>]*>([^<]*)<\/p>/.exec(String(v));
     if (m) window.__lines.push({text: m[1], at: Date.now()});
     return html.set.call(this, v);
   }});
@@ -293,6 +295,7 @@ test('a decision whose ring failed twice as upstream_error is rung once by the r
 // never rung, and its line claims neither that a session is waiting nor that none
 // was told.
 const NEUTRAL = 'Saved. What the working session did with it shows here once it reports back.';
+const TO_CHECK = ' If nothing shows here soon, Check in the panel rings the working session.';
 test('a stored decision with no recorded ring is never rung on load, pickup or not, and never says it is waiting', async () => {
   const decidedAt = '2026-09-12T10:00:00.000Z';
   const seed = {[PR]: {pr: 42, title: 'Harness desk', decision: 'approved', reason: null, decidedAt, threads: []}};
@@ -307,7 +310,10 @@ test('a stored decision with no recorded ring is never rung on load, pickup or n
     await desk.page.waitForTimeout(3000);
     assert.deepEqual(await desk.rings(), [], name);
     assert.deepEqual((await desk.log()).filter(e => e.op === 'publish refused' || e.op === 'acquire'), [], name);
-    assert.equal(await line(), NEUTRAL, name);
+    // A view that can ring points at Check; one that cannot has no Check to point at.
+    assert.equal(await line(), capabilities ? NEUTRAL : NEUTRAL + TO_CHECK, name);
+    assert.ok(waitingBefore(await desk.page.evaluate('window.__lines'), Infinity).length === 0
+      && (await desk.page.evaluate('window.__lines')).length > 0, name + ': the recorder saw the lines');
     assert.deepEqual(waitingBefore(await desk.page.evaluate('window.__lines'), Infinity), [], name);
     assert.equal((await desk.store())[PR].decisionRing, undefined, name + ': nothing is written for it');
     assert.deepEqual(await desk.missing(), []);
@@ -322,6 +328,31 @@ test('a stored decision with no recorded ring is never rung on load, pickup or n
   await desk.page.waitForTimeout(1500);
   assert.deepEqual(await desk.rings(), []);
   assert.deepEqual(await desk.missing(), []);
+});
+
+test('a stored decision whose ring may not have gone out points the reviewer to Check, and Check is there to press', async () => {
+  const decidedAt = '2026-09-12T10:00:00.000Z';
+  const base = {pr: 42, title: 'Harness desk', decision: 'approved', reason: null, decidedAt, threads: []};
+  const cases = [
+    ['no ring record and no pickup', base, /Check in the panel rings the working session\.$/],
+    ['a ring that did not go out, its re-ring spent', {...base,
+      decisionRing: {decidedAt, why: 'rate_limited', again: Date.parse(decidedAt) + 6000}},
+      /could not notify the working session \(rate_limited\)\. Check in the panel rings it again\./],
+  ];
+  for (const [name, doc, says] of cases){
+    desk = await open(browser, {seed: {[PR]: doc}});
+    await ready(desk);
+    await lineSays('Check in the panel');
+    assert.match(await line(), says, name);
+    await desk.page.click('#fab');
+    assert.equal(await desk.page.locator('#check').count(), 1, name + ': Check is offered');
+    assert.deepEqual(await desk.rings(), [], name);
+    if (name !== cases[cases.length - 1][0]){
+      assert.deepEqual(await desk.missing(), []);
+      assert.deepEqual(desk.errors, []);
+      await desk.close();
+    }
+  }
 });
 
 test('a view that cannot ring records a decision and says it could not notify the working session', async () => {
@@ -381,6 +412,19 @@ test('Check with no answer inside the wait says so, and offers the resume comman
   await desk.page.waitForFunction(() => /Copied|Selected/.test(document.getElementById('copyResume').textContent));
   if (await desk.page.textContent('#copyResume') === 'Selected')
     assert.equal(await desk.page.evaluate(() => String(getSelection())), RESUME);
+});
+
+test('the resume copy after an unanswered Check tells the person to send the resumed session a message', async () => {
+  const stamp = String(Math.floor(Date.now() / 1000) - 60);
+  desk = await open(browser, {clock: true, seed: {[PR + '/presence/' + stamp]: {resume: RESUME}}});
+  await ready(desk);
+  await desk.page.click('#fab');
+  await desk.page.click('#check');
+  await desk.page.clock.fastForward(76000);
+  await desk.page.waitForSelector('#resumeCmd');
+  const said = await desk.page.textContent('#presence');
+  assert.match(said, /bring that session back, then send it any message: a resumed session does nothing until someone types/);
+  assert.doesNotMatch(said, /as it starts/);
 });
 
 test('a desk that closes after an unanswered Check stops offering the resume command', async () => {

@@ -93,6 +93,15 @@ class Sweep(unittest.TestCase):
         # A desk watched by a new session gets that session's resume command.
         self.assertIn("Whenever a ring arrives", text)
 
+    def test_desk_work_runs_on_the_first_turn_and_says_so_before_a_merge(self):
+        # SessionStart only adds context; a resumed session does nothing until
+        # someone types, and what they type may be about something else.
+        text = " ".join(said(run([desk(2)])).split())
+        self.assertNotIn("Before the user's first request", text)
+        self.assertIn("this runs on the session's first turn", text)
+        self.assertIn("Before any merge, tell the user in one line which pull request", text)
+        self.assertLess(text.index("Before any merge"), text.index("Say in one line what you found"))
+
     def test_this_repository_first_and_other_repositories_counted(self):
         text = said(run([desk(1, repo="o/a"), desk(2), desk(3, repo="o/b"), desk(4, repo="o/a")]))
         lines = text.splitlines()

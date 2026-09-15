@@ -169,6 +169,35 @@ test('a change to a page the reviewer is not reading leaves the sheet alone, and
   assert.deepEqual(desk.errors, []);
 });
 
+test('on a desk with no documents, a description rewrite leaves no changed dot that survives clicking the only tab', async () => {
+  desk = await open(browser);
+  await desk.page.waitForSelector('#sheet h2');
+  assert.equal(await desk.page.locator('.leaf').count(), 1);
+  await desk.context('body', {text: '## Revised\n\nNew words.'});
+  await desk.page.waitForSelector('#sheet >> text=New words.');
+  await desk.page.click('.leaf[data-leaf="0"]');
+  await desk.page.waitForTimeout(300);
+  assert.equal(await desk.page.locator('.leaf .fresh.show').count(), 0, 'the only tab kept a dot nothing can clear');
+  assert.deepEqual(desk.errors, []);
+});
+
+/* ---------------- day wording across midnight ---------------- */
+
+test('a stamp from 23:50 reads at 23:50, and once the clock passes midnight with nothing else happening, reads yesterday', async () => {
+  const now = Date.UTC(2026, 8, 13, 23, 55);
+  desk = await open(browser, {context: {locale: 'en-GB', timezoneId: 'UTC'}, clock: {time: now},
+    seed: {[PR + '/presence/' + Math.floor((now - 5 * 60000) / 1000)]: {}}});
+  const line = () => desk.page.textContent('#presence > span');
+  await desk.page.waitForSelector('#presence >> text=Working session last answered', {state: 'attached'});
+  assert.equal(await line(), 'Working session last answered at 23:50.');
+
+  await desk.page.clock.fastForward(6 * 60000);
+  await desk.page.waitForFunction(() => /yesterday at 23:50/.test(document.querySelector('#presence > span').textContent),
+    null, {timeout: 3000});
+  assert.equal(await line(), 'Working session last answered yesterday at 23:50.');
+  assert.deepEqual(desk.errors, []);
+});
+
 /* ---------------- where the reviewer is reading ---------------- */
 
 // Counts, from inside the page, the IntersectionObservers made and not yet
@@ -578,6 +607,48 @@ for (const scheme of ['dark', 'light']){
     await desk.page.press('#box', 'Enter');
     await desk.page.waitForSelector('.turn.mine .said');
     const got = await contrasts(['#ok', '#send', '.tab.on', '.turn.mine .said']);
+    for (const [sel, ratio] of Object.entries(got)) assert.ok(ratio >= 4.5, `${sel} is ${ratio}:1`);
+    assert.deepEqual(desk.errors, []);
+  });
+}
+
+// The same measure for text drawn in --faint, which has no background of its own:
+// the colour it sits on is the nearest ancestor's that paints one.
+const faintContrasts = selectors => desk.page.evaluate(selectors => {
+  const rgb = css => css.match(/[\d.]+/g).map(Number);
+  const lum = css => {
+    const [r, g, b] = rgb(css).slice(0, 3).map(v => {
+      const c = v / 255;
+      return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+    });
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  };
+  const ground = el => {
+    for (let n = el; n; n = n.parentElement){
+      const bg = getComputedStyle(n).backgroundColor, a = rgb(bg);
+      if (a.length < 4 || a[3] > 0) return bg;
+    }
+    return 'rgb(255, 255, 255)';
+  };
+  return Object.fromEntries(selectors.map(sel => {
+    const el = document.querySelector(sel);
+    if (!el) return [sel, 'missing'];
+    const [hi, lo] = [lum(getComputedStyle(el).color), lum(ground(el))].sort((a, b) => b - a);
+    return [sel, Math.round((hi + 0.05) / (lo + 0.05) * 100) / 100];
+  }));
+}, selectors);
+
+for (const scheme of ['dark', 'light']){
+  test(`${scheme} mode: unopened document tabs, the hint, footer, meta line, speaker labels and section name clear 4.5:1`, async () => {
+    desk = await open(browser, {context: {colorScheme: scheme},
+      data: payload({documents: [{name: 'docs/a.md', text: '# A\n\nAlpha'}]})});
+    await desk.page.click('#fab');
+    await desk.page.waitForSelector('#stream .hint >> text=Ask the working session anything');
+    const got = await faintContrasts(['.leaf:not(.on)', '.hint', 'footer', '.meta', '.ptop .where']);
+    await desk.page.fill('#box', 'A turn, so a speaker label shows');
+    await desk.page.press('#box', 'Enter');
+    await desk.page.waitForSelector('.turn.mine .who');
+    Object.assign(got, await faintContrasts(['.who']));
     for (const [sel, ratio] of Object.entries(got)) assert.ok(ratio >= 4.5, `${sel} is ${ratio}:1`);
     assert.deepEqual(desk.errors, []);
   });

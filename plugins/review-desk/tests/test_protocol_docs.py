@@ -482,6 +482,20 @@ class Desk(unittest.TestCase):
         self.assertIn("even when it is not a git repository", text)
         self.assertIn("written before `cwd` was recorded", text)
 
+    def test_resume_is_built_from_the_launch_directory_and_an_unsafe_path_is_told_in_the_terminal(self):
+        # claude --resume finds a session by the directory it was launched from,
+        # and the page's RESUME_SHAPE shows only a path of [\w.~/-].
+        build = flat(section(self.doc, "Build"))
+        self.assertIn('"resume": "cd <launch directory> && claude --resume', build)
+        self.assertNotIn("<repository path>", build)
+        self.assertIn("Build it from the directory this session was launched in", build)
+        self.assertIn("Not the directory you run git in", build)
+        self.assertNotIn("Build it from the directory you run git in", build)
+        self.assertIn("letters, digits and `_ . ~ / -`", build)
+        self.assertIn("cannot be offered: leave `resume` out, and tell the user in the terminal", build)
+        down = flat(section(self.doc, "Write it down"))
+        self.assertIn("a resumed session does nothing until someone types", down)
+
     def test_ledger_records_the_published_head_and_branch(self):
         # "Changed since you opened this" lists commits pushed since the desk was
         # published, and nothing recorded which commit that was, so a later
