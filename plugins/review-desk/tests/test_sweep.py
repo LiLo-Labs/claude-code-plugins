@@ -90,8 +90,20 @@ class Sweep(unittest.TestCase):
         self.assertIn('doc_id "pr-<number>"', text)
         # Messages left for the working session are answered, not only decisions.
         self.assertIn("While they read", text)
-        # A desk watched by a new session gets that session's resume command.
-        self.assertIn("Whenever a ring arrives", text)
+    def test_every_desk_read_is_stamped_in_the_same_batch(self):
+        # The stamp is the only thing the reviewer sees, and a session whose
+        # context never held /review-desk cannot follow a pointer to it: the
+        # write itself has to be here. Desks accrue#9 and accrue-scratch#4 were
+        # both collected and merged with an empty presence collection, so their
+        # pages showed nobody home while the merge was going through.
+        text = " ".join(said(run([desk(2)])).split())
+        self.assertIn('collection "review/pr-<number>/presence"', text)
+        self.assertIn('data {"resume": "cd <this session\'s directory> && '
+                      "claude --resume <this session's id>\"}", text)
+        self.assertIn("before you know whether anything is waiting", text)
+        self.assertNotIn('as /review-desk describes under "Whenever a ring arrives"', text)
+        # It goes out with the reads, not after the collect instruction.
+        self.assertLess(text.index("/presence"), text.index("Only then collect"))
 
     def test_desk_work_runs_on_the_first_turn_and_says_so_before_a_merge(self):
         # SessionStart only adds context; a resumed session does nothing until

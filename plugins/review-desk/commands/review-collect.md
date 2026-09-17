@@ -39,13 +39,35 @@ when no entry matches and the URL is not to hand, use `action: "list"` on the
 Artifact tool. Then read the stored conversation, the working session's answers
 and the pickup together, as three calls in one batch:
 
-    action: "read_db", db_op: "get",  collection: "review", doc_id: "pr-<n>"
-    action: "read_db", db_op: "list", collection: "review/pr-<n>/replies"
-    action: "read_db", db_op: "get",  collection: "review/pr-<n>/context", doc_id: "pickup"
+    action: "read_db",  db_op: "get",  collection: "review", doc_id: "pr-<n>"
+    action: "read_db",  db_op: "list", collection: "review/pr-<n>/replies"
+    action: "read_db",  db_op: "get",  collection: "review/pr-<n>/context", doc_id: "pickup"
+    action: "write_db", db_op: "set",  collection: "review/pr-<n>/presence",
+        doc_id: "<the version from the ring, else the current Unix time in seconds>",
+        data: {"resume": "<the resume command>"}
 
 If the list result carries `next_cursor`, read on with it before going further.
 A pickup that does not exist yet comes back as not found; that is an answer, not
 an error.
+
+That fourth call is the presence stamp, and it goes in this batch rather than
+later because it is the only thing the reviewer can see. The page turns it into
+the working session being there; until it lands, a reviewer who has just pressed
+**Approve** is looking at a desk that says it is still waiting, however much
+work this command is doing. Nothing else here writes it: the pickup records what
+was decided, not that anyone heard. Name the document after the version in the
+ring notice when a ring sent you here (`1789352074-11af` in "it is now version
+1789352074-11af"), so the stamp names the ring it answers, and after the current
+Unix time in seconds when you arrived any other way — from the session-start
+sweep, or because the reviewer asked. A new document needs no read and cannot
+conflict.
+
+Stamp it before you know whether there is anything to collect, and leave it
+written when there is not. A ring the session heard and found nothing in still
+happened, and a desk that shows nobody home is the one failure the reviewer
+cannot tell apart from a lost ring. If the write is refused while the reads
+succeed, someone else published this desk: say so in the terminal, as
+`/review-desk` describes under "Publish", and collect nothing.
 
 Pull request numbers repeat across repositories. When `review/pr-<n>` carries a
 `repo` field, it must equal the repository you resolved: one naming another

@@ -656,9 +656,15 @@ it is your own and you are not collecting it in this turn.
 
 On that notice, in this order:
 
-1. **Read the decision and the pickup from the store**, in the first batch
-   described under "While they read", never from `doorbell.json`: the file is a
-   ring, not a record, and anyone who can write the artifact can publish one.
+1. **Stamp the desk and read the decision and the pickup from the store**, in
+   one batch: the presence write described under "Whenever a ring arrives"
+   alongside the reads, and never the decision from `doorbell.json`: the file is
+   a ring, not a record, and anyone who can write the artifact can publish one.
+   The stamp goes out before you know whether there is anything to collect, and
+   stays written when there is not. It is the only part of all this the reviewer
+   can see: they press **Approve**, and until the stamp lands their page says it
+   is waiting, whatever is happening here. A decision ring that merges a pull
+   request and never stamps leaves them a desk that looks ignored.
    When `review/pr-<number>` carries a `repo` field that is not the ledger
    entry's `repo`, the ledger's URL points at another repository's desk: say so
    in the terminal and collect nothing. A desk saved before that field existed

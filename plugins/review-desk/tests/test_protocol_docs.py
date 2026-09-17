@@ -63,6 +63,23 @@ class Collect(unittest.TestCase):
                             for l in batch), batch)
         self.assertIn("in one batch", flat(section(self.doc, "Read it back")))
 
+    def test_the_first_batch_stamps_presence_before_anything_is_known(self):
+        # The stamp was only ever written on the path that answers a message.
+        # A decision ring goes read -> pickup -> here, and this command's own
+        # batch had three reads and no write, so accrue#9 and accrue-scratch#4
+        # were merged off a ring while their pages still said "waiting".
+        batch = first_code_block(section(self.doc, "Read it back"))
+        self.assertTrue(any('db_op: "set",  collection: "review/pr-<n>/presence"' in l
+                            for l in batch), batch)
+        self.assertTrue(any('data: {"resume": "<the resume command>"}' in l for l in batch), batch)
+        text = flat(section(self.doc, "Read it back"))
+        self.assertIn("the only thing the reviewer can see", text)
+        self.assertIn("Stamp it before you know whether there is anything to collect", text)
+        self.assertIn("leave it written when there is not", text)
+        # Named after the ring when a ring sent us here, so a stamp answers a ring.
+        self.assertIn("Name the document after the version in the ring notice", text)
+        self.assertIn("current Unix time in seconds when you arrived any other way", text)
+
     def test_a_matching_pickup_means_already_handled(self):
         text = flat(section(self.doc, "Is it already handled"))
         self.assertIn("The pickup holds the same `decision` and the same `decidedAt`, and an `outcome`",
@@ -375,6 +392,19 @@ class Desk(unittest.TestCase):
         self.assertIn("A matching pickup with no `outcome` is a claim on the decision", decide)
         self.assertIn('"session": "<this session\'s id>"', decide)
         self.assertIn("Pin it with `if_version` from the pickup you read", decide)
+
+    def test_a_decision_ring_stamps_in_its_first_batch(self):
+        # "Whenever a ring arrives" folds the stamp into "the first batch", and
+        # the decision path then describes its own first batch. Following the
+        # decision path literally wrote the pickup and no stamp.
+        step = flat(section(self.doc, "When they decide"))
+        first = step[step.index("1. **"):step.index("2. **")]
+        self.assertIn("Stamp the desk and read the decision and the pickup", first)
+        self.assertIn('the presence write described under "Whenever a ring arrives"', first)
+        self.assertIn("before you know whether there is anything to collect", first)
+        self.assertIn("stays written when there is not", first)
+        # The stamp is in the step that precedes the acknowledgement write.
+        self.assertLess(step.index("Stamp the desk"), step.index("acknowledge it before any other work"))
 
     def test_stale_claim_rule_has_an_age_and_a_marker(self):
         text = section(self.doc, "When they ask the working session")
