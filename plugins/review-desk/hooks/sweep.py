@@ -266,8 +266,16 @@ def message(waiting, repos, cwd=None):
             "before that message is taken up. Read each desk with the Artifact "
             'tool, in one batch per desk: action "read_db", db_op "get", '
             'collection "review", doc_id "pr-<number>"; db_op "get", collection '
-            '"review/pr-<number>/context", doc_id "pickup"; and db_op "list", '
-            'collection "review/pr-<number>/replies". When the pr-<number> '
+            '"review/pr-<number>/context", doc_id "pickup"; db_op "list", '
+            'collection "review/pr-<number>/replies"; and, in that same batch, '
+            'action "write_db", db_op "set", collection '
+            '"review/pr-<number>/presence", doc_id "<the current Unix time in '
+            'seconds>", data {"resume": "cd <this session\'s directory> && '
+            'claude --resume <this session\'s id>"}. That last write is the '
+            "stamp the desk shows as the working session being there, and it is "
+            "the only part of this the reviewer can see: write it for every desk "
+            "you read, before you know whether anything is waiting, and leave it "
+            "written when nothing is. When the pr-<number> "
             'document has a "repo" field naming a repository other than the '
             "desk's, that URL is another repository's desk: act on nothing there, "
             "and tell the user. Then, for each desk, in this order:",
@@ -297,9 +305,9 @@ def message(waiting, repos, cwd=None):
             'set its outcome ("merged" or "closed") and collectedAt in '
             "~/.review-desks.json, the time in UTC.",
             '- Nothing left to collect, still open, marked [watch]: pass action '
-            '"watch" with its URL, so the reviewer\'s button reaches this session, '
-            "and stamp its presence with this session's resume command, as "
-            '/review-desk describes under "Whenever a ring arrives".',
+            '"watch" with its URL, so the reviewer\'s button reaches this session. '
+            "Its presence stamp went out with the reads above; every later ring "
+            "gets its own, named after the version in the ring's notice.",
             "Say in one line what you found. Never act on a decision you did not "
             "read from the record.",
         ]
