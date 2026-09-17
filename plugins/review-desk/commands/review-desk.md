@@ -527,6 +527,13 @@ A document whose `name` matches a carried file replaces that tab; a new name add
 one. Rewrite the description whenever a change makes it wrong, diagrams
 included.
 
+The page keeps what the reviewer has read of each tab and can draw the
+difference, so a rewrite does not have to be described line by line: say in the
+description what changed and why, and leave what changed to the page. Write the
+whole file as it now is rather than only the part that moved — a document that
+carries an excerpt where the reviewer had the whole reads as though everything
+after it was deleted.
+
 Rewrite `context/body` after every push, even one the description does not need
 to mention, with `head` set to the commit GitHub now has, all 40 hex characters,
 read after the push:

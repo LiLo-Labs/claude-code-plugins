@@ -12,6 +12,11 @@
      accents; the dark theme's accents are pastel, where white measured 2.6:1 on
      --cool and 2.47:1 on --good, so it takes the dark paper instead (7.1 and 7.46). */
   --on-accent:#fff;
+  /* The diff tints: a line's ground, and the stronger one behind the words that
+     actually changed inside it. Kept as tokens rather than a colour-mix of
+     --good and --mark so each theme can be measured, and so a browser without
+     color-mix still draws them. */
+  --addbg:#e6f0e6; --addwd:#c4e0c8; --delbg:#f6e6df; --delwd:#f0cdbe;
   --doc:"Newsreader",Georgia,serif;
   --ui:"Public Sans",system-ui,sans-serif;
   --mono:"JetBrains Mono",ui-monospace,Menlo,monospace;
@@ -23,6 +28,7 @@
     --ink:#eee9e0; --soft:#a89f93; --faint:#978e82;
     --mark:#d4805f; --good:#7fb08c; --cool:#7fa5c4; --lit:#4a3c1c;
     --on-accent:#15140f;
+    --addbg:#1c2a1e; --addwd:#2d4632; --delbg:#2c1d17; --delwd:#472a1e;
   }
 }
 :root[data-theme="dark"]{
@@ -30,6 +36,7 @@
   --ink:#eee9e0; --soft:#a89f93; --faint:#978e82;
   --mark:#d4805f; --good:#7fb08c; --cool:#7fa5c4; --lit:#4a3c1c;
   --on-accent:#15140f;
+  --addbg:#1c2a1e; --addwd:#2d4632; --delbg:#2c1d17; --delwd:#472a1e;
 }
 *{box-sizing:border-box}
 body{background:var(--paper);color:var(--ink);font-family:var(--ui);
@@ -136,6 +143,33 @@ h1.doctitle{font-family:var(--doc);font-weight:600;font-size:30px;
 .leaf .fresh.show{opacity:1}
 .sheet{background:var(--card);border:1px solid var(--edge);border-top:none;
   border-radius:0 0 6px 6px;overflow:hidden}
+
+/* The bar over a page that has been rewritten since this reviewer read it, and
+   the changes view it toggles. The diff is source, not prose: a patch is what
+   answers "what changed", and rendering markdown twice and diffing the result
+   would show a reworded paragraph as one replaced block. */
+.revbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px;
+  padding:9px 13px;border-bottom:1px solid var(--edge);background:var(--paper);
+  font-family:var(--ui);font-size:13px;color:var(--ink)}
+.revbar .what{flex:1 1 auto;min-width:0}
+.revbar button{min-height:32px;padding:0 11px;border:1px solid var(--edge);
+  background:var(--card);color:var(--soft);font-family:var(--ui);font-size:12px;
+  border-radius:6px;cursor:pointer}
+.revbar button[aria-pressed="true"]{border-color:var(--good);color:var(--good);font-weight:600}
+.revbar button:hover{color:var(--ink)}
+.diff{margin:0;padding:12px 13px;overflow-x:auto;font-family:var(--mono);
+  font-size:12.5px;line-height:1.55;white-space:pre;color:var(--ink)}
+.diff .row{display:block}
+.diff .add{background:var(--addbg)}
+.diff .del{background:var(--delbg)}
+.diff .sign{display:inline-block;width:1.2em;color:var(--faint);user-select:none}
+.diff .add .sign{color:var(--good)}
+.diff .del .sign{color:var(--mark)}
+.diff ins{text-decoration:none;background:var(--addwd)}
+.diff del{text-decoration:line-through;background:var(--delwd)}
+.diff .skip{display:block;color:var(--faint);padding:3px 0;font-size:11.5px;
+  font-family:var(--ui);white-space:normal}
+.diff .none{display:block;color:var(--soft);font-family:var(--ui);white-space:normal}
 
 /* A highlight that stays visible after the browser drops the selection --
    the moment focus enters the composer, the native selection is gone, and
@@ -349,7 +383,7 @@ footer{padding:22px 0 0;font-size:12.5px;color:var(--faint);line-height:1.6}
   <div id="pageFeeds"></div>
 
   <div class="leaves" id="leaves"></div>
-  <div class="sheet"><div class="md" id="sheet"></div></div>
+  <div class="sheet"><div class="revbar" id="revbar" hidden></div><div class="md" id="sheet"></div></div>
 
   <div class="slab" id="decide">
     <div class="cap">When you have made up your mind</div>
@@ -688,6 +722,223 @@ function render(page){
   return fenced(text, TONGUE[ext] || ext);
 }
 
+/* ================= what changed since you read it ================= */
+// The working session rewrites a document while the reviewer has it open, and
+// until now the page said only that something had: a mark on the tab, and a new
+// text where the old one was. A back and forth is not the only way a page moves
+// -- a push does it too -- and either way the reviewer's question is the same
+// one, which is what changed.
+//
+// So the page keeps the text of each page as this reviewer last read it, and can
+// draw the difference. That baseline lives in sessionStorage, per tab: a ring
+// reloads the tab, and without it the page would come back holding the new text
+// as though it had always said that. It is never written to the store, which is
+// capped and shared -- what one reviewer has read is not another's business.
+const READ_KEY = 'review-desk read ' + (typeof DATA.repo === 'string' ? DATA.repo : '') + '#' + DATA.number;
+// A baseline is worth keeping only while it is cheap. Past this, the pages read
+// longest ago lose theirs and simply have no changes view until they are read
+// again, which is better than a quota error taking the drafts with it.
+const READ_BUDGET = 400000;
+const asRead = new Map();
+// Whether this reviewer is reading changes rather than documents. One setting
+// for the desk, not one per page: it is a way of reading, and asked for once it
+// holds for every page that has been rewritten. Kept with the drafts, so a
+// reload comes back to it. Off to begin with -- a document is a document until
+// someone asks what moved in it.
+let wantChanges = false;
+// Keys whose baseline is the payload's copy rather than anything read in this
+// tab. See loadRead.
+const seeded = new Set();
+// Page 0 is the request itself, which has no path.
+const pageKey = i => i === 0 ? '' : ((pages()[i] || {}).full || '');
+const readText = i => asRead.get(pageKey(i));
+const revised = i => {
+  const p = pages()[i], was = readText(i);
+  return !!p && was !== undefined && was !== (p.text || '');
+};
+
+function loadRead(){
+  try { if (drafts().changes === true) wantChanges = true; } catch (e) {}
+  try {
+    const rows = JSON.parse(sessionStorage.getItem(READ_KEY) || 'null');
+    if (Array.isArray(rows)) rows.forEach(r => {
+      if (r && typeof r.k === 'string' && typeof r.t === 'string') asRead.set(r.k, r.t);
+    });
+  } catch (e) {}
+  // A page with no baseline is one this tab has not read: it takes the text it
+  // loaded, since a difference from nothing is not a change worth drawing. Such
+  // a baseline is only the payload's copy, though, and the store can hold a
+  // newer one written while no tab was open. The first row each feed delivers
+  // for it replaces it, so a desk opened fresh shows no changes at all rather
+  // than a difference the reviewer was never party to.
+  pages().forEach((p, i) => {
+    if (readText(i) !== undefined) return;
+    asRead.set(pageKey(i), p.text || '');
+    seeded.add(pageKey(i));
+  });
+  keepRead();
+}
+function keepRead(){
+  try {
+    const rows = [];
+    let size = 0;
+    // Newest first: Map keeps insertion order, and markRead re-inserts.
+    for (const [k, t] of [...asRead].reverse()){
+      size += k.length + t.length + 8;
+      if (size > READ_BUDGET) break;
+      rows.push({k, t});
+    }
+    sessionStorage.setItem(READ_KEY, JSON.stringify(rows));
+  } catch (e) {}
+}
+function markRead(i){
+  const p = pages()[i];
+  if (!p) return;
+  const k = pageKey(i);
+  asRead.delete(k);
+  asRead.set(k, p.text || '');
+  keepRead();
+}
+// Called by the feeds when a page's text has been replaced, before anything is
+// drawn: a page the reviewer had read now differs from what they read, and that
+// is the moment its changes view is turned on. A page they had not read keeps no
+// baseline, so nothing is claimed about it.
+// Called with the row a feed has just applied. `atLoad` says the row came in the
+// feed's first delivery, which is the store as it stood when this tab opened:
+// a page whose baseline is only the payload's copy takes that text as read. Any
+// row after that is a change, whichever copy the baseline came from.
+function noticeRevision(i, atLoad){
+  if (atLoad && seeded.has(pageKey(i))) { seeded.delete(pageKey(i)); markRead(i); }
+}
+
+/* ---- the difference itself, over lines ---- */
+// Trim the common head and tail first: a revision usually touches a few lines of
+// a long file, and what is left is small enough to diff exactly. A rewrite whose
+// window is bigger than this table is shown as the whole of the old text removed
+// and the whole of the new added, rather than hanging the page on a quadratic
+// walk of ten thousand lines.
+const DIFF_CELLS = 640000;
+function lineOps(before, after){
+  const a = before.split('\n'), b = after.split('\n');
+  let head = 0;
+  while (head < a.length && head < b.length && a[head] === b[head]) head++;
+  let tail = 0;
+  while (tail < a.length - head && tail < b.length - head
+         && a[a.length - 1 - tail] === b[b.length - 1 - tail]) tail++;
+  const x = a.slice(head, a.length - tail), y = b.slice(head, b.length - tail);
+  const ops = [];
+  for (let i = 0; i < head; i++) ops.push({t: 'same', s: a[i]});
+  let exact = true;
+  if (x.length * y.length > DIFF_CELLS){
+    exact = false;
+    x.forEach(s => ops.push({t: 'del', s}));
+    y.forEach(s => ops.push({t: 'add', s}));
+  } else {
+    lcsOps(x, y).forEach(o => ops.push(o));
+  }
+  for (let i = a.length - tail; i < a.length; i++) ops.push({t: 'same', s: a[i]});
+  return {ops, exact};
+}
+// The longest common subsequence, walked from the front so the result reads in
+// document order. Int32Array rather than nested arrays: the table is the one
+// thing here that can get big, and 640k cells is 2.5 MB flat.
+function lcsOps(x, y){
+  const n = x.length, m = y.length, w = m + 1;
+  const ops = [];
+  if (!n || !m){
+    x.forEach(s => ops.push({t: 'del', s}));
+    y.forEach(s => ops.push({t: 'add', s}));
+    return ops;
+  }
+  const L = new Int32Array((n + 1) * w);
+  for (let i = n - 1; i >= 0; i--)
+    for (let j = m - 1; j >= 0; j--)
+      L[i * w + j] = x[i] === y[j] ? L[(i + 1) * w + j + 1] + 1
+        : Math.max(L[(i + 1) * w + j], L[i * w + j + 1]);
+  let i = 0, j = 0;
+  while (i < n && j < m){
+    if (x[i] === y[j]){ ops.push({t: 'same', s: x[i]}); i++; j++; }
+    else if (L[(i + 1) * w + j] >= L[i * w + j + 1]) ops.push({t: 'del', s: x[i++]});
+    else ops.push({t: 'add', s: y[j++]});
+  }
+  while (i < n) ops.push({t: 'del', s: x[i++]});
+  while (j < m) ops.push({t: 'add', s: y[j++]});
+  return ops;
+}
+// Inside a line replaced by one other line, the words that actually changed. A
+// reworded sentence is otherwise two near-identical lines the reviewer has to
+// compare by eye. Whitespace is kept as its own token so the marks fall on
+// words and the line still reads.
+const WORD_CAP = 600;
+function wordMarks(before, after){
+  const x = before.split(/(\s+)/), y = after.split(/(\s+)/);
+  if (x.length * y.length > WORD_CAP * WORD_CAP) return null;
+  const ops = lcsOps(x, y);
+  const del = [], add = [];
+  let changed = false;
+  ops.forEach(o => {
+    if (o.t === 'same'){ del.push(esc(o.s)); add.push(esc(o.s)); return; }
+    // A space the walk paired differently is not a change anyone reads: marked,
+    // it puts a coloured gap between two words that both stayed.
+    const white = !o.s.trim();
+    if (!white) changed = true;
+    if (o.t === 'del') del.push(white ? esc(o.s) : '<del>' + esc(o.s) + '</del>');
+    else add.push(white ? esc(o.s) : '<ins>' + esc(o.s) + '</ins>');
+  });
+  // Every word different: the marks would cover the whole line and say nothing.
+  return changed && ops.some(o => o.t === 'same' && o.s.trim()) ? [del.join(''), add.join('')] : null;
+}
+
+// How many unchanged lines are kept either side of a change, and the shortest
+// run worth collapsing. A patch with no context is unreadable; all of it is the
+// document again.
+const DIFF_CONTEXT = 3;
+const row = (kind, sign, html) => '<span class="row ' + kind + '"><span class="sign">'
+  + sign + '</span>' + html + '</span>';
+function diffHtml(before, after){
+  const {ops, exact} = lineOps(before, after);
+  if (!ops.some(o => o.t !== 'same'))
+    return '<pre class="diff"><span class="none">No difference: this page reads exactly '
+      + 'as it did when you last read it.</span></pre>';
+  // Which unchanged lines to draw: those within DIFF_CONTEXT of a change.
+  const keep = ops.map(o => o.t !== 'same');
+  ops.forEach((o, i) => {
+    if (o.t === 'same') return;
+    for (let d = 1; d <= DIFF_CONTEXT; d++){
+      if (i - d >= 0) keep[i - d] = true;
+      if (i + d < ops.length) keep[i + d] = true;
+    }
+  });
+  const out = [];
+  if (!exact) out.push('<span class="skip">This page was rewritten wholesale, so the '
+    + 'difference is shown as the old text removed and the new text added.</span>');
+  let skipped = 0;
+  for (let i = 0; i < ops.length; i++){
+    const o = ops[i];
+    if (o.t === 'same' && !keep[i]){ skipped++; continue; }
+    if (skipped){
+      out.push('<span class="skip">' + skipped + (skipped === 1 ? ' unchanged line'
+        : ' unchanged lines') + '</span>');
+      skipped = 0;
+    }
+    // A line replaced by exactly one other line is marked word by word.
+    const next = ops[i + 1];
+    if (o.t === 'del' && next && next.t === 'add' && (!ops[i + 2] || ops[i + 2].t !== 'add')){
+      const marks = wordMarks(o.s, next.s);
+      if (marks){
+        out.push(row('del', '−', marks[0]));
+        out.push(row('add', '+', marks[1]));
+        i++;
+        continue;
+      }
+    }
+    out.push(row(o.t === 'add' ? 'add' : o.t === 'del' ? 'del' : 'ctx',
+      o.t === 'add' ? '+' : o.t === 'del' ? '−' : ' ', esc(o.s)));
+  }
+  if (skipped) out.push('<span class="skip">' + skipped + ' unchanged lines</span>');
+  return '<pre class="diff">' + out.join('') + '</pre>';
+}
+
 // Highlighting is applied after render rather than baked into the markup, so
 // the parser stays a parser and a missing library costs nothing but colour.
 function paintCode(){
@@ -869,11 +1120,47 @@ function paint(){
   const all = pages();
   if (leaf >= all.length) leaf = 0;
   drawLeaves();
-  $('sheet').innerHTML = render(all[leaf]);
+  drawRevBar();
+  // The document is drawn by render(), so a patch is never run through the
+  // markdown parser, and a page with no change of its own is never a patch.
+  const changes = revised(leaf) && wantChanges;
+  $('sheet').innerHTML = changes ? diffHtml(readText(leaf) || '', all[leaf].text || '')
+    : render(all[leaf]);
+  if (changes) return;               // a patch holds no code blocks, diagrams or headings
   paintCode();
   paintDiagrams();
   watchHeadings();
 }
+
+// The bar over a page rewritten since this reviewer read it. Marking it read is
+// the only thing here that moves the baseline: the toggle is a way of looking,
+// not a way of saying you have looked.
+function drawRevBar(){
+  const el = $('revbar');
+  if (!revised(leaf)){
+    el.hidden = true;
+    rebuild(el, '');
+    return;
+  }
+  el.hidden = false;
+  const on = wantChanges;
+  rebuild(el, '<span class="what">Rewritten since you read this page.</span>'
+    + '<button data-view="changes" aria-pressed="' + (on ? 'true' : 'false') + '">Changes</button>'
+    + '<button data-view="full" aria-pressed="' + (on ? 'false' : 'true') + '">Full document</button>'
+    + '<button data-view="read">Mark as read</button>');
+}
+
+$('revbar').addEventListener('click', e => {
+  const b = e.target.closest('[data-view]');
+  if (!b) return;
+  if (b.dataset.view === 'read') markRead(leaf);
+  else {
+    wantChanges = b.dataset.view === 'changes';
+    keepDraft('changes', wantChanges);
+  }
+  unlight();                         // the painted range belonged to the old view
+  paint();
+});
 
 $('leaves').addEventListener('click', e => {
   const b = e.target.closest('[data-leaf]'); if (!b) return;
@@ -2993,6 +3280,7 @@ function resumeDrafts(){
   if (typeof d.why === 'string' && !closedOutcome()) askReason(d.why, false);
 }
 
+loadRead();
 paint(); draw();
 atMidnight();
 
@@ -3039,12 +3327,18 @@ atMidnight();
 function followPage(){
   if (FEEDS.body) return;
 
+  // Whether each feed has delivered once: see noticeRevision.
+  let bodyIn = false, docsIn = false;
+
   // The description, rewritten by the working session when the pull request
   // changes under review.
   follow('body', 'changes to the description', 'page',
     () => db.doc('review/pr-' + DATA.number + '/context/body'), snap => {
       const row = snap.exists && snap.data();
-      if (!row) return;
+      // An empty delivery is still the feed's first delivery: a desk whose store
+      // holds no description yet must not take the first one written later as the
+      // text this tab had read.
+      if (!row){ bodyIn = true; return; }
       // The session writes the head with the text of a pushed revision. It is
       // taken even when the text is unchanged: a push the description did not
       // need to mention still moves what an approval would merge.
@@ -3054,8 +3348,10 @@ function followPage(){
         if (showingDecided) drawDecided();
         drawApproveAsk();
       }
-      if (typeof row.text !== 'string' || row.text === bodyText) return;
+      if (typeof row.text !== 'string' || row.text === bodyText){ bodyIn = true; return; }
       bodyText = row.text;
+      noticeRevision(0, !bodyIn);
+      bodyIn = true;
       freshOn[0] = true;
       if (leaf === 0){ unlight(); paint(); } else drawLeaves();
     });
@@ -3140,10 +3436,23 @@ function followPage(){
           const at = documents.findIndex(x => x.name === row.name);
           if (at >= 0 && documents[at].text === row.text) return;
           if (at >= 0) documents[at] = {name: row.name, text: row.text};
-          else documents.push({name: row.name, text: row.text});
+          else {
+            // A file this desk did not carry. There is nothing to have read, so
+            // the text it arrives with is its baseline and no change is claimed.
+            documents.push({name: row.name, text: row.text});
+            asRead.set(row.name, row.text);
+            keepRead();
+          }
           changed.push(row.name); touched = true;
         });
-        if (!touched) return;
+        if (!touched){ docsIn = true; return; }
+        // Before the reload path below, which paints and returns: a revision has
+        // to be noticed whichever way the page is drawn next.
+        changed.forEach(name => {
+          const at = documents.findIndex(x => x.name === name);
+          if (at >= 0) noticeRevision(at + 1, !docsIn);
+        });
+        docsIn = true;
         // The page a reload came back to, once the store has delivered it.
         const back = wantLeaf !== null && leaf === 0 ? leafNamed(wantLeaf) : null;
         if (back !== null){
