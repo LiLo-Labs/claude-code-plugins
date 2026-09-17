@@ -1,0 +1,35 @@
+name: code-canvas
+
+# Its own workflow with its own paths filter, so a run's conclusion is about this
+# plugin alone and a pull request to another plugin neither waits on it nor is
+# turned red by it. review-desk.yml was split out first, for exactly that.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'plugins/code-canvas/**'
+      - '.github/workflows/code-canvas.yml'
+  pull_request:
+    paths:
+      - 'plugins/code-canvas/**'
+      - '.github/workflows/code-canvas.yml'
+
+jobs:
+  code-canvas:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: plugins/code-canvas
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: plugins/code-canvas/package-lock.json
+      - run: npm ci
+      # The e2e suite drives a real browser against the built client, and the
+      # integration suite starts the server: both need Chromium present.
+      - run: npx playwright install --with-deps chromium
+      - name: Run the test suite
+        run: npm test

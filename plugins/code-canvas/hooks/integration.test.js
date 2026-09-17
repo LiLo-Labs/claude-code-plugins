@@ -130,7 +130,11 @@ describe('Hook Integration Tests', () => {
     });
 
     serverUrl = await new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => reject(new Error('Server startup timed out')), 10000);
+      // 30s, not 10: on a cold CI runner, and locally right after npm ci,
+      // node's first start has taken longer than ten seconds and failed the
+      // whole file before a single test ran. A longer wait costs nothing when
+      // the server does start.
+      const timeout = setTimeout(() => reject(new Error('Server startup timed out')), 30000);
       serverProcess.stdout.on('data', data => {
         try {
           const info = JSON.parse(data.toString());

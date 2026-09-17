@@ -1,7 +1,12 @@
 """review-desk's CI is only a signal if its workflow's conclusion is about
 review-desk alone and it runs everything. These checks hold that shape, so a
-job moved back into the shared tests.yml, a lost paths filter, or a WebKit
-run narrowed to one suite fails here instead of passing quietly.
+job moved into another plugin's workflow, a lost paths filter, or a WebKit run
+narrowed to one suite fails here instead of passing quietly.
+
+They also hold the shape of the repository's CI, which review-desk's own
+conclusion depends on: one workflow per plugin, each filtered to its own paths,
+so a review-desk pull request neither waits on another plugin's suite nor is
+turned red by it. That is what the shared tests.yml did until it was split up.
 
 Text checks, not a YAML parse: setup-python's interpreter has no PyYAML, and
 the suites here run with the standard library only."""
@@ -13,7 +18,8 @@ import unittest
 ROOT = os.path.join(os.path.dirname(__file__), "..")
 WORKFLOWS = os.path.join(ROOT, "..", "..", ".github", "workflows")
 OWN = os.path.join(WORKFLOWS, "review-desk.yml")
-SHARED = os.path.join(WORKFLOWS, "tests.yml")
+# Workflows that are about the repository rather than one plugin.
+REPO_WIDE = {"repo.yml"}
 PATHS = ["'plugins/review-desk/**'", "'.github/workflows/review-desk.yml'"]
 
 
@@ -38,9 +44,59 @@ class Workflow(unittest.TestCase):
     def test_holds_only_the_review_desk_jobs(self):
         self.assertEqual(jobs(read(OWN)), ["review-desk", "review-desk-page"])
 
-    def test_shared_workflow_no_longer_runs_review_desk(self):
-        self.assertNotIn("review-desk", jobs(read(SHARED)))
-        self.assertNotIn("review-desk-page", jobs(read(SHARED)))
+    def test_no_other_workflow_runs_review_desk(self):
+        # A job in someone else's workflow would put review-desk's result under
+        # a conclusion that is not review-desk's.
+        for name in sorted(os.listdir(WORKFLOWS)):
+            if name == "review-desk.yml" or not name.endswith(".yml"):
+                continue
+            text = read(os.path.join(WORKFLOWS, name))
+            self.assertNotIn("plugins/review-desk", text, name)
+            for job in jobs(text):
+                self.assertNotIn("review-desk", job, name)
+
+    def test_every_plugin_workflow_is_one_plugin_and_filtered(self):
+        # The shape that keeps each conclusion meaningful: a workflow named for
+        # its plugin, triggered only by that plugin's paths and its own file.
+        seen = 0
+        for name in sorted(os.listdir(WORKFLOWS)):
+            if not name.endswith(".yml") or name in REPO_WIDE:
+                continue
+            seen += 1
+            plugin = name[:-len(".yml")]
+            text = read(os.path.join(WORKFLOWS, name))
+            self.assertTrue(os.path.isdir(os.path.join(ROOT, "..", plugin)),
+                            name + " names no plugin directory")
+            on = text.split("\non:\n", 1)[1].split("\njobs:\n", 1)[0]
+            push, pull = on.split("  pull_request:\n")
+            self.assertIn("  push:\n    branches: [main]\n", push, name)
+            for block in (push, pull):
+                self.assertEqual(re.findall(r"^      - (.+)$", block, re.M),
+                                 ["'plugins/%s/**'" % plugin,
+                                  "'.github/workflows/%s'" % name], name)
+        self.assertGreaterEqual(seen, 6, "every plugin with tests has a workflow")
+
+    def test_every_plugin_with_tests_has_a_workflow(self):
+        # A plugin whose suite no job runs is a suite nobody runs: notes and
+        # code-canvas both sat like that, passing locally and never in CI.
+        plugins = os.path.join(ROOT, "..")
+        for plugin in sorted(os.listdir(plugins)):
+            tests = os.path.join(plugins, plugin, "tests")
+            package = os.path.join(plugins, plugin, "package.json")
+            has_tests = os.path.isdir(tests) and any(
+                f.startswith("test") or f == "desk" for f in os.listdir(tests))
+            if not has_tests and os.path.exists(package):
+                has_tests = '"test"' in read(package)
+            if has_tests:
+                self.assertTrue(os.path.exists(os.path.join(WORKFLOWS, plugin + ".yml")),
+                                plugin + " has tests and no workflow")
+
+    def test_the_marketplace_check_runs_on_everything(self):
+        # It guards the version a user actually installs, and any change can move
+        # a version, so it is not paths-filtered.
+        text = read(os.path.join(WORKFLOWS, "repo.yml"))
+        self.assertIn("check_marketplace.py", text)
+        self.assertNotIn("paths:", text)
 
     def test_runs_every_python_suite_and_both_engines(self):
         text = read(OWN)

@@ -1,0 +1,34 @@
+name: blender
+
+# Its own workflow with its own paths filter, so a run's conclusion is about this
+# plugin alone and a pull request to another plugin neither waits on it nor is
+# turned red by it. review-desk.yml was split out first, for exactly that.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'plugins/blender/**'
+      - '.github/workflows/blender.yml'
+  pull_request:
+    paths:
+      - 'plugins/blender/**'
+      - '.github/workflows/blender.yml'
+
+jobs:
+  blender:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: plugins/blender
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      # No install step: the suite runs a fake Blender over a local socket and
+      # speaks MCP by hand, so it needs neither pytest nor the network -- the
+      # same constraint the MCP server itself is written under. It must also pass
+      # with no `claude` on PATH, which is what a runner is: see the preflight
+      # check in tests/test_blendpipe.py.
+      - name: Run the test suite
+        run: python3 tests/test_blendpipe.py
