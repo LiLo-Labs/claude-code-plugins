@@ -26,8 +26,12 @@ jobs:
         with:
           python-version: "3.11"
       - name: Install the test dependencies
+        # --retries/--timeout because a PyPI read timeout on one package (once,
+        # on colour-science) failed the whole job and turned main red for a
+        # reason that had nothing to do with this plugin. pip's default is 5
+        # retries against a 15s timeout; a slow mirror needs longer, not more.
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements-test.txt
+          pip install --retries 5 --timeout 60 -r requirements-test.txt
       - name: Run the test suite
         run: python -m pytest tests -q
