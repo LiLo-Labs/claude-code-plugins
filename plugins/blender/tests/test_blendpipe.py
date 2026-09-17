@@ -428,8 +428,14 @@ def test_headless_agent():
     # Preflight. An unattended agent pointed at a Blender that is not running
     # does not stop: it errors, reasons, retries, and burns every turn it was
     # given. Nine minutes of exactly that is why this check exists.
+    # run() looks for the `claude` CLI before it looks at Blender, so this check
+    # has to say the CLI is there. Without that it passed on a machine with
+    # Claude Code installed and failed on every CI runner, which is how the
+    # blender job came to fail on main for a reason that was never about blender.
     listening = agent.blender_listening
+    which = agent.shutil.which
     try:
+        agent.shutil.which = lambda name: "/usr/local/bin/" + name
         agent.blender_listening = lambda **_kw: False
         try:
             agent.run("anything")
@@ -438,6 +444,7 @@ def test_headless_agent():
             refused = str(exc)
     finally:
         agent.blender_listening = listening
+        agent.shutil.which = which
     check("refuses to start when Blender is not listening", "not reachable" in refused, refused[:70])
     check("and names the address it tried", "9876" in refused, refused[:70])
 
