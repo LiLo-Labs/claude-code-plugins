@@ -1057,6 +1057,19 @@ let presenceIn = false;
 // Measured: a ring reaches an idle session in about 16 seconds, and a one-write
 // answer adds about 5. 75 seconds leaves room for a session finishing a step.
 const CHECK_WAIT = 75000;
+// How long a ring that went out has to be answered before this view rings once
+// more. A successful publish is not delivery: on two desks a decision rang, the
+// notice never reached the watching session, and the page waited on a ring that
+// was gone. The stamp is the receipt, so its absence is the only thing the page
+// can measure. 90 seconds is past the ~16 s an idle session takes and past a
+// short step; a busy one can take minutes, and then the second ring costs it one
+// extra wake-up, answering whatever has no reply, and nothing is lost.
+const ACK_WAIT = 90000;
+// A ring, rung at `rungAt`, that is now overdue an answer. Never before the
+// presence collection has loaded: with no stamps read yet, every ring looks
+// unanswered, and this view would ring again for one that was heard.
+const ackDue = rungAt => presenceIn && !!rungAt && !heardSince(rungAt)
+  && Date.now() - rungAt >= ACK_WAIT;
 
 const short =s => s.length > 42 ? s.slice(0, 40).trim() + '…' : s;
 
@@ -1163,8 +1176,11 @@ function sessionWait(m, r){
   // that anything is listening. Only a presence stamp from after the send shows a
   // session is answering rings here, so until one arrives the page promises nothing.
   if (!heardSince(m.sentAt || 0)) return 'Saved and rung. No working session has '
-    + 'answered on this desk since, so it may be busy or not running. The next '
-    + 'session to start answers it.';
+    + 'answered on this desk since, so it may be busy or not running. '
+    + (!bellOn || !ackDue(m.rungAt) ? ''
+      : m.again ? 'Check, at the top of this panel, rings it again. '
+      : 'This view rings it once more. ')
+    + 'The next session to start answers it.';
   return 'Sent to the working session. It answers within seconds if it is idle, after '
     + 'its current task if it is busy, and at its next start if none is running.';
 }
@@ -2241,8 +2257,24 @@ function pickupLine(){
     + 'so no session will see this. ' + (threads.length > 1 ? 'Close a thread you no longer '
     + 'need and decide again, or tell' : 'Tell') + ' the working session directly.';
   const later = ' If no session is running, the next one to start picks it up.';
-  // Waiting only once a ring is recorded.
-  if (rang === 'rung') return 'Waiting for the working session.' + later;
+  // Waiting only once a ring is recorded, and only while the ring is still worth
+  // waiting on. A ring whose stamp never came is the case this page used to hide:
+  // it said "waiting" forever, which is what a working session and a lost notice
+  // look like from here. Once one ring has gone unanswered the page says so, and
+  // once the second has too it stops promising and says what to do instead.
+  if (rang === 'rung'){
+    // A ring seconds old is worth waiting on, whether it is the first or the
+    // second: only a ring that has gone unanswered past ACK_WAIT says more. The
+    // page cannot tell a spent re-ring that followed an unanswered ring from one
+    // that followed a ring which never went out, so neither line counts rings.
+    const r = bellOn && decisionRing && decisionRing.decidedAt === decidedAt ? decisionRing : null;
+    if (r && ackDue(r.rungAt)) return r.again
+      ? 'Rung, and no working session has answered on this desk. It may be busy with a '
+        + 'task, or not running: Check, at the top of this panel, rings it again, and the '
+        + 'resume command there starts one.' + later
+      : 'Rung, and nothing has answered on this desk yet. This view rings it once more.' + later;
+    return 'Waiting for the working session.' + later;
+  }
   // No record: an older page stored it, or a tab closed between the save and the
   // ring. The page cannot tell whether a session was told or has collected it
   // already, so it claims neither.
@@ -2631,7 +2663,7 @@ let reringTimer = null, reringAt = 0;
 // kept: a failed send asking for one in RING_BACKOFF must not push back a slot
 // that comes of age before then.
 function reringIn(ms){
-  const at = Date.now() + Math.min(Math.max(ms, 0), RING_LEASE) + 50;
+  const at = Date.now() + Math.min(Math.max(ms, 0), Math.max(RING_LEASE, ACK_WAIT)) + 50;
   if (reringTimer && reringAt <= at) return;
   clearTimeout(reringTimer);
   reringAt = at;
@@ -2650,8 +2682,17 @@ const unrung = m => m.via === 'session' && !replied.has(m.answers) && !m.rungAt
   && (m.status === 'sent'
       || (m.status === 'unsent' && (m.why === 'conflict' || m.why === 'unsaved' || !m.again)));
 const ringsLater = m => unrung(m) && m.status === 'unsent' && m.why !== 'conflict' && m.why !== 'unsaved';
+// A fifth way, and the one the reviewer feels: a ring that went out and was never
+// answered. The publish succeeded, so nothing here failed and nothing retried,
+// while the notice it should have become never arrived. Such a slot is due one
+// more ring ACK_WAIT after it rang, and spends the same `again` as a failed one:
+// one extra ring per slot, whatever went wrong with the first.
+const silent = m => m.via === 'session' && !replied.has(m.answers) && !m.again
+  && m.status === 'sent' && !!m.rungAt && presenceIn && !heardSince(m.rungAt);
+const needsRing = m => unrung(m) || silent(m);
 const dueAt = m => m.status === 'unsent'
   ? (ringsLater(m) ? (m.sentAt || 0) + RING_BACKOFF : 0)
+  : m.rungAt ? m.rungAt + ACK_WAIT
   : lateStored.has(m.answers) ? 0 : (m.sentAt || 0) + RERING_AFTER;
 // When the decision on screen is due a ring from rering, or null when it is not.
 // Due only when this page's own record says its ring failed and the one re-ring is
@@ -2664,7 +2705,10 @@ function decisionDueAt(){
   if (rang === 'sending' || rang === 'unsaved' || rang === 'too large') return null;
   if (pickup && pickup.decision === decided && pickup.decidedAt === decidedAt) return null;
   const r = decisionRing, at = Date.parse(decidedAt) || 0;
-  if (!r || r.decidedAt !== decidedAt || r.rungAt || r.again) return null;
+  if (!r || r.decidedAt !== decidedAt || r.again) return null;
+  // A ring that went out is due one more only when nothing answered it, and this
+  // is the time to look, not the time to ring: ACK_WAIT after it rang.
+  if (r.rungAt) return heardSince(r.rungAt) ? null : r.rungAt + ACK_WAIT;
   return r.why === 'conflict' ? at : at + RING_BACKOFF;
 }
 const sessionSlots = doc => new Map(((doc && Array.isArray(doc.threads)) ? doc.threads : [])
@@ -2678,7 +2722,7 @@ async function rering(){
   // A merged or closed desk has no session watching it, so a ring wakes nobody.
   if (!bellOn || restore !== 'done' || closedOutcome()) return;
   const now = Date.now();
-  const waiting = threads.flatMap(t => t.turns).filter(m => unrung(m) && !unsaved(m)
+  const waiting = threads.flatMap(t => t.turns).filter(m => needsRing(m) && !unsaved(m)
     && !replied.has(m.answers) && !ringing.has(m.answers));
   const due = waiting.filter(m => dueAt(m) <= now);
   const young = waiting.filter(m => !due.includes(m));
@@ -2724,11 +2768,19 @@ async function rering(){
       const s = stored.get(m.answers);
       if (!s) return false;
       if (unrung(s)) return true;
+      // The store can hold a rungAt this view had not read: the ring another view
+      // made for this slot. That slot is due a second ring only once its own
+      // stamp has failed to arrive, which is ACK_WAIT after that ring, not after
+      // the send this view was timing from.
+      if (silent(s) && ackDue(s.rungAt)) return true;
       for (const k of ['status', 'why', 'rungAt', 'again']){
         if (k in s) m[k] = s[k]; else delete m[k];
       }
       if (unsaved(m)){ m.status = 'sent'; delete m.why; }
       lateStored.delete(m.answers);
+      // A ring of someone else's that has not been answered yet still has to be
+      // looked at again, or nothing would ever notice it went unanswered.
+      if (silent(m)) reringIn(dueAt(m) - Date.now());
       return false;
     });
     // Rung only when the store still holds this decision, with a failed ring
@@ -2738,6 +2790,11 @@ async function rering(){
     // save that carried it was refused: no other view can ring a decision the store
     // holds no record for, so there is no second ring to race.
     let ringTheDecision = false;
+    // The rungAt of the ring this view found unanswered, if that is why it is
+    // ringing. The write at the end needs it: a stored record with a rungAt is
+    // normally another view's successful ring and is never overwritten, and this
+    // is how the second ring's own record is told from one of those.
+    let ringWas = null;
     if (decisionDue && stillHeld()){
       const same = isRow(fresh) && fresh.decision === held.decision && fresh.decidedAt === held.decidedAt;
       const rec = same && isRow(fresh.decisionRing) && fresh.decisionRing.decidedAt === held.decidedAt
@@ -2745,21 +2802,42 @@ async function rering(){
       const mine = decisionRing && decisionRing.decidedAt === held.decidedAt ? decisionRing : null;
       const known = rec || mine;
       const collected = isRow(picked) && picked.decision === held.decision && picked.decidedAt === held.decidedAt;
-      if (same && !collected && known && !known.rungAt && !known.again) ringTheDecision = true;
-      else if (rec){ decisionRing = {...rec}; rang = rangFrom(decisionRing); }
+      // A record with rungAt is rung again only when its stamp never came: the
+      // publish worked and the notice did not, which no retry of the publish
+      // would have caught.
+      if (same && !collected && known && !known.again
+          && (!known.rungAt || ackDue(known.rungAt))){
+        ringTheDecision = true;
+        ringWas = known.rungAt || null;
+      }
+      else if (rec){
+        decisionRing = {...rec};
+        rang = rangFrom(decisionRing);
+        // As for a message above: a ring another view made, still unanswered, is
+        // due a look of its own.
+        const next = decisionDueAt();
+        if (next !== null && next > Date.now()) reringIn(next - Date.now());
+      }
     }
     // An outdated view still takes the stored outcome above, which only changes what
     // it shows, but rings and writes nothing: the view that overtook it holds the
     // current slots, and rings for them itself.
     if (outdated || (!toRing.length && !ringTheDecision)){ draw(); if (showingDecided) drawDecided(); return; }
 
+    // What each slot was rung at before this ring, as ringWas is for the decision:
+    // a slot with one is being rung because nothing answered that ring, so this
+    // ring is its second and spends its one `again`.
+    const prevRung = new Map(toRing.map(m => [m.answers, m.rungAt || 0]));
     if (toRing.length){
       const rung = await ring({kind: 'message', turns: toRing.map(m => m.answers), again: true}, false);
       toRing.forEach(m => {
         lateStored.delete(m.answers);
         // A reply that landed during the ring has taken over this slot.
         if (replied.has(m.answers)) return;
-        if (rung === 'rung'){ m.status = 'sent'; delete m.why; m.rungAt = Date.now(); }
+        if (rung === 'rung'){
+          m.status = 'sent'; delete m.why; m.rungAt = Date.now();
+          if (prevRung.get(m.answers)) m.again = Date.now();
+        }
         else {
           m.status = 'unsent'; m.why = rung;
           // A view that cannot ring at all spends nothing: one that can still tries.
@@ -2808,8 +2886,12 @@ async function rering(){
       for (const x of (Array.isArray(doc.threads) ? doc.threads : [])
           .flatMap(t => isRow(t) && Array.isArray(t.turns) ? t.turns : [])){
         const m = isRow(x) && x.via === 'session' && outcome.get(x.answers);
-        if (!m || replied.has(x.answers) || x.rungAt || x.status === 'working'
+        if (!m || replied.has(x.answers) || x.status === 'working'
             || x.status === 'done') continue;
+        // A stored rungAt is another view's successful ring, and this write leaves
+        // it alone -- unless it is the ring this view found unanswered, whose
+        // second ring is what is being written.
+        if (x.rungAt && !(x.rungAt === prevRung.get(x.answers) && !x.again)) continue;
         x.status = m.status;
         if (m.rungAt) x.rungAt = m.rungAt;
         if (m.why) x.why = m.why; else delete x.why;
@@ -2818,7 +2900,8 @@ async function rering(){
       }
       if (decisionOutcome && doc.decision === held.decision && doc.decidedAt === held.decidedAt){
         const r = isRow(doc.decisionRing) && doc.decisionRing.decidedAt === held.decidedAt ? doc.decisionRing : null;
-        if (!(r && r.rungAt)){ doc.decisionRing = {...decisionOutcome}; changed = true; }
+        const second = r && r.rungAt && !r.again && r.rungAt === ringWas;
+        if (!(r && r.rungAt) || second){ doc.decisionRing = {...decisionOutcome}; changed = true; }
       }
       if (!changed || outdated) return;
       if (records !== before){ await saveNow(); return; }
@@ -2996,6 +3079,9 @@ function followPage(){
     () => db.collection('review/pr-' + DATA.number + '/presence'), snap => {
       const history = !presenceIn;
       if (!(snap.metadata && snap.metadata.fromCache)) presenceIn = true;
+      // Until this collection has loaded, no ring can be called unanswered, so
+      // none was timed for a second try. Now one can be: look again.
+      if (history && presenceIn && bellOn && restore === 'done' && reringStarted) reringIn(0);
       let newest = 0;
       snap.docs.forEach(d => {
         const row = d.data() || {};
