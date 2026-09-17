@@ -157,19 +157,24 @@ h1.doctitle{font-family:var(--doc);font-weight:600;font-size:30px;
   border-radius:6px;cursor:pointer}
 .revbar button[aria-pressed="true"]{border-color:var(--good);color:var(--good);font-weight:600}
 .revbar button:hover{color:var(--ink)}
-.diff{margin:0;padding:12px 13px;overflow-x:auto;font-family:var(--mono);
-  font-size:12.5px;line-height:1.55;white-space:pre;color:var(--ink)}
-.diff .row{display:block}
-.diff .add{background:var(--addbg)}
-.diff .del{background:var(--delbg)}
-.diff .sign{display:inline-block;width:1.2em;color:var(--faint);user-select:none}
-.diff .add .sign{color:var(--good)}
-.diff .del .sign{color:var(--mark)}
-.diff ins{text-decoration:none;background:var(--addwd)}
-.diff del{text-decoration:line-through;background:var(--delwd)}
-.diff .skip{display:block;color:var(--faint);padding:3px 0;font-size:11.5px;
-  font-family:var(--ui);white-space:normal}
-.diff .none{display:block;color:var(--soft);font-family:var(--ui);white-space:normal}
+/* Redlines, in the document rather than beside it: what went is struck through
+   where it stood, what arrived is underlined in its place. The marks carry the
+   change, so a line that only had words replaced takes no background of its
+   own -- a whole line gone or arrived does, because there is nothing else to
+   tell it apart from its neighbours. */
+ins.rl{text-decoration:underline;text-decoration-thickness:1px;
+  text-underline-offset:2px;background:var(--addwd);color:var(--ink)}
+del.rl{text-decoration:line-through;background:var(--delwd);color:var(--ink)}
+.md p ins.rl,.md li ins.rl{padding:0 1px}
+.rlnote{margin:0 0 12px;padding:8px 11px;border:1px solid var(--edge);
+  border-radius:6px;background:var(--paper);color:var(--soft);
+  font-family:var(--ui);font-size:12.5px;line-height:1.5}
+pre.redline{margin:0;padding:12px 13px;overflow-x:auto;font-family:var(--mono);
+  font-size:12.5px;line-height:1.55;color:var(--ink)}
+pre.redline code{font:inherit;background:none;padding:0;white-space:pre}
+pre.redline .row{display:block}
+pre.redline .row.add{background:var(--addbg)}
+pre.redline .row.del{background:var(--delbg)}
 
 /* A highlight that stays visible after the browser drops the selection --
    the moment focus enters the composer, the native selection is gone, and
@@ -723,18 +728,24 @@ const TONGUE = {py:'python', js:'javascript', ts:'typescript', sh:'bash',
 const SHEBANG = {python:'python', python3:'python', node:'javascript',
   bash:'bash', sh:'bash', zsh:'bash', ruby:'ruby', perl:'perl'};
 
-function render(page){
+// Prose, or source in a fenced block, and which language to colour it as. The
+// redline view needs the same answer render() reaches, so it is one function.
+function tongue(page){
   const name = page.full || page.name || '';
   const text = page.text || '';
-  if (/\.(md|markdown)$/i.test(name)) return markdown(text);
+  if (/\.(md|markdown)$/i.test(name)) return {prose: true, lang: ''};
   if (!/\./.test(name.split('/').pop())){
     const first = text.split('\n', 1)[0];
-    if (!/^#!/.test(first)) return markdown(text);
+    if (!/^#!/.test(first)) return {prose: true, lang: ''};
     const word = (first.match(/[\w.]+$/) || [''])[0].replace(/[0-9.]+$/, '');
-    return fenced(text, SHEBANG[word] || SHEBANG[word + '3'] || '');
+    return {prose: false, lang: SHEBANG[word] || SHEBANG[word + '3'] || ''};
   }
   const ext = name.split('.').pop().toLowerCase();
-  return fenced(text, TONGUE[ext] || ext);
+  return {prose: false, lang: TONGUE[ext] || ext};
+}
+function render(page){
+  const t = tongue(page);
+  return t.prose ? markdown(page.text || '') : fenced(page.text || '', t.lang);
 }
 
 /* ================= what changed since you read it ================= */
@@ -924,79 +935,100 @@ function lcsOps(x, y){
   while (j < m) ops.push({t: 'add', s: y[j++]});
   return ops;
 }
-// Inside a line replaced by one other line, the words that actually changed. A
-// reworded sentence is otherwise two near-identical lines the reviewer has to
-// compare by eye. Whitespace is kept as its own token so the marks fall on
-// words and the line still reads.
+// The marks themselves are carried through the renderers as four private-use
+// characters, not as tags: the document is drawn by the same markdown parser and
+// the same fenced-source path as always, and only then do the marks become
+// elements. Tags handed to the parser would be escaped into visible text, and a
+// second parser written for marked-up documents would drift from the first.
+const INS_A = '', INS_Z = '', DEL_A = '', DEL_Z = '';
+const SENTINEL = /[-]/g;
+const marks = html => html
+  .replace(//g, '<ins class="rl">').replace(//g, '</ins>')
+  .replace(//g, '<del class="rl">').replace(//g, '</del>');
+
+// Inside a line replaced by one other line, the words that actually changed,
+// kept on one line: what stayed, then what went, then what arrived. Grouped into
+// runs rather than marked token by token, because alternating them reads as
+// neither sentence -- "Three is the linehas thatbeen moves.rewritten." was the
+// first attempt at this. Whitespace is its own token so the marks fall on words.
 const WORD_CAP = 600;
-function wordMarks(before, after){
+function markWords(before, after){
   const x = before.split(/(\s+)/), y = after.split(/(\s+)/);
   if (x.length * y.length > WORD_CAP * WORD_CAP) return null;
   const ops = lcsOps(x, y);
-  const del = [], add = [];
-  let changed = false;
+  const out = [];
+  let gone = [], came = [], kept = 0, changed = 0;
+  const flush = () => {
+    const went = gone.join('').trim(), arrived = came.join('').trim();
+    if (went) out.push(DEL_A + went + DEL_Z);
+    if (went && arrived) out.push(' ');
+    if (arrived) out.push(INS_A + arrived + INS_Z);
+    if (went || arrived) changed++;
+    gone = []; came = [];
+  };
   ops.forEach(o => {
-    if (o.t === 'same'){ del.push(esc(o.s)); add.push(esc(o.s)); return; }
-    // A space the walk paired differently is not a change anyone reads: marked,
-    // it puts a coloured gap between two words that both stayed.
-    const white = !o.s.trim();
-    if (!white) changed = true;
-    if (o.t === 'del') del.push(white ? esc(o.s) : '<del>' + esc(o.s) + '</del>');
-    else add.push(white ? esc(o.s) : '<ins>' + esc(o.s) + '</ins>');
+    if (o.t === 'same'){
+      // A space that both sides share, in the middle of a changed run, belongs
+      // to both phrases: flushing on it is what chopped a rewritten sentence
+      // into alternating words.
+      if (!o.s.trim() && (gone.length || came.length)){ gone.push(o.s); came.push(o.s); return; }
+      flush();
+      out.push(o.s);
+      if (o.s.trim()) kept++;
+      return;
+    }
+    (o.t === 'del' ? gone : came).push(o.s);
   });
-  // Every word different: the marks would cover the whole line and say nothing.
-  return changed && ops.some(o => o.t === 'same' && o.s.trim()) ? [del.join(''), add.join('')] : null;
+  flush();
+  // Nothing shared: the marks would cover the whole line and say nothing, so
+  // the two lines are shown as one gone and one arrived instead.
+  return kept && changed ? out.join('') : null;
 }
 
-// How many unchanged lines are kept either side of a change, and the shortest
-// run worth collapsing. A patch with no context is unreadable; all of it is the
-// document again.
-const DIFF_CONTEXT = 3;
-const row = (kind, sign, html) => '<span class="row ' + kind + '"><span class="sign">'
-  + sign + '</span>' + html + '</span>';
-function diffHtml(before, after, note = ''){
-  const {ops, exact} = lineOps(before, after);
-  if (!ops.some(o => o.t !== 'same'))
-    return '<pre class="diff"><span class="none">No difference: this page reads exactly '
-      + 'as it did when you last read it.</span></pre>';
-  // Which unchanged lines to draw: those within DIFF_CONTEXT of a change.
-  const keep = ops.map(o => o.t !== 'same');
-  ops.forEach((o, i) => {
-    if (o.t === 'same') return;
-    for (let d = 1; d <= DIFF_CONTEXT; d++){
-      if (i - d >= 0) keep[i - d] = true;
-      if (i + d < ops.length) keep[i + d] = true;
-    }
-  });
-  const out = [];
-  if (note) out.push('<span class="skip">' + esc(note) + '</span>');
-  if (!exact) out.push('<span class="skip">This page was rewritten wholesale, so the '
-    + 'difference is shown as the old text removed and the new text added.</span>');
-  let skipped = 0;
+// A whole line gone or arrived. The leading markup stays outside the mark: a
+// sentinel before a heading's # or a list's bullet stops the parser seeing them,
+// and the line lands as a paragraph in the middle of a list.
+const LEAD = /^(\s*(?:[-*+]\s+|\d+[.)]\s+|>\s?|#{1,4}\s+)?)([\s\S]*)$/;
+function markLine(line, kind){
+  const m = line.match(LEAD), rest = m ? m[2] : line;
+  if (!rest) return line;                 // blank, or a bare marker: nothing to mark
+  return (m ? m[1] : '') + (kind === 'del' ? DEL_A + rest + DEL_Z : INS_A + rest + INS_Z);
+}
+
+// The document with the changes marked in it, the way a tracked change reads in
+// a word processor: the whole page, in its own shape, with what went struck
+// through where it stood and what arrived underlined in its place. Not a patch
+// -- a patch is a list of fragments, and the reviewer is judging a document.
+function redline(before, after, page, note = ''){
+  const strip = t => String(t || '').replace(SENTINEL, '');
+  const {ops, exact} = lineOps(strip(before), strip(after));
+  const prose = tongue(page).prose;
+  const notes = [];
+  if (note) notes.push(note);
+  if (!exact) notes.push('This page was rewritten wholesale, so all of the old text '
+    + 'is struck through and all of the new is underlined.');
+  if (!ops.some(o => o.t !== 'same')) notes.push('No difference: this page reads exactly '
+    + 'as it does in what it is being compared with.');
+  const head = notes.map(n => '<p class="rlnote">' + esc(n) + '</p>').join('');
+
+  const lines = [];
   for (let i = 0; i < ops.length; i++){
-    const o = ops[i];
-    if (o.t === 'same' && !keep[i]){ skipped++; continue; }
-    if (skipped){
-      out.push('<span class="skip">' + skipped + (skipped === 1 ? ' unchanged line'
-        : ' unchanged lines') + '</span>');
-      skipped = 0;
-    }
-    // A line replaced by exactly one other line is marked word by word.
-    const next = ops[i + 1];
+    const o = ops[i], next = ops[i + 1];
+    if (o.t === 'same'){ lines.push({t: 'same', s: o.s}); continue; }
+    // One line replaced by one other: both, on one line, word by word.
     if (o.t === 'del' && next && next.t === 'add' && (!ops[i + 2] || ops[i + 2].t !== 'add')){
-      const marks = wordMarks(o.s, next.s);
-      if (marks){
-        out.push(row('del', '−', marks[0]));
-        out.push(row('add', '+', marks[1]));
-        i++;
-        continue;
-      }
+      const both = markWords(o.s, next.s);
+      if (both){ lines.push({t: 'both', s: both}); i++; continue; }
     }
-    out.push(row(o.t === 'add' ? 'add' : o.t === 'del' ? 'del' : 'ctx',
-      o.t === 'add' ? '+' : o.t === 'del' ? '−' : ' ', esc(o.s)));
+    lines.push({t: o.t, s: markLine(o.s, o.t)});
   }
-  if (skipped) out.push('<span class="skip">' + skipped + ' unchanged lines</span>');
-  return '<pre class="diff">' + out.join('') + '</pre>';
+  // Prose goes through the markdown parser as a document, marks and all.
+  if (prose) return head + marks(markdown(lines.map(l => l.s).join('\n')));
+  // Source keeps every line, changed or not: a file read as a patch of
+  // fragments cannot be judged, and the reviewer asked to see all of it.
+  return head + '<pre class="redline"><code>' + lines.map(l =>
+    '<span class="row ' + (l.t === 'same' ? 'ctx' : l.t) + '">'
+    + marks(esc(l.s)) + '\n</span>').join('') + '</code></pre>';
 }
 
 // Highlighting is applied after render rather than baked into the markup, so
@@ -1185,10 +1217,14 @@ function paint(){
   // markdown parser, and a page that has not moved is never a patch.
   const was = baseline(view, leaf);
   $('sheet').innerHTML = was === null ? render(all[leaf])
-    : diffHtml(was, all[leaf].text || '',
-               view === 'base' && baseText(leaf) === null
-                 ? 'This request adds this file, so all of it is new.' : '');
-  if (was !== null) return;          // a patch holds no code blocks, diagrams or headings
+    : redline(was, all[leaf].text || '', all[leaf],
+              view === 'base' && baseText(leaf) === null
+                ? 'This request adds this file, so all of it is new.' : '');
+  // A redline keeps the document's headings, so the panel can still say where
+  // the reader is. The highlighter and mermaid are skipped: both replace the
+  // markup of a block wholesale, and would drop the marks inside it. Colour and
+  // drawings are worth less than knowing what changed.
+  if (was !== null){ watchHeadings(); return; }
   paintCode();
   paintDiagrams();
   watchHeadings();

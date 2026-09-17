@@ -41,14 +41,21 @@ the session rewrites whatever the push made out of date.
 
 A page can be read three ways: **Document**, **Since you read**, and **Against
 main** — whatever branch the request is against. The two changed views are
-patches, with a few lines of context and the words that moved inside a reworded
-line marked. *Since you read* is what is new to you on this tab, which is how a
-back and forth reaches you. *Against main* is what the request itself changes:
-the file as it will be against the file as it is on the branch, which is the
-thing you are being asked to approve. A page that has moved says so in a bar
-over it, and a view with nothing to compare with is offered but disabled — so a
-page you have never read still answers the second question, and a file the
-request adds says that instead of drawing a comparison with nothing.
+redlines, drawn in the document rather than beside it: what went is struck
+through where it stood, what arrived is underlined in its place, and a reworded
+sentence shows the old phrase then the new one. Prose stays prose — a changed
+heading is still a heading — and a source file keeps every line, changed or not,
+because a file read as a handful of fragments cannot be judged. Syntax colouring
+and diagrams are left off in these two views: both are drawn by replacing a
+block's markup, which would take the marks with it.
+
+*Since you read* is what is new to you on this tab, which is how a back and
+forth reaches you. *Against main* is what the request itself changes: the file as
+it will be against the file as it is on the branch, which is the thing you are
+being asked to approve. A page that has moved says so in a bar over it, and a
+view with nothing to compare with is offered but disabled — so a page you have
+never read still answers the second question, and a file the request adds says
+that instead of drawing a comparison with nothing.
 
 **Mark as read** moves the read baseline; looking at the document does not, and
 neither view touches the other. The setting holds for the desk, so asking what

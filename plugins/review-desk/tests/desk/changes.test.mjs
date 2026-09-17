@@ -1,12 +1,13 @@
-// What changed since you read it. The working session rewrites a document while
-// the desk is open -- because the reviewer asked, or because someone pushed --
-// and the page used to say only that something had: a mark on the tab, and a new
-// text where the old one was. It now keeps the text each page had when this tab
-// last read it and draws the difference against it, as a patch, behind a toggle.
+// What changed, drawn in the document rather than beside it: what went struck
+// through where it stood, what arrived underlined in its place, the way a
+// tracked change reads in a word processor. A patch is a list of fragments, and
+// the reviewer is judging a document -- so prose stays prose, and a source file
+// keeps every line, changed or not.
 //
-// The toggle is one setting for the desk and it sticks, so asking what changed is
-// a single press and then it is simply how the desk reads. The baseline is per
-// tab, in sessionStorage, because a ring reloads the tab.
+// Three ways to read a page: the document, what has changed since this tab last
+// read it, and what this request changes against the branch it is against. The
+// read baseline is per tab in sessionStorage, because a ring reloads the tab;
+// the base text is carried onto the desk by the working session.
 import {test, before, after, afterEach} from 'node:test';
 import assert from 'node:assert/strict';
 import {launch, open, payload} from './harness.mjs';
@@ -31,18 +32,23 @@ const FIRST = ['# Notes', '', 'One stays as it is.', 'Two stays as it is.',
 const SECOND = FIRST.replace('Three is the line that moves.',
   'Three has been rewritten by the session.');
 
-// FIRST is also what the file says on main here, so the request itself changes
-// nothing until the session rewrites the document -- which keeps each test's
-// two baselines independent.
+// FIRST is what the file says on main here too, so the request changes nothing
+// until the session rewrites the document: each test's two baselines stay
+// independent of one another.
 const data = (extra = {}) => payload({baseRefName: 'main',
   documents: [{name: NOTES, text: FIRST, base: FIRST}], ...extra});
+
 const bar = () => desk.page.locator('#revbar .what');
 const barShown = () => desk.page.$eval('#revbar', el => !el.hidden);
-const diffText = () => desk.page.textContent('#sheet .diff');
+const sheet = () => desk.page.textContent('#sheet');
 const openNotes = () => desk.page.click('[data-leaf="1"]');
-// The rows of the patch, each with the sign the page drew.
-const rows = () => desk.page.$$eval('#sheet .diff .row',
-  els => els.map(e => e.textContent.replace(/ /g, ' ')));
+// The marks themselves: what the page says arrived, and what it says went.
+const arrived = () => desk.page.$$eval('#sheet ins.rl', els => els.map(e => e.textContent));
+const went = () => desk.page.$$eval('#sheet del.rl', els => els.map(e => e.textContent));
+const marked = () => desk.page.waitForSelector('#sheet ins.rl, #sheet del.rl', {timeout: 3000});
+// A source file's lines, with what the page made of each one.
+const codeLines = () => desk.page.$$eval('#sheet pre.redline .row',
+  els => els.map(e => [e.className.replace('row ', ''), e.textContent.replace(/\n$/, '')]));
 
 test('a rewritten page says so, and the changes are one press away', async () => {
   desk = await open(browser, {data: data()});
@@ -58,39 +64,20 @@ test('a rewritten page says so, and the changes are one press away', async () =>
   await desk.page.waitForFunction(() => !document.querySelector('#revbar').hidden);
   assert.match(await bar().textContent(), /Rewritten since you read this page/);
   // The document is still the document until the reviewer asks.
-  assert.equal(await desk.page.locator('#sheet .diff').count(), 0);
-  await desk.page.click('[data-view="read"]');
-  await desk.page.waitForSelector('#sheet .diff');
-  const drawn = await rows();
-  assert.ok(drawn.some(r => r.startsWith('−') && r.includes('Three is the line that moves')), drawn);
-  assert.ok(drawn.some(r => r.startsWith('+') && r.includes('Three has been rewritten')), drawn);
-  // Context either side, and the rest of the file collapsed rather than redrawn.
-  assert.ok(drawn.some(r => r.startsWith(' ') && r.includes('Two stays as it is')), drawn);
-  assert.match(await diffText(), /unchanged lines?/);
-  assert.equal(await desk.page.locator('#sheet h1').count(), 0, 'the patch is source, not prose');
-});
+  assert.equal(await desk.page.locator('#sheet ins.rl').count(), 0);
 
-test('the words that changed inside a rewritten line are marked', async () => {
-  desk = await open(browser, {data: data()});
-  await desk.page.waitForSelector('#sheet h2, #sheet h1');
-  await desk.document('docs~notes.md', NOTES, SECOND);
-  await desk.page.waitForFunction(() => document.querySelector('.leaf .fresh.show'));
-  await openNotes();
   await desk.page.click('[data-view="read"]');
-  await desk.page.waitForSelector('#sheet .diff');
-  // Each changed word is its own mark, so the line reads with the shared words
-  // unmarked between them.
-  // Each changed word is its own mark, and the spaces between them are not
-  // marked, so the line still reads as a line.
-  const marks = sel => desk.page.$$eval(sel, els => els.map(e => e.textContent));
-  assert.deepEqual(await marks('#sheet .diff del'), ['is', 'the', 'line', 'that', 'moves.']);
-  assert.deepEqual(await marks('#sheet .diff ins'),
-    ['has', 'been', 'rewritten', 'by', 'the', 'session.']);
-  // "Three" is shared, so it is marked on neither side, and both rows still
-  // carry the whole line.
-  const drawn = await rows();
-  assert.ok(drawn.includes('\u2212Three is the line that moves.'), drawn);
-  assert.ok(drawn.includes('+Three has been rewritten by the session.'), drawn);
+  await marked();
+  // Still a document: the heading is a heading, and every line that did not
+  // change is there, unmarked.
+  assert.equal(await desk.page.locator('#sheet h1').count(), 1, 'prose stays prose');
+  const text = await sheet();
+  for (const kept of ['One stays as it is.', 'Four stays as it is.', 'Eight stays as it is.'])
+    assert.ok(text.includes(kept), kept + ' is missing');
+  // Grouped, not alternated: the phrase that went, then the phrase that came.
+  assert.deepEqual(await went(), ['is the line that moves.']);
+  assert.deepEqual(await arrived(), ['has been rewritten by the session.']);
+  assert.ok(text.includes('Three'), 'the word both texts share is outside the marks');
 });
 
 test('a rewrite of the page on screen leaves the prose alone until the changes are asked for', async () => {
@@ -99,25 +86,88 @@ test('a rewrite of the page on screen leaves the prose alone until the changes a
   await desk.context('body', {text: '## What it does\n\nThe second account.\n'});
   await desk.page.waitForFunction(() => document.querySelector('#sheet').textContent.includes('second account'));
 
-  // The bar is there; the document is still a document. Swapping it for a patch
-  // under someone reading takes away the prose and the passage they were about
-  // to quote.
+  // Swapping the page under someone reading takes away the prose, where they
+  // are in it, and the passage they were about to quote.
   assert.equal(await barShown(), true);
   assert.equal(await desk.page.locator('#sheet h2').count(), 1);
-  assert.equal(await desk.page.locator('#sheet .diff').count(), 0);
+  assert.equal(await desk.page.locator('#sheet ins.rl').count(), 0);
 
   await desk.page.click('[data-view="read"]');
-  await desk.page.waitForSelector('#sheet .diff');
-  const drawn = await rows();
-  assert.ok(drawn.some(r => r.startsWith('−') && r.includes('The first account.')), drawn);
-  assert.ok(drawn.some(r => r.startsWith('+') && r.includes('The second account.')), drawn);
+  await marked();
+  assert.deepEqual(await went(), ['first']);
+  assert.deepEqual(await arrived(), ['second']);
+  assert.equal(await desk.page.locator('#sheet h2').count(), 1, 'the heading survives the marks');
   assert.equal(await desk.page.$eval('[data-view="read"]', el => el.getAttribute('aria-pressed')), 'true');
 
   await desk.page.click('[data-view="full"]');
   await desk.page.waitForSelector('#sheet h2');
-  assert.equal(await desk.page.locator('#sheet .diff').count(), 0);
+  assert.equal(await desk.page.locator('#sheet ins.rl').count(), 0);
   // Looking at the document is not saying you have read the change: the bar stays.
   assert.equal(await barShown(), true);
+});
+
+test('a source file keeps every line, with the changed one marked in place', async () => {
+  // Asked for plainly: an inline diff is fine, but all of the code, not the
+  // changed snippets. A file read as a handful of fragments cannot be judged.
+  const lines = n => Array.from({length: 40}, (_, i) => 'x_' + i + ' = ' + (i === 20 ? n : i)).join('\n');
+  desk = await open(browser, {data: payload({baseRefName: 'main',
+    documents: [{name: 'tools/a.py', text: lines(999), base: lines(20)}]})});
+  await desk.page.waitForSelector('.leaf[data-leaf="1"]');
+  await openNotes();
+  await desk.page.click('[data-view="base"]');
+  await desk.page.waitForSelector('#sheet pre.redline');
+
+  const drawn = await codeLines();
+  assert.equal(drawn.length, 40, 'every line of the file is drawn, not just the change');
+  const changed = drawn.filter(([kind]) => kind !== 'ctx');
+  assert.deepEqual(changed.map(([kind]) => kind), ['both']);
+  assert.deepEqual(await went(), ['20']);
+  assert.deepEqual(await arrived(), ['999']);
+  assert.equal(drawn[0][1], 'x_0 = 0');
+  assert.equal(drawn[39][1], 'x_39 = 39');
+});
+
+test('a line that only went, and one that only arrived, are marked whole', async () => {
+  const before = ['keep me', 'delete me', 'keep me too'].join('\n');
+  const after = ['keep me', 'keep me too', 'added at the end'].join('\n');
+  desk = await open(browser, {data: payload({baseRefName: 'main',
+    documents: [{name: 'tools/b.sh', text: after, base: before}]})});
+  await desk.page.waitForSelector('.leaf[data-leaf="1"]');
+  await openNotes();
+  await desk.page.click('[data-view="base"]');
+  await desk.page.waitForSelector('#sheet pre.redline');
+  assert.deepEqual(await codeLines(), [
+    ['ctx', 'keep me'],
+    ['del', 'delete me'],
+    ['ctx', 'keep me too'],
+    ['add', 'added at the end'],
+  ]);
+  assert.deepEqual(await went(), ['delete me']);
+  assert.deepEqual(await arrived(), ['added at the end']);
+});
+
+test('a heading or a list item that changed is still a heading or a list item', async () => {
+  // The marks are carried through the parser as characters, not tags, exactly so
+  // this holds: a mark in front of a # or a bullet would leave the line as a
+  // paragraph in the middle of a list.
+  const before = ['## The old heading', '', '- first item', '- second item'].join('\n');
+  const after = ['## The new heading', '', '- first item', '- second item, reworded',
+    '- a third item'].join('\n');
+  desk = await open(browser, {data: payload({baseRefName: 'main',
+    documents: [{name: 'docs/list.md', text: after, base: before}]})});
+  await desk.page.waitForSelector('#sheet');
+  await openNotes();
+  await desk.page.click('[data-view="base"]');
+  await marked();
+  assert.equal(await desk.page.locator('#sheet h2').count(), 1, 'the heading is still a heading');
+  assert.match(await desk.page.textContent('#sheet h2'), /old.*new|new.*old/);
+  assert.equal(await desk.page.locator('#sheet li').count(), 4,
+    'the list is still a list, with the item that went beside the one that came');
+  assert.ok((await went()).includes('old'), JSON.stringify(await went()));
+  assert.ok((await arrived()).includes('new'), JSON.stringify(await arrived()));
+  // The rewritten item and the added one are separate lines, so each is marked
+  // whole -- which is why there are four items here and three in the file.
+  assert.ok((await went()).includes('second item'), JSON.stringify(await went()));
 });
 
 test('Mark as read moves the read baseline, and the next rewrite is drawn against it', async () => {
@@ -127,120 +177,63 @@ test('Mark as read moves the read baseline, and the next rewrite is drawn agains
   await desk.page.waitForFunction(() => document.querySelector('.leaf .fresh.show'));
   await openNotes();
   await desk.page.click('[data-view="read"]');
-  await desk.page.waitForSelector('#sheet .diff');
+  await marked();
 
   await desk.page.click('[data-view="markRead"]');
-  await desk.page.waitForSelector('#sheet h1');
-  assert.equal(await desk.page.locator('#sheet .diff').count(), 0);
+  await desk.page.waitForFunction(() => !document.querySelector('#sheet ins.rl'));
 
-  // A second rewrite, of a different line, while this page is on screen. The
-  // toggle was left on, so the changes are drawn as soon as they are asked for.
+  // A second rewrite, of a different line, while this page is on screen.
   const third = SECOND.replace('Eight stays as it is.', 'Eight has moved too.');
   await desk.document('docs~notes.md', NOTES, third);
-  await desk.page.waitForFunction(() => !document.querySelector('#revbar').hidden);
-  await desk.page.waitForSelector('#sheet .diff');
-  const drawn = await rows();
-  assert.ok(drawn.some(r => r.startsWith('+') && r.includes('Eight has moved too')), drawn);
-  assert.ok(!drawn.some(r => r.startsWith('+') && r.includes('Three has been rewritten')),
-    'the first rewrite was read, so it is not drawn again: ' + JSON.stringify(drawn));
+  // In a redline the new phrase sits beside the old one, so the page reads
+  // "Eight stays as it is. has moved too." -- the arrival is what to wait for.
+  await desk.page.waitForFunction(() => [...document.querySelectorAll('#sheet ins.rl')]
+    .some(e => e.textContent.includes('moved too')));
+  await marked();
+  assert.deepEqual(await arrived(), ['has moved too.']);
+  assert.ok(!(await arrived()).includes('rewritten'),
+    'the first rewrite was read, so it is not marked again');
 });
 
 test('the baseline a reload comes back to is what this tab had read', async () => {
-  // The case the whole view exists for: a ring reloads the tab, so the page it
-  // comes back to is built from the payload again and the store hands it a text
-  // a revision ahead. The baseline in sessionStorage is the only record of what
-  // the reviewer had actually read, and this is the reload seen from the other
-  // side -- a tab that had read the payload's copy before the ring arrived.
   const READ_KEY = 'review-desk read LiLo-Labs/claude-code-plugins#42';
   desk = await open(browser, {
     data: data(),
     seed: {[PR + '/documents/docs~notes.md']:
-      {name: NOTES, text: SECOND, at: '2026-09-17T10:00:00.000Z'}},
+      {name: NOTES, text: SECOND, base: FIRST, at: '2026-09-17T10:00:00.000Z'}},
     init: 'sessionStorage.setItem(' + JSON.stringify(READ_KEY) + ', '
       + JSON.stringify(JSON.stringify([{k: NOTES, t: FIRST}])) + ')',
   });
   await desk.page.waitForFunction(() => document.querySelector('.leaf .fresh.show'));
   await openNotes();
   await desk.page.click('[data-view="read"]');
-  await desk.page.waitForSelector('#sheet .diff');
-  const drawn = await rows();
-  assert.ok(drawn.some(r => r.startsWith('+') && r.includes('Three has been rewritten')), drawn);
-  assert.ok(drawn.some(r => r.startsWith('\u2212') && r.includes('Three is the line that moves')), drawn);
+  await marked();
+  assert.deepEqual(await arrived(), ['has been rewritten by the session.']);
 });
 
 test('the toggle holds for the whole desk, and comes back after a reload', async () => {
+  const DRAFTS = 'review-desk draft LiLo-Labs/claude-code-plugins#42';
   desk = await open(browser, {data: data({body: '## What it does\n\nThe first account.\n'})});
   await desk.page.waitForSelector('#sheet h2');
   await desk.context('body', {text: '## What it does\n\nThe second account.\n'});
   await desk.page.waitForFunction(() => !document.querySelector('#revbar').hidden);
   await desk.page.click('[data-view="read"]');
-  await desk.page.waitForSelector('#sheet .diff');
+  await marked();
 
   // Another page, rewritten after the toggle went on: no second press.
   await desk.document('docs~notes.md', NOTES, SECOND);
   await desk.page.waitForFunction(() => document.querySelector('.leaf:nth-child(2) .fresh.show'));
   await openNotes();
-  await desk.page.waitForSelector('#sheet .diff');
-  assert.ok((await rows()).some(r => r.startsWith('+') && r.includes('Three has been rewritten')));
-
-  // And the setting itself is a draft, so the reload a ring causes keeps it.
-  assert.equal(await desk.page.evaluate(() => JSON.parse(
-    sessionStorage.getItem('review-desk draft LiLo-Labs/claude-code-plugins#42')).changes), 'read');
+  await marked();
+  assert.deepEqual(await arrived(), ['has been rewritten by the session.']);
+  assert.equal(await desk.page.evaluate(k => JSON.parse(sessionStorage.getItem(k)).changes, DRAFTS),
+    'read');
 });
 
-test('a desk opened fresh claims nothing you have read, and still has the request\u2019s diff', async () => {
-  // The session rewrote a document while no tab was open. The reviewer has read
-  // neither text, so "since you read" has nothing to compare with -- and the
-  // request's own diff is there regardless, which is the point of taking the
-  // third baseline off the branch rather than off the payload.
-  desk = await open(browser, {data: data(), seed: {[PR + '/documents/docs~notes.md']:
-    {name: NOTES, text: SECOND, at: '2026-09-17T10:00:00.000Z'}}});
-  await desk.page.waitForFunction(() => document.querySelector('#sheet') !== null);
-  await openNotes();
-  await desk.page.waitForFunction(() => document.querySelector('#sheet').textContent.includes('rewritten by the session'));
-  // The document reads as a document: nothing switched under the reviewer.
-  assert.equal(await desk.page.locator('#sheet .diff').count(), 0);
-  assert.equal(await desk.page.$eval('[data-view="read"]', el => el.disabled), true);
-  assert.match(await bar().textContent(), /Changed by this request/);
-
-  await desk.page.click('[data-view="base"]');
-  await desk.page.waitForSelector('#sheet .diff');
-  assert.ok((await rows()).some(r => r.startsWith('+') && r.includes('Three has been rewritten')));
-});
-
-test('a file the desk never carried reads as a document, and offers no comparison', async () => {
-  desk = await open(browser, {data: data()});
-  await desk.page.waitForSelector('#sheet h2, #sheet h1');
-  await desk.document('tools~new.py', 'tools/new.py', 'x = 1\ny = 2\n');
-  await desk.page.waitForFunction(() => document.querySelectorAll('.leaf').length === 3);
-  await desk.page.click('[data-leaf="2"]');
-  await desk.page.waitForFunction(() => document.querySelector('#sheet').textContent.includes('x = 1'));
-  // A row with no base text carries no comparison with main, and none was read
-  // of it here either: the document is all the page can honestly show.
-  assert.equal(await barShown(), false, 'nothing to compare with, so nothing is claimed');
-  assert.equal(await desk.page.locator('#sheet .diff').count(), 0);
-});
-
-test('a file the request adds says so, and the whole of it is the change', async () => {
-  desk = await open(browser, {data: data()});
-  await desk.page.waitForSelector('#sheet h2, #sheet h1');
-  await desk.document('tools~new.py', 'tools/new.py', 'x = 1\ny = 2\n', {base: null});
-  await desk.page.waitForFunction(() => document.querySelectorAll('.leaf').length === 3);
-  await desk.page.click('[data-leaf="2"]');
-  await desk.page.waitForFunction(() => document.querySelector('#sheet').textContent.includes('x = 1'));
-  assert.match(await bar().textContent(), /This request adds this file/);
-  await desk.page.click('[data-view="base"]');
-  await desk.page.waitForSelector('#sheet .diff');
-  assert.match(await diffText(), /This request adds this file/);
-  const drawn = await rows();
-  assert.ok(drawn.some(r => r.startsWith('+') && r.includes('x = 1')), drawn);
-  assert.ok(!drawn.some(r => r.startsWith('\u2212')), 'nothing was removed: ' + JSON.stringify(drawn));
-});
-
-test('the third view is the request\u2019s own diff, against the base branch', async () => {
-  // The question the review is actually about: not what is new to this tab, but
-  // what this request changes. Here main says FIRST, the request's head says
-  // SECOND, and the reviewer has read SECOND already.
+test('the third view is the request’s own diff, against the base branch', async () => {
+  // Here main says FIRST, the request's head says SECOND, and the reviewer has
+  // read SECOND already: nothing is new to them, and the request still changed
+  // the file.
   desk = await open(browser, {
     data: payload({baseRefName: 'main', documents: [{name: NOTES, text: SECOND, base: FIRST}]}),
   });
@@ -252,105 +245,78 @@ test('the third view is the request\u2019s own diff, against the base branch', a
   assert.match(await desk.page.textContent('[data-view="base"]'), /^Against main$/);
 
   await desk.page.click('[data-view="base"]');
-  await desk.page.waitForSelector('#sheet .diff');
-  const drawn = await rows();
-  assert.ok(drawn.some(r => r.startsWith('\u2212') && r.includes('Three is the line that moves')), drawn);
-  assert.ok(drawn.some(r => r.startsWith('+') && r.includes('Three has been rewritten')), drawn);
+  await marked();
+  // Grouped, not alternated: the phrase that went, then the phrase that came.
+  assert.deepEqual(await went(), ['is the line that moves.']);
+  assert.deepEqual(await arrived(), ['has been rewritten by the session.']);
 
-  // And a rewrite under the reviewer keeps both views true: since-you-read has
-  // the new line only, against-main has everything the request does.
+  // A rewrite under the reviewer keeps both views true.
   const third = SECOND.replace('Eight stays as it is.', 'Eight has moved too.');
   await desk.document('docs~notes.md', NOTES, third, {base: FIRST});
-  await desk.page.waitForFunction(() => document.querySelector('#sheet').textContent.includes('Eight has moved too'));
-  const sinceBase = await rows();
-  assert.ok(sinceBase.some(r => r.startsWith('+') && r.includes('Three has been rewritten')), sinceBase);
-  assert.ok(sinceBase.some(r => r.startsWith('+') && r.includes('Eight has moved too')), sinceBase);
+  // In a redline the new phrase sits beside the old one, so the page reads
+  // "Eight stays as it is. has moved too." -- the arrival is what to wait for.
+  await desk.page.waitForFunction(() => [...document.querySelectorAll('#sheet ins.rl')]
+    .some(e => e.textContent.includes('moved too')));
+  const both = (await arrived()).join(' | ');
+  assert.match(both, /rewritten/, 'against main keeps the earlier change');
+  assert.match(both, /moved/, 'and has the new one');
 
   await desk.page.click('[data-view="read"]');
-  await desk.page.waitForSelector('#sheet .diff');
-  const sinceRead = await rows();
-  assert.ok(sinceRead.some(r => r.startsWith('+') && r.includes('Eight has moved too')), sinceRead);
-  assert.ok(!sinceRead.some(r => r.includes('Three has been rewritten')),
-    'that line was read before the rewrite: ' + JSON.stringify(sinceRead));
+  await marked();
+  assert.deepEqual(await arrived(), ['has moved too.'],
+    'since you read has only what arrived after they read it');
 });
 
-test('the request\u2019s diff holds what was already read, and the read view does not', async () => {
-  // The two questions kept apart: "what is new to me on this tab" and "what does
-  // this request change". Marking a page read answers the first and must not
-  // touch the second.
+test('a file the request adds says so, and the whole of it is new', async () => {
   desk = await open(browser, {data: data()});
   await desk.page.waitForSelector('#sheet h2, #sheet h1');
-  await desk.document('docs~notes.md', NOTES, SECOND);
-  await desk.page.waitForFunction(() => document.querySelector('.leaf .fresh.show'));
-  await openNotes();
-  await desk.page.click('[data-view="markRead"]');
-  await desk.page.waitForSelector('#sheet h1');
+  await desk.document('tools~new.py', 'tools/new.py', 'x = 1\ny = 2\n', {base: null});
+  await desk.page.waitForFunction(() => document.querySelectorAll('.leaf').length === 3);
+  await desk.page.click('[data-leaf="2"]');
+  await desk.page.waitForFunction(() => document.querySelector('#sheet').textContent.includes('x = 1'));
+  assert.match(await bar().textContent(), /This request adds this file/);
 
-  // Read up to date, and the request still changes the file: the bar stays, and
-  // only the against-main view is live.
-  assert.equal(await barShown(), true);
-  assert.match(await bar().textContent(), /Changed by this request\. You have read what it says now/);
+  await desk.page.click('[data-view="base"]');
+  await desk.page.waitForSelector('#sheet pre.redline');
+  assert.match(await desk.page.textContent('#sheet .rlnote'), /This request adds this file/);
+  assert.deepEqual((await codeLines()).map(([kind]) => kind), ['add', 'add', 'ctx']);
+  assert.deepEqual(await went(), [], 'nothing was removed');
+});
+
+test('a document carried with no base text offers no comparison with the branch', async () => {
+  desk = await open(browser, {data: data()});
+  await desk.page.waitForSelector('#sheet h2, #sheet h1');
+  await desk.document('tools~old.py', 'tools/old.py', 'x = 1\n');
+  await desk.page.waitForFunction(() => document.querySelectorAll('.leaf').length === 3);
+  await desk.page.click('[data-leaf="2"]');
+  await desk.page.waitForFunction(() => document.querySelector('#sheet').textContent.includes('x = 1'));
+  assert.equal(await barShown(), false, 'nothing to compare with, so nothing is claimed');
+});
+
+test('a desk opened fresh claims nothing you have read, and still has the request’s diff', async () => {
+  desk = await open(browser, {data: data(), seed: {[PR + '/documents/docs~notes.md']:
+    {name: NOTES, text: SECOND, base: FIRST, at: '2026-09-17T10:00:00.000Z'}}});
+  await desk.page.waitForFunction(() => document.querySelector('#sheet') !== null);
+  await openNotes();
+  await desk.page.waitForFunction(() => document.querySelector('#sheet').textContent.includes('rewritten by the session'));
+  assert.equal(await desk.page.locator('#sheet ins.rl').count(), 0);
   assert.equal(await desk.page.$eval('[data-view="read"]', el => el.disabled), true);
-
-  const third = SECOND.replace('Eight stays as it is.', 'Eight has moved too.');
-  await desk.document('docs~notes.md', NOTES, third);
-  await desk.page.waitForFunction(() => document.querySelector('#sheet').textContent.includes('Eight has moved too'));
-
-  await desk.page.click('[data-view="read"]');
-  await desk.page.waitForSelector('#sheet .diff');
-  const sinceRead = await rows();
-  assert.ok(sinceRead.some(r => r.startsWith('+') && r.includes('Eight has moved too')), sinceRead);
-  assert.ok(!sinceRead.some(r => r.includes('Three has been rewritten')),
-    'the first rewrite was read: ' + JSON.stringify(sinceRead));
+  assert.match(await bar().textContent(), /Changed by this request/);
 
   await desk.page.click('[data-view="base"]');
-  await desk.page.waitForSelector('#sheet .diff');
-  const sinceBase = await rows();
-  assert.ok(sinceBase.some(r => r.startsWith('+') && r.includes('Eight has moved too')), sinceBase);
-  assert.ok(sinceBase.some(r => r.startsWith('+') && r.includes('Three has been rewritten')),
-    'the request\u2019s diff keeps what was already read: ' + JSON.stringify(sinceBase));
+  await marked();
+  assert.deepEqual(await arrived(), ['has been rewritten by the session.']);
 });
 
-test('the third view is remembered, and a setting from 0.18.0 still means Since you read', async () => {
-  const DRAFTS = 'review-desk draft LiLo-Labs/claude-code-plugins#42';
-  desk = await open(browser, {data: data()});
-  await desk.page.waitForSelector('#sheet h2, #sheet h1');
-  await desk.document('docs~notes.md', NOTES, SECOND);
-  await desk.page.waitForFunction(() => document.querySelector('.leaf .fresh.show'));
-  await openNotes();
-  await desk.page.click('[data-view="base"]');
-  await desk.page.waitForSelector('#sheet .diff');
-  assert.equal(await desk.page.evaluate(k => JSON.parse(sessionStorage.getItem(k)).changes, DRAFTS),
-    'base');
-  await desk.close();
-
-  // What a page built by 0.18.0 stored for the one changes view it had.
-  desk = await open(browser, {
-    data: data(),
-    seed: {[PR + '/documents/docs~notes.md']: {name: NOTES, text: SECOND, at: '2026-09-17T10:00:00.000Z'}},
-    init: 'sessionStorage.setItem(' + JSON.stringify(DRAFTS) + ', JSON.stringify({changes: true}));'
-      + 'sessionStorage.setItem("review-desk read LiLo-Labs/claude-code-plugins#42", '
-      + JSON.stringify(JSON.stringify([{k: NOTES, t: FIRST}])) + ')',
-  });
-  await desk.page.waitForFunction(() => document.querySelector('.leaf .fresh.show'));
-  await openNotes();
-  await desk.page.waitForSelector('#sheet .diff');
-  assert.equal(await desk.page.$eval('[data-view="read"]', el => el.getAttribute('aria-pressed')), 'true');
-});
-
-test('a wholesale rewrite past the diff table\u2019s cap says so', async () => {
-  // Past the table's cap the page stops trying to pair lines up: a quadratic
-  // walk of a thousand-line rewrite would hang the tab.
+test('a wholesale rewrite past the diff table’s cap says so', async () => {
   const long = n => Array.from({length: 900}, (_, i) => n + ' line ' + i).join('\n');
-  desk = await open(browser, {data: payload({documents: [{name: NOTES, text: long('old')}]})});
+  desk = await open(browser, {data: payload({baseRefName: 'main',
+    documents: [{name: 'docs/big.md', text: long('new'), base: long('old')}]})});
   await desk.page.waitForSelector('#sheet');
-  await desk.document('docs~notes.md', NOTES, long('new'));
-  await desk.page.waitForFunction(() => document.querySelector('.leaf .fresh.show'));
   await openNotes();
-  await desk.page.click('[data-view="read"]');
-  await desk.page.waitForSelector('#sheet .diff');
-  assert.match(await diffText(), /rewritten wholesale/);
-  const drawn = await rows();
-  assert.ok(drawn.some(r => r.startsWith('−') && r.includes('old line 0')), 'the old text is removed');
-  assert.ok(drawn.some(r => r.startsWith('+') && r.includes('new line 0')), 'the new text is added');
+  await desk.page.click('[data-view="base"]');
+  await marked();
+  assert.match(await desk.page.textContent('#sheet .rlnote'), /rewritten wholesale/);
+  assert.ok((await went()).some(t => t.includes('old line 0')), 'the old text is struck through');
+  assert.ok((await arrived()).some(t => t.includes('new line 0')), 'the new text is underlined');
 });
