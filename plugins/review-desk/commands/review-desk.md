@@ -535,12 +535,19 @@ A document whose `name` matches a carried file replaces that tab; a new name add
 one. Rewrite the description whenever a change makes it wrong, diagrams
 included.
 
-The page keeps what the reviewer has read of each tab and can draw the
-difference, so a rewrite does not have to be described line by line: say in the
-description what changed and why, and leave what changed to the page. Write the
-whole file as it now is rather than only the part that moved — a document that
-carries an excerpt where the reviewer had the whole reads as though everything
-after it was deleted.
+The page can draw what changed, so a rewrite does not have to be described line
+by line: say in the description what changed and why, and leave what changed to
+the page. It draws two differences — against what that browser tab last read,
+and against the text the desk was published with — so a reviewer who has been
+away sees the whole of what you have done since publishing, not only what
+arrived while they were looking.
+
+Two things follow for you. Write the whole file as it now is, never only the
+part that moved: a document that carries an excerpt where the reviewer had the
+whole reads as everything after it being deleted. And republishing the desk makes
+the payload you publish the new "since published" baseline, which is what you
+want when the request has moved on, and is not what you want in the middle of a
+back and forth — rewrite the document rather than republishing the desk.
 
 Rewrite `context/body` after every push, even one the description does not need
 to mention, with `head` set to the commit GitHub now has, all 40 hex characters,
