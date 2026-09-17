@@ -39,6 +39,15 @@ lists the open desks for every repository named by any git remote of the
 checkout the push ran from, so a push to a fork reaches the upstream's desk, and
 the session rewrites whatever the push made out of date.
 
+When a page is rewritten — because you asked for the change, or because someone
+pushed — the page says so over it and offers **Changes**: the difference between
+what you last read on that tab and what it says now, as a patch, with the words
+that moved inside a reworded line marked. **Full document** reads it whole again,
+**Mark as read** puts the mark away, and the setting holds for the desk, so
+asking what changed is one press and then it is simply how the desk reads. What
+you have read is remembered per browser tab, so the reload a ring causes does not
+lose it; a desk opened on another device starts fresh and claims no changes.
+
 The page draws mermaid diagrams: the ones Claude writes into the description,
 fenced `mermaid` blocks in any markdown file the request carries, and `.mmd`
 files. A diagram that does not parse shows its source and the error instead.
