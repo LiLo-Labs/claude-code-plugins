@@ -40,6 +40,39 @@ class Template(unittest.TestCase):
     def test_marker_appears_exactly_once(self):
         self.assertEqual(self.tpl.count("/*PAYLOAD*/"), 1)
 
+    def test_the_built_page_says_which_review_desk_built_it(self):
+        # A desk is a published artifact: its page stays whatever version
+        # published it, and nothing on the page used to say which, so a fix that
+        # had shipped and a fix that had not looked identical from the desk.
+        with open(os.path.join(HERE, "..", ".claude-plugin", "plugin.json"),
+                  encoding="utf-8") as f:
+            declared = json.load(f)["version"]
+        self.assertEqual(self.tpl.count("/*VERSION*/"), 1, "the template's stamp")
+        page = build_desk.render(self.tpl, dict(HOSTILE), "Hostile Desk")
+        self.assertEqual(re.search(r"const STAMP = '([^']*)'", page).group(1), declared)
+        self.assertNotIn("/*VERSION*/", page)
+
+    def test_an_unbuilt_template_says_dev_rather_than_its_marker(self):
+        # The template is opened directly by the browser harness's own fixtures
+        # and by anyone reading it; it must not print a comment marker as a
+        # version.
+        self.assertIn("const BUILT = /^\\d+\\.\\d+\\.\\d+$/.test(STAMP) ? STAMP : 'dev';",
+                      self.tpl)
+
+    def test_a_plugin_version_that_is_not_a_version_is_refused(self):
+        real = build_desk.PLUGIN_JSON
+        for bad in ('{"version": "0.17"}', '{"version": 17}', '{}', 'not json'):
+            with tempfile.TemporaryDirectory() as tmp:
+                path = os.path.join(tmp, "plugin.json")
+                with open(path, "w", encoding="utf-8") as f:
+                    f.write(bad)
+                build_desk.PLUGIN_JSON = path
+                try:
+                    with self.assertRaises(build_desk.BuildError, msg=bad):
+                        build_desk.render(self.tpl, dict(HOSTILE), "Hostile Desk")
+                finally:
+                    build_desk.PLUGIN_JSON = real
+
     def test_title_within_first_8kb(self):
         head = self.tpl.encode("utf-8")[:8192]
         self.assertIn(b"<title>Review Desk</title>", head)

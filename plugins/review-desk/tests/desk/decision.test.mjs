@@ -505,8 +505,11 @@ test('Approve then Confirm stores approved with decidedAt, decidedOn and repo, a
   await approve(desk);
   const doc = (await desk.until(s => s[PR] && s[PR].decision === 'approved' && s[PR].decisionRing))[PR];
   assert.deepEqual(Object.keys(doc).sort(),
-    ['decidedAt', 'decidedOn', 'decision', 'decisionRing', 'pr', 'reason', 'repo', 'threads', 'title', 'updatedAt',
-      'writer', 'writtenAt']);
+    ['decidedAt', 'decidedOn', 'decision', 'decisionRing', 'page', 'pr', 'reason', 'repo', 'threads', 'title',
+      'updatedAt', 'writer', 'writtenAt']);
+  // Which page wrote it: a session reading this can tell a decision made on an
+  // old desk from one made on a page that has the fix it is looking for.
+  assert.match(doc.page, /^\d+\.\d+\.\d+$/);
   // The ring's outcome is stored with the decision it rang for, so a later load
   // knows whether anything was told.
   assert.deepEqual(Object.keys(doc.decisionRing).sort(), ['decidedAt', 'rungAt']);

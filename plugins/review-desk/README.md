@@ -54,6 +54,11 @@ files. A diagram that does not parse shows its source and the error instead.
 The library (mermaid 11.15.0, pinned by hash) loads only on pages that have a
 diagram.
 
+The page's footer says which review-desk built it, and every save records the
+same version. A desk is a published page: it stays the version that published
+it, so a fix that has shipped reaches an open desk only when that desk is
+republished.
+
 The page needs the `db` and `artifact` capabilities. Without `db` neither a
 message nor a decision can reach the session. The build script prints the exact
 object to publish with: `db` carries write rules, so only the desk's owner (the

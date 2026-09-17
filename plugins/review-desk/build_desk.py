@@ -26,6 +26,13 @@ import sys
 ROOT = os.path.dirname(os.path.abspath(__file__))
 TEMPLATE = os.path.join(ROOT, "templates", "review.html")
 MARKER = "/*PAYLOAD*/"
+# The page says which review-desk built it, in its footer and in every document
+# it writes. A desk is a published artifact: its page stays whatever version
+# published it, however many have shipped since, and nothing on the page used to
+# say which. Taken from the plugin's own manifest rather than the payload, so a
+# session cannot forget it or get it wrong.
+VERSION_MARKER = "/*VERSION*/"
+PLUGIN_JSON = os.path.join(ROOT, ".claude-plugin", "plugin.json")
 TEMPLATE_TITLE = "<title>Review Desk</title>"
 # The publisher reads the title only from the first 8KB of the page.
 TITLE_WINDOW = 8192
@@ -41,6 +48,18 @@ def template():
         return f.read()
 
 
+def version():
+    """The plugin's version, from its manifest."""
+    try:
+        with open(PLUGIN_JSON, encoding="utf-8") as f:
+            found = json.load(f).get("version")
+    except (OSError, ValueError) as e:
+        raise BuildError("cannot read the plugin version from %s: %s" % (PLUGIN_JSON, e))
+    if not isinstance(found, str) or not re.fullmatch(r"\d+\.\d+\.\d+", found):
+        raise BuildError("the plugin version must be major.minor.patch, found %r" % (found,))
+    return found
+
+
 def script_json(payload):
     text = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
     return (text.replace("<", "\\u003c")
@@ -54,8 +73,14 @@ def render(tpl, payload, title):
                          % (MARKER, tpl.count(MARKER)))
     if tpl.count(TEMPLATE_TITLE) != 1:
         raise BuildError("the template must contain %s exactly once" % TEMPLATE_TITLE)
+    if tpl.count(VERSION_MARKER) != 1:
+        raise BuildError("the template must contain %s exactly once, found %d"
+                         % (VERSION_MARKER, tpl.count(VERSION_MARKER)))
     if not title or not title.strip():
         raise BuildError("the page needs a title")
+    # The version first: the payload is substituted by position, and a carried
+    # file that quotes the version marker must not be rewritten.
+    tpl = tpl.replace(VERSION_MARKER, version(), 1)
     before, after = tpl.split(MARKER)
     page = before + script_json(payload) + after
     page = page.replace(TEMPLATE_TITLE,

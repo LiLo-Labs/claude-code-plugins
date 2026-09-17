@@ -80,7 +80,10 @@ The document holds `threads`, the conversations, each with its `turns` in order,
 and `decision`, which is `approved`, `needs changes`, or absent if they have not
 finished, with `decidedAt`, when they recorded it, and `decidedOn`, the pull
 request's head commit the page was showing when they did. It also carries
-`repo`. A desk published before `decidedOn` existed stores none on any decision
+`repo`, and `page`, the version of review-desk that built the page the reviewer
+was using when it last saved: a decision recorded on an older page was made
+without whatever has shipped since, which is worth knowing before puzzling over
+what that page did or did not do. A desk published before `decidedOn` existed stores none on any decision
 until it is republished; "Act on it" says how its approval is merged. A reviewer's turn (`"role":
 "user"`) carries its `id`, the `content` they wrote and, when they highlighted
 something, `quote` (the passage) and `reading` (the page and section they were
