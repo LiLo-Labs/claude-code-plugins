@@ -755,12 +755,23 @@ const READ_KEY = 'review-desk read ' + (typeof DATA.repo === 'string' ? DATA.rep
 // again, which is better than a quota error taking the drafts with it.
 const READ_BUDGET = 400000;
 const asRead = new Map();
-// Whether this reviewer is reading changes rather than documents. One setting
-// for the desk, not one per page: it is a way of reading, and asked for once it
-// holds for every page that has been rewritten. Kept with the drafts, so a
-// reload comes back to it. Off to begin with -- a document is a document until
-// someone asks what moved in it.
-let wantChanges = false;
+// How this reviewer is reading: the document itself, what has changed since
+// they last read the page, or everything that has changed since the desk was
+// published. The last one answers a different question -- "what has the session
+// done to this desk" -- and a reviewer who reads a page for the first time
+// halfway through a review has no read-baseline to ask the first question with.
+//
+// One setting for the desk, not one per page: it is a way of reading, and asked
+// for once it holds for every page that has moved. Kept with the drafts, so a
+// reload comes back to it. 'full' to begin with -- a document is a document
+// until someone asks what moved in it.
+const VIEWS = ['full', 'read', 'published'];
+let view = 'full';
+// The text of each page as the desk was published: the payload's own copy, which
+// the store's rows never overwrite. A republish makes a new payload and so a new
+// baseline, which is the right meaning of "since published" -- since this desk
+// was last published.
+const asPublished = new Map();
 // Keys whose baseline is the payload's copy rather than anything read in this
 // tab. See loadRead.
 const seeded = new Set();
@@ -771,9 +782,31 @@ const revised = i => {
   const p = pages()[i], was = readText(i);
   return !!p && was !== undefined && was !== (p.text || '');
 };
+// A page not in the payload was added to the desk after it was published, so
+// there is nothing it used to say: the whole of it is new, and the view says so
+// rather than pretending the desk shipped with an empty page.
+const publishedText = i => asPublished.get(pageKey(i));
+const movedSincePublished = i => {
+  const p = pages()[i];
+  return !!p && publishedText(i) !== (p.text || '');
+};
+// What each view is drawn against, and null when that view has nothing to draw.
+function baseline(mode, i){
+  if (mode === 'read') return revised(i) ? (readText(i) || '') : null;
+  if (mode === 'published') return movedSincePublished(i) ? (publishedText(i) || '') : null;
+  return null;
+}
+const moved = i => revised(i) || movedSincePublished(i);
 
 function loadRead(){
-  try { if (drafts().changes === true) wantChanges = true; } catch (e) {}
+  // The payload, before any stored row has replaced it.
+  pages().forEach((p, i) => asPublished.set(pageKey(i), p.text || ''));
+  try {
+    const kept = drafts().changes;
+    // true is what pages up to 0.18.0 stored for the one changes view there was.
+    if (kept === true) view = 'read';
+    else if (VIEWS.includes(kept)) view = kept;
+  } catch (e) {}
   try {
     const rows = JSON.parse(sessionStorage.getItem(READ_KEY) || 'null');
     if (Array.isArray(rows)) rows.forEach(r => {
@@ -910,7 +943,7 @@ function wordMarks(before, after){
 const DIFF_CONTEXT = 3;
 const row = (kind, sign, html) => '<span class="row ' + kind + '"><span class="sign">'
   + sign + '</span>' + html + '</span>';
-function diffHtml(before, after){
+function diffHtml(before, after, note = ''){
   const {ops, exact} = lineOps(before, after);
   if (!ops.some(o => o.t !== 'same'))
     return '<pre class="diff"><span class="none">No difference: this page reads exactly '
@@ -925,6 +958,7 @@ function diffHtml(before, after){
     }
   });
   const out = [];
+  if (note) out.push('<span class="skip">' + esc(note) + '</span>');
   if (!exact) out.push('<span class="skip">This page was rewritten wholesale, so the '
     + 'difference is shown as the old text removed and the new text added.</span>');
   let skipped = 0;
@@ -1137,11 +1171,14 @@ function paint(){
   drawLeaves();
   drawRevBar();
   // The document is drawn by render(), so a patch is never run through the
-  // markdown parser, and a page with no change of its own is never a patch.
-  const changes = revised(leaf) && wantChanges;
-  $('sheet').innerHTML = changes ? diffHtml(readText(leaf) || '', all[leaf].text || '')
-    : render(all[leaf]);
-  if (changes) return;               // a patch holds no code blocks, diagrams or headings
+  // markdown parser, and a page that has not moved is never a patch.
+  const was = baseline(view, leaf);
+  $('sheet').innerHTML = was === null ? render(all[leaf])
+    : diffHtml(was, all[leaf].text || '',
+               view === 'published' && publishedText(leaf) === undefined
+                 ? 'This page was added to the desk after it was published, so all of it is new.'
+                 : '');
+  if (was !== null) return;          // a patch holds no code blocks, diagrams or headings
   paintCode();
   paintDiagrams();
   watchHeadings();
@@ -1152,26 +1189,41 @@ function paint(){
 // not a way of saying you have looked.
 function drawRevBar(){
   const el = $('revbar');
-  if (!revised(leaf)){
+  if (!moved(leaf)){
     el.hidden = true;
     rebuild(el, '');
     return;
   }
   el.hidden = false;
-  const on = wantChanges;
-  rebuild(el, '<span class="what">Rewritten since you read this page.</span>'
-    + '<button data-view="changes" aria-pressed="' + (on ? 'true' : 'false') + '">Changes</button>'
-    + '<button data-view="full" aria-pressed="' + (on ? 'false' : 'true') + '">Full document</button>'
-    + '<button data-view="read">Mark as read</button>');
+  // Which of the three is on, and what the page has actually done: rewritten
+  // since this tab read it, moved since the desk was published, or both. A
+  // reviewer arriving at a page for the first time has read nothing of it, and
+  // the bar says so rather than offering a comparison with nothing.
+  const fresh = publishedText(leaf) === undefined;
+  const said = fresh
+    ? (revised(leaf) ? 'Added to the desk after it was published, and rewritten since you read it.'
+        : 'Added to the desk after it was published.')
+    : revised(leaf)
+      ? (movedSincePublished(leaf) ? 'Rewritten since you read this page, and since the desk was published.'
+          : 'Rewritten since you read this page.')
+      : 'Rewritten since the desk was published. You have read what it says now.';
+  const button = (mode, label, live) =>
+    '<button data-view="' + mode + '" aria-pressed="' + (view === mode ? 'true' : 'false') + '"'
+    + (live ? '' : ' disabled title="Nothing to compare with"') + '>' + label + '</button>';
+  rebuild(el, '<span class="what">' + said + '</span>'
+    + button('full', 'Document', true)
+    + button('read', 'Since you read', revised(leaf))
+    + button('published', 'Since published', movedSincePublished(leaf))
+    + '<button data-view="markRead">Mark as read</button>');
 }
 
 $('revbar').addEventListener('click', e => {
   const b = e.target.closest('[data-view]');
-  if (!b) return;
-  if (b.dataset.view === 'read') markRead(leaf);
+  if (!b || b.disabled) return;
+  if (b.dataset.view === 'markRead') markRead(leaf);
   else {
-    wantChanges = b.dataset.view === 'changes';
-    keepDraft('changes', wantChanges);
+    view = b.dataset.view;
+    keepDraft('changes', view);
   }
   unlight();                         // the painted range belonged to the old view
   paint();

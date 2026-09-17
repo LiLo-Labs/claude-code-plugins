@@ -32,7 +32,7 @@ const SECOND = FIRST.replace('Three is the line that moves.',
   'Three has been rewritten by the session.');
 
 const data = (extra = {}) => payload({documents: [{name: NOTES, text: FIRST}], ...extra});
-const bar = () => desk.page.locator('#revbar');
+const bar = () => desk.page.locator('#revbar .what');
 const barShown = () => desk.page.$eval('#revbar', el => !el.hidden);
 const diffText = () => desk.page.textContent('#sheet .diff');
 const openNotes = () => desk.page.click('[data-leaf="1"]');
@@ -55,7 +55,7 @@ test('a rewritten page says so, and the changes are one press away', async () =>
   assert.match(await bar().textContent(), /Rewritten since you read this page/);
   // The document is still the document until the reviewer asks.
   assert.equal(await desk.page.locator('#sheet .diff').count(), 0);
-  await desk.page.click('[data-view="changes"]');
+  await desk.page.click('[data-view="read"]');
   await desk.page.waitForSelector('#sheet .diff');
   const drawn = await rows();
   assert.ok(drawn.some(r => r.startsWith('−') && r.includes('Three is the line that moves')), drawn);
@@ -72,7 +72,7 @@ test('the words that changed inside a rewritten line are marked', async () => {
   await desk.document('docs~notes.md', NOTES, SECOND);
   await desk.page.waitForFunction(() => document.querySelector('.leaf .fresh.show'));
   await openNotes();
-  await desk.page.click('[data-view="changes"]');
+  await desk.page.click('[data-view="read"]');
   await desk.page.waitForSelector('#sheet .diff');
   // Each changed word is its own mark, so the line reads with the shared words
   // unmarked between them.
@@ -102,12 +102,12 @@ test('a rewrite of the page on screen leaves the prose alone until the changes a
   assert.equal(await desk.page.locator('#sheet h2').count(), 1);
   assert.equal(await desk.page.locator('#sheet .diff').count(), 0);
 
-  await desk.page.click('[data-view="changes"]');
+  await desk.page.click('[data-view="read"]');
   await desk.page.waitForSelector('#sheet .diff');
   const drawn = await rows();
   assert.ok(drawn.some(r => r.startsWith('−') && r.includes('The first account.')), drawn);
   assert.ok(drawn.some(r => r.startsWith('+') && r.includes('The second account.')), drawn);
-  assert.equal(await desk.page.$eval('[data-view="changes"]', el => el.getAttribute('aria-pressed')), 'true');
+  assert.equal(await desk.page.$eval('[data-view="read"]', el => el.getAttribute('aria-pressed')), 'true');
 
   await desk.page.click('[data-view="full"]');
   await desk.page.waitForSelector('#sheet h2');
@@ -116,18 +116,17 @@ test('a rewrite of the page on screen leaves the prose alone until the changes a
   assert.equal(await barShown(), true);
 });
 
-test('Mark as read takes the bar away, and the next rewrite is drawn against what was read', async () => {
+test('Mark as read moves the read baseline, and the next rewrite is drawn against it', async () => {
   desk = await open(browser, {data: data()});
   await desk.page.waitForSelector('#sheet h2, #sheet h1');
   await desk.document('docs~notes.md', NOTES, SECOND);
   await desk.page.waitForFunction(() => document.querySelector('.leaf .fresh.show'));
   await openNotes();
-  await desk.page.click('[data-view="changes"]');
+  await desk.page.click('[data-view="read"]');
   await desk.page.waitForSelector('#sheet .diff');
 
-  await desk.page.click('[data-view="read"]');
+  await desk.page.click('[data-view="markRead"]');
   await desk.page.waitForSelector('#sheet h1');
-  assert.equal(await barShown(), false);
   assert.equal(await desk.page.locator('#sheet .diff').count(), 0);
 
   // A second rewrite, of a different line, while this page is on screen. The
@@ -158,7 +157,7 @@ test('the baseline a reload comes back to is what this tab had read', async () =
   });
   await desk.page.waitForFunction(() => document.querySelector('.leaf .fresh.show'));
   await openNotes();
-  await desk.page.click('[data-view="changes"]');
+  await desk.page.click('[data-view="read"]');
   await desk.page.waitForSelector('#sheet .diff');
   const drawn = await rows();
   assert.ok(drawn.some(r => r.startsWith('+') && r.includes('Three has been rewritten')), drawn);
@@ -170,7 +169,7 @@ test('the toggle holds for the whole desk, and comes back after a reload', async
   await desk.page.waitForSelector('#sheet h2');
   await desk.context('body', {text: '## What it does\n\nThe second account.\n'});
   await desk.page.waitForFunction(() => !document.querySelector('#revbar').hidden);
-  await desk.page.click('[data-view="changes"]');
+  await desk.page.click('[data-view="read"]');
   await desk.page.waitForSelector('#sheet .diff');
 
   // Another page, rewritten after the toggle went on: no second press.
@@ -182,29 +181,109 @@ test('the toggle holds for the whole desk, and comes back after a reload', async
 
   // And the setting itself is a draft, so the reload a ring causes keeps it.
   assert.equal(await desk.page.evaluate(() => JSON.parse(
-    sessionStorage.getItem('review-desk draft LiLo-Labs/claude-code-plugins#42')).changes), true);
+    sessionStorage.getItem('review-desk draft LiLo-Labs/claude-code-plugins#42')).changes), 'read');
 });
 
-test('a desk opened fresh on a store already ahead of its payload claims no changes', async () => {
+test('a desk opened fresh on a store ahead of its payload claims nothing you have read', async () => {
   // The session rewrote a document while no tab was open. The reviewer has read
-  // neither text, so there is nothing to show them as a change.
+  // neither text, so "since you read" has nothing to compare with -- but the
+  // desk has moved since it was published, and that is exactly what the third
+  // view is for.
   desk = await open(browser, {data: data(), seed: {[PR + '/documents/docs~notes.md']:
     {name: NOTES, text: SECOND, at: '2026-09-17T10:00:00.000Z'}}});
   await desk.page.waitForFunction(() => document.querySelector('#sheet') !== null);
   await openNotes();
   await desk.page.waitForFunction(() => document.querySelector('#sheet').textContent.includes('rewritten by the session'));
-  assert.equal(await barShown(), false);
+  // The document reads as a document: nothing switched under the reviewer.
   assert.equal(await desk.page.locator('#sheet .diff').count(), 0);
+  assert.equal(await desk.page.$eval('[data-view="read"]', el => el.disabled), true);
+  assert.match(await bar().textContent(), /Rewritten since the desk was published/);
+
+  await desk.page.click('[data-view="published"]');
+  await desk.page.waitForSelector('#sheet .diff');
+  assert.ok((await rows()).some(r => r.startsWith('+') && r.includes('Three has been rewritten')));
 });
 
-test('a file the desk never carried arrives as a document, not as a change', async () => {
+test('a file the desk never carried reads as a document, and says it arrived late', async () => {
   desk = await open(browser, {data: data()});
   await desk.page.waitForSelector('#sheet h2, #sheet h1');
   await desk.document('tools~new.py', 'tools/new.py', 'x = 1\ny = 2\n');
   await desk.page.waitForFunction(() => document.querySelectorAll('.leaf').length === 3);
   await desk.page.click('[data-leaf="2"]');
   await desk.page.waitForFunction(() => document.querySelector('#sheet').textContent.includes('x = 1'));
-  assert.equal(await barShown(), false);
+  // Nothing was read of it before, so there is nothing to compare with: the
+  // document is what shows, and only the published view has anything to say.
+  assert.match(await bar().textContent(), /Added to the desk after it was published\.$/);
+  assert.equal(await desk.page.$eval('[data-view="read"]', el => el.disabled), true);
+  assert.equal(await desk.page.locator('#sheet .diff').count(), 0);
+
+  await desk.page.click('[data-view="published"]');
+  await desk.page.waitForSelector('#sheet .diff');
+  assert.match(await diffText(), /added to the desk after it was published/);
+  assert.ok((await rows()).some(r => r.startsWith('+') && r.includes('x = 1')));
+});
+
+test('Since published holds everything the session has done, read or not', async () => {
+  // The other question, and the one a reviewer coming back to a desk has: not
+  // "what is new to me" but "what has this desk become since it was published".
+  desk = await open(browser, {data: data()});
+  await desk.page.waitForSelector('#sheet h2, #sheet h1');
+  await desk.document('docs~notes.md', NOTES, SECOND);
+  await desk.page.waitForFunction(() => document.querySelector('.leaf .fresh.show'));
+  await openNotes();
+  await desk.page.click('[data-view="markRead"]');
+  await desk.page.waitForSelector('#sheet h1');
+
+  // Read up to date, and the desk still moved since it was published: the bar
+  // stays, and only the published view is live.
+  assert.equal(await barShown(), true);
+  assert.match(await bar().textContent(), /You have read what it says now/);
+  assert.equal(await desk.page.$eval('[data-view="read"]', el => el.disabled), true);
+
+  const third = SECOND.replace('Eight stays as it is.', 'Eight has moved too.');
+  await desk.document('docs~notes.md', NOTES, third);
+  await desk.page.waitForFunction(() => document.querySelector('#sheet').textContent.includes('Eight has moved too'));
+
+  await desk.page.click('[data-view="read"]');
+  await desk.page.waitForSelector('#sheet .diff');
+  const sinceRead = await rows();
+  assert.ok(sinceRead.some(r => r.startsWith('+') && r.includes('Eight has moved too')), sinceRead);
+  assert.ok(!sinceRead.some(r => r.includes('Three has been rewritten')),
+    'the first rewrite was read: ' + JSON.stringify(sinceRead));
+
+  await desk.page.click('[data-view="published"]');
+  await desk.page.waitForSelector('#sheet .diff');
+  const sincePublished = await rows();
+  assert.ok(sincePublished.some(r => r.startsWith('+') && r.includes('Eight has moved too')), sincePublished);
+  assert.ok(sincePublished.some(r => r.startsWith('+') && r.includes('Three has been rewritten')),
+    'the published view keeps what was already read: ' + JSON.stringify(sincePublished));
+});
+
+test('the third view is remembered, and a setting from 0.18.0 still means Since you read', async () => {
+  const DRAFTS = 'review-desk draft LiLo-Labs/claude-code-plugins#42';
+  desk = await open(browser, {data: data()});
+  await desk.page.waitForSelector('#sheet h2, #sheet h1');
+  await desk.document('docs~notes.md', NOTES, SECOND);
+  await desk.page.waitForFunction(() => document.querySelector('.leaf .fresh.show'));
+  await openNotes();
+  await desk.page.click('[data-view="published"]');
+  await desk.page.waitForSelector('#sheet .diff');
+  assert.equal(await desk.page.evaluate(k => JSON.parse(sessionStorage.getItem(k)).changes, DRAFTS),
+    'published');
+  await desk.close();
+
+  // What a page built by 0.18.0 stored for the one changes view it had.
+  desk = await open(browser, {
+    data: data(),
+    seed: {[PR + '/documents/docs~notes.md']: {name: NOTES, text: SECOND, at: '2026-09-17T10:00:00.000Z'}},
+    init: 'sessionStorage.setItem(' + JSON.stringify(DRAFTS) + ', JSON.stringify({changes: true}));'
+      + 'sessionStorage.setItem("review-desk read LiLo-Labs/claude-code-plugins#42", '
+      + JSON.stringify(JSON.stringify([{k: NOTES, t: FIRST}])) + ')',
+  });
+  await desk.page.waitForFunction(() => document.querySelector('.leaf .fresh.show'));
+  await openNotes();
+  await desk.page.waitForSelector('#sheet .diff');
+  assert.equal(await desk.page.$eval('[data-view="read"]', el => el.getAttribute('aria-pressed')), 'true');
 });
 
 test('a wholesale rewrite past the diff table\u2019s cap says so', async () => {
@@ -216,7 +295,7 @@ test('a wholesale rewrite past the diff table\u2019s cap says so', async () => {
   await desk.document('docs~notes.md', NOTES, long('new'));
   await desk.page.waitForFunction(() => document.querySelector('.leaf .fresh.show'));
   await openNotes();
-  await desk.page.click('[data-view="changes"]');
+  await desk.page.click('[data-view="read"]');
   await desk.page.waitForSelector('#sheet .diff');
   assert.match(await diffText(), /rewritten wholesale/);
   const drawn = await rows();

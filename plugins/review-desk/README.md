@@ -40,13 +40,22 @@ checkout the push ran from, so a push to a fork reaches the upstream's desk, and
 the session rewrites whatever the push made out of date.
 
 When a page is rewritten — because you asked for the change, or because someone
-pushed — the page says so over it and offers **Changes**: the difference between
-what you last read on that tab and what it says now, as a patch, with the words
-that moved inside a reworded line marked. **Full document** reads it whole again,
-**Mark as read** puts the mark away, and the setting holds for the desk, so
-asking what changed is one press and then it is simply how the desk reads. What
-you have read is remembered per browser tab, so the reload a ring causes does not
-lose it; a desk opened on another device starts fresh and claims no changes.
+pushed — the page says so over it, and offers three ways to read it:
+**Document**, **Since you read** and **Since published**. The two changed views
+are patches, with a few lines of context and the words that moved inside a
+reworded line marked. *Since you read* is what is new to you on this tab; *since
+published* is everything the session has done to that page since the desk was
+published, read or not — the question you have when you come back to a desk
+rather than sit on it. A view with nothing to compare with is offered but
+disabled, so a page you have never read still answers the second question.
+**Mark as read** moves the read baseline; looking at the document does not. The
+setting holds for the desk, so asking what changed is one press and then it is
+simply how the desk reads.
+
+What you have read is remembered per browser tab, so the reload a ring causes
+does not lose it; a desk opened on another device has read nothing yet, and shows
+what has changed since publication instead. Republishing a desk makes its
+published text the new baseline.
 
 The page draws mermaid diagrams: the ones Claude writes into the description,
 fenced `mermaid` blocks in any markdown file the request carries, and `.mmd`
