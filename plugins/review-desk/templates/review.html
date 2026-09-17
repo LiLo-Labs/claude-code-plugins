@@ -363,6 +363,7 @@ textarea:focus{outline:2px solid var(--cool);outline-offset:-1px;
 .done .ask{margin:0}
 .confirming .btn{min-width:44px;min-height:44px}
 footer{padding:22px 0 0;font-size:12.5px;color:var(--faint);line-height:1.6}
+footer .built{margin-top:10px;font-family:var(--mono);font-size:11.5px}
 </style>
 
 <!-- Pinned by hash: without integrity, whatever cdnjs serves at this path
@@ -402,6 +403,7 @@ footer{padding:22px 0 0;font-size:12.5px;color:var(--faint);line-height:1.6}
     answers while it is running and can change this page and the pull request.
     Anything sent while no session is running is answered by the next one to
     start.
+    <div class="built">review desk <span id="built"></span></div>
   </footer>
 </div>
 
@@ -659,6 +661,19 @@ function blocks(rows){
   if (code) out.push(fenced(code.join('\n'), codeLang));
   return out.join('');
 }
+
+// Which review-desk built this page. build_desk.py puts the plugin's own
+// version here; the template as it sits in the repository still holds the
+// marker, and an unbuilt page says 'dev' rather than printing it. A desk is a
+// published artifact, so its page is whatever version published it however old
+// that is, and there was no way to tell from the page which one you were
+// looking at -- which cost an evening of wondering why a fix was not there.
+const STAMP = '/*VERSION*/';
+const BUILT = /^\d+\.\d+\.\d+$/.test(STAMP) ? STAMP : 'dev';
+// Straight into the footer, and before FOOT below takes the copy it redraws
+// from: set after that, the version survived until the first redraw and then
+// vanished, which is a worse lie than not saying it at all.
+document.getElementById('built').textContent = BUILT;
 
 /* ================= render the page ================= */
 // A document names the file it is and carries its text. A row without both, from
@@ -2107,6 +2122,10 @@ function deskBody(held){
     ...(decided && decidedOn ? {decidedOn} : {}),
     ...(decided && decisionRing && decisionRing.decidedAt === decidedAt ? {decisionRing} : {}),
     updatedAt: new Date().toISOString(),
+    // Which page wrote this, so a session reading the store can tell a decision
+    // made on an old page from one made on a page that has the fix it is looking
+    // for. The reviewer sees the same version in the footer.
+    page: BUILT,
     // Which view saved this, so every view can tell its own save from another's.
     writer: viewId,
     writtenAt: new Date().toISOString(),
@@ -2643,7 +2662,8 @@ function drawOutcome(){
     + when(o.at) + (o.detail ? ': ' + String(o.detail).replace(/[.\s]+$/, '') : '')
     + '. This review desk is closed.';
   $('foot').innerHTML = o ? 'The review of this pull request is over. The panel keeps the '
-    + 'discussion with the working session to read, and takes no new messages.' : FOOT;
+    + 'discussion with the working session to read, and takes no new messages.'
+    + '<div class="built">review desk ' + esc(BUILT) + '</div>' : FOOT;
   $('closedSlot').innerHTML = o ? '<div class="shutNote">This desk is closed: the pull request was '
     + (o.result === 'merged' ? 'merged' : 'closed without merging') + '. The discussion stays '
     + 'here to read, but nothing sent from here would reach a working session. Ask on the pull '
@@ -3164,7 +3184,7 @@ async function rering(){
       // back exactly as it was read: this write is the view's own, not the
       // reviewer's, and must not drop what another view may still read.
       const doc = {...had, updatedAt: new Date().toISOString(),
-        writer: viewId, writtenAt: new Date().toISOString(),
+        page: BUILT, writer: viewId, writtenAt: new Date().toISOString(),
         ...(Array.isArray(had.threads) ? {threads: had.threads.map(t => isRow(t) && Array.isArray(t.turns)
           ? {...t, turns: t.turns.map(x => isRow(x) && x.via === 'session' ? leanSlot(x) : x)}
           : t)} : {})};

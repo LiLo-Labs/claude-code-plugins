@@ -1,6 +1,7 @@
 // Behaviour the desk has today, locked in before later changes touch it.
 import {test, before, after, afterEach} from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import {launch, open, payload, approve} from './harness.mjs';
 
 let browser, desk;
@@ -222,4 +223,23 @@ test('a session reply lands in the thread', async () => {
   await desk.page.waitForSelector('.said.rich strong');
   assert.equal(await desk.page.textContent('.said.rich'), 'Because reasons.');
   assert.deepEqual(desk.errors, []);
+});
+
+test('the page says which review-desk built it, in the footer and in what it writes', async () => {
+  // A desk is a published artifact and its page stays whatever version
+  // published it. Without this the only way to tell an old desk from a new one
+  // was to notice a behaviour it did not have.
+  const declared = JSON.parse(fs.readFileSync(
+    new URL('../../.claude-plugin/plugin.json', import.meta.url), 'utf8')).version;
+  desk = await open(browser);
+  await desk.page.waitForFunction('restore === "done"', null, {timeout: 5000});
+  assert.equal(await desk.page.textContent('#built'), declared);
+  assert.match(await desk.page.textContent('footer'), /review desk \d+\.\d+\.\d+/);
+
+  await desk.page.click('#fab');
+  await desk.page.fill('#box', 'Which version is this desk?');
+  await desk.page.press('#box', 'Enter');
+  const doc = (await desk.until(s => s[desk.pr] && (s[desk.pr].threads || [])
+    .some(t => t.turns.some(m => m.content === 'Which version is this desk?'))))[desk.pr];
+  assert.equal(doc.page, declared, 'every save records the page that made it');
 });

@@ -100,6 +100,14 @@ There is no briefing field. The page's chat reaches this session, which already
 knows why the change exists, what was rejected, and what was verified; say it in
 the replies instead.
 
+There is no version field either, and there cannot be: `build_desk.py` stamps
+the plugin's own version into the page. The page prints it in its footer and
+writes it as `page` on every save, so a desk published weeks ago can be told
+from one published now. A desk is a published artifact and its page stays
+whatever version built it, however many have shipped since; when an open desk
+needs a fix that has shipped, republish it rather than waiting for the page to
+change on its own.
+
 `resume` is the command that brings this session back. The page shows it when
 the reviewer presses **Check** and nothing answers. Build it from the directory
 this session was launched in, the same absolute path the ledger entry records as
