@@ -1,0 +1,22 @@
+name: repo
+
+# The marketplace listing is what a user's Claude Code installs from, and each
+# plugin's own manifest is what the plugin says it is. Both are hand-edited at
+# the end of a change, and they drifted: code-canvas shipped 0.7.0 while the
+# marketplace advertised 0.6.3, so an install stayed on 0.6.3 and nothing said
+# why. Every push and every pull request, since anything can change a version.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  marketplace:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: The marketplace agrees with every plugin manifest
+        run: python3 .github/scripts/check_marketplace.py

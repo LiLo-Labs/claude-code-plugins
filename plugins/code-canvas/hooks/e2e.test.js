@@ -55,7 +55,8 @@ describe('E2E Browser Tests', () => {
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     serverUrl = await new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => reject(new Error('timeout')), 10000);
+      // 30s: see integration.test.js -- a cold start has overrun ten.
+      const timeout = setTimeout(() => reject(new Error('server startup timed out')), 30000);
       serverProcess.stdout.on('data', data => {
         try {
           const info = JSON.parse(data.toString());

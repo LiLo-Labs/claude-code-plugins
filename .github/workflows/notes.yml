@@ -1,0 +1,35 @@
+name: notes
+
+# Its own workflow with its own paths filter, so a run's conclusion is about this
+# plugin alone and a pull request to another plugin neither waits on it nor is
+# turned red by it. review-desk.yml was split out first, for exactly that.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'plugins/notes/**'
+      - '.github/workflows/notes.yml'
+  pull_request:
+    paths:
+      - 'plugins/notes/**'
+      - '.github/workflows/notes.yml'
+
+jobs:
+  notes:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: plugins/notes
+    steps:
+      - uses: actions/checkout@v4
+      # Both suites run even after one fails, so one failure does not hide
+      # another. They drive the shell script the plugin ships.
+      - name: Run the shell suites
+        run: |
+          status=0
+          for t in tests/test_notes.sh tests/test_integration.sh; do
+            echo "::group::$t"
+            bash "$t" || { echo "::error::$t failed"; status=1; }
+            echo "::endgroup::"
+          done
+          exit $status

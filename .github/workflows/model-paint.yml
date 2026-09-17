@@ -1,0 +1,33 @@
+name: model-paint
+
+# Its own workflow with its own paths filter, so a run's conclusion is about this
+# plugin alone and a pull request to another plugin neither waits on it nor is
+# turned red by it. review-desk.yml was split out first, for exactly that.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'plugins/model-paint/**'
+      - '.github/workflows/model-paint.yml'
+  pull_request:
+    paths:
+      - 'plugins/model-paint/**'
+      - '.github/workflows/model-paint.yml'
+
+jobs:
+  model-paint:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: plugins/model-paint
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install the test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-test.txt
+      - name: Run the test suite
+        run: python -m pytest tests -q
