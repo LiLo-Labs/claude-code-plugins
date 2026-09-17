@@ -31,7 +31,11 @@ const FIRST = ['# Notes', '', 'One stays as it is.', 'Two stays as it is.',
 const SECOND = FIRST.replace('Three is the line that moves.',
   'Three has been rewritten by the session.');
 
-const data = (extra = {}) => payload({documents: [{name: NOTES, text: FIRST}], ...extra});
+// FIRST is also what the file says on main here, so the request itself changes
+// nothing until the session rewrites the document -- which keeps each test's
+// two baselines independent.
+const data = (extra = {}) => payload({baseRefName: 'main',
+  documents: [{name: NOTES, text: FIRST, base: FIRST}], ...extra});
 const bar = () => desk.page.locator('#revbar .what');
 const barShown = () => desk.page.$eval('#revbar', el => !el.hidden);
 const diffText = () => desk.page.textContent('#sheet .diff');
@@ -184,11 +188,11 @@ test('the toggle holds for the whole desk, and comes back after a reload', async
     sessionStorage.getItem('review-desk draft LiLo-Labs/claude-code-plugins#42')).changes), 'read');
 });
 
-test('a desk opened fresh on a store ahead of its payload claims nothing you have read', async () => {
+test('a desk opened fresh claims nothing you have read, and still has the request\u2019s diff', async () => {
   // The session rewrote a document while no tab was open. The reviewer has read
-  // neither text, so "since you read" has nothing to compare with -- but the
-  // desk has moved since it was published, and that is exactly what the third
-  // view is for.
+  // neither text, so "since you read" has nothing to compare with -- and the
+  // request's own diff is there regardless, which is the point of taking the
+  // third baseline off the branch rather than off the payload.
   desk = await open(browser, {data: data(), seed: {[PR + '/documents/docs~notes.md']:
     {name: NOTES, text: SECOND, at: '2026-09-17T10:00:00.000Z'}}});
   await desk.page.waitForFunction(() => document.querySelector('#sheet') !== null);
@@ -197,35 +201,83 @@ test('a desk opened fresh on a store ahead of its payload claims nothing you hav
   // The document reads as a document: nothing switched under the reviewer.
   assert.equal(await desk.page.locator('#sheet .diff').count(), 0);
   assert.equal(await desk.page.$eval('[data-view="read"]', el => el.disabled), true);
-  assert.match(await bar().textContent(), /Rewritten since the desk was published/);
+  assert.match(await bar().textContent(), /Changed by this request/);
 
-  await desk.page.click('[data-view="published"]');
+  await desk.page.click('[data-view="base"]');
   await desk.page.waitForSelector('#sheet .diff');
   assert.ok((await rows()).some(r => r.startsWith('+') && r.includes('Three has been rewritten')));
 });
 
-test('a file the desk never carried reads as a document, and says it arrived late', async () => {
+test('a file the desk never carried reads as a document, and offers no comparison', async () => {
   desk = await open(browser, {data: data()});
   await desk.page.waitForSelector('#sheet h2, #sheet h1');
   await desk.document('tools~new.py', 'tools/new.py', 'x = 1\ny = 2\n');
   await desk.page.waitForFunction(() => document.querySelectorAll('.leaf').length === 3);
   await desk.page.click('[data-leaf="2"]');
   await desk.page.waitForFunction(() => document.querySelector('#sheet').textContent.includes('x = 1'));
-  // Nothing was read of it before, so there is nothing to compare with: the
-  // document is what shows, and only the published view has anything to say.
-  assert.match(await bar().textContent(), /Added to the desk after it was published\.$/);
-  assert.equal(await desk.page.$eval('[data-view="read"]', el => el.disabled), true);
+  // A row with no base text carries no comparison with main, and none was read
+  // of it here either: the document is all the page can honestly show.
+  assert.equal(await barShown(), false, 'nothing to compare with, so nothing is claimed');
   assert.equal(await desk.page.locator('#sheet .diff').count(), 0);
-
-  await desk.page.click('[data-view="published"]');
-  await desk.page.waitForSelector('#sheet .diff');
-  assert.match(await diffText(), /added to the desk after it was published/);
-  assert.ok((await rows()).some(r => r.startsWith('+') && r.includes('x = 1')));
 });
 
-test('Since published holds everything the session has done, read or not', async () => {
-  // The other question, and the one a reviewer coming back to a desk has: not
-  // "what is new to me" but "what has this desk become since it was published".
+test('a file the request adds says so, and the whole of it is the change', async () => {
+  desk = await open(browser, {data: data()});
+  await desk.page.waitForSelector('#sheet h2, #sheet h1');
+  await desk.document('tools~new.py', 'tools/new.py', 'x = 1\ny = 2\n', {base: null});
+  await desk.page.waitForFunction(() => document.querySelectorAll('.leaf').length === 3);
+  await desk.page.click('[data-leaf="2"]');
+  await desk.page.waitForFunction(() => document.querySelector('#sheet').textContent.includes('x = 1'));
+  assert.match(await bar().textContent(), /This request adds this file/);
+  await desk.page.click('[data-view="base"]');
+  await desk.page.waitForSelector('#sheet .diff');
+  assert.match(await diffText(), /This request adds this file/);
+  const drawn = await rows();
+  assert.ok(drawn.some(r => r.startsWith('+') && r.includes('x = 1')), drawn);
+  assert.ok(!drawn.some(r => r.startsWith('\u2212')), 'nothing was removed: ' + JSON.stringify(drawn));
+});
+
+test('the third view is the request\u2019s own diff, against the base branch', async () => {
+  // The question the review is actually about: not what is new to this tab, but
+  // what this request changes. Here main says FIRST, the request's head says
+  // SECOND, and the reviewer has read SECOND already.
+  desk = await open(browser, {
+    data: payload({baseRefName: 'main', documents: [{name: NOTES, text: SECOND, base: FIRST}]}),
+  });
+  await desk.page.waitForSelector('#sheet h2, #sheet h1');
+  await openNotes();
+  assert.match(await bar().textContent(), /Changed by this request\. You have read what it says now/);
+  assert.equal(await desk.page.$eval('[data-view="read"]', el => el.disabled), true,
+    'nothing has changed since this tab read it');
+  assert.match(await desk.page.textContent('[data-view="base"]'), /^Against main$/);
+
+  await desk.page.click('[data-view="base"]');
+  await desk.page.waitForSelector('#sheet .diff');
+  const drawn = await rows();
+  assert.ok(drawn.some(r => r.startsWith('\u2212') && r.includes('Three is the line that moves')), drawn);
+  assert.ok(drawn.some(r => r.startsWith('+') && r.includes('Three has been rewritten')), drawn);
+
+  // And a rewrite under the reviewer keeps both views true: since-you-read has
+  // the new line only, against-main has everything the request does.
+  const third = SECOND.replace('Eight stays as it is.', 'Eight has moved too.');
+  await desk.document('docs~notes.md', NOTES, third, {base: FIRST});
+  await desk.page.waitForFunction(() => document.querySelector('#sheet').textContent.includes('Eight has moved too'));
+  const sinceBase = await rows();
+  assert.ok(sinceBase.some(r => r.startsWith('+') && r.includes('Three has been rewritten')), sinceBase);
+  assert.ok(sinceBase.some(r => r.startsWith('+') && r.includes('Eight has moved too')), sinceBase);
+
+  await desk.page.click('[data-view="read"]');
+  await desk.page.waitForSelector('#sheet .diff');
+  const sinceRead = await rows();
+  assert.ok(sinceRead.some(r => r.startsWith('+') && r.includes('Eight has moved too')), sinceRead);
+  assert.ok(!sinceRead.some(r => r.includes('Three has been rewritten')),
+    'that line was read before the rewrite: ' + JSON.stringify(sinceRead));
+});
+
+test('the request\u2019s diff holds what was already read, and the read view does not', async () => {
+  // The two questions kept apart: "what is new to me on this tab" and "what does
+  // this request change". Marking a page read answers the first and must not
+  // touch the second.
   desk = await open(browser, {data: data()});
   await desk.page.waitForSelector('#sheet h2, #sheet h1');
   await desk.document('docs~notes.md', NOTES, SECOND);
@@ -234,10 +286,10 @@ test('Since published holds everything the session has done, read or not', async
   await desk.page.click('[data-view="markRead"]');
   await desk.page.waitForSelector('#sheet h1');
 
-  // Read up to date, and the desk still moved since it was published: the bar
-  // stays, and only the published view is live.
+  // Read up to date, and the request still changes the file: the bar stays, and
+  // only the against-main view is live.
   assert.equal(await barShown(), true);
-  assert.match(await bar().textContent(), /You have read what it says now/);
+  assert.match(await bar().textContent(), /Changed by this request\. You have read what it says now/);
   assert.equal(await desk.page.$eval('[data-view="read"]', el => el.disabled), true);
 
   const third = SECOND.replace('Eight stays as it is.', 'Eight has moved too.');
@@ -251,12 +303,12 @@ test('Since published holds everything the session has done, read or not', async
   assert.ok(!sinceRead.some(r => r.includes('Three has been rewritten')),
     'the first rewrite was read: ' + JSON.stringify(sinceRead));
 
-  await desk.page.click('[data-view="published"]');
+  await desk.page.click('[data-view="base"]');
   await desk.page.waitForSelector('#sheet .diff');
-  const sincePublished = await rows();
-  assert.ok(sincePublished.some(r => r.startsWith('+') && r.includes('Eight has moved too')), sincePublished);
-  assert.ok(sincePublished.some(r => r.startsWith('+') && r.includes('Three has been rewritten')),
-    'the published view keeps what was already read: ' + JSON.stringify(sincePublished));
+  const sinceBase = await rows();
+  assert.ok(sinceBase.some(r => r.startsWith('+') && r.includes('Eight has moved too')), sinceBase);
+  assert.ok(sinceBase.some(r => r.startsWith('+') && r.includes('Three has been rewritten')),
+    'the request\u2019s diff keeps what was already read: ' + JSON.stringify(sinceBase));
 });
 
 test('the third view is remembered, and a setting from 0.18.0 still means Since you read', async () => {
@@ -266,10 +318,10 @@ test('the third view is remembered, and a setting from 0.18.0 still means Since 
   await desk.document('docs~notes.md', NOTES, SECOND);
   await desk.page.waitForFunction(() => document.querySelector('.leaf .fresh.show'));
   await openNotes();
-  await desk.page.click('[data-view="published"]');
+  await desk.page.click('[data-view="base"]');
   await desk.page.waitForSelector('#sheet .diff');
   assert.equal(await desk.page.evaluate(k => JSON.parse(sessionStorage.getItem(k)).changes, DRAFTS),
-    'published');
+    'base');
   await desk.close();
 
   // What a page built by 0.18.0 stored for the one changes view it had.

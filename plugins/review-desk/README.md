@@ -39,23 +39,23 @@ lists the open desks for every repository named by any git remote of the
 checkout the push ran from, so a push to a fork reaches the upstream's desk, and
 the session rewrites whatever the push made out of date.
 
-When a page is rewritten — because you asked for the change, or because someone
-pushed — the page says so over it, and offers three ways to read it:
-**Document**, **Since you read** and **Since published**. The two changed views
-are patches, with a few lines of context and the words that moved inside a
-reworded line marked. *Since you read* is what is new to you on this tab; *since
-published* is everything the session has done to that page since the desk was
-published, read or not — the question you have when you come back to a desk
-rather than sit on it. A view with nothing to compare with is offered but
-disabled, so a page you have never read still answers the second question.
-**Mark as read** moves the read baseline; looking at the document does not. The
-setting holds for the desk, so asking what changed is one press and then it is
-simply how the desk reads.
+A page can be read three ways: **Document**, **Since you read**, and **Against
+main** — whatever branch the request is against. The two changed views are
+patches, with a few lines of context and the words that moved inside a reworded
+line marked. *Since you read* is what is new to you on this tab, which is how a
+back and forth reaches you. *Against main* is what the request itself changes:
+the file as it will be against the file as it is on the branch, which is the
+thing you are being asked to approve. A page that has moved says so in a bar
+over it, and a view with nothing to compare with is offered but disabled — so a
+page you have never read still answers the second question, and a file the
+request adds says that instead of drawing a comparison with nothing.
 
-What you have read is remembered per browser tab, so the reload a ring causes
-does not lose it; a desk opened on another device has read nothing yet, and shows
-what has changed since publication instead. Republishing a desk makes its
-published text the new baseline.
+**Mark as read** moves the read baseline; looking at the document does not, and
+neither view touches the other. The setting holds for the desk, so asking what
+changed is one press and then it is simply how the desk reads. What you have
+read is remembered per browser tab, so the reload a ring causes does not lose
+it; a desk opened on another device has read nothing yet and still has the
+request's own diff.
 
 The page draws mermaid diagrams: the ones Claude writes into the description,
 fenced `mermaid` blocks in any markdown file the request carries, and `.mmd`

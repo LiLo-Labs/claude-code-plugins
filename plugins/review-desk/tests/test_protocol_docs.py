@@ -382,6 +382,21 @@ class NoSettingsEdits(unittest.TestCase):
 class Desk(unittest.TestCase):
     doc = read("review-desk.md")
 
+    def test_each_file_is_carried_at_the_head_and_at_the_base(self):
+        # The page's third view is the request's own diff, which it can only draw
+        # from a text it was given: the page cannot reach GitHub.
+        text = flat(section(self.doc, "Gather"))
+        self.assertIn("Carry each file **twice**", text)
+        self.assertIn("contents/<path>?ref=<baseRefName>", text)
+        self.assertIn('carry `"base": null`', text)
+        self.assertIn("leave `base` out altogether rather than truncating it", text)
+        build = flat(section(self.doc, "Build"))
+        self.assertIn('"base": "the same file on baseRefName, or null if the request adds it"', build)
+        self.assertIn('"baseRefName": "main"', build)
+        # And a rewrite has to carry it too, or the view goes away mid-review.
+        self.assertIn("Carry `base` on a rewritten document too",
+                      flat(section(self.doc, "Changing the desk and the pull request")))
+
     def test_ring_reads_pickup_and_skips_a_handled_decision(self):
         waiting = flat(section(self.doc, "When they ask the working session"))
         self.assertIn("get `review/pr-<number>/context/pickup`", waiting)
