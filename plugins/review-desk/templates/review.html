@@ -765,13 +765,20 @@ const asRead = new Map();
 // for once it holds for every page that has moved. Kept with the drafts, so a
 // reload comes back to it. 'full' to begin with -- a document is a document
 // until someone asks what moved in it.
-const VIEWS = ['full', 'read', 'published'];
+const VIEWS = ['full', 'read', 'base'];
 let view = 'full';
-// The text of each page as the desk was published: the payload's own copy, which
-// the store's rows never overwrite. A republish makes a new payload and so a new
-// baseline, which is the right meaning of "since published" -- since this desk
-// was last published.
-const asPublished = new Map();
+// The text of each carried file on the branch this request is against -- main,
+// usually -- as the working session read it off that branch and carried it.
+// That is what makes the third view the request's own diff, rather than an
+// accident of when the desk happened to be built.
+//
+// Per document: `base` is the file's text on the base branch, null when the
+// request adds the file, and absent when no base text was carried (too large,
+// or a desk built before this existed). The request's own page has none: a
+// description is not a file on a branch.
+const asBase = new Map();
+const BASE_NAME = typeof DATA.baseRefName === 'string'
+  && /^[\w.\/-]{1,80}$/.test(DATA.baseRefName) ? DATA.baseRefName : '';
 // Keys whose baseline is the payload's copy rather than anything read in this
 // tab. See loadRead.
 const seeded = new Set();
@@ -782,29 +789,33 @@ const revised = i => {
   const p = pages()[i], was = readText(i);
   return !!p && was !== undefined && was !== (p.text || '');
 };
-// A page not in the payload was added to the desk after it was published, so
-// there is nothing it used to say: the whole of it is new, and the view says so
-// rather than pretending the desk shipped with an empty page.
-const publishedText = i => asPublished.get(pageKey(i));
-const movedSincePublished = i => {
+// undefined: no base text was carried for this page, so nothing can be drawn.
+// null: the request adds this file, so the whole of it is the change.
+const baseText = i => asBase.get(pageKey(i));
+const hasBase = i => baseText(i) !== undefined;
+const changedFromBase = i => {
   const p = pages()[i];
-  return !!p && publishedText(i) !== (p.text || '');
+  return !!p && hasBase(i) && (baseText(i) || '') !== (p.text || '');
 };
 // What each view is drawn against, and null when that view has nothing to draw.
 function baseline(mode, i){
   if (mode === 'read') return revised(i) ? (readText(i) || '') : null;
-  if (mode === 'published') return movedSincePublished(i) ? (publishedText(i) || '') : null;
+  if (mode === 'base') return changedFromBase(i) ? (baseText(i) || '') : null;
   return null;
 }
-const moved = i => revised(i) || movedSincePublished(i);
+const moved = i => revised(i) || changedFromBase(i);
 
 function loadRead(){
-  // The payload, before any stored row has replaced it.
-  pages().forEach((p, i) => asPublished.set(pageKey(i), p.text || ''));
+  (DATA.documents || []).filter(isDocument).forEach(d => {
+    if (typeof d.base === 'string' || d.base === null) asBase.set(d.name, d.base);
+  });
   try {
     const kept = drafts().changes;
-    // true is what pages up to 0.18.0 stored for the one changes view there was.
+    // true is what pages up to 0.18.0 stored for the one changes view there was;
+    // 'published' is what 0.19.0 called the third view before it was pointed at
+    // the base branch.
     if (kept === true) view = 'read';
+    else if (kept === 'published') view = 'base';
     else if (VIEWS.includes(kept)) view = kept;
   } catch (e) {}
   try {
@@ -1175,9 +1186,8 @@ function paint(){
   const was = baseline(view, leaf);
   $('sheet').innerHTML = was === null ? render(all[leaf])
     : diffHtml(was, all[leaf].text || '',
-               view === 'published' && publishedText(leaf) === undefined
-                 ? 'This page was added to the desk after it was published, so all of it is new.'
-                 : '');
+               view === 'base' && baseText(leaf) === null
+                 ? 'This request adds this file, so all of it is new.' : '');
   if (was !== null) return;          // a patch holds no code blocks, diagrams or headings
   paintCode();
   paintDiagrams();
@@ -1199,21 +1209,26 @@ function drawRevBar(){
   // since this tab read it, moved since the desk was published, or both. A
   // reviewer arriving at a page for the first time has read nothing of it, and
   // the bar says so rather than offering a comparison with nothing.
-  const fresh = publishedText(leaf) === undefined;
-  const said = fresh
-    ? (revised(leaf) ? 'Added to the desk after it was published, and rewritten since you read it.'
-        : 'Added to the desk after it was published.')
-    : revised(leaf)
-      ? (movedSincePublished(leaf) ? 'Rewritten since you read this page, and since the desk was published.'
-          : 'Rewritten since you read this page.')
-      : 'Rewritten since the desk was published. You have read what it says now.';
-  const button = (mode, label, live) =>
+  // What the page has done, in the reviewer's terms: rewritten since they read
+  // it, changed by this request, added by it, or both of the first two.
+  const against = BASE_NAME ? BASE_NAME : 'the base branch';
+  const adds = baseText(leaf) === null;
+  const said = revised(leaf)
+    ? (adds ? 'Rewritten since you read this page. This request adds the file.'
+        : changedFromBase(leaf) ? 'Rewritten since you read this page, and changed by this request.'
+        : 'Rewritten since you read this page.')
+    : adds ? 'This request adds this file. You have read what it says now.'
+    : 'Changed by this request. You have read what it says now.';
+  const button = (mode, label, live, why) =>
     '<button data-view="' + mode + '" aria-pressed="' + (view === mode ? 'true' : 'false') + '"'
-    + (live ? '' : ' disabled title="Nothing to compare with"') + '>' + label + '</button>';
+    + (live ? '' : ' disabled title="' + esc(why) + '"') + '>' + esc(label) + '</button>';
   rebuild(el, '<span class="what">' + said + '</span>'
-    + button('full', 'Document', true)
-    + button('read', 'Since you read', revised(leaf))
-    + button('published', 'Since published', movedSincePublished(leaf))
+    + button('full', 'Document', true, '')
+    + button('read', 'Since you read', revised(leaf),
+             'This page has not changed since you read it')
+    + button('base', 'Against ' + against, changedFromBase(leaf),
+             hasBase(leaf) ? 'This page is the same on ' + against
+               : 'This desk carries no ' + against + ' text for this page')
     + '<button data-view="markRead">Mark as read</button>');
 }
 
@@ -3505,6 +3520,10 @@ function followPage(){
           if (!had || writtenAt(row) >= writtenAt(had)) newest.set(row.name, row);
         });
         newest.forEach(row => {
+          // The base-branch text travels with each rewrite, so the request's
+          // own diff survives the session changing a file under the reviewer.
+          // A row that carries none leaves whatever the payload carried.
+          if (typeof row.base === 'string' || row.base === null) asBase.set(row.name, row.base);
           const at = documents.findIndex(x => x.name === row.name);
           if (at >= 0 && documents[at].text === row.text) return;
           if (at >= 0) documents[at] = {name: row.name, text: row.text};

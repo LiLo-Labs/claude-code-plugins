@@ -52,6 +52,23 @@ holds for source files as much as documents. The page renders markdown as prose
 and everything else as syntax-highlighted source, so a shell script arrives
 readable rather than as a paragraph describing it.
 
+Carry each file **twice**: as it will be, and as it is on the branch the request
+is against. The page reads the first and draws the difference against the
+second, which is the request's own diff — the thing being judged. Take the base
+text from the base branch, never from the working tree, which may hold anything:
+
+    gh api repos/<owner/repo>/contents/<path>?ref=<baseRefName> --jq .content | base64 -d
+
+That call fails with 404 for a file the request adds. That is an answer: carry
+`"base": null`, and the page says the request adds the file. A file the request
+deletes is not carried at all.
+
+Carrying both texts doubles what a document holds, against a 256 KiB limit per
+document. When both will not fit, carry the head text and leave `base` out
+altogether rather than truncating it: the page then offers the reviewer no
+comparison for that file and says so, which is honest, where half a base text
+would draw a diff that is wrong.
+
 Judgement on what to carry, since a page nobody can read is worse than a short
 one: carry every changed file when the request is small. When it is large, carry
 the files the decision actually turns on and say in the `body` which ones you
@@ -85,7 +102,9 @@ the same path. The payload is a JSON object:
       "headRefOid": "the head commit from that query, all 40 hex characters",
       "summary":   "34 files, no code" — a short honest size,
       "body":      "the pull request description, markdown, with its diagrams",
-      "documents": [{"name": "docs/design/0002-x.md", "text": "…"}],
+      "documents": [{"name": "docs/design/0002-x.md", "text": "…",
+                     "base": "the same file on baseRefName, or null if the request adds it"}],
+      "baseRefName": "main" — from that query, so the page can name what it compares against,
       "openers":   ["four questions worth asking about THIS request"],
       "resume":    "cd <launch directory> && claude --resume <this session's id>"
     }
@@ -538,16 +557,16 @@ included.
 The page can draw what changed, so a rewrite does not have to be described line
 by line: say in the description what changed and why, and leave what changed to
 the page. It draws two differences — against what that browser tab last read,
-and against the text the desk was published with — so a reviewer who has been
-away sees the whole of what you have done since publishing, not only what
-arrived while they were looking.
+and against the base branch — so a reviewer who has been away sees both what
+arrived since they looked and what the request does as a whole.
 
-Two things follow for you. Write the whole file as it now is, never only the
-part that moved: a document that carries an excerpt where the reviewer had the
-whole reads as everything after it being deleted. And republishing the desk makes
-the payload you publish the new "since published" baseline, which is what you
-want when the request has moved on, and is not what you want in the middle of a
-back and forth — rewrite the document rather than republishing the desk.
+Carry `base` on a rewritten document too, the same text as when the desk was
+built unless the base branch itself has moved. A rewrite that leaves it out
+takes the request's own diff away from the reviewer for that file.
+
+And write the whole file as it now is, never only the part that moved: a
+document that carries an excerpt where the reviewer had the whole reads as
+everything after it being deleted.
 
 Rewrite `context/body` after every push, even one the description does not need
 to mention, with `head` set to the commit GitHub now has, all 40 hex characters,
