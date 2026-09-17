@@ -411,6 +411,15 @@ page takes the time from the name:
     collection: "review/pr-<number>/presence", doc_id: "<the version from the notice>",
     data: {"resume": "<the resume command>"}
 
+**A ring can arrive twice for the same thing.** The page waits about 90 seconds
+for the stamp above; if none names its ring, it rings once more, because a
+publish that succeeded is not a notice that arrived. The second ring carries
+`again: true` in `doorbell.json`, and there is never a third. Nothing about
+handling it changes: the store is the record, a decision the pickup already
+holds with an outcome is not collected again, and a message with a reply is not
+answered again. The stamp is what stops the second ring, which is the other
+reason it goes out before anything else.
+
 A ring with no new message and no new decision is the reviewer pressing
 **Check**. A Check ping also answers every waiting message and collects a
 waiting decision: handle it as you would any other ring. The page offers Check

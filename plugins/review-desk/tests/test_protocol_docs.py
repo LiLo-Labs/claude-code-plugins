@@ -426,6 +426,16 @@ class Desk(unittest.TestCase):
         # A progress rewrite renews the claim, or a long answer looks abandoned.
         self.assertIn('keeping `"status": "working"` and setting `at` to now', body)
 
+    def test_a_ring_can_arrive_twice_and_the_stamp_is_what_stops_the_second(self):
+        # The page rings again when no stamp answered the first ring, so a session
+        # that handles a ring must expect a duplicate rather than treat it as a
+        # second decision or a second question.
+        text = flat(section(self.doc, "Whenever a ring arrives"))
+        self.assertIn("A ring can arrive twice for the same thing", text)
+        self.assertIn("`again: true` in `doorbell.json`", text)
+        self.assertIn("there is never a third", text)
+        self.assertIn("The stamp is what stops the second ring", text)
+
     def test_a_check_ping_answers_waiting_messages_and_collects_a_waiting_decision(self):
         # The page offers Check to ring again for a message or decision whose own
         # ring failed. A doc that called the ping's presence stamp "the whole
