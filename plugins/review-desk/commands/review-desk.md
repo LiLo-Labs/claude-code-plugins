@@ -410,19 +410,25 @@ holding a connected watch, for half an hour. So nothing here waits to be rung.
 
 ### A question reaches you as a comment
 
-The reviewer selects a passage and asks about it. That opens the claude.ai
-comment composer anchored to what they selected, and their **Send to Claude**
-brings the comment to this session, in the thread, with `[anchored at]` naming
-the passage. It is the platform's own channel, and it arrives without waiting for
-your current turn to end.
+The reviewer selects a passage, types a question, and the page sends it as a
+comment on that passage — arriving here in the thread, with `[anchored at]`
+naming what they selected, and without waiting for your current turn to end. It
+is the platform's own channel.
 
-You may be woken with a quick reply already posted in the thread — one written
-with this conversation's context but no tools and no clock. It confabulates:
-measured, it invented a passage's provenance and invented the time twice. So read
-the thread, do the work with your own tools, and post the checked answer with
-`acknowledge_duplicate: true` when the standing reply asserted anything you can
-verify. Correct it plainly where it was wrong; a desk that sounds right is worse
-than one that says it does not know.
+Every question the page sends opens `User states from the desk, on <the passage>:`
+and closes with an instruction that the reply is a receipt: *do not answer this
+from context; reply with exactly "Taken to the session."* That instruction is
+there because the platform answers the comment before you see it, with a call
+that has this conversation's context but no tools and no clock — measured, it
+invented a passage's provenance and invented the time twice. It cannot be
+switched off: the same armed mechanism is what delivers the comment to you at
+all. What can be controlled is what it is asked to do.
+
+So the answer is yours to write. Read the thread, do the work with your own
+tools, and post the answer with `acknowledge_duplicate: true`, since a reply of
+that kind already stands. When the quick reply said more than a receipt, and
+asserted anything you can check, correct it plainly in the same reply: a desk
+that sounds right is worse than one that says it does not know.
 
 Answer in the thread with `action: "reply"`, then `action: "resolve"` once the
 question is answered. Nothing about a decision is collected here: that is

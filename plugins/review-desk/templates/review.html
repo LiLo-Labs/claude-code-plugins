@@ -122,7 +122,16 @@ pre.redline .row.add{background:var(--addbg)}
 pre.redline .row.del{background:var(--delbg)}
 
 /* asking, and deciding */
-.ask-bar{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin:16px 0 0}
+.asking{margin:18px 0 0;padding:14px 16px;background:var(--card);
+  border:1px solid var(--edge);border-radius:8px}
+.asking label{display:block;font-size:12px;font-weight:600;text-transform:uppercase;
+  letter-spacing:0.07em;color:var(--faint);margin:0 0 7px}
+.asking .quoted{margin:0 0 8px;padding:6px 10px;border-left:2px solid var(--mark);
+  font-family:var(--doc);font-size:15px;color:var(--soft)}
+.asking textarea{width:100%;font-family:var(--ui);font-size:15px;line-height:1.5;
+  padding:9px 10px;border:1px solid var(--edge);border-radius:6px;background:var(--paper);
+  color:var(--ink);resize:vertical}
+.ask-bar{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin:10px 0 0}
 .askState{flex:1 1 220px;min-width:0;font-size:13px;color:var(--soft)}
 .askState.no{color:var(--mark)}
 .decide{margin:18px 0 0;padding:15px 16px;background:var(--card);
@@ -167,9 +176,14 @@ footer .built{margin-top:10px;font-family:var(--mono);font-size:11.5px}
   <div class="sheet"><div class="revbar" id="revbar" hidden></div><div class="md" id="sheet"></div></div>
   <span class="where" id="where"></span>
 
-  <div class="ask-bar">
-    <button id="ask" class="go" disabled>Ask about this page</button>
-    <span class="askState" id="askState">Checking whether a session is listening…</span>
+  <div class="asking">
+    <label for="question">Ask the session</label>
+    <div class="quoted" id="quoted" hidden></div>
+    <textarea id="question" rows="2" placeholder="Select a passage first, then ask about it."></textarea>
+    <div class="ask-bar">
+      <button id="ask" class="go" disabled>Ask about this page</button>
+      <span class="askState" id="askState">Checking whether a session is listening…</span>
+    </div>
   </div>
 
   <div class="decide" id="decide"></div>
@@ -1110,18 +1124,39 @@ function drawWork(){
 }
 
 /* ---- asking about a passage ---- */
-// The platform's own composer, opened on what the reviewer selected: they type
-// there and press its Send to Claude, so the page never holds their words and
-// never needs consent to post as them. canSendToClaude() is the part the old
-// desk never had -- it says whether anyone is listening before they type.
+// The page composes the message and sends it, rather than opening the shell's
+// composer, for one reason: the text is then ours. A comment sent to Claude is
+// answered first by a call that has this conversation's context but no tools and
+// no clock -- it invented a provenance and invented the time twice when it was
+// measured -- and that call cannot be switched off, because the same armed
+// mechanism is what delivers the comment to the session at all. What can be
+// controlled is what it is asked to do: every question from this desk carries an
+// instruction that the reply is a receipt, and the answer comes from the session
+// with its tools. canSendToClaude() says whether anyone is listening at all.
 let listening = 'checking';
+// What the session is asked to do with a question, and what the quick reply is
+// told to do instead of answering it.
+const RECEIPT = 'Do not answer this from context. Reply with exactly: "Taken to '
+  + 'the session." The session itself answers here, with the repository and its '
+  + 'tools, and its answer is the one that counts.';
+function askText(label, question){
+  return 'User states from the desk, on ' + label + ':\n\n' + question
+    + '\n\n---\n' + RECEIPT;
+}
+// What just happened, when that is more use than the standing state. Cleared the
+// moment the reviewer types again, so it never sits there as stale news.
+let note = '';
 async function drawAsk(){
   const el = $('askState');
   const sel = window.getSelection();
   const some = sel && !sel.isCollapsed && String(sel).trim().length > 1;
-  $('ask').disabled = listening !== 'available';
+  const typed = ($('question').value || '').trim().length > 1;
+  $('ask').disabled = listening !== 'available' || !typed;
   $('ask').textContent = some ? 'Ask about what you selected' : 'Ask about this page';
-  el.className = 'askState ' + (listening === 'available' ? 'yes' : 'no');
+  $('quoted').textContent = some ? String(sel).trim().slice(0, 160) : '';
+  $('quoted').hidden = !some;
+  el.className = 'askState ' + (note ? 'yes' : listening === 'available' ? 'yes' : 'no');
+  if (note){ el.textContent = note; return; }
   el.textContent = listening === 'available'
     ? 'A session is listening. Select a passage, then ask.'
     : listening === 'no_session'
@@ -1232,22 +1267,44 @@ $('decide').addEventListener('click', async e => {
   else if (id === 'again'){ decision = null; decidedAt = null; reason = null; drawDecision(); }
 });
 
-$('ask').addEventListener('click', async () => {
-  if (!comments) return;
+// The selection at the moment of the gesture, kept because pressing a button
+// collapses it.
+let held = null;
+$('question').addEventListener('input', () => { note = ''; if (comments) drawAsk(); });
+document.addEventListener('selectionchange', () => {
   const sel = window.getSelection();
-  const target = sel && !sel.isCollapsed && sel.rangeCount && String(sel).trim()
-    ? {range: sel.getRangeAt(0)} : {element: $('sheet')};
-  try {
-    const r = await comments.openComposer(target);
-    $('askState').textContent = r.opened
-      ? 'Composer open. Type your question, then press Send to Claude in it.'
-      : 'A composer you already have open is being protected — finish or clear it first.';
-  } catch (e){
-    $('askState').textContent = 'The composer could not open ('
-      + ((e && e.code) || 'unknown') + ').';
+  if (sel && !sel.isCollapsed && String(sel).trim().length > 1){
+    held = {text: String(sel).trim(), node: sel.anchorNode};
   }
+  if (comments) drawAsk();
 });
-document.addEventListener('selectionchange', () => { if (comments) drawAsk(); });
+
+$('ask').addEventListener('click', async () => {
+  const question = ($('question').value || '').trim();
+  if (!comments || !question) return;
+  $('ask').disabled = true;
+  const page = pages()[leaf] || {};
+  const where = held && held.text ? '“' + held.text.slice(0, 120) + '”'
+    : (page.full || page.name || 'this page');
+  const el = held && held.node
+    ? (held.node.nodeType === 1 ? held.node : held.node.parentElement) : $('sheet');
+  try {
+    const anchor = await comments.anchorFor(el && el.isConnected ? el : $('sheet'));
+    await comments.sendToClaude({anchor, text: askText(where, question)});
+    $('question').value = '';
+    held = null;
+    note = 'Asked. The session answers in the thread on this page, and what it does '
+      + 'while it works shows at the top.';
+  } catch (e){
+    const code = (e && e.code) || 'unknown';
+    note = code === 'consent_required'
+      ? 'Allow this page to comment as you, then ask again — your words are kept.'
+      : code === 'claude_unavailable'
+        ? 'That could not reach a session, so nothing was posted. Try again when one is running.'
+        : 'Not sent (' + code + '). Your words are kept.';
+  }
+  await refreshAsk();
+});
 
 /* ================= live ================= */
 function listen(){
