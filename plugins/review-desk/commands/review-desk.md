@@ -346,12 +346,17 @@ Append an entry to `~/.review-desks.json`, creating the file with an empty list
 if it is absent. Each entry is:
 
     {"repo": "owner/name", "pr": <number>, "url": "<artifact url>",
-     "cwd": "<launch directory>", "head": "<headRefOid>", "branch": "<headRefName>",
+     "cwd": "<launch directory>", "session": "<this session's id>",
+     "head": "<headRefOid>", "branch": "<headRefName>",
      "collectedAt": null}
 
 `cwd` is the absolute path of the directory this session was launched in, the
 working directory Claude Code named when the session started, not a directory
-you later ran `cd` into. `head` is the `headRefOid` this publish wrote into the
+you later ran `cd` into. `session` is `$CLAUDE_CODE_SESSION_ID`, this session's
+own id, left out when that variable is empty: it is how a session attending the
+desk reaches the conversation that built the request, by resuming a fork of it
+to ask what was rejected or why a thing is the way it is, as `/review-attend`
+describes under "Asking the working session". `head` is the `headRefOid` this publish wrote into the
 payload and `context/body`, the commit the desk shows, and `branch` is the
 `headRefName` from the same `gh pr view`, the branch the pull request's commits
 are pushed to. If an entry for this request already exists, keep that one

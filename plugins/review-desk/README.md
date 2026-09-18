@@ -31,6 +31,18 @@ to the pull request while you watch. Whatever you highlight goes along with the
 question, with the tab and section you were reading. A message sent while no
 session is running is answered by the next one to start.
 
+A session in the middle of a task cannot serve a desk. A ring is taken up only
+when the current turn ends, so a question asked while that session is writing
+code waits for it — twenty-five minutes, on one real desk. The desk can only be
+read and written from an interactive session, so there is no background worker to
+hand it to; what there is instead is a session that does nothing else.
+`/review-attend`, run in a spare terminal, holds the watches and answers rings
+within seconds, and asks the session that built the request whatever needs its
+context by resuming a fork of it headlessly — that fork has the whole
+conversation and the repository's tools, and leaves the session itself
+undisturbed. `/review-answer <owner/repo>#<number>` does the same answering on
+demand, and nothing else: no comment, no merge.
+
 The panel says when the working session last answered, and has a **Check**
 button that rings it and waits. If nothing answers, the page shows the command
 that brings that session back (`claude --resume …`), for someone at the computer

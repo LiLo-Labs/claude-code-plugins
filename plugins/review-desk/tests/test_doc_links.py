@@ -1,13 +1,16 @@
-"""The hooks send sessions to sections of /review-desk by name. The hook tests
-only check the hooks' own strings, so a renamed heading would leave a session
-pointed at a section that no longer exists while every other test passed."""
+"""The hooks and the command docs send sessions to sections by name. The hook
+tests only check the hooks' own strings, so a renamed heading would leave a
+session pointed at a section that no longer exists while every other test
+passed. The commands cite one another's sections too, so a named section must
+exist in one of them, not only in /review-desk."""
 import ast
 import os
 import re
 import unittest
 
 ROOT = os.path.join(os.path.dirname(__file__), "..")
-DOC = os.path.join(ROOT, "commands", "review-desk.md")
+COMMANDS = os.path.join(ROOT, "commands")
+DOC = os.path.join(COMMANDS, "review-desk.md")
 UNDER = re.compile(r'under "([^"]+)"')
 
 
@@ -29,9 +32,12 @@ class DocLinks(unittest.TestCase):
         phrases = [p for text in texts for p in UNDER.findall(text)]
         # Guards against a pass that checked nothing because the wording moved.
         self.assertGreaterEqual(len(phrases), at_least, f"{source}: {phrases}")
-        headings = set(re.findall(r"^#{2,3} (.+?)\s*$", read(DOC), re.M))
+        headings = set()
+        for name in sorted(os.listdir(COMMANDS)):
+            if name.endswith(".md"):
+                headings |= set(re.findall(r"^#{2,3} (.+?)\s*$", read(os.path.join(COMMANDS, name)), re.M))
         missing = sorted(set(phrases) - headings)
-        self.assertEqual(missing, [], f"{source} names sections commands/review-desk.md lacks")
+        self.assertEqual(missing, [], f"{source} names sections no command doc has")
 
     def test_sweep_names_real_sections(self):
         self.assert_sections_exist(strings(os.path.join(ROOT, "hooks", "sweep.py")),
@@ -41,9 +47,15 @@ class DocLinks(unittest.TestCase):
         self.assert_sections_exist(strings(os.path.join(ROOT, "hooks", "after_push.py")),
                                    "hooks/after_push.py", 1)
 
-    def test_command_doc_names_its_own_sections(self):
-        self.assert_sections_exist([" ".join(read(DOC).split())],
-                                   "commands/review-desk.md", 1)
+    def test_command_docs_name_real_sections(self):
+        for name in sorted(os.listdir(COMMANDS)):
+            if not name.endswith(".md"):
+                continue
+            with self.subTest(doc=name):
+                text = " ".join(read(os.path.join(COMMANDS, name)).split())
+                # Only /review-desk is long enough to guarantee a citation.
+                self.assert_sections_exist([text], "commands/" + name,
+                                           1 if name == "review-desk.md" else 0)
 
 
 README = os.path.join(ROOT, "README.md")
