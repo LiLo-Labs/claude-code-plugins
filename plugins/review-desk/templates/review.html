@@ -1,137 +1,64 @@
 <title>Review Desk</title>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,400;6..72,600&family=Public+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400&display=swap">
 <style>
 :root{
   --paper:#f7f5f2; --card:#fffefc; --edge:#e3ded6; --rule:#ece7e0;
-  /* --faint is text too: unopened document tabs, the footer, the meta line, the
-     speaker labels, code comments. At #948d84 (light) and #7a7267 (dark) those read
-     at 2.7 to 3.9:1. Each value now clears 4.5:1 on --paper, --card and --rule. */
   --ink:#22201d; --soft:#5f5a53; --faint:#6b645b;
-  --mark:#9a4a2f; --good:#3f6b4a; --cool:#3d5a72; --lit:#f5e3b8;
-  /* Text and glyphs drawn on --cool, --good or --mark. White suits the dark light-mode
-     accents; the dark theme's accents are pastel, where white measured 2.6:1 on
-     --cool and 2.47:1 on --good, so it takes the dark paper instead (7.1 and 7.46). */
+  --mark:#9a4a2f; --good:#3f6b4a; --cool:#3d5a72;
   --on-accent:#fff;
-  /* The diff tints: a line's ground, and the stronger one behind the words that
-     actually changed inside it. Kept as tokens rather than a colour-mix of
-     --good and --mark so each theme can be measured, and so a browser without
-     color-mix still draws them. */
   --addbg:#e6f0e6; --addwd:#c4e0c8; --delbg:#f6e6df; --delwd:#f0cdbe;
   --doc:"Newsreader",Georgia,serif;
   --ui:"Public Sans",system-ui,sans-serif;
   --mono:"JetBrains Mono",ui-monospace,Menlo,monospace;
-  --panel-w:400px;
 }
 @media (prefers-color-scheme: dark){
   :root:not([data-theme="light"]){
     --paper:#15140f; --card:#1c1a16; --edge:#302c25; --rule:#2a2721;
     --ink:#eee9e0; --soft:#a89f93; --faint:#978e82;
-    --mark:#d4805f; --good:#7fb08c; --cool:#7fa5c4; --lit:#4a3c1c;
-    --on-accent:#15140f;
+    --mark:#d4805f; --good:#7fb08c; --cool:#7fa5c4; --on-accent:#15140f;
     --addbg:#1c2a1e; --addwd:#2d4632; --delbg:#2c1d17; --delwd:#472a1e;
   }
 }
 :root[data-theme="dark"]{
   --paper:#15140f; --card:#1c1a16; --edge:#302c25; --rule:#2a2721;
   --ink:#eee9e0; --soft:#a89f93; --faint:#978e82;
-  --mark:#d4805f; --good:#7fb08c; --cool:#7fa5c4; --lit:#4a3c1c;
-  --on-accent:#15140f;
+  --mark:#d4805f; --good:#7fb08c; --cool:#7fa5c4; --on-accent:#15140f;
   --addbg:#1c2a1e; --addwd:#2d4632; --delbg:#2c1d17; --delwd:#472a1e;
 }
 *{box-sizing:border-box}
 body{background:var(--paper);color:var(--ink);font-family:var(--ui);
   font-size:16px;line-height:1.6;margin:0;-webkit-text-size-adjust:100%}
-.page{max-width:760px;margin:0 auto;padding:30px 20px 120px;
-  transition:margin-right .22s ease}
-body.open .page{margin-right:var(--panel-w)}
-@media (max-width:900px){ body.open .page{margin-right:0} }
-
-/* ---------- the document ---------- */
-.tag{font-family:var(--mono);font-size:10.5px;letter-spacing:.16em;
-  text-transform:uppercase;color:var(--mark)}
-h1.doctitle{font-family:var(--doc);font-weight:600;font-size:30px;
-  line-height:1.15;margin:8px 0 6px;letter-spacing:-.01em}
-.meta{font-family:var(--mono);font-size:11.5px;color:var(--faint)}
-.meta a{color:var(--cool)}
+.page{max-width:760px;margin:0 auto;padding:28px 20px 90px}
+h1#title{font-size:22px;font-weight:600;letter-spacing:-0.015em;margin:0 0 3px;
+  text-wrap:balance}
+.repoTag{font-size:11px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;
+  color:var(--mark);margin:0 0 9px}
+.meta{font-size:13px;color:var(--faint);margin:0 0 20px}
+.meta a{color:var(--cool)} .meta code{font-family:var(--mono);font-size:12px}
 .meta .newer{color:var(--mark)}
-/* What became of the pull request, once it is over. Not styled as an error:
-   a merge is the review ending as it should. */
-.banner{margin:12px 0 0;padding:10px 14px;background:var(--card);
-  border:1px solid var(--edge);border-left:3px solid var(--good);border-radius:6px;
-  font-size:14px;line-height:1.5}
-.banner.unmerged{border-left-color:var(--faint)}
 
-.slab{background:var(--card);border:1px solid var(--edge);border-radius:6px;
-  margin:18px 0;overflow:hidden}
-.slab > .cap{padding:12px 17px;border-bottom:1px solid var(--rule);
-  font-weight:600;font-size:13.5px;display:flex;align-items:center;gap:9px}
-.cap .fresh{font-family:var(--mono);font-size:10px;letter-spacing:.09em;
-  text-transform:uppercase;color:var(--good);margin-left:auto;opacity:0;
-  transition:opacity .2s}
-.cap .fresh.show{opacity:1}
+/* the session at work */
+.work{background:var(--card);border:1px solid var(--edge);border-radius:8px;
+  padding:13px 15px;margin:0 0 16px}
+.work h2{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.08em;
+  color:var(--faint);margin:0 0 8px;display:flex;align-items:center;gap:8px}
+.pulse{width:7px;height:7px;border-radius:4px;background:var(--good);
+  animation:beat 1.4s ease-in-out infinite}
+@keyframes beat{0%,100%{opacity:.25}50%{opacity:1}}
+@media (prefers-reduced-motion: reduce){.pulse{animation:none;opacity:.85}}
+.step{display:grid;grid-template-columns:58px 1fr;gap:10px;padding:6px 0;
+  border-top:1px solid var(--rule)}
+.step:first-child{border-top:none}
+.step time{font-family:var(--mono);font-size:11px;color:var(--faint);padding-top:3px}
+.step .what{font-size:14.5px;line-height:1.5}
+.step .kind{display:block;font-size:10px;font-weight:600;text-transform:uppercase;
+  letter-spacing:0.08em;color:var(--faint);margin:0 0 1px}
+.step.found .kind{color:var(--good)} .step.wrong .kind{color:var(--mark)}
+.step.said .kind{color:var(--cool)} .step.done .what{color:var(--soft)}
+.quiet{color:var(--faint);font-size:13.5px;font-style:italic;margin:0}
 
-.md{font-family:var(--doc);font-size:16.5px;line-height:1.66;padding:14px 18px}
-.md h1{font-family:var(--doc);font-size:22px;margin:22px 0 6px}
-.md h2{font-family:var(--doc);font-weight:600;font-size:18.5px;margin:26px 0 7px;
-  padding-top:15px;border-top:1px solid var(--rule);scroll-margin-top:14px}
-.md h2:first-of-type{border-top:none;padding-top:0;margin-top:6px}
-.md h3{font-family:var(--ui);font-weight:600;font-size:15px;margin:18px 0 5px}
-/* An identifier or a path with nothing to break at wraps where it must. `anywhere`
-   rather than `break-word`, because only `anywhere` also narrows the element's
-   minimum width, which is what stops a token from widening its container. */
-.md p,.md li,.md blockquote,.md h1,.md h2,.md h3{overflow-wrap:anywhere}
-.md p{margin:0 0 13px}
-.md ul,.md ol{margin:0 0 13px;padding-left:22px}
-.md li{margin-bottom:6px}
-.md li > ul,.md li > ol{margin:6px 0 0}
-.md li > pre{margin:6px 0}
-.md a{color:var(--cool);text-decoration:underline;text-underline-offset:2px;
-  text-decoration-thickness:1px}
-.md a:hover{color:var(--mark)}
-.md strong{font-weight:600}
-.md em{font-style:italic}
-.md blockquote{margin:15px 0;padding:3px 0 3px 15px;
-  border-left:2px solid var(--mark);color:var(--soft)}
-.md code{font-family:var(--mono);font-size:14px;background:var(--rule);
-  padding:1px 4px;border-radius:3px}
-.md pre{background:var(--rule);padding:12px 14px;border-radius:5px;
-  overflow-x:auto;margin:0 0 13px}
-.md pre code{background:none;padding:0;font-size:13px;line-height:1.5;overflow-wrap:normal}
-
-/* Syntax colours drawn from the page's own palette rather than a downloaded
-   theme: the artifact CSP blocks third-party stylesheets, and a theme picked
-   for a light background is unreadable on the dark one. */
-.hljs-keyword,.hljs-selector-tag,.hljs-literal,.hljs-section{color:var(--mark)}
-.hljs-string,.hljs-attr,.hljs-addition,.hljs-symbol{color:var(--good)}
-.hljs-comment,.hljs-quote,.hljs-meta{color:var(--faint);font-style:italic}
-.hljs-number,.hljs-built_in,.hljs-type,.hljs-class .hljs-title{color:var(--cool)}
-.hljs-title,.hljs-name,.hljs-function .hljs-title{color:var(--ink);font-weight:600}
-.hljs-variable,.hljs-template-variable,.hljs-params{color:var(--soft)}
-.hljs-deletion{color:var(--mark);text-decoration:line-through}
-
-/* A wide diagram scrolls inside its own frame rather than pushing the page
-   sideways on a phone. */
-.md figure.diagram{margin:4px 0 16px;overflow-x:auto}
-.md figure.diagram svg{display:block;margin:0 auto;height:auto}
-.md figure.diagram details{margin-top:4px;font-family:var(--ui);font-size:12.5px;
-  color:var(--faint)}
-.md figure.diagram summary{cursor:pointer}
-.md figure.diagram details pre{margin:6px 0 0}
-.md .unparsed{font-family:var(--ui);font-size:13px;color:var(--mark);margin:0 0 6px}
-.md hr{border:none;border-top:1px solid var(--rule);margin:20px 0}
-.md .tw{overflow-x:auto;margin:0 0 14px}
-.md table{border-collapse:collapse;font-family:var(--ui);font-size:14px;
-  width:100%}
-.md th{text-align:left;font-weight:600;padding:7px 13px 7px 0;
-  border-bottom:1px solid var(--edge);white-space:nowrap}
-.md td{padding:7px 13px 7px 0;border-bottom:1px solid var(--rule);
-  vertical-align:top;color:var(--soft)}
-
-/* The documents are read HERE. Sending someone away to read the thing they
-   are being asked to judge loses the highlight, the conversation and the
-   place they were at. */
-.leaves{display:flex;gap:3px;overflow-x:auto;margin:20px 0 0;
-  border-bottom:1px solid var(--edge);padding-bottom:0;-webkit-overflow-scrolling:touch}
+/* the documents */
+.leaves{display:flex;gap:3px;overflow-x:auto;margin:0;border-bottom:1px solid var(--edge);
+  -webkit-overflow-scrolling:touch}
 .leaf{border:1px solid transparent;border-bottom:none;background:none;
   font-family:var(--ui);font-size:13px;font-weight:500;color:var(--faint);
   padding:9px 15px;cursor:pointer;white-space:nowrap;border-radius:6px 6px 0 0;
@@ -143,32 +70,50 @@ h1.doctitle{font-family:var(--doc);font-weight:600;font-size:30px;
 .leaf .fresh.show{opacity:1}
 .sheet{background:var(--card);border:1px solid var(--edge);border-top:none;
   border-radius:0 0 6px 6px;overflow:hidden}
+.md{padding:22px 24px}
+.md h1{font-family:var(--doc);font-size:26px;font-weight:600;margin:0 0 12px;text-wrap:balance}
+.md h2{font-family:var(--doc);font-size:20px;font-weight:600;margin:26px 0 10px}
+.md h3{font-size:15px;font-weight:600;margin:20px 0 8px}
+.md p,.md li{font-family:var(--doc);font-size:17px;line-height:1.66}
+.md p{margin:0 0 13px}
+.md ul,.md ol{margin:0 0 13px;padding-left:22px}
+.md li{margin:0 0 5px}
+.md a{color:var(--cool)}
+.md a:hover{color:var(--mark)}
+.md blockquote{margin:0 0 13px;padding-left:12px;border-left:2px solid var(--mark);
+  color:var(--soft)}
+.md code{font-family:var(--mono);font-size:13.5px;background:var(--paper);
+  padding:1px 4px;border-radius:3px}
+.md pre{margin:0 0 14px;padding:12px 13px;overflow-x:auto;background:var(--paper);
+  border:1px solid var(--edge);border-radius:6px}
+.md pre code{background:none;padding:0;font-size:12.5px;line-height:1.55}
+.md .tw{overflow-x:auto;margin:0 0 14px}
+.md table{border-collapse:collapse;font-size:14px;font-family:var(--ui)}
+.md th,.md td{border:1px solid var(--edge);padding:6px 9px;text-align:left}
+.md th{background:var(--paper);font-weight:600}
+.md hr{border:none;border-top:1px solid var(--edge);margin:20px 0}
+.md .unparsed{font-family:var(--ui);font-size:13px;color:var(--mark);margin:0 0 6px}
+.hljs-comment,.hljs-quote{color:var(--faint);font-style:italic}
+.hljs-keyword,.hljs-selector-tag,.hljs-literal,.hljs-section{color:var(--mark)}
+.hljs-string,.hljs-attr,.hljs-addition,.hljs-symbol{color:var(--good)}
+.hljs-number,.hljs-built_in,.hljs-type,.hljs-class .hljs-title{color:var(--cool)}
+.hljs-title,.hljs-function .hljs-title,.hljs-name{color:var(--ink);font-weight:600}
+.hljs-deletion{color:var(--mark);text-decoration:line-through}
 
-/* The bar over a page that has been rewritten since this reviewer read it, and
-   the changes view it toggles. The diff is source, not prose: a patch is what
-   answers "what changed", and rendering markdown twice and diffing the result
-   would show a reworded paragraph as one replaced block. */
-.revbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px;
-  padding:9px 13px;border-bottom:1px solid var(--edge);background:var(--paper);
-  font-family:var(--ui);font-size:13px;color:var(--ink)}
+/* the three views, and the redlines */
+.revbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:9px 13px;
+  border-bottom:1px solid var(--edge);background:var(--paper);font-size:13px}
 .revbar .what{flex:1 1 auto;min-width:0}
 .revbar button{min-height:32px;padding:0 11px;border:1px solid var(--edge);
   background:var(--card);color:var(--soft);font-family:var(--ui);font-size:12px;
   border-radius:6px;cursor:pointer}
 .revbar button[aria-pressed="true"]{border-color:var(--good);color:var(--good);font-weight:600}
-.revbar button:hover{color:var(--ink)}
-/* Redlines, in the document rather than beside it: what went is struck through
-   where it stood, what arrived is underlined in its place. The marks carry the
-   change, so a line that only had words replaced takes no background of its
-   own -- a whole line gone or arrived does, because there is nothing else to
-   tell it apart from its neighbours. */
-ins.rl{text-decoration:underline;text-decoration-thickness:1px;
-  text-underline-offset:2px;background:var(--addwd);color:var(--ink)}
+.revbar button:disabled{color:var(--faint);cursor:default}
+ins.rl{text-decoration:underline;text-decoration-thickness:1px;text-underline-offset:2px;
+  background:var(--addwd);color:var(--ink)}
 del.rl{text-decoration:line-through;background:var(--delwd);color:var(--ink)}
-.md p ins.rl,.md li ins.rl{padding:0 1px}
-.rlnote{margin:0 0 12px;padding:8px 11px;border:1px solid var(--edge);
-  border-radius:6px;background:var(--paper);color:var(--soft);
-  font-family:var(--ui);font-size:12.5px;line-height:1.5}
+.rlnote{margin:0 0 12px;padding:8px 11px;border:1px solid var(--edge);border-radius:6px;
+  background:var(--paper);color:var(--soft);font-family:var(--ui);font-size:12.5px}
 pre.redline{margin:0;padding:12px 13px;overflow-x:auto;font-family:var(--mono);
   font-size:12.5px;line-height:1.55;color:var(--ink)}
 pre.redline code{font:inherit;background:none;padding:0;white-space:pre}
@@ -176,271 +121,67 @@ pre.redline .row{display:block}
 pre.redline .row.add{background:var(--addbg)}
 pre.redline .row.del{background:var(--delbg)}
 
-/* A highlight that stays visible after the browser drops the selection --
-   the moment focus enters the composer, the native selection is gone, and
-   without this the quote you are asking about vanishes off the page. Painted
-   through the Custom Highlight API so the document itself is never rewritten. */
-::highlight(carried){background:var(--lit);color:var(--ink)}
-
-/* ---------- selection pop ---------- */
-#pop{position:absolute;z-index:60;display:none;background:var(--ink);
-  color:var(--paper);font-family:var(--ui);font-weight:600;font-size:12.5px;
-  padding:7px 13px;border-radius:16px;cursor:pointer;white-space:nowrap;
-  box-shadow:0 3px 14px #0004}
-#pop:active{transform:scale(.97)}
-
-/* ---------- the FAB ---------- */
-#fab{position:fixed;right:20px;bottom:20px;z-index:70;width:56px;height:56px;
-  border-radius:28px;border:none;background:var(--cool);color:var(--on-accent);
-  font-size:21px;cursor:pointer;box-shadow:0 4px 18px #0003;
-  display:flex;align-items:center;justify-content:center;padding:0}
-#fab:hover{filter:brightness(1.08)}
-#fab .dot{position:absolute;top:2px;right:2px;min-width:19px;height:19px;
-  border-radius:10px;background:var(--mark);color:var(--on-accent);font-size:11px;
-  font-weight:600;font-family:var(--ui);display:none;
-  align-items:center;justify-content:center;padding:0 5px}
-#fab .dot.show{display:flex}
-body.open #fab{display:none}
-
-/* ---------- the panel ---------- */
-#panel{position:fixed;top:0;right:0;bottom:0;width:var(--panel-w);z-index:80;
-  background:var(--card);border-left:1px solid var(--edge);
-  display:none;flex-direction:column}
-body.open #panel{display:flex}
-@media (max-width:900px){ #panel{width:100%;border-left:none} }
-
-.ptop{display:flex;align-items:center;gap:8px;padding:11px 12px;
-  border-bottom:1px solid var(--rule);flex-shrink:0}
-.ptop b{font-size:13.5px}
-.ptop .where{font-family:var(--mono);font-size:10.5px;color:var(--faint);
-  margin-left:auto;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
-  max-width:190px}
-.icon{border:none;background:none;color:var(--faint);font-size:19px;
-  cursor:pointer;padding:3px 7px;line-height:1;border-radius:5px}
-.icon:hover{background:var(--rule);color:var(--ink)}
-
-/* Whether the working session is reachable. The page cannot see a session, so
-   this reports when one last answered and what a check found. */
-.presence{padding:7px 12px;border-bottom:1px solid var(--rule);flex-shrink:0;
-  font-size:12px;line-height:1.45;color:var(--soft);display:flex;flex-wrap:wrap;
-  gap:6px 8px;align-items:center}
-.presence .gone{color:var(--mark)}
-.presence .check{border:1px solid var(--edge);background:var(--paper);color:var(--soft);
-  font-family:var(--ui);font-size:11.5px;padding:3px 9px;border-radius:11px;
-  cursor:pointer;margin-left:auto}
-/* min-width:0 on the row and on the command lets the command shrink and scroll.
-   A flex item otherwise never shrinks below its content, so a resume command
-   widened both and pushed Copy out of the panel, past the window's edge. */
-.presence .resume{flex-basis:100%;min-width:0;display:flex;gap:6px;align-items:center}
-.presence .resume code{flex:1;min-width:0;font-family:var(--mono);font-size:11px;
-  background:var(--rule);padding:4px 6px;border-radius:4px;overflow-x:auto;
-  white-space:nowrap}
-.presence .resume .check{margin-left:0}
-
-.tabs{display:flex;gap:5px;padding:8px 12px;border-bottom:1px solid var(--rule);
-  overflow-x:auto;flex-shrink:0;align-items:center}
-.tab{border:1px solid var(--edge);background:var(--paper);color:var(--soft);
-  font-family:var(--ui);font-size:12px;padding:5px 10px;border-radius:13px;
-  cursor:pointer;white-space:nowrap;display:flex;align-items:center;gap:6px}
-.tab.on{background:var(--cool);border-color:var(--cool);color:var(--on-accent)}
-.tab .spin{width:7px;height:7px;border-radius:4px;background:var(--mark);
-  animation:pulse 1.1s ease-in-out infinite}
-.tab.on .spin{background:var(--on-accent)}
-/* A reply in this thread the reviewer has not seen yet. */
-.tab .unread{width:7px;height:7px;border-radius:4px;background:var(--mark)}
-.tab.on .unread{background:var(--on-accent)}
-@keyframes pulse{0%,100%{opacity:.3}50%{opacity:1}}
-.tabpair{display:flex;align-items:center;flex-shrink:0}
-/* Its own button beside the tab, 44px square by its box rather than its glyph.
-   Inside the tab it was an 8px glyph at the tab's right edge: a finger switching
-   threads on an iPad landed on it, and a keyboard could not reach it at all. */
-.shut{min-width:44px;min-height:44px;padding:0;border:none;background:none;
-  color:var(--faint);font-size:17px;line-height:1;cursor:pointer;border-radius:22px;
-  display:flex;align-items:center;justify-content:center}
-.shut:hover{color:var(--ink);background:var(--rule)}
-.closing .choices{display:flex;gap:8px;margin-top:8px}
-.closing .choices button{margin:0;min-height:44px;padding:0 16px;font-size:13px}
-.tabs .add{border:1px dashed var(--edge);background:none;color:var(--faint);
-  font-size:15px;padding:4px 10px;border-radius:13px;cursor:pointer}
-
-.stream{flex:1;overflow-y:auto;padding:14px 13px;display:flex;
-  flex-direction:column;gap:13px}
-.turn{display:flex;flex-direction:column;gap:4px;max-width:94%}
-.turn.mine{align-self:flex-end;align-items:flex-end}
-.who{font-family:var(--mono);font-size:9.5px;letter-spacing:.11em;
-  text-transform:uppercase;color:var(--faint)}
-.said{padding:9px 12px;border-radius:9px;font-size:14.5px;line-height:1.56;
-  white-space:pre-wrap;overflow-wrap:anywhere}
-.turn.mine .said{background:var(--cool);color:var(--on-accent);border-bottom-right-radius:2px}
-.turn.theirs .said{background:var(--rule);border-bottom-left-radius:2px}
-.quoted{border-left:2px solid var(--mark);padding:5px 0 5px 10px;
-  font-family:var(--doc);font-size:13.5px;color:var(--soft);
-  margin-bottom:6px;max-width:94%;white-space:pre-wrap;overflow-wrap:anywhere}
-.turn.mine .quoted{border-left:none;border-right:2px solid var(--mark);
-  padding:5px 10px 5px 0;text-align:right;align-self:flex-end}
-.hint{color:var(--faint);font-size:14px;line-height:1.55}
-.turn .again{min-height:44px;padding:0 14px;border:1px solid var(--mark);
-  background:var(--paper);color:var(--mark);font-family:var(--ui);font-size:13px;
-  border-radius:8px;cursor:pointer}
-.turn .again:disabled{opacity:.45;cursor:default}
-.turn .again + .again{margin-left:8px}
-
-/* The working session writes markdown, so its replies are rendered, not shown raw. */
-.said.rich{white-space:normal}
-.said.rich p,.said.rich ul,.said.rich ol,.said.rich pre,.said.rich .tw{margin:0 0 8px}
-.said.rich > :first-child{margin-top:0}
-.said.rich > :last-child{margin-bottom:0}
-/* Headings mark sections of an answer; at the page's sizes a 22px "Details" was
-   the loudest thing in the panel. */
-.said.rich h1,.said.rich h2,.said.rich h3{font-family:var(--ui);font-size:14.5px;
-  font-weight:600;margin:10px 0 4px}
-.said.rich blockquote{margin:0 0 8px;padding-left:10px;border-left:2px solid var(--mark);
-  color:var(--soft)}
-.said.rich li > ul,.said.rich li > ol,.said.rich li > pre{margin:4px 0}
-.said.rich ul,.said.rich ol{padding-left:18px}
-.said.rich code{font-family:var(--mono);font-size:12.5px}
-.said.rich pre,.said.rich .tw{overflow-x:auto}
-.said.rich pre{background:var(--paper);padding:8px 10px;border-radius:5px}
-.said.rich a{color:var(--cool)}
-
-.seed{padding:0 13px 12px;display:flex;flex-wrap:wrap;gap:6px;flex-shrink:0}
-.seed button{border:1px solid var(--edge);background:var(--paper);
-  color:var(--soft);font-family:var(--ui);font-size:12px;padding:6px 10px;
-  border-radius:13px;cursor:pointer;text-align:left}
-.seed button:hover{border-color:var(--faint);color:var(--ink)}
-
-.carry{margin:0 13px 8px;padding:8px 11px;background:var(--lit);
-  border-radius:7px;font-family:var(--doc);font-size:13.5px;
-  display:flex;gap:9px;align-items:flex-start;flex-shrink:0}
-.carry span{flex:1;overflow:hidden;display:-webkit-box;-webkit-line-clamp:3;
-  -webkit-box-orient:vertical;line-height:1.45}
-.carry button{border:none;background:none;color:var(--soft);cursor:pointer;
-  font-size:15px;padding:0 2px;line-height:1}
-.lost{margin:0 13px 8px;padding:9px 11px;border:1px solid var(--mark);
-  border-radius:7px;font-size:13px;line-height:1.45;color:var(--mark);
-  flex-shrink:0}
-.lost button{margin-left:6px;border:1px solid var(--mark);background:var(--paper);
-  color:var(--mark);font-family:var(--ui);font-size:12px;padding:3px 9px;
-  border-radius:5px;cursor:pointer}
-.btn:disabled,.seed button:disabled{opacity:.45;cursor:default}
-#pageFeeds .lost,#stalePage .lost{margin:14px 0 0}
-#staleSlot .lost{margin:10px 13px 0;flex-shrink:0}
-#decideState .lost{margin:14px 18px 0}
-#decideState .restoring{padding:14px 18px 0;font-size:13.5px;color:var(--soft)}
-
-.shutNote{margin:0 13px 8px;padding:9px 11px;border:1px solid var(--edge);
-  border-radius:7px;font-size:13px;line-height:1.45;color:var(--soft);flex-shrink:0}
-textarea:disabled{opacity:.6;cursor:default}
-.compose{display:flex;gap:8px;padding:11px 13px;border-top:1px solid var(--rule);
-  align-items:flex-end;flex-shrink:0}
-textarea{flex:1;font-family:var(--ui);font-size:16px;line-height:1.45;
-  padding:9px 11px;border:1px solid var(--edge);border-radius:8px;
-  background:var(--paper);color:var(--ink);resize:none;min-height:40px;
-  max-height:150px}
-textarea:focus{outline:2px solid var(--cool);outline-offset:-1px;
-  border-color:transparent}
-.send{border:none;background:var(--cool);color:var(--on-accent);font-family:var(--ui);
-  font-weight:600;font-size:14px;padding:10px 15px;border-radius:8px;
-  cursor:pointer}
-.send:disabled{opacity:.4;cursor:default}
-
-/* ---------- decision ---------- */
-.verdict{display:flex;gap:9px;flex-wrap:wrap;padding:16px 18px;
-  align-items:center}
-.verdict .note{margin-right:auto;font-size:13.5px;color:var(--soft);
-  max-width:60%}
-.btn{font-family:var(--ui);font-weight:600;font-size:14px;padding:10px 17px;
-  border-radius:7px;border:1px solid var(--edge);background:var(--card);
-  color:var(--ink);cursor:pointer}
-.btn.yes{background:var(--good);border-color:var(--good);color:var(--on-accent)}
-.done{padding:16px 18px;font-size:15px;line-height:1.6}
-.done textarea{flex:none;width:100%;display:block;background:var(--paper);
-  border:1px solid var(--edge);border-radius:5px;padding:10px 12px;
-  color:var(--ink);resize:vertical}
-.done blockquote{margin:12px 0 0;padding:3px 0 3px 13px;
-  border-left:2px solid var(--mark);color:var(--soft)}
-.done .verdict{padding:14px 0 0}
-.done b{color:var(--good)}
-.done .pickup{margin:12px 0 0;font-size:13.5px;color:var(--soft)}
-.done.revised{padding-bottom:0}
-.done.revised .pickup{margin:0 0 8px;color:var(--good);font-weight:600}
-.done .pickup a{color:var(--cool)}
-.done .ask{margin:0}
-.confirming .btn{min-width:44px;min-height:44px}
+/* asking, and deciding */
+.ask-bar{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin:16px 0 0}
+.askState{flex:1 1 220px;min-width:0;font-size:13px;color:var(--soft)}
+.askState.no{color:var(--mark)}
+.decide{margin:18px 0 0;padding:15px 16px;background:var(--card);
+  border:1px solid var(--edge);border-radius:8px}
+.row{display:flex;gap:9px;flex-wrap:wrap;align-items:center}
+button{min-height:44px;padding:0 16px;border-radius:7px;border:1px solid var(--edge);
+  background:var(--card);color:var(--ink);font-family:var(--ui);font-size:14px;
+  font-weight:500;cursor:pointer}
+button.go{background:var(--good);border-color:var(--good);color:var(--on-accent);font-weight:600}
+button:disabled{color:var(--faint);cursor:default}
+.decide label{display:block;font-size:12px;font-weight:600;text-transform:uppercase;
+  letter-spacing:0.07em;color:var(--faint);margin:0 0 6px}
+.decide textarea{width:100%;font-family:var(--ui);font-size:15px;line-height:1.5;
+  padding:9px 10px;border:1px solid var(--edge);border-radius:6px;background:var(--paper);
+  color:var(--ink);margin:0 0 10px;resize:vertical}
+.decide .confirm{font-size:14.5px;margin:0 0 11px}
+.decide .confirm code{font-family:var(--mono);font-size:13px}
+.recorded b{color:var(--good)}
+.recorded .why{margin:8px 0 0;padding-left:10px;border-left:2px solid var(--mark);
+  color:var(--soft);font-size:14.5px}
+.recorded .pickup{margin:9px 0 11px;font-size:13.5px;color:var(--soft)}
+.lost{margin:14px 0 0;padding:9px 11px;border:1px solid var(--mark);border-radius:7px;
+  font-size:13px;line-height:1.45;color:var(--mark)}
 footer{padding:22px 0 0;font-size:12.5px;color:var(--faint);line-height:1.6}
 footer .built{margin-top:10px;font-family:var(--mono);font-size:11.5px}
+.where{display:block;margin:10px 0 0;font-size:12px;color:var(--faint)}
 </style>
 
-<!-- Pinned by hash: without integrity, whatever cdnjs serves at this path
-     runs inside the page, and this page holds a review conversation and a
-     decision. The hash was computed from the downloaded file and checked
-     against the one cdnjs publishes; both are sha512 and they agree. A
-     changed file fails to load and the page loses colour, nothing more. -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"
-        integrity="sha512-D9gUyxqja7hBtkWpPWGt9wfbfaMGVt9gnyCvYa+jojwwPHLCzUm5i8rpk7vD7wNee9bA35eYIjobYPaQuKS1MQ=="
-        crossorigin="anonymous" referrerpolicy="no-referrer"></script>
-
-<div class="page" id="page">
-  <div class="tag" id="repoTag"></div>
-  <h1 class="doctitle" id="title"></h1>
+<div class="page">
+  <h1 id="title">Review Desk</h1>
+  <div class="repoTag" id="repoTag"></div>
   <div class="meta" id="meta"></div>
-  <div class="banner" id="outcomeBanner" hidden></div>
-  <div id="stalePage"></div>
+
+  <div class="work">
+    <h2><span class="pulse" id="pulse" hidden></span>The session at work</h2>
+    <div id="work"></div>
+  </div>
+
   <div id="pageFeeds"></div>
 
   <div class="leaves" id="leaves"></div>
   <div class="sheet"><div class="revbar" id="revbar" hidden></div><div class="md" id="sheet"></div></div>
+  <span class="where" id="where"></span>
 
-  <div class="slab" id="decide">
-    <div class="cap">When you have made up your mind</div>
-    <div id="decideState"></div>
-    <div class="verdict">
-      <span class="note">Recorded here. I pick it up, write the discussion into
-      the pull request, and merge or revise accordingly.</span>
-      <button class="btn yes" id="ok">Approve</button>
-      <button class="btn" id="changes">Needs changes</button>
-    </div>
+  <div class="ask-bar">
+    <button id="ask" class="go" disabled>Ask about this page</button>
+    <span class="askState" id="askState">Checking whether a session is listening…</span>
   </div>
 
-  <footer id="foot">
-    The panel talks to the working session: the Claude Code session that opened
-    this pull request, with its conversation, the repository and its tools. It
-    answers while it is running and can change this page and the pull request.
-    Anything sent while no session is running is answered by the next one to
-    start.
+  <div class="decide" id="decide"></div>
+  <div id="lost"></div>
+
+  <footer>
+    Questions you ask here reach the Claude Code session that published this desk — the one
+    with the repository, its tools, and the conversation behind this request. What it does
+    while you wait shows at the top of this page.
     <div class="built">review desk <span id="built"></span></div>
   </footer>
 </div>
-
-<div id="pop">Ask about this</div>
-
-<button id="fab" title="Talk it through">
-  <svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
-  <span class="dot" id="dot"></span>
-</button>
-
-<aside id="panel">
-  <div class="ptop">
-    <b>Talk it through</b>
-    <span class="where" id="where"></span>
-    <button class="icon" id="shut" title="Close">&times;</button>
-  </div>
-  <div id="staleSlot"></div>
-  <div class="presence" id="presence" hidden></div>
-  <div class="tabs" id="tabs"></div>
-  <div id="closeSlot"></div>
-  <div class="stream" id="stream"></div>
-  <div class="seed" id="seed"></div>
-  <div id="aloneSlot"></div>
-  <div id="feedSlot"></div>
-  <div id="lostSlot"></div>
-  <div id="carrySlot"></div>
-  <div id="closedSlot"></div>
-  <div class="compose">
-    <textarea id="box" rows="1" enterkeyhint="send" placeholder="Ask the working session&hellip;"></textarea>
-    <button class="send" id="send">Send</button>
-  </div>
-</aside>
 
 <script>
 const DATA = /*PAYLOAD*/;
@@ -1054,109 +795,11 @@ function paintCode(){
 //
 // The page draws its own rather than leaning on the host's built-in handling of
 // pre.mermaid, which cannot be themed from these tokens and was never shown to
-// pick up blocks this script inserts after load.
-const MERMAID_SRC = 'https://cdnjs.cloudflare.com/ajax/libs/mermaid/11.15.0/mermaid.min.js';
-const MERMAID_SRI = 'sha512-HH52omhHpZF6RfVnGiQwYgYm4H/ya2xsZYLl5xJ4+tLfX+rN4+8zF7V/H/KLeicPrKZYi1g6iBmVkk2AhXTGlg==';
-let mermaidLoad = null, diagramSeq = 0;
 
-function loadMermaid(){
-  if (!mermaidLoad) mermaidLoad = new Promise((ok, fail) => {
-    const s = document.createElement('script');
-    s.src = MERMAID_SRC; s.integrity = MERMAID_SRI;
-    s.crossOrigin = 'anonymous'; s.referrerPolicy = 'no-referrer';
-    s.onload = () => window.mermaid ? ok(window.mermaid)
-                                    : fail(new Error('the diagram library did not start'));
-    // Forget the failure so the next repaint tries again.
-    s.onerror = () => { mermaidLoad = null; s.remove();
-                        fail(new Error('the diagram library could not be loaded')); };
-    document.head.appendChild(s);
-  });
-  return mermaidLoad;
-}
+/* ---- lifted: the page shell ---- */
+// A commit or a long name, shortened for a line of prose.
+const short = s => String(s).length > 42 ? String(s).slice(0, 40).trim() + '\u2026' : String(s);
 
-// Mermaid derives its shades by doing arithmetic on hex values, so it gets the
-// page's resolved tokens, not var() references, and is redrawn when the theme
-// flips. securityLevel strict because a pull request can come from anyone, and
-// this page holds the conversation and the store.
-function diagramConfig(){
-  const css = getComputedStyle(document.documentElement);
-  const v = n => css.getPropertyValue(n).trim();
-  const stamped = document.documentElement.dataset.theme;
-  const dark = stamped ? stamped === 'dark'
-                       : matchMedia('(prefers-color-scheme: dark)').matches;
-  return {startOnLoad: false, securityLevel: 'strict', theme: 'base',
-    fontFamily: v('--ui'),
-    themeVariables: {darkMode: dark, fontFamily: v('--ui'), background: v('--card'),
-      primaryColor: v('--paper'), primaryTextColor: v('--ink'),
-      primaryBorderColor: v('--soft'), secondaryColor: v('--lit'),
-      tertiaryColor: v('--rule'), lineColor: v('--soft'), textColor: v('--ink'),
-      edgeLabelBackground: v('--card'), clusterBkg: v('--paper'),
-      clusterBorder: v('--edge'), noteBkgColor: v('--lit'),
-      noteTextColor: v('--ink'), noteBorderColor: v('--edge'),
-      actorBkg: v('--paper'), actorBorder: v('--soft'), actorTextColor: v('--ink'),
-      signalColor: v('--soft'), signalTextColor: v('--ink')}};
-}
-
-function unparsed(el, why){
-  const prev = el.previousElementSibling;
-  if (prev && prev.classList.contains('unparsed')) prev.remove();
-  const note = document.createElement('div');
-  note.className = 'unparsed';
-  note.textContent = 'Diagram not drawn: ' + why + '. Its source is below.';
-  el.before(note);
-}
-
-async function drawOne(mermaid, el, src){
-  const id = 'diagram-' + (++diagramSeq);
-  try {
-    const {svg} = await mermaid.render(id, src);
-    if (!el.isConnected) return;               // the sheet was repainted meanwhile
-    const fig = document.createElement('figure');
-    fig.className = 'diagram';
-    fig.dataset.src = src;
-    fig.innerHTML = svg + '<details><summary>Source</summary><pre><code>'
-      + esc(src) + '</code></pre></details>';
-    el.replaceWith(fig);
-  } catch (e){
-    // A failed render leaves mermaid's own error drawing attached to the body.
-    ['d' + id, id].forEach(x => { const n = document.getElementById(x); if (n) n.remove(); });
-    // A parse error arrives as "Parse error on line 2:", a window of source cut
-    // mid-word, a caret drawing, then the grammar tokens it expected. The line
-    // number is the usable part, so the line is quoted from the source itself.
-    const first = String((e && e.message) || e).split('\n')[0];
-    let why = first.replace(/:\s*$/, '');
-    const at = first.match(/^Parse error on line (\d+)/);
-    const bad = at && src.split('\n')[+at[1] - 1];
-    if (bad && bad.trim()) why += ', “' + bad.trim() + '”';
-    if (el.isConnected) unparsed(el, why);
-  }
-}
-
-async function paintDiagrams(){
-  const blocks = Array.from(document.querySelectorAll('.md pre > code.language-mermaid'))
-    .map(c => c.parentNode);
-  if (!blocks.length) return;
-  let mermaid;
-  try { mermaid = await loadMermaid(); }
-  catch (e){ blocks.forEach(pre => pre.isConnected && unparsed(pre, e.message)); return; }
-  mermaid.initialize(diagramConfig());
-  for (const pre of blocks){
-    if (pre.isConnected) await drawOne(mermaid, pre, pre.textContent);
-  }
-}
-
-async function redrawDiagrams(){
-  const figs = document.querySelectorAll('.md figure.diagram');
-  if (!figs.length || !window.mermaid) return;
-  window.mermaid.initialize(diagramConfig());
-  for (const f of figs) await drawOne(window.mermaid, f, f.dataset.src);
-}
-matchMedia('(prefers-color-scheme: dark)').addEventListener('change', redrawDiagrams);
-new MutationObserver(redrawDiagrams).observe(document.documentElement,
-  {attributes: true, attributeFilter: ['data-theme']});
-
-// Its own function so a new head redraws this line alone: paint() replaces the
-// sheet, and with it any passage the reviewer has highlighted.
 function drawMeta(){
   const short = h => h.slice(0, 7);
   $('meta').innerHTML = 'pull request <a href="'+esc(DATA.url)+'" target="_blank" rel="noopener">#'
@@ -1208,7 +851,6 @@ function paint(){
   drawMeta();
   // The sheet is about to be replaced: a leaf switch, or a document or the
   // description changing. A selection held from it points at nodes that are gone.
-  forget();
   const all = pages();
   if (leaf >= all.length) leaf = 0;
   drawLeaves();
@@ -1226,7 +868,6 @@ function paint(){
   // drawings are worth less than knowing what changed.
   if (was !== null){ watchHeadings(); return; }
   paintCode();
-  paintDiagrams();
   watchHeadings();
 }
 
@@ -1276,7 +917,6 @@ $('revbar').addEventListener('click', e => {
     view = b.dataset.view;
     keepDraft('changes', view);
   }
-  unlight();                         // the painted range belonged to the old view
   paint();
 });
 
@@ -1293,7 +933,6 @@ $('leaves').addEventListener('click', e => {
   }
   delete freshOn[leaf]; leaf = i; delete freshOn[i];
   keepDraft('leaf', i ? pages()[i].full : null);
-  unlight();                       // the painted range belonged to the old page
   paint();
   window.scrollTo({top: 0, behavior: 'smooth'});
 });
@@ -1340,47 +979,8 @@ function watchHeadings(){
   headingWatch = {io, onScroll};
 }
 
-/* ================= threads ================= */
-let threads = [{id: 't1', name: 'Thread 1', turns: [], unread: false}];
-let live = 0;
 
-// The newest reply, by its `at`, that this browser has shown the reviewer on this
-// desk, kept in localStorage so a reload can tell answers that came while the desk
-// was closed from answers already read. Replies are compared with replies, never
-// with this device's clock: the session stamps `at` on its own machine, which may
-// be another computer. null when nothing is stored, or storage is refused: then
-// every answer stored at load counts as read, as it did before this was kept.
-const SEEN_KEY = 'review-desk seen ' + (typeof DATA.repo === 'string' ? DATA.repo : '') + '#' + DATA.number;
-let seenAt = null;
-try {
-  const v = localStorage.getItem(SEEN_KEY);
-  if (typeof v === 'string' && /^\d+$/.test(v)) seenAt = +v;
-} catch (e) {}
-const replyAt = r => { const t = r && typeof r.at === 'string' ? Date.parse(r.at) : NaN; return isNaN(t) ? 0 : t; };
-// Moved on only while no thread is unread. One time per desk cannot say which
-// threads were read, so while one is not, it holds still: a reload may then mark
-// an answer the reviewer already read in another thread, which costs a glance,
-// where moving on would lose the mark on the one they have not read.
-function noteSeen(){
-  if (!repliesIn || threads.some(t => t.unread)) return;
-  let newest = 0;
-  threads.forEach(t => t.turns.forEach(m => {
-    const r = m.via === 'session' && sessionReplies.get(m.answers);
-    if (r && r.at > newest) newest = r.at;
-  }));
-  if (seenAt !== null && newest <= seenAt) return;
-  seenAt = newest;
-  try { localStorage.setItem(SEEN_KEY, String(newest)); } catch (e) {}
-}
-// What the reviewer has in hand and has not sent. A doorbell ring or a republish
-// reloads every other open view (artifact.d.ts), and state kept only in variables is
-// gone after a reload: a half-typed message, a Needs-changes reason, a carried quote,
-// and the thread and page they were on. Each is kept in sessionStorage, for this tab
-// and this desk, as one field of one entry: box, why, quote, thread, leaf. box and
-// quote are cleared once the send that took them has saved, and why once a decision
-// has, so a reload never offers something that was already sent. Storage can be
-// refused (a private window, a sandboxed frame), so every access is in try/catch and
-// the page runs as before without it.
+/* ---- lifted: drafts, leaf names, when(), isRow, follow() ---- */
 const DRAFT_KEY = 'review-desk draft ' + (typeof DATA.repo === 'string' ? DATA.repo : '') + '#' + DATA.number;
 function drafts(){
   try {
@@ -1404,1202 +1004,6 @@ function leafNamed(name){
   return i > 0 ? i : null;
 }
 
-let carried = null;
-let db = null, decided = null, reason = null;
-
-// Every save is a whole-document set, and set replaces what is stored. So a save
-// built before the stored document was read -- still loading, or the read failed
-// -- replaces the discussion and the decision with this page's empty defaults.
-// Nothing writes until `restore` is 'done'; while it is 'pending' or 'failed',
-// Send, the openers, Approve and Needs changes are off. 'nostore' is a view
-// with no store at all, which says so on every send and decision instead.
-let restore = 'pending';
-const blocked = () => restore === 'pending' || restore === 'failed';
-// Set once the stored document changes under this view from somewhere else: another
-// tab or device, or this tab's own earlier load. Its threads are then behind the
-// store, and any save from it would replace the newer document. So every save path
-// stops, and the view says to reload (see noticeStored). It never clears: a reload
-// is the only way to the latest.
-let outdated = false;
-const locked = () => blocked() || outdated;
-const sendBtn = $('send');
-
-// Whether this view can ring the working session. Without the doorbell a saved
-// message is still answered, by the next session to start.
-let bellOn = false;
-// artifact.d.ts: a read-only view still gets the artifact namespace, so only a
-// publish refusal says the view cannot write. The first one is permanent for the
-// view: ringing is off from then on (see goReadOnly), and nothing publishes again.
-let readOnly = false;
-let alone = false;
-function sayAlone(){
-  alone = true;
-  drawAlone();
-}
-// A closed desk sends nothing, so it has nothing to say about who would answer.
-function drawAlone(){
-  $('aloneSlot').innerHTML = alone && !closedOutcome() ? '<div class="lost">This view cannot ring the working '
-    + 'session. What you send is saved, and the next session to start answers it.</div>' : '';
-}
-function goReadOnly(){
-  if (readOnly) return;
-  readOnly = true;
-  bellOn = false;
-  sayAlone();
-  draw();
-  if (showingDecided) drawDecided();
-}
-
-// What the page knows about the session. Every ring the session handles gets its
-// own stamp under review/pr-N/presence, named after that ring's artifact version.
-// A new document each time, so the session writes it blind -- no read first,
-// nothing to conflict with -- and the name starts with the epoch second of the
-// ring. No answer is not proof the session is gone: a busy one answers after its
-// current task, so the page says both, and how to bring one back.
-let lastHeard = 0, lastResume = '', stampsSeen = new Set(), checkedAt = null, answeredAt = 0;
-// Whether the presence listener has had a server-definitive snapshot yet.
-let presenceIn = false, pickupIn = false;
-// Measured: a ring reaches an idle session in about 16 seconds, and a one-write
-// answer adds about 5. 75 seconds leaves room for a session finishing a step.
-const CHECK_WAIT = 75000;
-// How long a ring that went out has to be answered before this view rings once
-// more. A successful publish is not delivery: on two desks a decision rang, the
-// notice never reached the watching session, and the page waited on a ring that
-// was gone. The stamp is the receipt, so its absence is the only thing the page
-// can measure. 90 seconds is past the ~16 s an idle session takes and past a
-// short step; a busy one can take minutes, and then the second ring costs it one
-// extra wake-up, answering whatever has no reply, and nothing is lost.
-const ACK_WAIT = 90000;
-// A ring, rung at `rungAt`, that is now overdue an answer. Never before the
-// presence collection has loaded: with no stamps read yet, every ring looks
-// unanswered, and this view would ring again for one that was heard.
-const ackDue = rungAt => presenceIn && !!rungAt && !heardSince(rungAt)
-  && Date.now() - rungAt >= ACK_WAIT;
-
-const short =s => s.length > 42 ? s.slice(0, 40).trim() + '…' : s;
-
-// The id of the thread whose close is waiting on the reviewer's say-so, if any.
-let closing = null;
-function drawTabs(){
-  const el = $('tabs');
-  // A closed desk's discussion is the record of the review: no thread is added
-  // to it, and none is closed out of it.
-  const shut = !!closedOutcome();
-  // A thread whose reply the session is still writing pulses; once no reply in it
-  // is being written, one the reviewer has not seen is marked. Both are on the tab,
-  // because the badge is hidden while the panel is open, and a reply for another
-  // thread otherwise changed nothing on screen.
-  const writing = t => t.turns.some(m => m.via === 'session'
-    && (sessionReplies.get(m.answers) || {}).status === 'working');
-  rebuild(el, threads.map((t, i) =>
-    '<span class="tabpair"><button class="tab'+(i===live?' on':'')+'" data-go="'+i+'">'
-    + (writing(t) ? '<span class="spin" title="The working session is writing a reply"></span>'
-      : t.unread ? '<span class="unread" title="A reply you have not seen"></span>' : '')
-    + esc(t.name) + '</button>'
-    + (threads.length > 1 && !shut ? '<button class="shut" data-shut="'+i+'" aria-label="Close '
-        + esc(t.name) + '" title="Close this thread">×</button>' : '')
-    + '</span>').join('')
-    + (shut ? '' : '<button class="add" id="more" title="New thread">+</button>'));
-  if (shut) closing = null;
-  const t = threads.find(x => x.id === closing);
-  if (!t) closing = null;
-  rebuild($('closeSlot'), t ? '<div class="lost closing">Close “' + esc(t.name)
-    + '”? Its conversation leaves the saved discussion, so it is not written into '
-    + 'the pull request, and it cannot be brought back.'
-    + '<span class="choices"><button id="closeYes">Close it</button>'
-    + '<button id="closeNo">Keep it</button></span></div>' : '');
-}
-function closeThread(id){
-  const i = threads.findIndex(t => t.id === id);
-  closing = null;
-  // Closed here but not saved, the thread would be gone from this view and still
-  // in the store: say nothing happened instead.
-  if (outdated){ drawTabs(); return; }
-  if (i < 0 || threads.length < 2){ drawTabs(); return; }
-  if (threads[i].abort) threads[i].abort.abort();
-  threads.splice(i, 1);
-  // Closing a thread before the open one would otherwise shift a different
-  // thread under the reviewer.
-  if (i < live) live--;
-  if (live >= threads.length) live = threads.length - 1;
-  keepDraft('thread', threads[live].id);
-  draw(true); save();
-}
-// What the working session has said, by the id of the message it answers, taken
-// only from review/pr-N/replies. Under the desk's rules only the owner writes
-// there. review/pr-N itself stays writable by any viewer, so said() never shows
-// session text from it. The slot stored there carries only where the message
-// has got to (see leanSlot); desks saved before 0.8.0 also carry a `content`
-// copy of the reply, which is dropped on load and never shown.
-const sessionReplies = new Map();
-let repliesIn = false;
-// Every live listener, by name; see follow().
-const FEEDS = {};
-
-// A reply slot for the working session holds nothing until the session writes
-// to it, so what it shows meanwhile is where the message has got to.
-function sessionWait(m, r){
-  if (r) return r.status === 'working' ? 'The working session has this and is working on it.'
-    : 'The working session marked this answered without writing a reply.';
-  // No session collects a merged or closed desk, so no promise below would be kept.
-  if (closedOutcome()) return 'The desk closed before the working session answered this.';
-  // Not "Saved" until the store has said so: the save and its retry can take a second.
-  if (storing.has(m.answers)) return resending.has(m.answers) ? 'Sending again…' : 'Sending…';
-  // Only this view's own failed save says this. A slot read back from the store is
-  // saved whatever it was marked (see restoredThreads).
-  if (unsaved(m)) return 'Not saved, so this has not reached the working session. '
-    + 'Send again stores it and rings the session; Edit puts it back in the box to reword.';
-  // A dead replies listener delivers nothing more, so "Loading" or "Sent" here
-  // would never change. Say that an answer may be waiting that this view cannot see.
-  const rf = FEEDS.replies;
-  if (rf && rf.dead) return (rf.ever ? 'This view stopped receiving the working session’s replies'
-      : 'The working session’s replies could not be loaded')
-    + ' (' + rf.dead + '), so an answer may be waiting that this view cannot show.'
-    + (rf.retrying ? ' Trying again…' : rf.dead === 'revoked' ? '' : ' Use Try again below.');
-  if (!repliesIn) return 'Loading the working session’s reply…';
-  // The stored slot says the session took this, but no reply document backs it.
-  if (m.status === 'working' || m.status === 'done') return 'The saved discussion says '
-    + 'this was answered, but the working session has no reply for it on this desk.';
-  if (m.status === 'unsent'){
-    // 'readonly' is this page's word, not an artifact.d.ts code, so it is never shown.
-    if (bellOn && ringsLater(m)) return 'Saved, but the ring to the working session did not go out'
-      + (m.why === 'readonly' ? '' : ' (' + m.why + ')') + '. This view rings it again in a few seconds.';
-    if (m.why === 'readonly') return 'Saved. This view cannot ring the working session, so the '
-      + 'next session to start answers it.';
-    // A conflict means this view is being reloaded to a newer version, which rings it.
-    return 'Saved, but this view could not ring the working session (' + (m.why || 'unknown') + ').'
-      + (bellOn && m.why !== 'conflict' ? ' Check, at the top of this panel, rings it again, and a '
-        + 'running session answers every waiting message when it hears one.' : '')
-      + ' The next session to start will answer it.';
-  }
-  // No rungAt: saved, but no ring is recorded yet. Either the ring is going out
-  // now, or rering will send it. Saying "rung" here would be untrue.
-  if (!m.rungAt) return bellOn ? 'Saved. Ringing the working session.'
-    : 'Saved, but this view cannot ring the working session. The next session to '
-      + 'start will answer it.';
-  // A stored 'sent' proves the message was saved, not that the ring went out or
-  // that anything is listening. Only a presence stamp from after the send shows a
-  // session is answering rings here, so until one arrives the page promises nothing.
-  if (!heardSince(m.sentAt || 0)) return 'Saved and rung. Nothing has been written '
-    + 'on this desk since, so the session is either working on something else or '
-    + 'not running. One in the middle of a task takes it up when that task ends, '
-    + 'which has been half an hour. '
-    + (!bellOn || !ackDue(m.rungAt) ? ''
-      : m.again ? 'Check, at the top of this panel, rings it again. '
-      : 'This view rings it once more. ')
-    + 'The next session to start answers it.';
-  return 'Sent to the working session. It answers within seconds if it is idle, after '
-    + 'its current task if it is busy, and at its next start if none is running.';
-}
-// A live stamp is timed by this clock when it arrives. One from the first
-// snapshot is history, timed by its name: the epoch second of the ring, which
-// can fall up to a second before a send made in that same second.
-const heardSince = ms => answeredAt > ms || lastHeard + 1000 > ms;
-// A write the session made, timed by what it carries. Everything delivered up to
-// the first definitive snapshot is history and only moves lastHeard; a write
-// after that is the session working now.
-function wroteAt(at, history){
-  const t = typeof at === 'number' ? at : Date.parse(at || '');
-  if (!Number.isFinite(t) || t <= 0 || t > Date.now() + 86400000) return;
-  lastHeard = Math.max(lastHeard, t);
-  if (!history) answeredAt = Math.max(answeredAt, Date.now());
-}
-
-function said(m){
-  if (m.via !== 'session') return '<div class="said">'+esc(m.content)+'</div>';
-  const r = sessionReplies.get(m.answers);
-  if (r && r.text) return '<div class="said rich">'+markdown(r.text)+'</div>'
-    + (r.status === 'working' ? '<span class="who">still working</span>' : '');
-  const shut = !!closedOutcome();
-  const id = esc(m.answers), held = !r && !shut && unsaved(m), again = !r && !shut && resending.has(m.answers);
-  return '<div class="said">'+esc(sessionWait(m, r))+'</div>'
-    + (held || again ? '<button class="again" data-resend="'+id+'"'+(again ? ' disabled' : '')
-        + '>Send again</button>' : '')
-    + (held ? '<button class="again" data-edit="'+id+'">Edit</button>' : '');
-}
-
-// The stream follows new text only for a reader already at its end. A reply is
-// rewritten several times while the session works, and each rewrite used to
-// jump the stream to the bottom, away from whatever earlier answer the reviewer
-// had scrolled up to read. `toEnd` is for the reviewer's own moves: opening the
-// panel, switching or closing a thread, sending. A closed panel's stream has no
-// box, so every measure is 0 and it counts as at the end.
-function drawStream(toEnd){
-  const t = threads[live], el = $('stream');
-  const atEnd = toEnd || el.scrollHeight - el.scrollTop - el.clientHeight < 40;
-  rebuild(el, !t.turns.length && restore === 'pending'
-    ? '<div class="hint">Loading the saved discussion…</div>'
-    : !t.turns.length && closedOutcome()
-    ? '<div class="hint">Nothing was discussed in this thread.</div>'
-    : !t.turns.length
-    ? '<div class="hint">Ask the working session anything: it has '
-      + 'the code, the tests and the conversation that made this change, and it '
-      + 'can change the pull request. Highlight a passage first and it goes along '
-      + 'with the question, with the tab and section you were reading.</div>'
-    : t.turns.map(m =>
-      (m.quote ? '<div class="quoted'+(m.role==='user'?' mine':'')+'">'+esc(m.quote)+'</div>' : '')
-      + '<div class="turn '+(m.role==='user'?'mine':'theirs')+'">'
-      + '<span class="who">'+(m.role==='user' ? 'you'
-          : m.via==='session' ? 'working session' : 'claude')+'</span>'
-      + said(m) + '</div>').join(''));
-  if (atEnd) el.scrollTop = el.scrollHeight;
-  $('seed').style.display = t.turns.length || closedOutcome() ? 'none' : 'flex';
-  gate();
-}
-function gate(){
-  const shut = !!closedOutcome();
-  sendBtn.disabled = locked() || shut;
-  // An outdated view keeps its box: what the reviewer typed stays to copy.
-  $('box').disabled = shut;
-  document.querySelectorAll('#seed button').forEach(b => { b.disabled = locked() || shut; });
-  document.querySelectorAll('#ok, #changes, #approveConfirm')
-    .forEach(b => { b.disabled = locked(); });
-  gateRetry();
-  drawDecideState();
-}
-// Send again stays off while its own save is on its way. Edit stays off while the
-// box holds a draft, which it would otherwise overwrite.
-function gateRetry(){
-  const draft = !!$('box').value.trim(), shut = !!closedOutcome();
-  document.querySelectorAll('[data-resend]')
-    .forEach(b => { b.disabled = locked() || shut || resending.has(b.dataset.resend); });
-  document.querySelectorAll('[data-edit]').forEach(b => { b.disabled = locked() || shut || draft; });
-}
-// Why Approve and Needs changes are off, said beside them. The panel's banner
-// alone left a reviewer with the panel closed looking at two dimmed buttons and
-// nothing else. Rewritten only when what it says changes, so a draw() landing
-// between a press on Try again and its click does not replace the button.
-function drawDecideState(){
-  const el = $('decideState');
-  if (!el) return;
-  const say = outdated ? 'outdated' : restore === 'pending' ? 'pending'
-    : restore === 'failed' ? 'failed:' + unreadWhy : '';
-  if (el.dataset.say === say) return;
-  el.dataset.say = say;
-  el.innerHTML = outdated ? staleLine()
-    : restore === 'pending'
-    ? '<div class="restoring">Loading the saved discussion… Approve and Needs changes '
-      + 'come on once it has loaded.</div>'
-    : restore === 'failed'
-    ? '<div class="lost">Not loaded — the saved discussion could not be read ('
-      + esc(unreadWhy) + '). Approve and Needs changes are off until it loads, so '
-      + 'nothing stored is replaced.<button data-retry-restore>Try again</button></div>'
-    : '';
-}
-function drawCarry(){
-  $('carrySlot').innerHTML = carried
-    ? '<div class="carry"><span>'+esc(carried)+'</span><button id="drop">×</button></div>'
-    : '';
-  if (carried) $('drop').onclick = () => {
-    carried = null; unlight(); drawCarry(); keepDraft('quote', null);
-  };
-}
-// The open thread counts too while the panel is closed. Skipping it left the
-// badge dark for the usual review, a single thread: ask, close the panel to keep
-// reading, and the answer arrived with nothing on screen saying so.
-function drawBadge(){
-  const open = document.body.classList.contains('open');
-  const waiting = threads.reduce((n, t, i) =>
-    n + (t.unread && (i !== live || !open) ? 1 : 0), 0);
-  const d = $('dot');
-  d.textContent = waiting || '';
-  d.classList.toggle('show', waiting > 0 && !open);
-  noteSeen();
-}
-// The resume command is offered for the reviewer to copy and run on their own
-// computer, and the presence stamp it can come from is a document anyone who can
-// write this desk's store can set. So only the exact shape the session writes is
-// shown: cd into a plain path, then claude --resume with a session id. Anything
-// else -- a second command, a pipe, a substitution -- is not shown at all. A path
-// with spaces is refused too; that costs the command on such a machine, not safety.
-const RESUME_SHAPE = /^cd [\w.~\/-]+ && claude --resume [0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-const safeResume = cmd => typeof cmd === 'string' && RESUME_SHAPE.test(cmd);
-
-function drawPresence(){
-  const el = $('presence');
-  if (!db){ el.hidden = true; return; }
-  el.hidden = false;
-  const asked = checkedAt ? Date.parse(checkedAt) : 0;
-  const heard = Math.max(answeredAt, lastHeard);
-  let line, gone = false;
-  if (asked && answeredAt < asked){
-    if (Date.now() - asked < CHECK_WAIT) line = 'Checking the working session… '
-      + 'usually about 20 seconds, longer if it is busy with a task.';
-    else {
-      line = 'No answer to the check sent' + when(checkedAt) + '. The session may be '
-        + 'busy with a task, or not running.';
-      gone = true;
-    }
-  } else if (heard){
-    line = 'Working session last answered' + when(heard) + '.';
-  } else {
-    line = 'The working session has not answered on this desk yet.';
-  }
-  const resume = [lastResume, DATA.resume].find(safeResume) || '';
-  rebuild(el, '<span class="'+(gone ? 'gone' : '')+'">'+esc(line)+'</span>'
-    + (bellOn && !closedOutcome() ? '<button class="check" id="check">Check</button>' : '')
-    // A closed desk promises no session: the resume command would bring one
-    // back to a review that is over.
-    + (gone && resume && !closedOutcome()
-      ? '<div class="resume"><code id="resumeCmd">'+esc(resume)+'</code>'
-        + '<button class="check" id="copyResume">Copy</button></div>'
-        // A resumed session only has this desk in its context; its first turn, and
-        // with it the pickup, starts when someone types.
-        + '<span>Run this on the computer to bring that session back, then send it any '
-        + 'message: a resumed session does nothing until someone types. That first '
-        + 'turn picks up this desk and anything you sent meanwhile.</span>'
-      : ''));
-}
-function draw(toEnd){ drawTabs(); drawStream(toEnd); drawCarry(); drawBadge(); drawPresence(); drawApproveAsk(); }
-
-$('presence').addEventListener('click', async e => {
-  if (e.target.id === 'check'){
-    checkedAt = new Date().toISOString();
-    drawPresence();
-    // A ping is a ring with nothing new behind it; the session's whole answer is
-    // the presence stamp it writes on every ring.
-    const rung = await ring({kind: 'ping'});
-    if (rung !== 'rung'){
-      checkedAt = null;
-      drawPresence();
-      // A read-only view has just lost Check and gained the banner that says why.
-      if (rung !== 'readonly') $('presence').querySelector('span').textContent =
-        'Could not ring the working session (' + rung + ').';
-      return;
-    }
-    setTimeout(drawPresence, CHECK_WAIT + 500);
-  }
-  if (e.target.id === 'copyResume'){
-    const code = $('resumeCmd');
-    try {
-      await navigator.clipboard.writeText(code.textContent);
-      e.target.textContent = 'Copied';
-    } catch (err){
-      // The artifact frame can refuse clipboard access; select it instead.
-      const r = document.createRange(); r.selectNodeContents(code);
-      const s = getSelection(); s.removeAllRanges(); s.addRange(r);
-      e.target.textContent = 'Selected';
-    }
-  }
-});
-
-$('tabs').addEventListener('click', e => {
-  const shut = e.target.closest('[data-shut]');
-  if (shut){
-    const t = threads[+shut.dataset.shut];
-    if (!t) return;
-    // Closing removes the thread from the stored document on the next save, and
-    // nothing rebuilds it, so a thread with anything in it asks first. Asked on
-    // the page, not with confirm(): in a frame sandboxed without allow-modals
-    // confirm() returns false at once, and closing would silently never work.
-    if (outdated) return;
-    if (t.turns.length){ closing = t.id; drawTabs(); $('closeNo').focus(); return; }
-    closeThread(t.id); return;
-  }
-  if (e.target.closest('#more')){
-    threads.push({id:'t'+(threads.length+1)+'-'+Date.now(),
-                  name:'Thread '+(threads.length+1), turns:[], unread:false});
-    live = threads.length - 1; keepDraft('thread', threads[live].id); draw(true); $('box').focus(); return;
-  }
-  const go = e.target.closest('[data-go]');
-  if (go){ live = +go.dataset.go; threads[live].unread = false; keepDraft('thread', threads[live].id); draw(true); }
-});
-
-const SEEDS = DATA.openers && DATA.openers.length ? DATA.openers : [
-  "What is the weakest part of this?",
-  "What did you consider and reject?",
-  "What would you challenge if you were me?",
-  "What breaks if I say no?",
-];
-$('seed').innerHTML = SEEDS.map((q,i)=>'<button data-s="'+i+'">'+esc(q)+'</button>').join('');
-$('closeSlot').addEventListener('click', e => {
-  // The question goes away either way, so focus goes to what it was about: the
-  // thread's own close button when kept, the open thread's tab when closed.
-  if (e.target.id === 'closeYes'){
-    closeThread(closing);
-    const tab = document.querySelector('.tab.on');
-    if (tab) tab.focus({preventScroll: true});
-  } else if (e.target.id === 'closeNo'){
-    const i = threads.findIndex(t => t.id === closing);
-    closing = null; drawTabs();
-    const b = document.querySelector('[data-shut="' + i + '"]');
-    if (b) b.focus({preventScroll: true});
-  }
-});
-$('seed').addEventListener('click', e => {
-  const b = e.target.closest('[data-s]'); if (!b) return;
-  const box = $('box'), opener = SEEDS[+b.dataset.s];
-  // With a draft in the box the opener joins it and nothing is sent. Replacing
-  // and sending threw away a half-written question: on an iPad the chips sit
-  // just above the box, where a tap meant for the text lands. It goes at the end
-  // rather than at the caret, which is wherever the reviewer last left it and
-  // would split a word.
-  if (box.value.trim()){
-    box.value = box.value.replace(/\s+$/, '') + '\n' + opener;
-    keepDraft('box', box.value);
-    fit(box);
-    box.focus();
-    box.setSelectionRange(box.value.length, box.value.length);
-    return;
-  }
-  box.value = opener;
-  send();
-});
-
-/* ================= selection ================= */
-let pending = '', pendingRange = null;
-// A press on the pop or the panel button can itself dismiss the selection before
-// its click arrives, as a tap on an iPad does. A collapse within PRESS_GRACE of
-// such a press keeps the passage, and the pop, for that click until the grace
-// runs out; any other collapse drops it at once. A press that never becomes a
-// click (a drag, a scroll) must not leave the passage waiting for the next
-// time the panel opens.
-let pressedAt = 0, graceTimer = 0;
-const PRESS_GRACE = 1000;
-function forget(){
-  pending = ''; pendingRange = null;
-  $('pop').style.display = 'none';
-}
-
-/* The native selection disappears as soon as the composer takes focus, so the
-   passage being discussed is painted separately and stays lit until the
-   question is sent or dropped. */
-function light(range){
-  try {
-    if (!range || !window.CSS || !CSS.highlights || !window.Highlight) return;
-    CSS.highlights.set('carried', new Highlight(range));
-  } catch (e) {}
-}
-function unlight(){
-  try { if (window.CSS && CSS.highlights) CSS.highlights.delete('carried'); }
-  catch (e) {}
-}
-function take(){
-  carried = pending;
-  keepDraft('quote', carried);
-  light(pendingRange);
-  pending = ''; pendingRange = null;
-  $('pop').style.display = 'none';
-}
-document.addEventListener('selectionchange', () => {
-  const sel = document.getSelection();
-  const text = sel ? String(sel).trim() : '';
-  const pop = $('pop');
-  // A closed desk takes no question, so it offers none about a passage.
-  const range = !closedOutcome() && text.length >= 3 && sel.rangeCount
-    && !(sel.anchorNode && $('panel').contains(sel.anchorNode)) ? sel.getRangeAt(0) : null;
-  const r = range && range.getBoundingClientRect();
-  if (!r || (!r.width && !r.height)){
-    // A selection the reviewer dismissed is dropped. Kept, it was attached to
-    // the next question whenever the panel was next opened, however much later.
-    const left = PRESS_GRACE - (Date.now() - pressedAt);
-    if (left <= 0 || !pending){ forget(); return; }
-    // The pop stays up: hidden, the tap that collapsed the selection would
-    // have nothing to land its click on.
-    const held = pendingRange;
-    clearTimeout(graceTimer);
-    graceTimer = setTimeout(() => { if (pendingRange === held) forget(); }, left);
-    return;
-  }
-  pending = text.length > 700 ? text.slice(0, 700) + '…' : text;
-  pendingRange = range.cloneRange();
-  pop.style.display = 'block';
-  // Above the selection with a mouse. On a touch screen iPadOS puts its own
-  // Copy / Look Up menu above the selection, so the pop goes below instead,
-  // clear of the lower selection handle. Each falls back to the other side when
-  // its own has no room: clamping into the window instead put the pop over the
-  // selection it was offering to carry, or, with a mouse, off the top.
-  const w = pop.offsetWidth, h = pop.offsetHeight;
-  const above = r.top - h - 10, below = r.bottom + 16;
-  const fitsAbove = above >= 10, fitsBelow = below + h <= innerHeight - 10;
-  const top = matchMedia('(pointer: coarse)').matches
-    ? (fitsBelow || !fitsAbove ? below : above)
-    : (fitsAbove || !fitsBelow ? above : below);
-  // A selection taller than the window has no clear side; stay on screen.
-  pop.style.top = (window.scrollY + Math.max(10, Math.min(top, innerHeight - h - 10))) + 'px';
-  pop.style.left = (window.scrollX
-    + Math.max(10, Math.min(r.left + r.width/2 - w/2, innerWidth - w - 10))) + 'px';
-});
-$('pop').addEventListener('mousedown', e => e.preventDefault());
-['pop', 'fab'].forEach(id => $(id).addEventListener('pointerdown', () => { pressedAt = Date.now(); }));
-$('pop').addEventListener('click', () => {
-  take();
-  document.getSelection().removeAllRanges();
-  openPanel(); $('box').focus();
-});
-
-/* ================= the panel ================= */
-function openPanel(){
-  // Highlighting and then simply opening the panel should carry the passage
-  // too. Requiring the pill to be tapped meant a highlight was silently
-  // dropped by anyone who reached for the button instead.
-  if (!carried && pending) take();
-  document.body.classList.add('open');
-  threads[live].unread = false;
-  draw(true);
-}
-$('fab').addEventListener('click', openPanel);
-$('shut').addEventListener('click', () => {
-  document.body.classList.remove('open'); drawBadge();
-});
-
-/* ================= asking ================= */
-async function ask(){
-  const t = threads[live];
-  const box = $('box');
-  const q = box.value.trim();
-  if (!q && !carried) return;
-  // Enter still reaches here while Send is off. Leave the text in the box: a
-  // message kept out of the store should not also vanish from the screen.
-  if (locked() || closedOutcome()) return;
-
-  // Every message carries an id, so the reply written elsewhere can find it; the
-  // passage the reviewer highlighted; and where they were reading, because that
-  // is half of what they meant.
-  const quote = carried;
-  const turn = {id: 'm' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
-    role: 'user', content: q || NO_QUESTION, quote,
-    reading: place(), at: new Date().toISOString(), to: 'session'};
-  const slot = {role: 'assistant', via: 'session', answers: turn.id,
-                status: 'sent', sentAt: Date.now()};
-  const name = t.name;
-  t.turns.push(turn);
-  if (t.turns.length === 1) t.name = short(q || 'Highlighted');
-
-  // Every save carries the whole discussion, so a message that takes it past the
-  // store's cap makes every later save fail, Approve included, and with one thread
-  // there is nothing to close to get it back under. So it is measured first, as the
-  // same document record() would store, and refused before it joins the thread.
-  if (db){
-    t.turns.push(slot);
-    const bytes = deskBytes();
-    t.turns.splice(-2, 2);
-    if (bytes > MAX_DOC){ t.name = name; sayOversize(bytes); return; }
-    t.turns.push(turn);
-  }
-  // Always a new message. A message whose save failed never comes back through
-  // the box: it stays in its own thread with Send again, so nothing typed here is
-  // ever matched against it or sent in its place.
-  carried = null; unlight();
-  box.value = ''; box.style.height = 'auto';
-
-  // A view that cannot save cannot reach the session at all. A reviewer typing
-  // into a box and watching it look sent is the worst outcome available.
-  if (!db){
-    t.turns.push({role: 'assistant', content: 'This view cannot save messages, so this '
-      + 'one will not reach the working session. Tell it directly.'});
-    draw(true);
-    return;
-  }
-
-  // Stored first, then the doorbell, exactly as a decision is: the session reads
-  // the message from the store, never from the ring. The reply arrives in its
-  // own document (see the replies listener).
-  t.turns.push(slot);
-  storing.add(turn.id);
-  draw(true);
-  await deliver(turn, slot);
-}
-const NO_QUESTION = 'What do you make of this?';
-const unsaved = m => !!m && m.via === 'session' && m.status === 'unsent' && m.why === 'unsaved';
-const slotFor = id => threads.flatMap(t => t.turns)
-  .find(m => m.via === 'session' && m.answers === id) || null;
-const turnFor = id => threads.flatMap(t => t.turns)
-  .find(m => m.role === 'user' && m.id === id) || null;
-// Messages whose save is on its way, so their line says Sending rather than
-// Saved; and of those, the ones Send again started, whose button stays on
-// screen, disabled, until the save settles.
-const storing = new Set(), resending = new Set();
-
-// Stored first, then the doorbell. A save that still fails after saveNow's retry
-// leaves the slot unsent with why 'unsaved'. The message stays in its thread,
-// marked not saved, with Send again and Edit. No other write carries it (see
-// record), so it reaches the store and the session only through Send again.
-async function deliver(turn, slot){
-  // rering must not ring for a slot this view is still ringing for.
-  ringing.add(turn.id);
-  try {
-    // A send made during saveNow's retry wait writes the whole document, this
-    // slot included, because the slot was not yet marked unsaved when that write
-    // was built. When that write stores it and the retry is then refused, the
-    // store holds the message, so it is kept and rung here.
-    const kept = await saveNow(() => storedBy(turn.id));
-    storing.delete(turn.id); resending.delete(turn.id);
-    // Saved, so the draft entry stops holding the words it sent. It takes whatever
-    // the box and the carry hold now, which is anything begun since.
-    if (kept){ keepDraft('box', $('box').value); keepDraft('quote', carried); }
-    // Not drawn on a refusal: the slot still says 'sent' until the line below.
-    if (kept) draw();
-    const rung = kept ? await ring({kind: 'message', turn: turn.id}) : 'unsaved';
-    if (rung === 'rung') slot.rungAt = Date.now();
-    else if (!replied.has(turn.id)){ slot.status = 'unsent'; slot.why = rung; }
-    draw();
-    // Stored at once, not after the debounce. A tab closed now, or a reload from a
-    // republish, can still lose this write. Then the store keeps 'sent' with no
-    // rungAt, or 'unsent' with why 'conflict'. rering rings for either one.
-    if (kept) await saveNow();
-  } finally {
-    ringing.delete(turn.id); storing.delete(turn.id); resending.delete(turn.id);
-  }
-  // A ring that failed for a reason another try can get past gets that try, once,
-  // after RING_BACKOFF, from rering under the lease. Scheduled only once the id has
-  // left `ringing`, which rering skips.
-  if (bellOn && ringsLater(slot)) reringIn(dueAt(slot) - Date.now());
-}
-// The only way a message whose save failed is sent again: the same turn and the
-// same slot, so the stored conversation never holds the message twice. A click
-// while that save or its retry is on its way finds the slot no longer unsaved,
-// and the id in `ringing`, and does nothing.
-async function resend(id){
-  const slot = slotFor(id), turn = turnFor(id);
-  if (!turn || !unsaved(slot) || locked() || ringing.has(id)) return;
-  slot.status = 'sent'; delete slot.why; slot.sentAt = Date.now();
-  storing.add(id); resending.add(id);
-  draw();
-  await deliver(turn, slot);
-}
-// Takes a message whose save failed back out of the conversation and puts its
-// words in the box to be reworded, in one step. Only into an empty box, so
-// nothing the reviewer is typing is overwritten. No write has it in flight:
-// deliver marks a slot unsaved only after every write carrying it has settled,
-// and record leaves it out of every write after that. So once taken out here,
-// nothing stores it.
-function edit(id){
-  const box = $('box'), slot = slotFor(id), turn = turnFor(id);
-  if (!turn || !unsaved(slot) || locked() || ringing.has(id) || box.value.trim()) return;
-  const t = threads.find(x => x.turns.includes(turn));
-  t.turns = t.turns.filter(m => m !== turn && m !== slot);
-  box.value = turn.content === NO_QUESTION && turn.quote ? '' : turn.content;
-  if (turn.quote && !carried) carried = turn.quote;
-  keepDraft('box', box.value); keepDraft('quote', carried);
-  if (lost === HELD) sayKept();
-  fit(box);
-  draw(true);
-  box.focus();
-}
-// A send that throws has to say so. Otherwise the reviewer is left looking at a
-// box that emptied and a chat that did not change.
-const sendFailed = e => sayLost('the message was not sent (' + ((e && e.message) || e) + ')');
-const send = () => ask().catch(sendFailed);
-$('send').addEventListener('click', send);
-$('stream').addEventListener('click', e => {
-  const b = e.target.closest && e.target.closest('[data-resend], [data-edit]');
-  if (!b || b.disabled) return;
-  if ('resend' in b.dataset) resend(b.dataset.resend).catch(sendFailed);
-  else edit(b.dataset.edit);
-});
-function fit(box){
-  box.style.height = 'auto';
-  box.style.height = Math.min(box.scrollHeight, 150) + 'px';
-}
-$('box').addEventListener('input', e => {
-  fit(e.target);
-  gateRetry();
-  keepDraft('box', e.target.value);
-});
-$('box').addEventListener('keydown', e => {
-  // Enter sends, as in every chat box; Shift+Enter is a new line. An input
-  // method's own Enter (choosing a character) is left alone. isComposing alone
-  // does not catch it on WebKit, Safari on iPad included: the Enter that commits
-  // a composition arrives after compositionend with isComposing false, and only
-  // keyCode 229 marks it.
-  // Enter sends on touch screens too. An iPad with a hardware keyboard also
-  // reports a coarse pointer, so making Return a newline there would take
-  // Enter-to-send from exactly the reviewer this page is built for. The software
-  // key is labelled Send instead (enterkeyhint on the box).
-  if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && e.keyCode !== 229){
-    e.preventDefault(); send();
-  }
-});
-
-/* ================= persistence and live document ================= */
-// What a working-session slot stores: where its message has got to, never what
-// the session said. The words are already durable in replies/<turn id>, and
-// copying them here did three kinds of harm. Every answer was stored twice, so a
-// long review grew this one document towards the store's 256 KiB cap, past which
-// nothing saves, rings or records a decision. The copy had to be saved whenever a
-// reply changed, so every open view rewrote the whole document from its own
-// possibly stale threads each time the session reported progress. And
-// /review-collect had to be told not to trust it.
-// `again` is when a view last rang for the slot after its own ring failed: the one
-// such try each slot gets (see rering).
-const SLOT_KEYS = ['role', 'via', 'answers', 'status', 'why', 'sentAt', 'rungAt', 'again'];
-const leanSlot = m => Object.fromEntries(SLOT_KEYS.filter(k => k in m).map(k => [k, m[k]]));
-
-// `held` is the ids of messages whose own save failed. They and their slots are
-// left out, so a write made for something else never stores one behind the
-// reviewer: the page says it was not saved, and only Send again sends it.
-function tidy(t, held = new Set()){
-  // A reply slot still waiting on the session is kept: it holds when the
-  // message was sent, and dropping it would lose the "sent" state on reload.
-  return {id:t.id, name:t.name,
-          turns:t.turns.filter(m => !held.has(m.via === 'session' ? m.answers : m.id))
-                       .filter(m => (m.content && m.content !== 'Thinking…')
-                                    || m.via === 'session')
-                       .map(m => m.via === 'session' ? leanSlot(m) : m)};
-}
-let saving = null, lost = null;
-
-// A conversation the reviewer can see but which was never stored is worse than
-// no conversation: they argue a point, close the tab, and it is gone with no
-// sign it was ever at risk. This used to swallow every write error.
-function sayLost(why){
-  if (lost === why) return;
-  lost = why;
-  const el = $('lostSlot');
-  if (el) el.innerHTML = '<div class="lost">Not saved \u2014 ' + esc(why)
-    + '. Copy anything here you want to keep; reloading will lose it.</div>';
-}
-// db.d.ts gives invalid_argument for a body over 256 KiB, and says a retry
-// cannot succeed. Its other causes do not arise for this write: the page always
-// sends an object, and review/pr-N's `interact` rule admits anyone who can open
-// the desk. So it is reported as what it almost certainly is, with the one thing
-// the reviewer can do about it, rather than as a bare code.
-function sayRefused(e){
-  if (!(e && e.code === 'invalid_argument'))
-    return sayLost((e && (e.code || e.message)) || 'the write was refused');
-  if (lost === 'too large') return;
-  lost = 'too large';
-  $('lostSlot').innerHTML = '<div class="lost">This conversation is too large to save. '
-    + 'The store refuses a discussion over 256 KiB, so nothing new here is kept, and '
-    + 'no message or decision reaches the working session. '
-    // × is drawn only beside a second thread, so with one there is nothing to close.
-    + (threads.length > 1 ? 'Closing a thread with × removes it from what is saved; copy '
-      + 'anything you want to keep first.' : 'Copy anything you want to keep, and tell the '
-      + 'working session directly.') + '</div>';
-}
-// A message refused before it joined the thread, because with it the saved
-// discussion would pass the store's cap. Nothing was lost: the words are still in
-// the box, and every other save goes on working.
-function sayOversize(bytes){
-  lost = 'oversize';
-  $('lostSlot').innerHTML = '<div class="lost">Not sent: with this message the saved '
-    + 'discussion would be ' + Math.ceil(bytes / 1024) + ' KiB, over the store’s 256 KiB '
-    + 'limit, so it was not added. It is still in the box. Shorten it, or send an excerpt '
-    + 'or a link instead.' + (threads.length > 1 ? ' Closing a thread with × also makes room.' : '')
-    + '</div>';
-}
-// A write for something else does not make a held-back message safe. While one is
-// on screen the banner says so, since it is what a reload would lose.
-const HELD = 'a message here could not be stored. Use Send again on it, or Edit to reword it';
-function sayKept(){
-  if (threads.some(t => t.turns.some(unsaved))) return sayLost(HELD);
-  if (lost === null) return;
-  lost = null;
-  const el = $('lostSlot');
-  if (el) el.innerHTML = '';
-}
-
-// decidedAt is stamped when the reviewer decides and stored with the decision.
-// The session's pickup copies it back, so an acknowledgement of an earlier
-// verdict never reads as one for the verdict on screen.
-let decidedAt = null, pickup = null, rang = null, showingDecided = false;
-// Whether the slab is the choice offered under a revised outcome, which a change
-// to the pickup redraws as it does a recorded decision.
-let showingRevised = false;
-// The head the page was showing when the reviewer decided, stamped with
-// decidedAt. Null for a decision restored from a desk saved before it existed,
-// which /review-collect then merges as it always did.
-let decidedOn = null;
-// What became of the ring for the decision on screen, stored beside it:
-// {decidedAt, rungAt} once a ring went out, or {decidedAt, why} when it did not,
-// with `again` once a view has spent the one re-ring (see rering). Keyed by
-// decidedAt, so a record left over from an earlier decision never counts. Null
-// while nothing is recorded, which is every decision an older page stored. Such a
-// decision is never rung: a desk from before pickup stamps holds a decision that
-// was collected long ago with no pickup to show it, and a ring would make a session
-// treat it as new and comment on the pull request again.
-let decisionRing = null;
-// What `rang` a recorded ring outcome restores to.
-const rangFrom = r => !r ? null : r.rungAt ? 'rung' : String(r.why || 'upstream_error');
-
-// Counts whole-document writes from this view, so rering can tell whether one
-// went out while its own read-modify-write was in flight.
-let records = 0;
-// Session slot ids and the decidedAt that some successful write from this view
-// stored, and the writes still in flight with what each carries. A save that is
-// refused can then ask whether another write stored the same thing anyway.
-const storedSlots = new Set();
-let storedDecidedAt = null;
-const inFlight = new Set();
-const heldIds = () => new Set(threads.flatMap(t => t.turns).filter(unsaved).map(m => m.answers));
-// The document every save stores, built from this view as it is now.
-function deskBody(held){
-  return {
-    pr: DATA.number,
-    ...(typeof DATA.repo === 'string' ? {repo: DATA.repo} : {}),
-    title: DATA.title,
-    threads: threads.map(t => tidy(t, held)),
-    decision: decided,
-    reason: reason,
-    decidedAt: decidedAt,
-    ...(decided && decidedOn ? {decidedOn} : {}),
-    ...(decided && decisionRing && decisionRing.decidedAt === decidedAt ? {decisionRing} : {}),
-    updatedAt: new Date().toISOString(),
-    // Which page wrote this, so a session reading the store can tell a decision
-    // made on an old page from one made on a page that has the fix it is looking
-    // for. The reviewer sees the same version in the footer.
-    page: BUILT,
-    // Which view saved this, so every view can tell its own save from another's.
-    writer: viewId,
-    writtenAt: new Date().toISOString(),
-  };
-}
-// db.d.ts: a document body is at most 256 KiB serialized. Measured in UTF-8 bytes,
-// as the store counts it, not in string length: an é or an emoji is two to four.
-const MAX_DOC = 256 * 1024;
-const deskBytes = () => new TextEncoder().encode(JSON.stringify(deskBody(heldIds()))).length;
-async function record(){
-  // A retry waiting out its delay, or a save started just before the snapshot that
-  // made this view outdated, lands here too.
-  if (outdated) throw Object.assign(new Error('this view is out of date'), {code: 'outdated'});
-  records++;
-  // Everything this write carries, which is never a message marked unsaved when
-  // the write is built. A retry calls record() again, so it leaves out whatever
-  // was marked, or taken out by Edit, during its wait.
-  const held = heldIds();
-  const slots = threads.flatMap(t => t.turns).filter(m => m.via === 'session' && !held.has(m.answers));
-  const at = decided ? decidedAt : undefined;
-  const write = {ids: new Set(slots.map(m => m.answers)), at};
-  write.done = db.doc('review/pr-' + DATA.number).set(deskBody(held)).then(() => {
-    write.ids.forEach(id => storedSlots.add(id));
-    if (at !== undefined) storedDecidedAt = at;
-  });
-  inFlight.add(write);
-  try { await write.done; } finally { inFlight.delete(write); }
-  storedAnyway(at);
-}
-// Whether a write from this view has stored the slot for `id`, or the decision
-// stamped `at`, once every write already carrying it has landed or been refused.
-// Waiting matters: a refusal can arrive while a covering write is still on its way.
-async function covered(has, stored){
-  await Promise.allSettled([...inFlight].filter(has).map(w => w.done));
-  return stored();
-}
-const storedBy = id => covered(w => w.ids.has(id), () => storedSlots.has(id));
-const decisionStored = at => covered(w => w.at === at, () => storedDecidedAt === at);
-
-// A decision whose own save failed, stored by a later write: a send, closing a
-// thread. Every write carries the decision, so the store now holds it, and the
-// page stops saying it was not saved and rings for it, as it would have at once.
-// A message is never stored this way: record leaves an unsaved one out.
-function storedAnyway(at){
-  if (at === undefined || !decided || decidedAt !== at
-      || !(rang === 'unsaved' || rang === 'too large')) return;
-  rang = 'sending';
-  if (showingDecided) drawDecided();
-  ringDecision(at);
-}
-// Rings for the decision stamped `at` once it is stored, and stores what became of
-// the ring beside it, at once as deliver() does for a message: a later load then
-// knows whether anything was told, and rering rings again for one that was not.
-const DECISION = ' decision';        // its key in `ringing`; no turn id has a space
-async function ringDecision(at){
-  ringing.add(DECISION);
-  let r;
-  try { r = await ring(); } finally { ringing.delete(DECISION); }
-  if (decidedAt !== at || rang !== 'sending') return;
-  rang = r;
-  decisionRing = r === 'rung' ? {decidedAt: at, rungAt: Date.now()} : {decidedAt: at, why: r};
-  if (showingDecided) drawDecided();
-  await saveNow();
-  // Not after a conflict: this view is being reloaded, and a lease it took now would
-  // hold off the reloaded view's ring for RING_LEASE.
-  const due = decisionDueAt();
-  if (bellOn && due !== null && r !== 'conflict') reringIn(due - Date.now());
-}
-// A slot read from the store marked unsaved. Desks saved by 0.10.2 and earlier
-// hold these: a debounced save stored the message after its own save failed.
-// Being in the store proves it saved, so it is marked saved, not yet rung, and
-// due now rather than after RERING_AFTER, since no view is still ringing for it.
-// rering takes an id out of here once the slot is rung or the store shows it
-// needs no ring.
-const lateStored = new Set();
-function storedLate(m){
-  m.status = 'sent'; delete m.why;
-  lateStored.add(m.answers);
-  return m;
-}
-
-// db.d.ts: `unavailable` is transient, and a verb that fails with it is retried
-// once after a short randomized delay; an unknown code counts as unavailable.
-// These are the codes it says a retry cannot fix.
-// 'outdated' is this page's own, from record(): nothing a retry does changes it.
-const NO_RETRY = new Set(['invalid_argument', 'resource_exhausted', 'quota_exceeded',
-  'revoked', 'not_granted', 'capability_disabled', 'capability_removed', 'transform_error',
-  'outdated']);
-async function recordRetried(){
-  try { await record(); }
-  catch (e){
-    if (e && NO_RETRY.has(e.code)) throw e;
-    // record() is called again rather than resent, so the retry stores the
-    // threads as they are now, with anything sent during the wait.
-    await new Promise(r => setTimeout(r, 300 + Math.random() * 700));
-    await record();
-  }
-}
-
-// Both savers refuse until the stored document has been read (see `restore`).
-// The banner for a failed read is already up, so they add nothing to it. A
-// failure that the retry recovers says nothing: the banner is for what is lost.
-async function save(){
-  if (!db){ sayLost('this view cannot reach the store'); return; }
-  if (restore !== 'done' || outdated) return;
-  clearTimeout(saving);
-  saving = setTimeout(async () => {
-    try {
-      await recordRetried();
-      sayKept();
-    } catch (e) {
-      // The outdated banner already says why nothing saves.
-      if (!(e && e.code === 'outdated')) sayRefused(e);
-    }
-  }, 400);
-}
-
-// A decision cannot sit out the debounce: the doorbell rings straight after it,
-// and a session answering the bell must find the decision already stored.
-// `stored`, when given, asks whether another write stored what this save was for.
-// If so, a refusal is not reported: the banner would say the thing was lost while
-// the store holds it, and a refusal that lands after the covering write would
-// leave that banner up, since no later save comes to clear it. The refused write
-// may still have carried something newer, so the document as it is now is saved
-// once more, and the banner says whatever that write says.
-async function saveNow(stored){
-  if (!db){ sayLost('this view cannot reach the store'); return false; }
-  if (restore !== 'done' || outdated) return false;
-  clearTimeout(saving);
-  try {
-    await recordRetried();
-    sayKept();
-    return true;
-  } catch (e) {
-    if (stored && await stored()){ await saveNow(); return true; }
-    if (e && e.code === 'outdated') return false;
-    sayRefused(e);
-    return false;
-  }
-}
-
-/* The doorbell. A store write reaches no Claude Code session; a new version of
-   this artifact does -- the session that published the desk is watching it, and
-   hears within seconds of going idle. So once a decision is stored the page also
-   publishes one small file into itself.
-   The file carries nothing the session acts on. It reads the decision from the
-   store, so a lost ring costs only speed (the session-start sweep still finds
-   the desk) and a stray one changes nothing. The files form keeps this view
-   running; the page form would reload it under the reviewer. */
-const bellReady = (async () => {
-  try { return await claude.use('artifact'); } catch (e) { return null; }
-})();
-
-// `what` says what rang it -- a decision by default, or a message -- for anyone
-// reading the version history. The session never acts on it.
-//
-// artifact.d.ts: branch on the code. Retry only upstream_error, once, after a short
-// randomized delay, and treat an unknown code as upstream_error. rate_limited is
-// never retried here: rering tries once more after RING_BACKOFF. The read-only
-// codes are permanent for the view, and the first one turns ringing off, so the
-// view never publishes again and returns 'readonly' from then on.
-// rering passes retry false: its ring is already the one more try a failed ring
-// gets, and a second retry inside it would make four publishes where artifact.d.ts
-// allows the first and one retry.
-const READ_ONLY = new Set(['not_writer', 'not_granted', 'not_declared', 'consent_required',
-  'capability_disabled', 'capability_removed']);
-const NOT_TRANSIENT = new Set([...READ_ONLY, 'conflict', 'too_large', 'invalid_content',
-  'read_only_path', 'rate_limited', 'transform_error']);
-async function ring(what, retry = true){
-  const bell = await bellReady;
-  if (!bell) return 'unavailable';
-  const says = what || {kind: 'decision', decision: decided, decidedAt: decidedAt};
-  let code = null;
-  for (let tries = 0; tries < (retry ? 2 : 1); tries++){
-    if (tries) await new Promise(r => setTimeout(r, 300 + Math.random() * 700));
-    if (readOnly) return 'readonly';
-    try {
-      await bell.publish({'doorbell.json': JSON.stringify(Object.assign(
-        {pr: DATA.number, at: new Date().toISOString()}, says))});
-      return 'rung';
-    } catch (e) {
-      code = (e && typeof e.code === 'string' && e.code) || 'upstream_error';
-      if (READ_ONLY.has(code)){ goReadOnly(); return 'readonly'; }
-      if (NOT_TRANSIENT.has(code)) return code;
-    }
-  }
-  return code;
-}
-
-// "Needs changes" without saying what to change is the one verdict nobody can
-// act on. Approving needs no reason -- the request already says what it wants --
-// so only this branch asks, and it asks before recording, because the panel is
-// replaced once a decision is in and there is no way back to it.
-// `focus` is false when a reload brings back a reason being written: nothing moves
-// the reader to the slab on load.
-function askReason(existing, focus = true){
-  if (closedOutcome()) return drawShut();
-  showingDecided = false;
-  showingRevised = false;
-  rebuild($('decide'), '<div class="cap">What needs changing</div>'
-    + '<div class="done"><textarea id="why" rows="4" placeholder="The part that is '
-    + 'wrong, and what would make it right."></textarea>'
-    + '<div class="verdict"><span class="note">This goes into the pull request '
-    + 'with the discussion.</span>'
-    + '<button class="btn" id="back">Back</button>'
-    + '<button class="btn yes" id="recordReason">Record it</button></div></div>');
-  const why = $('why');
-  why.value = existing || '';
-  if (focus) why.focus();
-  why.addEventListener('input', () => keepDraft('why', why.value));
-  $('back').addEventListener('click', () => { keepDraft('why', null); backToChoice(); });
-  $('recordReason').addEventListener('click', () => {
-    if (!why.value.trim()){ why.focus(); return; }
-    decide('needs changes', false, why.value.trim());
-  });
-}
-
-// Approving starts a merge that nothing on this page can undo, so it asks once,
-// in the slab rather than with confirm(): in a frame sandboxed without
-// allow-modals confirm() returns false at once and Approve would never work.
-// The step adds a line above the buttons, so neither Confirm nor Back is under
-// the spot Approve was: a second tap there lands on no button.
-function askApprove(){
-  if (closedOutcome()) return drawShut();
-  showingDecided = false;
-  showingRevised = false;
-  rebuild($('decide'), '<div class="cap">Before it merges</div>'
-    + '<div class="done confirming"><p class="ask" id="approveAsk"></p>'
-    + '<p class="pickup" id="approvePending" hidden></p>'
-    + '<div class="verdict"><span class="note">A merge cannot be undone from this '
-    + 'page.</span>'
-    + '<button class="btn" id="approveBack">Back</button>'
-    + '<button class="btn yes" id="approveConfirm">Confirm</button></div></div>');
-  drawApproveAsk();
-  $('approveBack').addEventListener('click', backToChoice);
-  $('approveConfirm').addEventListener('click', () => decide('approved'));
-  gate();
-  $('approveConfirm').focus();
-}
-function backToChoice(){
-  offerDecision();
-  // A desk that closed meanwhile draws no Approve.
-  const ok = $('ok');
-  if (ok) ok.focus();
-}
-// Enter activates a button on keydown, and focus moves to Confirm as the step
-// opens, so the auto-repeat of one held Enter pressed Confirm too: measured in
-// Chromium and WebKit, one held key recorded the approval. Repeats are dropped
-// while the step is up; a fresh press still confirms.
-$('decide').addEventListener('keydown', e => {
-  if (!$('approveAsk')) return;
-  if (e.repeat){ e.preventDefault(); return; }
-  if (e.key === 'Escape'){ e.preventDefault(); backToChoice(); }
-});
-
-// Messages the working session has not finished with: a reply it is still
-// writing, and a saved message with no reply yet. A message whose save failed
-// never reached the session, and says so in its own thread.
-function outstanding(){
-  const slots = threads.flatMap(t => t.turns).filter(m => m.via === 'session' && !unsaved(m));
-  const rf = FEEDS.replies;
-  if (slots.length && (!repliesIn || (rf && rf.dead))) return null;
-  const writing = slots.filter(m => (sessionReplies.get(m.answers) || {}).status === 'working').length;
-  const waiting = slots.filter(m => !sessionReplies.has(m.answers)
-    && m.status !== 'working' && m.status !== 'done').length;
-  return {writing, waiting};
-}
-// Redrawn in place, so a reply finishing or a new head while the step is open
-// changes what it says without moving focus off Confirm.
-function drawApproveAsk(){
-  const ask = $('approveAsk');
-  if (!ask) return;
-  ask.textContent = 'Approve and merge ' + (typeof DATA.repo === 'string' ? DATA.repo : '')
-    + '#' + DATA.number + (head ? ' at ' + head.slice(0, 7) : '') + '?';
-  const o = outstanding(), el = $('approvePending');
-  const parts = !o ? [] : [
-    o.writing && (o.writing === 1 ? '1 answer is' : o.writing + ' answers are') + ' still being written',
-    o.waiting && (o.waiting === 1 ? '1 message is' : o.waiting + ' messages are')
-      + ' still waiting for the working session'].filter(Boolean);
-  const n = o ? o.writing + o.waiting : 0;
-  el.textContent = !o ? 'The working session’s replies have not loaded on this view, so it '
-      + 'cannot tell whether an answer is still coming.'
-    : parts.length ? parts.join(' and ') + '. Confirm does not wait for ' + (n === 1 ? 'it' : 'them') + '.'
-    : '';
-  el.hidden = !el.textContent;
-}
-
-// The choice. After a revision is pushed it is offered straight away, under what
-// was revised: the decision is the reviewer's again, and "Change this" would hide
-// that behind a button that reads as undoing something.
-function offerDecision(){
-  if (closedOutcome()) return drawShut();
-  showingDecided = false;
-  const r = revisedOutcome();
-  showingRevised = !!r;
-  rebuild($('decide'), '<div class="cap">'
-    + (r ? 'Revised, ready for another look' : 'When you have made up your mind') + '</div>'
-    + '<div id="decideState"></div>'
-    + (r ? '<div class="done revised"><p class="pickup">' + esc(outcomeLine(r)) + '</p>'
-      + '<p class="ask">You had marked this <b>' + esc(decided) + '</b>' + (reason ? ':' : '.') + '</p>'
-      + (reason ? '<blockquote>' + esc(reason) + '</blockquote>' : '') + '</div>' : '')
-    + '<div class="verdict"><span class="note">Recorded here and sent to the '
-    + 'working session, which writes the discussion into the pull request and '
-    + 'merges or revises accordingly.</span>'
-    + '<button class="btn yes" id="ok">Approve</button>'
-    + '<button class="btn" id="changes">Needs changes</button></div>');
-  $('ok').addEventListener('click', askApprove);
-  // The reason a revision answered is not the next one, so the form starts empty.
-  $('changes').addEventListener('click', () => askReason(r ? '' : reason));
-  gate();
-}
-
-async function decide(v, quiet, why){
-  // A verdict restored from the store with no reason on it was recorded before
-  // there was anywhere to put one. Ask now rather than stranding it.
-  if (v === 'needs changes' && !why){ decided = v; return askReason(reason); }
-  // The buttons are off until restore settles; this covers anything that
-  // reaches decide another way, such as the reason panel's Record it.
-  if (!quiet && (locked() || closedOutcome())) return;
-
-  // Confirm or Record it held focus, and the slab is about to be replaced. Focus
-  // goes to the line that says whether it was saved and rung, which a screen reader
-  // then reads; Change this, under it, would take a repeat of the same Enter.
-  const fromSlab = !quiet && $('decide').contains(document.activeElement);
-  decided = v;
-  reason = why || null;
-  // A restored decision says what its stored ring record says; restore sets
-  // decisionRing before it calls here.
-  rang = rangFrom(decisionRing);
-  if (!quiet){
-    const at = decidedAt = new Date().toISOString();
-    decidedOn = head;
-    decisionRing = null;
-    rang = 'sending';
-    drawDecided();
-    const said = $('decisionLine');
-    if (fromSlab && said) said.focus({preventScroll: true});
-    // As in deliver(): a send during the retry wait may have stored this decision.
-    const kept = await saveNow(() => decisionStored(at));
-    // Read `lost` straight after the refusal: a later save that succeeds clears
-    // it, and the line under the buttons must keep saying why this one failed.
-    const why = lost === 'too large' ? 'too large' : 'unsaved';
-    if (kept) keepDraft('why', null);
-    if (kept) await ringDecision(at);
-    else if (decidedAt === at && rang === 'sending') rang = why;
-  }
-  drawDecided();
-}
-
-// The page cannot see whether a session is running, so it says only what it
-// knows: saved, rung, or picked up. "I will merge it" was a promise nothing
-// on this side could keep.
-//
-// when() takes an ISO string or epoch milliseconds. Anything a Date cannot hold
-// says nothing rather than throwing, as toISOString would. A time alone reads as
-// today, so a reviewer back on Monday took Friday's "last answered at 16:10" for
-// this afternoon. A time from another day says which day, in the reader's own
-// locale and timezone: " yesterday at 16:10", or " on Fri 11 Sep at 16:10", with
-// the year when it is not this one. Days are counted between local midnights,
-// rounded, so a day that DST makes 23 or 25 hours long still counts as one.
 const when = at => {
   const t = new Date(at);
   if (isNaN(t)) return '';
@@ -2617,299 +1021,7 @@ const when = at => {
 // the lines that carry a time are drawn again. A second late, so the new day has
 // begun; a timer held back by a sleeping tab fires late, which is still the new day.
 // Nothing is redrawn while the reviewer is in the reason form or the confirm step.
-function atMidnight(){
-  const now = new Date();
-  const next = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1).getTime();
-  setTimeout(() => {
-    drawPresence();
-    drawOutcome();
-    if (showingDecided || showingRevised) drawDecided();
-    atMidnight();
-  }, next - now.getTime() + 1000);
-}
-
-// The session's report of what it did, when the pickup carries one.
-const outcomeOf = p => isRow(p) && isRow(p.outcome) && typeof p.outcome.result === 'string'
-  && p.outcome.result ? p.outcome : null;
-const pickedUp = () => !!pickup && pickup.decision === decided && pickup.decidedAt === decidedAt;
-// Merged, or closed without merging: the review is over whichever decision the
-// pickup was for. /review-collect stamps the ledger and unwatches the desk for
-// both, and the sweep stops listing it, so nothing sent from the page after this
-// reaches a session. The page stops offering to send anything.
-const ENDS_REVIEW = ['merged', 'closed'];
-const closedOutcome = () => {
-  const o = outcomeOf(pickup);
-  return o && ENDS_REVIEW.includes(o.result) ? o : null;
-};
-// The revision a Needs changes asked for has been pushed and the desk rewritten
-// for it, so the decision is the reviewer's again. Only for the decision on screen:
-// deciding again leaves it behind, like any other pickup.
-const revisedOutcome = () => {
-  const o = pickedUp() && outcomeOf(pickup);
-  return o && o.result === 'revised' ? o : null;
-};
-function outcomeLine(o){
-  const said = o.detail ? ': ' + String(o.detail).replace(/[.\s]+$/, '') : '';
-  if (o.result === 'merged') return 'Merged by the working session' + when(o.at) + said + '.';
-  if (o.result === 'revising') return 'The working session is revising' + said + '.';
-  if (o.result === 'revised') return 'Revised' + when(o.at) + said + '.';
-  // /review-collect reports `closed` when GitHub shows the request closed
-  // without merging, and never as blocked; it is not a failure to finish.
-  if (o.result === 'closed') return 'Closed without merging' + when(o.at) + said + '.';
-  return 'The working session could not finish' + said + '.';
-}
-
-function pickupLine(){
-  if (!db) return 'Saving is unavailable on this view, so no session will see '
-    + 'this. Tell the working session directly.';
-  if (pickedUp()){
-    // The outcome is what actually happened after pickup. Without it a blocked
-    // merge and a finished one look identical from here.
-    const o = outcomeOf(pickup);
-    if (o) return outcomeLine(o);
-    return 'Picked up by the working session' + when(pickup.at)
-      + '. What it did shows here once it has acted.';
-  }
-  if (rang === 'sending') return 'Saving…';
-  if (rang === 'unsaved') return 'Not saved, so no session will see this. '
-    + 'Tell the working session directly.';
-  if (rang === 'too large') return 'Not saved: this conversation is too large to store, '
-    + 'so no session will see this. ' + (threads.length > 1 ? 'Close a thread you no longer '
-    + 'need and decide again, or tell' : 'Tell') + ' the working session directly.';
-  const later = ' If no session is running, the next one to start picks it up.';
-  // Waiting only once a ring is recorded, and only while the ring is still worth
-  // waiting on. A ring whose stamp never came is the case this page used to hide:
-  // it said "waiting" forever, which is what a working session and a lost notice
-  // look like from here. Once one ring has gone unanswered the page says so, and
-  // once the second has too it stops promising and says what to do instead.
-  if (rang === 'rung'){
-    // A ring seconds old is worth waiting on, whether it is the first or the
-    // second: only a ring that has gone unanswered past ACK_WAIT says more. The
-    // page cannot tell a spent re-ring that followed an unanswered ring from one
-    // that followed a ring which never went out, so neither line counts rings.
-    const r = bellOn && decisionRing && decisionRing.decidedAt === decidedAt ? decisionRing : null;
-    if (r && ackDue(r.rungAt)) return r.again
-      ? 'Rung, and no working session has answered on this desk. It may be busy with a '
-        + 'task, or not running: Check, at the top of this panel, rings it again, and the '
-        + 'resume command there starts one.' + later
-      : 'Rung, and nothing has answered on this desk yet. This view rings it once more.' + later;
-    return 'Waiting for the working session.' + later;
-  }
-  // No record: an older page stored it, or a tab closed between the save and the
-  // ring. The page cannot tell whether a session was told or has collected it
-  // already, so it claims neither.
-  // Neither of the next two knows a ring went out, and a decision in the store with
-  // no ring wakes nothing until a session starts. Check in the panel is a ring any
-  // session handles by collecting a waiting decision, so the line points at it
-  // wherever the view has Check to press.
-  if (rang === null) return 'Saved. What the working session did with it shows here '
-    + 'once it reports back.' + (bellOn ? ' If nothing shows here soon, Check in the panel rings '
-    + 'the working session.' : '');
-  // 'readonly' is this page's word, not an artifact.d.ts code, so it is never shown.
-  if (bellOn && decisionDueAt() !== null) return 'Saved, but the working session was not notified'
-    + (rang === 'readonly' ? '' : ' (' + rang + ')') + '. This view tries again in a few seconds, '
-    + 'and Check in the panel rings it too.' + later;
-  if (rang === 'readonly') return 'Saved. This view cannot notify the working '
-    + 'session, so the next session to start picks it up.';
-  return 'Saved, but this view could not notify the working session ('
-    + rang + ').' + (bellOn ? ' Check in the panel rings it again.' : '') + later;
-}
-
-// An approval of a head the page no longer shows. Not said once the pickup
-// reports the merge: the push that moved the head came after it.
-function staleApproval(){
-  if (decided !== 'approved' || !decidedOn || !head || decidedOn === head) return false;
-  const o = pickup && pickup.decision === decided && pickup.decidedAt === decidedAt && pickup.outcome;
-  return !(o && o.result === 'merged');
-}
-
-function drawDecided(){
-  if (closedOutcome()) return drawShut();
-  // A revised decision, and no decision at all, are the reviewer's to make.
-  if (!decided || revisedOutcome()) return offerDecision();
-  showingDecided = true;
-  showingRevised = false;
-  rebuild($('decide'), '<div class="cap">Recorded</div><div class="done">'
-    + 'You marked this <b>'+esc(decided)+'</b>. The working session writes the '
-    + 'discussion into pull request #'+DATA.number+', '
-    + (decided === 'approved' ? 'merges it' : 'starts the revision')
-    + ', and reports back here.'
-    + (reason ? '<blockquote>'+esc(reason)+'</blockquote>' : '')
-    + '<p class="pickup" id="decisionLine" tabindex="-1">'+esc(pickupLine())+'</p>'
-    + (staleApproval() ? '<p class="pickup" id="staleHead">You approved commit '
-      + decidedOn.slice(0, 7) + '. The desk now shows ' + head.slice(0, 7)
-      + ', pushed since, so the working session will not merge until you look at '
-      + 'the new commits and decide again.</p>' : '')
-    + '<div class="verdict"><button class="btn" id="redo">Change this</button></div>'
-    + '</div>');
-  $('redo').addEventListener('click', backToChoice);
-}
-
-// A merged or closed pull request. No Change this: a decision recorded now reaches
-// no session, and a merge cannot be taken back from here anyway.
-function drawShut(){
-  showingDecided = true;
-  showingRevised = false;
-  const o = closedOutcome();
-  rebuild($('decide'), '<div class="cap">' + (o.result === 'merged' ? 'Merged' : 'Closed') + '</div>'
-    + '<div class="done">'
-    + (decided ? 'You marked this <b>' + esc(decided) + '</b>.' : 'No decision was recorded on this desk.')
-    + (reason ? '<blockquote>' + esc(reason) + '</blockquote>' : '')
-    + '<p class="pickup">' + esc(outcomeLine(o)) + '</p>'
-    + '<p class="pickup" id="shutNote">The review is over, so this desk takes no new decision or '
-    + 'message. Anything more belongs on <a href="' + esc(DATA.url) + '" target="_blank" '
-    + 'rel="noopener">the pull request</a>.</p>'
-    + '</div>');
-}
-
-// What the outcome changes outside the decision slab: the banner under the title,
-// and, for a merged or closed request, the composer, the footer and every line
-// that says a session will pick something up.
-const FOOT = $('foot').innerHTML;
-let shutDrawn = false;
-function drawOutcome(){
-  const o = closedOutcome();
-  const banner = $('outcomeBanner');
-  banner.hidden = !o;
-  banner.className = 'banner' + (o && o.result === 'closed' ? ' unmerged' : '');
-  banner.textContent = !o ? '' : (o.result === 'merged' ? 'Merged' : 'Closed without merging')
-    + when(o.at) + (o.detail ? ': ' + String(o.detail).replace(/[.\s]+$/, '') : '')
-    + '. This review desk is closed.';
-  $('foot').innerHTML = o ? 'The review of this pull request is over. The panel keeps the '
-    + 'discussion with the working session to read, and takes no new messages.'
-    + '<div class="built">review desk ' + esc(BUILT) + '</div>' : FOOT;
-  $('closedSlot').innerHTML = o ? '<div class="shutNote">This desk is closed: the pull request was '
-    + (o.result === 'merged' ? 'merged' : 'closed without merging') + '. The discussion stays '
-    + 'here to read, but nothing sent from here would reach a working session. Ask on the pull '
-    + 'request instead.</div>' : '';
-  $('box').placeholder = o ? 'This desk is closed' : 'Ask the working session…';
-  drawAlone();
-  if (!!o !== shutDrawn){ shutDrawn = !!o; draw(); }
-}
-
-/* ================= restore ================= */
-// A failed read gets its own banner, not sayLost's: nothing typed here is at
-// risk, and reading again is the fix rather than the danger.
-// The same failure is also said in the decision slab (drawDecideState), so each
-// Try again is found by attribute rather than by one id.
-let unreadWhy = '';
-function sayUnread(why){
-  lost = 'unread';
-  unreadWhy = why;
-  $('lostSlot').innerHTML = '<div class="lost">Not loaded — the saved discussion '
-    + 'could not be read (' + esc(why) + '). Sending and deciding are off until it '
-    + 'loads, so nothing stored is replaced.<button data-retry-restore>Try again</button></div>';
-}
-function restoreFailed(e){
-  restore = 'failed';
-  sayUnread((e && (e.code || e.message)) || 'the read failed');
-  try { draw(); } catch (x) {}
-  return false;
-}
-document.addEventListener('click', async e => {
-  if (!(e.target.closest && e.target.closest('[data-retry-restore]'))) return;
-  if (restore !== 'failed' || !db) return;
-  const restored = await restoreStored();
-  followPage();
-  if (restored){ watchDesk(); listenReplies(); }
-});
-
-// What restore keeps of the stored threads. review/pr-N is writable by any
-// viewer, by write_db, and by older and newer versions of this page, so a thread
-// may be null or carry turns that are not an array. Mapping one of those threw,
-// and restore never finished: every control stayed off with no banner. A thread
-// that is not an object and a turn that is not an object are skipped, and a
-// thread's missing turns, id or name are filled in. This is the in-memory copy
-// only. Nothing is written back until the reviewer sends, decides or closes a
-// thread, so another view that reads the stored shape differently still finds it.
 const isRow = v => !!v && typeof v === 'object' && !Array.isArray(v);
-function restoredThreads(stored){
-  // The store hands back frozen objects. Spreading a thread copies the thread but
-  // not its turns array, and pushing the next message onto that frozen array threw
-  // "object is not extensible" -- so every message sent after a reload was lost.
-  // Copy the turns too.
-  // A desk saved before 0.8.0 also stores each session slot's content. Any viewer
-  // can write this document, so that copy is never shown, and it is dropped here
-  // so the next save leaves it out.
-  // A slot stored as unsaved was written by a later save after its own failed.
-  // Read back from the store, it is saved, and waits to be rung.
-  return stored.filter(isRow).map((t, i) => ({...t, unread: false,
-    id: typeof t.id === 'string' && t.id ? t.id : 't' + (i + 1) + '-restored',
-    name: typeof t.name === 'string' && t.name ? t.name : 'Thread ' + (i + 1),
-    turns: (Array.isArray(t.turns) ? t.turns : []).filter(isRow)
-      .map(m => m.via !== 'session' ? {...m}
-        : unsaved(m) ? storedLate(leanSlot(m)) : leanSlot(m))}));
-}
-
-// db.d.ts calls `unavailable` transient and asks verbs to retry once after a
-// short randomized delay. Any other failure gets the same one retry: it is
-// cheap, and the alternative is a read-only desk. A read that never settles
-// would leave every control off with no banner and no way out, so each attempt
-// is given RESTORE_WAIT and then counts as failed.
-const RESTORE_WAIT = 10000;
-// Never rejects: anything that throws while reading or applying the stored
-// document leaves restore 'failed', with the banner and Try again, rather than
-// 'pending' with no way out.
-async function restoreStored(){
-  restore = 'pending';
-  let snap;
-  try {
-    draw();
-    const ref = db.doc('review/pr-' + DATA.number);
-    const read = () => Promise.race([ref.get(), new Promise((_, no) =>
-      setTimeout(() => no({code: 'timed out'}), RESTORE_WAIT))]);
-    try { snap = await read(); }
-    catch (e){
-      await new Promise(r => setTimeout(r, 300 + Math.random() * 700));
-      snap = await read();
-    }
-  } catch (e) {
-    return restoreFailed(e);
-  }
-  try {
-    const had = snap.exists && snap.data();
-    const kept = had && Array.isArray(had.threads) ? restoredThreads(had.threads) : [];
-    if (kept.length){ threads = kept; live = 0; }
-    deskStamp = stampOf(had);
-    restore = 'done';
-    if (lost === 'unread'){ lost = null; $('lostSlot').innerHTML = ''; }
-    if (had){
-      reason = had.reason || null;
-      decidedAt = had.decidedAt || null;
-      decidedOn = isHead(had.decidedOn) ? had.decidedOn : null;
-      // A copy: the store hands back frozen objects. A record stamped for another
-      // decidedAt, or none at all, leaves this decision with no recorded ring.
-      decisionRing = isRow(had.decisionRing) && typeof decidedAt === 'string'
-        && had.decisionRing.decidedAt === decidedAt ? {...had.decisionRing} : null;
-      if (had.decision) decide(had.decision, true, had.reason);
-    }
-    draw();
-    return true;
-  } catch (e) {
-    return restoreFailed(e);
-  }
-}
-
-/* ================= live listeners ================= */
-// db.d.ts: an onSnapshot error callback receives at most one terminal error,
-// after which that subscription delivers nothing, and a fresh onSnapshot is the
-// only way back. With no callback the listener still dies, only silently: a
-// dead replies listener left every answered message on "Loading the working
-// session's reply…" for good. So every listener goes through follow(), which
-// says on the page which feed stopped and with what code, and subscribes again
-// once after a short randomized wait. It never retries a code that db.d.ts says
-// cannot succeed on a retry. Each outage gets one automatic resubscribe: a
-// delivery ends the outage and earns the next one, so a feed that drops twice in
-// a long review comes back twice on its own. A store that refuses every
-// subscribe never delivers, so it is not asked again on its own; the reviewer
-// gets Try again. A store that delivers and then drops every time would
-// otherwise be resubscribed every few seconds for as long as that goes on, and
-// db.d.ts names a per-viewer call rate that answers resource_exhausted, so the
-// wait doubles for each automatic resubscribe that follows the last one within
-// RESUBSCRIBE_MAX, and never exceeds it.
-const NO_RESUBSCRIBE = new Set(['invalid_argument', 'revoked', 'not_granted',
-  'capability_disabled', 'capability_removed', 'transform_error']);
-const RESUBSCRIBE_AFTER = 1500, RESUBSCRIBE_MAX = 60000;
 function follow(name, label, where, ref, next){
   const feed = FEEDS[name] = {name, label, where, dead: null, retrying: false,
     retried: false, ever: false, gen: 0, streak: 0, lastAuto: 0, wait: 0};
@@ -2951,674 +1063,299 @@ function feedLine(f){
     + (f.retrying ? ' Trying again…'
       : f.dead === 'revoked' ? '' : '<button data-refollow="' + esc(f.name) + '">Try again</button>');
 }
-function drawFeeds(changed){
-  [['panel', 'feedSlot'], ['page', 'pageFeeds']].forEach(([where, id]) => {
-    const down = Object.values(FEEDS).filter(f => f.where === where && f.dead);
-    $(id).innerHTML = down.length
-      ? '<div class="lost">' + down.map(feedLine).join('<br>') + '</div>' : '';
-  });
-  if (changed && changed.name === 'replies') drawStream();
-}
-document.addEventListener('click', e => {
-  const b = e.target.closest && e.target.closest('[data-refollow]');
-  const f = b && FEEDS[b.dataset.refollow];
-  if (!f || !f.dead || f.retrying) return;
-  f.retrying = true;
-  drawFeeds(f);
-  f.start();
-});
-
-// Answers from the working session: one document per message, keyed by the
-// message's id, rewritten as the session works. A reply with no slot waiting
-// (the page reloaded before the slot was saved) gets one after the message
-// rather than being dropped. Every delivery also adds to `replied`, the
-// messages the session has already claimed, which rering skips.
-//
-// Nothing here saves. The reply is already stored, in its own document, so a
-// save would only rewrite review/pr-N from this view's threads, which may be
-// missing a message another open view has sent since this one loaded.
-const replied = new Set();
-// Replies already marked unread for having come while the desk was closed.
-const flaggedAtLoad = new Set();
-let reringStarted = false;
-function listenReplies(){
-  if (FEEDS.replies) return;
-  follow('replies', 'the working session’s replies', 'panel',
-    () => db.collection('review/pr-' + DATA.number + '/replies'), snap => {
-      // Every delivery up to and including the first server-definitive one is what
-      // was already there at load, so none of it flags a thread unread by arriving.
-      // db.d.ts: the first pages of a subscription can be fromCache, empty or
-      // older than the store, with the definitive snapshot after them. Taking the
-      // first delivery as the whole of history lit the badge for answers read the
-      // day before. Only what this browser recorded as seen (seenAt) marks history:
-      // an answer newer than that came while the desk was closed.
-      // A change confined to threads the reviewer is not looking at redraws only
-      // the tabs and the badge. The open thread's stream is left alone, nodes and
-      // all, so a selection in it survives and its text is not re-parsed. Any
-      // change touching the open thread still redraws that stream in full.
-      const history = !repliesIn;
-      let shown = history, liveShown = history;
-      // Not "in" until definitive: a cache page may lack replies the store holds,
-      // and rering, started below, must not ring for a message already answered.
-      if (!(snap.metadata && snap.metadata.fromCache)) repliesIn = true;
-      const open = document.body.classList.contains('open');
-      snap.docs.forEach(d => {
-        const r = d.data();
-        if (!r || typeof r.turn !== 'string') return;
-        replied.add(r.turn);
-        const text = typeof r.text === 'string' ? r.text : '';
-        const status = r.status === 'done' ? 'done' : 'working';
-        // Anything the session writes on this desk is a sign of life, not only a
-        // presence stamp: a reply, and a claim at "working", both say it is here
-        // and reading. Liveness judged by stamps alone let a desk where answers
-        // were arriving still say that nobody had answered on it, which is the
-        // page calling a working session dead.
-        wroteAt(replyAt(r), history);
-        const was = sessionReplies.get(r.turn);
-        const changed = !was || was.text !== text || was.status !== status;
-        if (changed) sessionReplies.set(r.turn, {text, status, at: replyAt(r)});
-        else was.at = Math.max(was.at, replyAt(r));
-        // Once per reply: a cache page and the definitive snapshot can both carry it,
-        // and a thread opened between them stays read.
-        const missed = history && seenAt !== null && replyAt(r) > seenAt && !flaggedAtLoad.has(r.turn);
-        if (missed) flaggedAtLoad.add(r.turn);
-        for (const t of threads){
-          const at = t.turns.findIndex(m => m.id === r.turn);
-          if (at < 0) continue;
-          let hit = changed;
-          if (!t.turns.some(m => m.via === 'session' && m.answers === r.turn)){
-            let j = at + 1;
-            while (j < t.turns.length && t.turns[j].role === 'assistant') j++;
-            t.turns.splice(j, 0, {role: 'assistant', via: 'session', answers: r.turn});
-            hit = true;
-          }
-          if (hit){ shown = true; if (t === threads[live]) liveShown = true; }
-          if (((changed && !history) || missed) && (t !== threads[live] || !open)){
-            t.unread = true;
-            shown = true;
-          }
-          break;
-        }
-      });
-      if (liveShown) draw();
-      else if (shown){ drawTabs(); drawBadge(); drawApproveAsk(); }
-      if (repliesIn && !reringStarted){ reringStarted = true; rering(); }
-    });
+function drawFeeds(){
+  const down = Object.values(FEEDS).filter(f => f.dead);
+  $('pageFeeds').innerHTML = down.length
+    ? '<div class="lost">' + down.map(feedLine).join('<br>') + '</div>' : '';
 }
 
-// A message whose ring never went out. Nothing else wakes an idle session for
-// it, so this view rings once and stores rungAt. There are two ways to get here:
-// - 'sent' with no rungAt. The slot was saved, but the ring outcome was not:
-//   the tab closed, or a republish reloaded the view. Such a slot is left alone
-//   until it is RERING_AFTER old, because the view that sent it is usually still
-//   ringing and storing rungAt. A slot that is too young gets a timer for the
-//   moment it comes of age, not just a check at load. A republish reloads the
-//   view seconds after the send, so a check at load alone would never ring for it.
-// - 'unsent' with why 'conflict'. The ring was refused because a newer version
-//   was already live and the view was being reloaded (artifact.d.ts), so the
-//   view that sent it is not ringing for it any more.
-//
-// What this view read at load is not enough to decide. Every ring is a publish
-// that reloads the other open views, so a view is usually reading a slot just
-// before the ringing view stores rungAt for it. The page has no live copy of
-// the main document, so three things stop a second ring:
-// - A lease. db.d.ts: acquire is set-if-not-busy and expires on its own. Only
-//   the holder rings, so two views that load the same slot do not both ring,
-//   and a view reloaded by the holder's ring finds the lease still held.
-// - A fresh read under the lease. A slot the store already shows as rung,
-//   answered or gone is taken from the store and not rung.
-// - The outcome is written into a fresh read of the stored document, not this
-//   view's load-time copy. Writing that copy would undo whatever another view
-//   saved since, such as a closed thread.
-// A second ring can still happen if the sending view takes longer than
-// RERING_AFTER to store rungAt. It costs one extra wake-up and a reload of the
-// other views, not a second answer: the session answers only turns with no
-// reply document.
-const RERING_AFTER = 10000;
-const RING_LEASE = 20000;
-// How long after a ring fails with a code another try can get past (rate_limited,
-// upstream_error after ring()'s own retry, or a view that could not ring at all)
-// before a view rings once more. artifact.d.ts asks a rate-limited page to slow
-// down, and a transient failure a second old is likely still failing. Measured
-// from sentAt, or from decidedAt for a decision.
-const RING_BACKOFF = 5000;
-const viewId = 'v' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
-const ringing = new Set();
-let reringTimer = null, reringAt = 0;
-// Capped, so a sentAt or lease expiry from a clock that runs ahead only means
-// another check later, not a timer set hours out. A check already due sooner is
-// kept: a failed send asking for one in RING_BACKOFF must not push back a slot
-// that comes of age before then.
-function reringIn(ms){
-  const at = Date.now() + Math.min(Math.max(ms, 0), Math.max(RING_LEASE, ACK_WAIT)) + 50;
-  if (reringTimer && reringAt <= at) return;
-  clearTimeout(reringTimer);
-  reringAt = at;
-  reringTimer = setTimeout(rering, at - Date.now());
-}
-// A third way: 'unsent' with why 'unsaved', in the store. Pages up to 0.10.2 let a
-// later write store a message whose own save had failed; being in the store
-// proves it saved. The same mark in this view's memory means only that this view
-// could not store it, so rering never starts from one (see `waiting`).
-// A fourth: 'unsent' with any other why, a ring that failed with a code another
-// try can get past. Such a slot gets one more ring, after RING_BACKOFF, and the
-// view that makes it stores `again`, so no view and no later load rings it a third
-// time. A conflict is left unbounded as before: the view that got it is being
-// reloaded, and the reload is what rings.
-const unrung = m => m.via === 'session' && !replied.has(m.answers) && !m.rungAt
-  && (m.status === 'sent'
-      || (m.status === 'unsent' && (m.why === 'conflict' || m.why === 'unsaved' || !m.again)));
-const ringsLater = m => unrung(m) && m.status === 'unsent' && m.why !== 'conflict' && m.why !== 'unsaved';
-// A fifth way, and the one the reviewer feels: a ring that went out and was never
-// answered. The publish succeeded, so nothing here failed and nothing retried,
-// while the notice it should have become never arrived. Such a slot is due one
-// more ring ACK_WAIT after it rang, and spends the same `again` as a failed one:
-// one extra ring per slot, whatever went wrong with the first.
-const silent = m => m.via === 'session' && !replied.has(m.answers) && !m.again
-  && m.status === 'sent' && !!m.rungAt && presenceIn && !heardSince(m.rungAt);
-const needsRing = m => unrung(m) || silent(m);
-const dueAt = m => m.status === 'unsent'
-  ? (ringsLater(m) ? (m.sentAt || 0) + RING_BACKOFF : 0)
-  : m.rungAt ? m.rungAt + ACK_WAIT
-  : lateStored.has(m.answers) ? 0 : (m.sentAt || 0) + RERING_AFTER;
-// When the decision on screen is due a ring from rering, or null when it is not.
-// Due only when this page's own record says its ring failed and the one re-ring is
-// not spent. A decision with no record is left alone (see decisionRing). Never
-// while this view is saving or ringing for it, and never once the pickup shows it
-// was collected.
-function decisionDueAt(){
-  if (!decided || typeof decidedAt !== 'string' || ringing.has(DECISION)) return null;
-  if (decided === 'needs changes' && !reason) return null;
-  if (rang === 'sending' || rang === 'unsaved' || rang === 'too large') return null;
-  if (pickup && pickup.decision === decided && pickup.decidedAt === decidedAt) return null;
-  const r = decisionRing, at = Date.parse(decidedAt) || 0;
-  if (!r || r.decidedAt !== decidedAt || r.again) return null;
-  // A ring that went out is due one more only when nothing answered it, and this
-  // is the time to look, not the time to ring: ACK_WAIT after it rang.
-  if (r.rungAt) return heardSince(r.rungAt) ? null : r.rungAt + ACK_WAIT;
-  return r.why === 'conflict' ? at : at + RING_BACKOFF;
-}
-const sessionSlots = doc => new Map(((doc && Array.isArray(doc.threads)) ? doc.threads : [])
-  .flatMap(t => (t && Array.isArray(t.turns)) ? t.turns : [])
-  .filter(m => m && m.via === 'session' && typeof m.answers === 'string')
-  .map(m => [m.answers, m]));
 
-async function rering(){
-  clearTimeout(reringTimer);
-  reringTimer = null;
-  // A merged or closed desk has no session watching it, so a ring wakes nobody.
-  if (!bellOn || restore !== 'done' || closedOutcome()) return;
-  const now = Date.now();
-  const waiting = threads.flatMap(t => t.turns).filter(m => needsRing(m) && !unsaved(m)
-    && !replied.has(m.answers) && !ringing.has(m.answers));
-  const due = waiting.filter(m => dueAt(m) <= now);
-  const young = waiting.filter(m => !due.includes(m));
-  if (young.length) reringIn(Math.min(...young.map(dueAt)) - now);
-  // The decision goes through the same lease and fresh read as the messages.
-  const decisionAt = decisionDueAt();
-  if (decisionAt !== null && decisionAt > now) reringIn(decisionAt - now);
-  const decisionDue = decisionAt !== null && decisionAt <= now;
-  if (!due.length && !decisionDue) return;
+/* ================= the store ================= */
+// Two channels, and neither is a doorbell. A question leaves this page as an
+// artifact comment sent to Claude, anchored to the passage it is about, and
+// arrives in the session the reviewer already talks to. The session's work comes
+// back as documents in this store, which this page subscribes to -- a live
+// client, so a write from the session lands here with nothing to notify.
+const FEEDS = {};
+const NO_RESUBSCRIBE = new Set(['not_granted', 'permission_denied', 'invalid_argument']);
+const RESUBSCRIBE_AFTER = 4000, RESUBSCRIBE_MAX = 60000;
+let db = null, comments = null;
+// Where the page is in its own startup: 'pending' until the store has answered,
+// then 'done', or 'nostore' when this view cannot reach it at all. A reader sees
+// the carried text either way; this only says whether what the session writes
+// can arrive.
+let restore = 'pending';
+const PR = () => 'review/pr-' + DATA.number;
 
-  const ids = due.map(m => m.answers);
-  ids.forEach(id => ringing.add(id));
-  if (decisionDue) ringing.add(DECISION);
-  const held = {decision: decided, decidedAt};
-  const stillHeld = () => decided === held.decision && decidedAt === held.decidedAt;
+/* ---- what the session is doing, as it does it ---- */
+// One document per step, written by the session in its own order. The page only
+// renders. This is the direction that always worked and went unused.
+const KINDS = {doing: 'doing', found: 'found', wrong: 'went wrong', done: 'done',
+  said: 'answer', asked: 'you asked'};
+let work = [];
+function drawWork(){
+  const el = $('work');
+  if (!work.length){
+    el.innerHTML = '<p class="quiet">Nothing from the session yet. What it does while you '
+      + 'wait shows here.</p>';
+    $('pulse').hidden = true;
+    return;
+  }
+  $('pulse').hidden = !work.some(r => r.kind === 'doing');
+  rebuild(el, work.map(r =>
+    '<div class="step ' + esc(r.kind || 'doing') + '">'
+    + '<time>' + esc(String(when(r.at)).replace(/^ at /, '')) + '</time>'
+    + '<div class="what"><span class="kind">' + esc(KINDS[r.kind] || r.kind || 'doing')
+    + '</span>' + esc(r.text || '') + '</div></div>').join(''));
+}
+
+/* ---- asking about a passage ---- */
+// The platform's own composer, opened on what the reviewer selected: they type
+// there and press its Send to Claude, so the page never holds their words and
+// never needs consent to post as them. canSendToClaude() is the part the old
+// desk never had -- it says whether anyone is listening before they type.
+let listening = 'checking';
+async function drawAsk(){
+  const el = $('askState');
+  const sel = window.getSelection();
+  const some = sel && !sel.isCollapsed && String(sel).trim().length > 1;
+  $('ask').disabled = listening !== 'available';
+  $('ask').textContent = some ? 'Ask about what you selected' : 'Ask about this page';
+  el.className = 'askState ' + (listening === 'available' ? 'yes' : 'no');
+  el.textContent = listening === 'available'
+    ? 'A session is listening. Select a passage, then ask.'
+    : listening === 'no_session'
+      ? 'No session is listening right now, so a question would wait. Start one, or ask later.'
+      : listening === 'checking' ? 'Checking whether a session is listening…'
+      : listening === 'writers_only'
+        ? 'You can comment here, but only an editor of this desk can send to the session.'
+        : 'Asking the session is not available in this view (' + listening + ').';
+}
+async function refreshAsk(){
+  if (!comments){ listening = 'unavailable'; drawAsk(); return; }
+  try { listening = await comments.canSendToClaude(); }
+  catch (e){ listening = (e && e.code) || 'unavailable'; }
+  drawAsk();
+}
+
+/* ---- the decision ---- */
+// The one thing this page writes. Approve stores the commit the reviewer was
+// shown, and the session merges only that commit.
+let decision = null, decidedAt = null, decidedOn = null, reason = null;
+let pickup = null, docVersion = null, asking = null;
+
+function drawDecision(){
+  const slab = $('decide');
+  if (decision){
+    rebuild(slab, '<div class="recorded"><b>' + esc(decision === 'approved' ? 'Approved'
+      + (decidedOn ? ' at commit ' + esc(decidedOn.slice(0, 7)) : '') : 'Needs changes')
+      + '</b>' + esc(when(decidedAt)) + '.'
+      + (reason ? '<div class="why">' + esc(reason) + '</div>' : '')
+      + '<div class="pickup">' + esc(pickupLine()) + '</div>'
+      + '<button id="again" class="plain">Change this</button></div>');
+    return;
+  }
+  if (asking === 'changes'){
+    rebuild(slab, '<div class="ask"><label for="why">What needs changing?</label>'
+      + '<textarea id="why" rows="3" placeholder="In your words — the session acts on this."></textarea>'
+      + '<div class="row"><button id="recordReason" class="go">Record it</button>'
+      + '<button id="back" class="plain">Back</button></div></div>');
+    $('why').focus();
+    return;
+  }
+  if (asking === 'approve'){
+    rebuild(slab, '<div class="ask"><p class="confirm">Approve this request'
+      + (head ? ' at commit <code>' + esc(head.slice(0, 7)) + '</code>' : '')
+      + '? The session merges that commit and nothing newer.</p>'
+      + '<div class="row"><button id="confirm" class="go">Yes, approve</button>'
+      + '<button id="back" class="plain">Back</button></div></div>');
+    return;
+  }
+  rebuild(slab, '<div class="row"><button id="approve" class="go">Approve</button>'
+    + '<button id="changes" class="plain">Needs changes</button></div>');
+}
+
+function pickupLine(){
+  if (!db) return 'Saving is unavailable in this view, so tell the session directly.';
+  const mine = isRow(pickup) && pickup.decision === decision && pickup.decidedAt === decidedAt;
+  if (mine && isRow(pickup.outcome)){
+    const o = pickup.outcome;
+    return (o.result === 'merged' ? 'Merged' : o.result === 'closed' ? 'Closed'
+      : String(o.result || 'acted on')) + when(o.at)
+      + (o.detail ? ': ' + String(o.detail) : '') + '.';
+  }
+  if (mine) return 'Picked up by the session' + when(pickup.at) + '. What it did shows here.';
+  return 'Waiting for the session. What it does with this shows above as it happens.';
+}
+
+async function store(){
+  if (!db) return false;
+  const body = {pr: DATA.number, repo: DATA.repo, title: DATA.title,
+    decision, decidedAt, reason, page: BUILT,
+    ...(decision === 'approved' && head ? {decidedOn: head} : {})};
   try {
-    const ref = db.doc('review/pr-' + DATA.number);
-    // A store that cannot grant leases still gets the fresh read below, which
-    // covers a view reloaded by a ring that has already stored rungAt.
-    let lease = null;
-    try {
-      lease = await ref.collection('rering').doc('lease')
-        .acquire({holder: viewId, ttlMs: RING_LEASE});
-    } catch (e) {}
-    if (lease && !lease.acquired){
-      const until = Date.parse(lease.expiresAt || '') || now + RING_LEASE;
-      reringIn(until - Date.now() + Math.random() * 500);
-      return;
-    }
-
-    // For a decision, the pickup is read fresh too: the listener's copy may not
-    // have arrived, and a decision already collected is never rung.
-    let fresh, picked = null;
-    try {
-      const [snap, p] = await Promise.all([ref.get(),
-        decisionDue ? ref.collection('context').doc('pickup').get() : null]);
-      fresh = snap.data();
-      picked = p && p.exists ? p.data() : null;
-      noticeStored(snap);
-    } catch (e){ reringIn(RERING_AFTER); return; }
-    const stored = sessionSlots(fresh);
-    const toRing = due.filter(m => {
-      const s = stored.get(m.answers);
-      if (!s) return false;
-      if (unrung(s)) return true;
-      // The store can hold a rungAt this view had not read: the ring another view
-      // made for this slot. That slot is due a second ring only once its own
-      // stamp has failed to arrive, which is ACK_WAIT after that ring, not after
-      // the send this view was timing from.
-      if (silent(s) && ackDue(s.rungAt)) return true;
-      for (const k of ['status', 'why', 'rungAt', 'again']){
-        if (k in s) m[k] = s[k]; else delete m[k];
-      }
-      if (unsaved(m)){ m.status = 'sent'; delete m.why; }
-      lateStored.delete(m.answers);
-      // A ring of someone else's that has not been answered yet still has to be
-      // looked at again, or nothing would ever notice it went unanswered.
-      if (silent(m)) reringIn(dueAt(m) - Date.now());
-      return false;
-    });
-    // Rung only when the store still holds this decision, with a failed ring
-    // recorded for it whose re-ring is not spent, and no pickup for it. A record
-    // another view stored is taken, so this view stops saying it will ring. This
-    // view's own failed record stands in only when the store has none, as when the
-    // save that carried it was refused: no other view can ring a decision the store
-    // holds no record for, so there is no second ring to race.
-    let ringTheDecision = false;
-    // The rungAt of the ring this view found unanswered, if that is why it is
-    // ringing. The write at the end needs it: a stored record with a rungAt is
-    // normally another view's successful ring and is never overwritten, and this
-    // is how the second ring's own record is told from one of those.
-    let ringWas = null;
-    if (decisionDue && stillHeld()){
-      const same = isRow(fresh) && fresh.decision === held.decision && fresh.decidedAt === held.decidedAt;
-      const rec = same && isRow(fresh.decisionRing) && fresh.decisionRing.decidedAt === held.decidedAt
-        ? fresh.decisionRing : null;
-      const mine = decisionRing && decisionRing.decidedAt === held.decidedAt ? decisionRing : null;
-      const known = rec || mine;
-      const collected = isRow(picked) && picked.decision === held.decision && picked.decidedAt === held.decidedAt;
-      // A record with rungAt is rung again only when its stamp never came: the
-      // publish worked and the notice did not, which no retry of the publish
-      // would have caught.
-      if (same && !collected && known && !known.again
-          && (!known.rungAt || ackDue(known.rungAt))){
-        ringTheDecision = true;
-        ringWas = known.rungAt || null;
-      }
-      else if (rec){
-        decisionRing = {...rec};
-        rang = rangFrom(decisionRing);
-        // As for a message above: a ring another view made, still unanswered, is
-        // due a look of its own.
-        const next = decisionDueAt();
-        if (next !== null && next > Date.now()) reringIn(next - Date.now());
-      }
-    }
-    // An outdated view still takes the stored outcome above, which only changes what
-    // it shows, but rings and writes nothing: the view that overtook it holds the
-    // current slots, and rings for them itself.
-    if (outdated || (!toRing.length && !ringTheDecision)){ draw(); if (showingDecided) drawDecided(); return; }
-
-    // What each slot was rung at before this ring, as ringWas is for the decision:
-    // a slot with one is being rung because nothing answered that ring, so this
-    // ring is its second and spends its one `again`.
-    const prevRung = new Map(toRing.map(m => [m.answers, m.rungAt || 0]));
-    if (toRing.length){
-      const rung = await ring({kind: 'message', turns: toRing.map(m => m.answers), again: true}, false);
-      toRing.forEach(m => {
-        lateStored.delete(m.answers);
-        // A reply that landed during the ring has taken over this slot.
-        if (replied.has(m.answers)) return;
-        if (rung === 'rung'){
-          m.status = 'sent'; delete m.why; m.rungAt = Date.now();
-          if (prevRung.get(m.answers)) m.again = Date.now();
-        }
-        else {
-          m.status = 'unsent'; m.why = rung;
-          // A view that cannot ring at all spends nothing: one that can still tries.
-          if (rung !== 'readonly') m.again = Date.now();
-        }
-      });
-    }
-    let decisionOutcome = null;
-    if (ringTheDecision && stillHeld()){
-      const r = await ring({kind: 'decision', decision: held.decision, decidedAt: held.decidedAt, again: true}, false);
-      if (r !== 'readonly' && stillHeld()){
-        decisionRing = decisionOutcome = r === 'rung'
-          ? {decidedAt: held.decidedAt, rungAt: Date.now(), again: Date.now()}
-          : {decidedAt: held.decidedAt, why: r, again: Date.now()};
-        rang = rangFrom(decisionRing);
-      }
-    }
-    draw();
-    if (showingDecided) drawDecided();
-    if (!toRing.length && !decisionOutcome) return;
-
-    try {
-      // set is last-writer-wins with no transactions (db.d.ts), so this write can
-      // land after a save this view made while it was reading, and drop the turn
-      // that save stored: say, a message sent right after load. That save was
-      // taken from this view's threads, which already carry the outcome above.
-      // So when one went out, this view saves its own threads again instead,
-      // after this write if this write is already on its way.
-      const before = records;
-      const snap = await ref.get();
-      noticeStored(snap);
-      const had = snap.exists && snap.data();
-      if (!isRow(had) || outdated) return;
-      // The store hands back frozen objects; each session slot is rebuilt by
-      // leanSlot before it is edited, which also leaves out a pre-0.8.0 content
-      // copy. Everything else, a malformed thread or turn included, is written
-      // back exactly as it was read: this write is the view's own, not the
-      // reviewer's, and must not drop what another view may still read.
-      const doc = {...had, updatedAt: new Date().toISOString(),
-        page: BUILT, writer: viewId, writtenAt: new Date().toISOString(),
-        ...(Array.isArray(had.threads) ? {threads: had.threads.map(t => isRow(t) && Array.isArray(t.turns)
-          ? {...t, turns: t.turns.map(x => isRow(x) && x.via === 'session' ? leanSlot(x) : x)}
-          : t)} : {})};
-      const outcome = new Map(toRing.map(m => [m.answers, m]));
-      let changed = false;
-      for (const x of (Array.isArray(doc.threads) ? doc.threads : [])
-          .flatMap(t => isRow(t) && Array.isArray(t.turns) ? t.turns : [])){
-        const m = isRow(x) && x.via === 'session' && outcome.get(x.answers);
-        if (!m || replied.has(x.answers) || x.status === 'working'
-            || x.status === 'done') continue;
-        // A stored rungAt is another view's successful ring, and this write leaves
-        // it alone -- unless it is the ring this view found unanswered, whose
-        // second ring is what is being written.
-        if (x.rungAt && !(x.rungAt === prevRung.get(x.answers) && !x.again)) continue;
-        x.status = m.status;
-        if (m.rungAt) x.rungAt = m.rungAt;
-        if (m.why) x.why = m.why; else delete x.why;
-        if (m.again) x.again = m.again;
-        changed = true;
-      }
-      if (decisionOutcome && doc.decision === held.decision && doc.decidedAt === held.decidedAt){
-        const r = isRow(doc.decisionRing) && doc.decisionRing.decidedAt === held.decidedAt ? doc.decisionRing : null;
-        const second = r && r.rungAt && !r.again && r.rungAt === ringWas;
-        if (!(r && r.rungAt) || second){ doc.decisionRing = {...decisionOutcome}; changed = true; }
-      }
-      if (!changed || outdated) return;
-      if (records !== before){ await saveNow(); return; }
-      await ref.set(doc);
-      if (records !== before) await saveNow(); else sayKept();
-    } catch (e) {
-      sayRefused(e);
-    }
-  } finally {
-    ids.forEach(id => ringing.delete(id));
-    if (decisionDue) ringing.delete(DECISION);
+    const ref = db.doc(PR());
+    const res = docVersion === null ? await ref.set(body)
+      : await ref.set(body, {ifVersion: docVersion});
+    docVersion = (res && res.version) || null;
+    return true;
+  } catch (e){
+    $('lost').innerHTML = '<div class="lost">That was not saved ('
+      + esc((e && e.code) || 'unknown') + '), so no session will see it. Tell the session '
+      + 'directly, or try again.</div>';
+    return false;
   }
 }
 
-/* ================= a view another view has overtaken ================= */
-// review/pr-N is saved whole, last writer wins, and only browser views of this page
-// write it: the working session writes only under replies/, presence/, context/ and
-// documents/. A second tab or device, or a tab that slept holding what it loaded,
-// saves its own copy over whatever landed since. No per-write merge got this right
-// (#46 tried several, and each opened a new race), so a view that sees the stored
-// document change under it stops saving and asks to be reloaded.
-//
-// Every save carries `writer`, this view's id, and `writtenAt`. A snapshot is
-// definitive when it is neither from cache nor carrying this view's own unconfirmed
-// write (db.d.ts, SnapshotMetadata). A definitive document this view did not write,
-// whose stamp differs from the one restore read, means someone else saved.
-// A document from an older page has no writer, but every version of record() has
-// stamped updatedAt, so that stands in. One with neither was written by no version
-// of this page, and changes to it are not seen.
-//
-// This narrows the race; it does not close it. Until the other view's snapshot
-// arrives, up to about 30 s on the store's fallback refresh, a stale view can still
-// save once. A read before each save was tried in #46: it reordered this view's own
-// saves and lost a message.
-let deskStamp = null;
-const stampOf = doc => !isRow(doc) ? 'absent'
-  : typeof doc.writer === 'string' ? 'writer ' + doc.writer + ' ' + doc.writtenAt
-  : typeof doc.updatedAt === 'string' ? 'updatedAt ' + doc.updatedAt
-  : 'unstamped';
-function noticeStored(snap){
-  if (outdated || restore !== 'done' || !snap) return;
-  const m = snap.metadata || {};
-  if (m.fromCache || m.hasPendingWrites) return;
-  const doc = snap.exists ? snap.data() : null;
-  // Any save of this view's own, confirmed. Its stamp is not compared: an echo of
-  // an earlier save can arrive after a later one has gone out.
-  if (isRow(doc) && doc.writer === viewId) return;
-  if (stampOf(doc) === deskStamp) return;
-  outdated = true;
-  clearTimeout(saving);
-  closing = null;
-  drawStale();
-  draw();
+async function decide(what, why){
+  decision = what;
+  decidedAt = new Date().toISOString();
+  decidedOn = what === 'approved' ? head : null;
+  reason = why || null;
+  asking = null;
+  drawDecision();
+  await store();
+  drawDecision();
 }
-const STALE = 'This desk changed in another tab or device. Reload to see the latest and continue.';
-const staleLine = () => '<div class="lost">' + esc(STALE) + '<button data-reload>Reload</button></div>';
-function drawStale(){
-  $('stalePage').innerHTML = $('staleSlot').innerHTML = outdated ? staleLine() : '';
-}
-document.addEventListener('click', e => {
-  if (e.target.closest && e.target.closest('[data-reload]')) location.reload();
+
+$('decide').addEventListener('click', async e => {
+  const id = e.target && e.target.id;
+  if (id === 'approve'){ asking = 'approve'; drawDecision(); }
+  else if (id === 'changes'){ asking = 'changes'; drawDecision(); }
+  else if (id === 'back'){ asking = null; drawDecision(); }
+  else if (id === 'confirm'){ await decide('approved'); }
+  else if (id === 'recordReason'){
+    const why = ($('why').value || '').trim();
+    if (!why){ $('why').focus(); return; }
+    await decide('needs changes', why);
+  }
+  else if (id === 'again'){ decision = null; decidedAt = null; reason = null; drawDecision(); }
 });
-// Started once a restore has read the document, so the first snapshot is compared
-// with what was read.
-function watchDesk(){
-  if (FEEDS.desk) return;
-  follow('desk', 'changes made to this desk in other tabs or devices', 'page',
-    () => db.doc('review/pr-' + DATA.number), noticeStored);
-}
 
-offerDecision();
-
-// What a reload can give back before the store is read: the box, the carried quote
-// and the page. The thread and a reason being written wait for the stored document
-// (see resumeDrafts).
-{
-  const d = drafts();
-  if (typeof d.box === 'string'){ $('box').value = d.box; fit($('box')); }
-  if (typeof d.quote === 'string') carried = d.quote;
-  if (typeof d.leaf === 'string'){
-    const i = leafNamed(d.leaf);
-    if (i !== null) leaf = i; else wantLeaf = d.leaf;
+$('ask').addEventListener('click', async () => {
+  if (!comments) return;
+  const sel = window.getSelection();
+  const target = sel && !sel.isCollapsed && sel.rangeCount && String(sel).trim()
+    ? {range: sel.getRangeAt(0)} : {element: $('sheet')};
+  try {
+    const r = await comments.openComposer(target);
+    $('askState').textContent = r.opened
+      ? 'Composer open. Type your question, then press Send to Claude in it.'
+      : 'A composer you already have open is being protected — finish or clear it first.';
+  } catch (e){
+    $('askState').textContent = 'The composer could not open ('
+      + ((e && e.code) || 'unknown') + ').';
   }
-}
-function resumeDrafts(){
-  const d = drafts();
-  const i = threads.findIndex(t => t.id === d.thread);
-  if (i >= 0 && i !== live){ live = i; threads[i].unread = false; draw(true); }
-  if (typeof d.why === 'string' && !closedOutcome()) askReason(d.why, false);
+});
+document.addEventListener('selectionchange', () => { if (comments) drawAsk(); });
+
+/* ================= live ================= */
+function listen(){
+  // The request's own description and head commit.
+  follow('body', 'the description', 'page', () => db.doc(PR() + '/context/body'), snap => {
+    const row = snap.exists && snap.data();
+    // An empty or unchanged delivery is still the feed's first delivery: without
+    // this, the first rewrite that arrives is mistaken for the text at load and
+    // taken as read, so nothing is ever shown as changed.
+    if (!isRow(row)){ bodyIn = true; return; }
+    if (isHead(row.head) && row.head !== head){ head = row.head; drawMeta(); drawDecision(); }
+    if (typeof row.text !== 'string' || row.text === bodyText){ bodyIn = true; return; }
+    bodyText = row.text;
+    noticeRevision(0, !bodyIn);
+    bodyIn = true;
+    freshOn[0] = true;
+    if (leaf === 0) paint(); else drawLeaves();
+  });
+
+  // The carried files, as the session rewrites them.
+  follow('documents', 'the documents', 'page', () => db.collection(PR() + '/documents'), snap => {
+    const newest = new Map();
+    snap.docs.forEach(d => {
+      const row = d.data();
+      if (!isDocument(row)) return;
+      const had = newest.get(row.name);
+      if (!had || String(row.at || '') >= String(had.at || '')) newest.set(row.name, row);
+    });
+    const changed = [];
+    newest.forEach(row => {
+      if (typeof row.base === 'string' || row.base === null) asBase.set(row.name, row.base);
+      const at = documents.findIndex(x => x.name === row.name);
+      if (at >= 0 && documents[at].text === row.text) return;
+      if (at >= 0) documents[at] = {name: row.name, text: row.text};
+      else {
+        documents.push({name: row.name, text: row.text});
+        asRead.set(row.name, row.text);
+        keepRead();
+      }
+      changed.push(row.name);
+    });
+    if (!changed.length){ docsIn = true; return; }
+    changed.forEach(name => {
+      const at = documents.findIndex(x => x.name === name);
+      if (at >= 0) noticeRevision(at + 1, !docsIn);
+    });
+    docsIn = true;
+    const back = wantLeaf !== null && leaf === 0 ? leafNamed(wantLeaf) : null;
+    if (back !== null){ wantLeaf = null; leaf = back; delete freshOn[back]; paint(); return; }
+    let onScreen = false;
+    changed.forEach(name => {
+      const at = documents.findIndex(x => x.name === name);
+      if (at < 0) return;
+      freshOn[at + 1] = true;
+      if (at + 1 === leaf) onScreen = true;
+    });
+    if (onScreen) paint(); else drawLeaves();
+  });
+
+  // The decision, so a second device shows what was recorded here.
+  follow('decision', 'the decision', 'page', () => db.doc(PR()), snap => {
+    const row = snap.exists && snap.data();
+    docVersion = snap.version === undefined ? docVersion : snap.version;
+    if (!isRow(row)) return;
+    if (row.decidedAt === decidedAt && row.decision === decision) return;
+    decision = row.decision || null;
+    decidedAt = row.decidedAt || null;
+    decidedOn = row.decidedOn || null;
+    reason = row.reason || null;
+    asking = null;
+    drawDecision();
+  });
+
+  // What the session says about it afterwards.
+  follow('pickup', 'the session’s pickup', 'page', () => db.doc(PR() + '/context/pickup'),
+    snap => { pickup = (snap.exists && snap.data()) || null; drawDecision(); });
+
+  // And the session's own working notes, in the order it wrote them.
+  // Sorted and capped here rather than in the query: the order is the session's
+  // own numbering, which is the document id, and one fewer thing the store has
+  // to support.
+  follow('progress', 'the session at work', 'page',
+    () => db.collection(PR() + '/progress'), snap => {
+      work = snap.docs.map(d => Object.assign({id: d.id}, d.data()))
+        .filter(r => typeof r.text === 'string')
+        .sort((a, b) => String(a.id).localeCompare(String(b.id)))
+        .slice(-300);
+      drawWork();
+    });
 }
 
+let bodyIn = false, docsIn = false;
+
+/* ================= start ================= */
 loadRead();
-paint(); draw();
-atMidnight();
+paint();
+drawDecision();
+drawWork();
 
 (async () => {
-  // Reaching the runtime at all can fail, and an unhandled rejection here used
-  // to kill the rest of this block silently -- leaving a page that looked
-  // fine, answered nothing, and stored nothing.
   try { db = await claude.use('db'); } catch (e) { db = null; }
-  bellOn = !!(await bellReady);
-
-  // Without the doorbell the session is not told straight away, but a saved
-  // message still reaches the next session to start. This lives in its own
-  // slot, not the not-saved banner, which clears on the first successful write.
-  if (!bellOn && db) sayAlone();
-  draw();
-
-  if (!db){ restore = 'nostore'; draw(); sayLost('this view cannot reach the store'); resumeDrafts(); return; }
-  // The replies listener adds slots to the restored threads and starts rering,
-  // so it waits for a successful restore; Try again starts it if the first
-  // attempt failed. The page's other feeds start either way: the description,
-  // the documents, presence and pickup do not depend on the stored threads, and
-  // waiting on a restore that threw left the page without any of them. They
-  // start before the replies listener, so a throw there cannot strand them: Try
-  // again only runs when the restore itself failed.
-  let restored = false;
-  try { restored = await restoreStored(); } catch (e){ restoreFailed(e); }
-  // After the stored threads, so the thread a reload came back to can be found, and
-  // after a restored decision has drawn, which a reason being written replaces.
-  resumeDrafts();
-  followPage();
-  // Before the replies listener, whose first delivery starts rering.
-  if (restored){ watchDesk(); listenReplies(); }
-})().catch(e => {
-  // Anything else that throws while the view starts. Left unhandled, it stopped
-  // the rest of startup silently, with restore still 'pending' and every control
-  // off. A view with a store gets the not-loaded banner and Try again, which
-  // reads again and starts whatever did not start.
-  if (!db){ restore = 'nostore'; sayLost('this view cannot reach the store'); try { draw(); } catch (x) {} return; }
-  if (blocked()){ restoreFailed(e); return; }
-  sayLost('this view did not finish starting (' + ((e && (e.code || e.message)) || e) + ')');
-});
-
-// Started once, by startup or by Try again.
-function followPage(){
-  if (FEEDS.body) return;
-
-  // Whether each feed has delivered once: see noticeRevision.
-  let bodyIn = false, docsIn = false;
-
-  // The description, rewritten by the working session when the pull request
-  // changes under review.
-  follow('body', 'changes to the description', 'page',
-    () => db.doc('review/pr-' + DATA.number + '/context/body'), snap => {
-      const row = snap.exists && snap.data();
-      // An empty delivery is still the feed's first delivery: a desk whose store
-      // holds no description yet must not take the first one written later as the
-      // text this tab had read.
-      if (!row){ bodyIn = true; return; }
-      // The session writes the head with the text of a pushed revision. It is
-      // taken even when the text is unchanged: a push the description did not
-      // need to mention still moves what an approval would merge.
-      if (isHead(row.head) && row.head !== head){
-        head = row.head;
-        drawMeta();
-        if (showingDecided) drawDecided();
-        drawApproveAsk();
-      }
-      if (typeof row.text !== 'string' || row.text === bodyText){ bodyIn = true; return; }
-      bodyText = row.text;
-      noticeRevision(0, !bodyIn);
-      bodyIn = true;
-      freshOn[0] = true;
-      if (leaf === 0){ unlight(); paint(); } else drawLeaves();
-    });
-
-  // The session's presence stamps, one per ring it handled. Every snapshot up to and
-  // including the first server-definitive one is history, timed from the stamps'
-  // names; a stamp that arrives after that is an answer happening now, timed by this
-  // clock. A fromCache first page (db.d.ts) holds none of the stored stamps, and
-  // taking it as the whole of history made a stamp from hours ago say "last
-  // answered" at the moment the page loaded.
-  // A name that is not an epoch second, or is one a Date cannot hold, times
-  // nothing. lastHeard only grows, so one bad name used to stay for the life of
-  // the page and throw in every draw(). A stamp more than a day ahead of this
-  // clock is ignored too, or "last answered" would stay stuck on it; that costs
-  // only a reviewer whose clock is a day behind, who then sees live stamps only.
-  const stampTime = id => {
-    const t = parseInt(String(id), 10) * 1000;
-    return Number.isFinite(t) && t > 0 && t < Date.now() + 86400000 ? t : 0;
-  };
-  follow('presence', 'word from the working session', 'panel',
-    () => db.collection('review/pr-' + DATA.number + '/presence'), snap => {
-      const history = !presenceIn;
-      if (!(snap.metadata && snap.metadata.fromCache)) presenceIn = true;
-      // Until this collection has loaded, no ring can be called unanswered, so
-      // none was timed for a second try. Now one can be: look again.
-      if (history && presenceIn && bellOn && restore === 'done' && reringStarted) reringIn(0);
-      let newest = 0;
-      snap.docs.forEach(d => {
-        const row = d.data() || {};
-        const t = stampTime(d.id);
-        if (t && t >= newest){
-          newest = t;
-          if (typeof row.resume === 'string') lastResume = row.resume;
-        }
-        if (!stampsSeen.has(d.id)){
-          stampsSeen.add(d.id);
-          if (!history) answeredAt = Date.now();
-        }
-      });
-      lastHeard = Math.max(lastHeard, newest);
-      drawPresence();
-      // A stamp can turn a waiting "Saved and rung" into "Sent". Only then is the
-      // stream redrawn, since a redraw replaces its nodes and any selection in them.
-      if (threads[live].turns.some(m => m.via === 'session' && m.status === 'sent'
-                                     && !replied.has(m.answers)))
-        drawStream();
-    });
-
-  // The session's acknowledgement, written when it answers the doorbell or
-  // finds this desk in its session-start sweep.
-  follow('pickup', 'the working session’s pickup of your decision', 'page',
-    () => db.doc('review/pr-' + DATA.number + '/context/pickup'), snap => {
-      pickup = (snap.exists && snap.data()) || null;
-      // The pickup is the session's word too, and its outcome later.
-      if (pickup){
-        wroteAt(pickup.at, !pickupIn);
-        if (isRow(pickup.outcome)) wroteAt(pickup.outcome.at, !pickupIn);
-      }
-      pickupIn = true;
-      drawOutcome();
-      if (closedOutcome() || showingDecided || showingRevised) drawDecided();
-    });
-
-  // The document, live. Revised from the working session with write_db, this
-  // page shows the new text without anyone reloading -- which is the point:
-  // you say what is wrong, it changes under you, and you confirm.
-  //
-  // Each snapshot is the whole collection, in document-id order. Two rows can
-  // name one file (an earlier session wrote it under another id), and applying
-  // every row let whichever id sorts last win, and flagged the tab fresh on
-  // every snapshot because the two texts always differ. So one row per name is
-  // chosen first: the newest `at`, with a row that has none older than any that
-  // does, and a tie going to the later id as before.
-  const writtenAt = row => {
-    const t = typeof row.at === 'string' ? Date.parse(row.at) : NaN;
-    return isNaN(t) ? -Infinity : t;
-  };
-  follow('documents', 'changes to the documents', 'page',
-    () => db.collection('review/pr-' + DATA.number + '/documents'), snap => {
-        let touched = false; const changed = [];
-        const newest = new Map();
-        snap.docs.forEach(d => {
-          const row = d.data(); if (!isDocument(row)) return;
-          const had = newest.get(row.name);
-          if (!had || writtenAt(row) >= writtenAt(had)) newest.set(row.name, row);
-        });
-        newest.forEach(row => {
-          // The base-branch text travels with each rewrite, so the request's
-          // own diff survives the session changing a file under the reviewer.
-          // A row that carries none leaves whatever the payload carried.
-          if (typeof row.base === 'string' || row.base === null) asBase.set(row.name, row.base);
-          const at = documents.findIndex(x => x.name === row.name);
-          if (at >= 0 && documents[at].text === row.text) return;
-          if (at >= 0) documents[at] = {name: row.name, text: row.text};
-          else {
-            // A file this desk did not carry. There is nothing to have read, so
-            // the text it arrives with is its baseline and no change is claimed.
-            documents.push({name: row.name, text: row.text});
-            asRead.set(row.name, row.text);
-            keepRead();
-          }
-          changed.push(row.name); touched = true;
-        });
-        if (!touched){ docsIn = true; return; }
-        // Before the reload path below, which paints and returns: a revision has
-        // to be noticed whichever way the page is drawn next.
-        changed.forEach(name => {
-          const at = documents.findIndex(x => x.name === name);
-          if (at >= 0) noticeRevision(at + 1, !docsIn);
-        });
-        docsIn = true;
-        // The page a reload came back to, once the store has delivered it.
-        const back = wantLeaf !== null && leaf === 0 ? leafNamed(wantLeaf) : null;
-        if (back !== null){
-          wantLeaf = null; leaf = back; delete freshOn[back];
-          unlight(); paint(); return;
-        }
-        let onScreen = false;
-        changed.forEach(name => {
-          const at = documents.findIndex(x => x.name === name);
-          if (at < 0) return;
-          freshOn[at + 1] = true;                  // +1: page 0 is the request
-          if (at + 1 === leaf) onScreen = true;
-        });
-        if (!onScreen){ drawLeaves(); return; }
-        unlight();          // the range points into nodes about to be replaced
-        paint();
-      });
-}
+  try { comments = await claude.use('comments'); } catch (e) { comments = null; }
+  if (db){ listen(); restore = 'done'; }
+  else {
+    restore = 'nostore';
+    $('lost').innerHTML = '<div class="lost">This view cannot reach the store, so a '
+      + 'decision made here would not reach the session.</div>';
+  }
+  await refreshAsk();
+})().catch(() => {});
 </script>

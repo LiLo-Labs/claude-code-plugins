@@ -1,6 +1,7 @@
-// Reading the panel and the page while answers arrive: the badge says an answer
-// came, the stream keeps the reviewer's place, and the page keeps track of which
-// section they are reading.
+// What the reviewer reads: the tabs, the marks on them, and the one renderer
+// every document goes through. The chat these once shared a page with is gone;
+// what is left is the reading surface, which is the half of the desk that was
+// never in question.
 import {test, before, after, afterEach} from 'node:test';
 import assert from 'node:assert/strict';
 import {launch, open, payload} from './harness.mjs';
@@ -28,114 +29,22 @@ const oneWaiting = () => ({[PR]: {pr: 42, title: 'Harness desk', decision: null,
     {id: 'u1', role: 'user', content: 'Is the lease needed?', to: 'session'},
     {role: 'assistant', via: 'session', answers: 'u1', status: 'sent', sentAt: 1000, rungAt: 1400}]}]}});
 
-test('with one thread and the panel closed, a reply lights the badge', async () => {
-  desk = await open(browser, {seed: oneWaiting()});
-  await desk.page.waitForFunction(p => window.__desk.log().some(e => e.op === 'subscribe' && e.path === p),
-    REPLIES);
-  await desk.page.waitForTimeout(300);                // the first, historical, delivery
-  assert.equal(await desk.page.locator('#dot.show').count(), 0);
 
-  await desk.reply('u1', 'Yes: two views ring otherwise.');
-  await desk.page.waitForSelector('#dot.show', {timeout: 3000});
-  assert.equal(await desk.page.textContent('#dot'), '1');
-
-  // Opening the panel reads it.
-  await desk.page.click('#fab');
-  await desk.page.waitForSelector('.said.rich >> text=two views ring');
-  await desk.page.click('#shut');
-  assert.equal(await desk.page.locator('#dot.show').count(), 0);
-  assert.deepEqual(desk.errors, []);
-});
-
-test('a reply with the panel open on that thread lights nothing', async () => {
-  desk = await open(browser, {seed: oneWaiting()});
-  await desk.page.click('#fab');
-  await desk.page.waitForSelector('text=Is the lease needed?');
-  await desk.reply('u1', 'Answered while you watched.');
-  await desk.page.waitForSelector('text=Answered while you watched.');
-  await desk.page.click('#shut');
-  assert.equal(await desk.page.locator('#dot.show').count(), 0);
-  assert.deepEqual(desk.errors, []);
-});
-
-/* ---------------- the stream keeps its place ---------------- */
-
-const LONG = Array.from({length: 60}, (_, i) => 'Paragraph ' + (i + 1) + ' of the long answer.').join('\n\n');
-const twoInOne = () => ({[PR]: {pr: 42, title: 'Harness desk', decision: null, reason: null,
-  decidedAt: null, threads: [{id: 't1', name: 'Long', turns: [
-    {id: 'u1', role: 'user', content: 'Explain the lease.', to: 'session'},
-    {role: 'assistant', via: 'session', answers: 'u1', status: 'done', sentAt: 1000, rungAt: 1400},
-    {id: 'u2', role: 'user', content: 'And the retry?', to: 'session'},
-    {role: 'assistant', via: 'session', answers: 'u2', status: 'working', sentAt: 2000, rungAt: 2400}]}]},
-  [REPLIES + '/u1']: {turn: 'u1', status: 'done', text: LONG, at: AT},
-  [REPLIES + '/u2']: {turn: 'u2', status: 'working', text: 'Step 1', at: AT}});
-
-const scroll = to => desk.page.$eval('#stream', (el, to) => {
-  el.scrollTop = to === 'end' ? el.scrollHeight : to;
-  return el.scrollTop;
-}, to);
-const scrollTop = () => desk.page.$eval('#stream', el => el.scrollTop);
-const gap = () => desk.page.$eval('#stream', el => el.scrollHeight - el.scrollTop - el.clientHeight);
-
-test('a reply rewrite leaves a reader scrolled up where they were, and keeps one at the end there', async () => {
-  desk = await open(browser, {seed: twoInOne()});
-  await desk.page.click('#fab');
-  await desk.page.waitForSelector('text=Step 1');
-  assert.ok(await gap() < 2, 'opening the panel starts at the end');
-
-  assert.equal(await scroll(0), 0);
-  await desk.reply('u2', 'Step 2', 'working');
-  await desk.page.waitForSelector('text=Step 2');
-  assert.equal(await scrollTop(), 0);
-
-  // Part way up, too: not only the top, which a clamp would also leave alone.
-  const mid = await scroll(300);
-  assert.ok(mid > 0, 'the stream is long enough to scroll');
-  await desk.reply('u2', 'Step 3', 'working');
-  await desk.page.waitForSelector('text=Step 3');
-  assert.equal(await scrollTop(), mid);
-
-  await scroll('end');
-  await desk.reply('u2', 'Done.\n\n' + LONG.replace(/long answer/g, 'retry answer'));
-  await desk.page.waitForSelector('text=Paragraph 60 of the retry answer.');
-  assert.ok(await gap() < 2, 'a reader at the end follows the new text');
-  assert.deepEqual(desk.errors, []);
-});
-
-test('a reply for another thread leaves the open thread\'s stream nodes in place', async () => {
-  const seed = twoInOne();
-  const turns = seed[PR].threads[0].turns;
-  seed[PR].threads = [{id: 't1', name: 'First', turns: turns.slice(0, 2)},
-                      {id: 't2', name: 'Second', turns: turns.slice(2)}];
-  desk = await open(browser, {seed});
-  await desk.page.click('#fab');
-  await desk.page.waitForSelector('text=Paragraph 60 of the long answer.');
-  await desk.page.waitForTimeout(300);
-  await desk.page.evaluate(() => {
-    window.__held = document.querySelector('#stream .turn.theirs');
-    window.__tabsRedrawn = new Promise(done => new MutationObserver((_, o) => { o.disconnect(); done(); })
-      .observe(document.getElementById('tabs'), {childList: true}));
+const describe = async (body, options = {}) => {
+  desk = await open(browser, {data: payload({body}), ...options});
+  await desk.page.waitForSelector('#sheet > *');
+};
+// A compact outline of an element's children: tag, attributes that matter here,
+// and text for leaves, so a test states the whole shape it expects.
+const shape = sel => desk.page.$eval(sel, root => {
+  const walk = el => [...el.childNodes].map(n => {
+    if (n.nodeType === 3) return n.textContent;
+    const tag = n.tagName.toLowerCase() + (n.getAttribute('start') ? '[start=' + n.getAttribute('start') + ']' : '')
+      + (n.className ? '.' + n.className : '');
+    return n.children.length || n.tagName === 'CODE' ? {[tag]: walk(n)} : {[tag]: n.textContent};
   });
-
-  await desk.reply('u2', 'The retry is bounded.');
-  await desk.page.evaluate(() => window.__tabsRedrawn);
-  await desk.page.waitForTimeout(100);
-  assert.equal(await desk.page.evaluate(() =>
-    window.__held.isConnected && document.querySelector('#stream .turn.theirs') === window.__held), true,
-    'the open thread\'s stream was rebuilt for a reply to another thread');
-
-  // Nothing is stale: the other thread shows the new answer when opened.
-  await desk.page.click('.tab[data-go="1"]');
-  await desk.page.waitForSelector('.said.rich >> text=The retry is bounded.');
-  // And a later one, while the panel is shut on the first thread, lights the badge.
-  await desk.page.click('.tab[data-go="0"]');
-  await desk.page.click('#shut');
-  await desk.reply('u2', 'The retry is bounded, twice.');
-  await desk.page.waitForSelector('#dot.show', {timeout: 3000});
-  assert.deepEqual(desk.errors, []);
+  return walk(root);
 });
-
-/* ---------------- a page that changed ---------------- */
 
 test('a change to a page the reviewer is not reading leaves the sheet alone, and its mark stays until that page is opened', async () => {
   desk = await open(browser, {data: payload({documents: [{name: 'docs/a.md', text: '# A\n\nAlpha'}]})});
@@ -169,6 +78,7 @@ test('a change to a page the reviewer is not reading leaves the sheet alone, and
   assert.deepEqual(desk.errors, []);
 });
 
+
 test('on a desk with no documents, a description rewrite leaves no changed dot that survives clicking the only tab', async () => {
   desk = await open(browser);
   await desk.page.waitForSelector('#sheet h2');
@@ -183,125 +93,6 @@ test('on a desk with no documents, a description rewrite leaves no changed dot t
 
 /* ---------------- day wording across midnight ---------------- */
 
-test('a stamp from 23:50 reads at 23:50, and once the clock passes midnight with nothing else happening, reads yesterday', async () => {
-  const now = Date.UTC(2026, 8, 13, 23, 55);
-  desk = await open(browser, {context: {locale: 'en-GB', timezoneId: 'UTC'}, clock: {time: now},
-    seed: {[PR + '/presence/' + Math.floor((now - 5 * 60000) / 1000)]: {}}});
-  const line = () => desk.page.textContent('#presence > span');
-  await desk.page.waitForSelector('#presence >> text=Working session last answered', {state: 'attached'});
-  assert.equal(await line(), 'Working session last answered at 23:50.');
-
-  await desk.page.clock.fastForward(6 * 60000);
-  await desk.page.waitForFunction(() => /yesterday at 23:50/.test(document.querySelector('#presence > span').textContent),
-    null, {timeout: 3000});
-  assert.equal(await line(), 'Working session last answered yesterday at 23:50.');
-  assert.deepEqual(desk.errors, []);
-});
-
-/* ---------------- where the reviewer is reading ---------------- */
-
-// Counts, from inside the page, the IntersectionObservers made and not yet
-// disconnected, and the scroll handlers on window not yet removed.
-function countWatchers(){
-  const IO = window.IntersectionObserver;
-  window.__watch = {made: 0, live: 0, scroll: new Set()};
-  window.IntersectionObserver = class extends IO {
-    constructor(...a){ super(...a); window.__watch.made++; window.__watch.live++; this.__on = true; }
-    disconnect(){ if (this.__on){ this.__on = false; window.__watch.live--; } return super.disconnect(); }
-  };
-  const add = window.addEventListener, remove = window.removeEventListener;
-  window.addEventListener = function(type, fn, o){
-    // A {once: true} handler removes itself; those are the test's own.
-    if (type === 'scroll' && !(o && o.once)) window.__watch.scroll.add(fn);
-    return add.call(this, type, fn, o);
-  };
-  window.removeEventListener = function(type, fn, o){
-    if (type === 'scroll') window.__watch.scroll.delete(fn);
-    return remove.call(this, type, fn, o);
-  };
-}
-
-const sections = (label, n) => Array.from({length: n}, (_, i) => '## ' + label + ' ' + (i + 1) + '\n\n'
-  + Array.from({length: 6}, () => 'A sentence long enough to take up a line of the sheet. ').join('')
-  + '\n').join('\n');
-
-test('after many repaints the message says the section of the page on screen, and one observer is live', async () => {
-  const data = payload({body: sections('Section', 10),
-    documents: [{name: 'docs/notes.md', text: '# Notes\n\n' + sections('Part', 8)},
-                {name: 'tools/a.py', text: Array.from({length: 150}, (_, i) => 'x_' + i + ' = ' + i).join('\n')}]});
-  desk = await open(browser, {data, init: countWatchers});
-  await desk.page.waitForSelector('#sheet h2');
-  const PAGE = '#sheet';
-
-  // Ten rewrites of the description on screen, each a repaint.
-  for (let i = 1; i <= 10; i++){
-    await desk.context('body', {text: sections('Section', 10) + '\nRevision ' + i + '\n'});
-    await desk.page.waitForFunction(([sel, i]) =>
-      document.querySelector(sel).textContent.includes('Revision ' + i), [PAGE, i]);
-  }
-  await desk.page.waitForTimeout(300);
-  const made = await desk.page.evaluate(() => window.__watch.made);
-  assert.ok(made >= 10, 'the wrapped constructor saw the page\'s repaints (' + made + ')');
-
-  const scrollTo = y => desk.page.evaluate(y => new Promise(done => {
-    addEventListener('scroll', () => requestAnimationFrame(() => done()), {once: true});
-    window.scrollTo({top: y, behavior: 'instant'});
-  }), y);
-  const headingY = text => desk.page.evaluate(text => {
-    const h = [...document.querySelectorAll('#sheet h1, #sheet h2')].find(x => x.textContent.trim() === text);
-    return h.getBoundingClientRect().top + scrollY;
-  }, text);
-  const sendAndRead = async question => {
-    await desk.page.fill('#box', question);
-    await desk.page.press('#box', 'Enter');
-    const store = await desk.until(s => ((s[PR] && s[PR].threads) || [])
-      .some(t => t.turns.some(m => m.content === question)));
-    return store[PR].threads.flatMap(t => t.turns).find(m => m.content === question).reading;
-  };
-
-  await scrollTo(await headingY('Section 6') - 60);
-  assert.equal(await desk.page.textContent('#where'), '¶ Section 6');
-
-  // A source file has no headings; scrolling it must not bring back the description's.
-  await desk.page.click('.leaf:nth-child(3)');
-  await desk.page.waitForTimeout(800);                  // the switch's smooth scroll to the top
-  await scrollTo(400);
-  await desk.page.click('#fab');
-  assert.equal(await sendAndRead('Asked from the source file'), 'tools/a.py');
-
-  await desk.page.click('#shut');
-  await desk.page.click('.leaf:nth-child(2)');
-  await desk.page.waitForTimeout(800);
-  await scrollTo(await headingY('Part 3') - 60);
-  await desk.page.click('#fab');
-  assert.equal(await sendAndRead('Asked from the notes'), 'docs/notes.md — Part 3');
-
-  const watch = await desk.page.evaluate(() => ({live: window.__watch.live, scroll: window.__watch.scroll.size}));
-  assert.ok(watch.live <= 1, 'live IntersectionObservers: ' + watch.live);
-  assert.ok(watch.scroll <= 1, 'window scroll handlers: ' + watch.scroll);
-  assert.deepEqual(desk.errors, []);
-});
-
-/* ---------------- how markdown renders ---------------- */
-
-// The description and the session's replies go through the one renderer, so
-// these read the rendered DOM rather than the markup string: what the reviewer
-// sees is the shape the browser built.
-const describe = async (body, options = {}) => {
-  desk = await open(browser, {data: payload({body}), ...options});
-  await desk.page.waitForSelector('#sheet > *');
-};
-// A compact outline of an element's children: tag, attributes that matter here,
-// and text for leaves, so a test states the whole shape it expects.
-const shape = sel => desk.page.$eval(sel, root => {
-  const walk = el => [...el.childNodes].map(n => {
-    if (n.nodeType === 3) return n.textContent;
-    const tag = n.tagName.toLowerCase() + (n.getAttribute('start') ? '[start=' + n.getAttribute('start') + ']' : '')
-      + (n.className ? '.' + n.className : '');
-    return n.children.length || n.tagName === 'CODE' ? {[tag]: walk(n)} : {[tag]: n.textContent};
-  });
-  return walk(root);
-});
 
 test('a loose numbered list, blank lines between its steps, is one list counting 1, 2, 3', async () => {
   await describe('1. Run the tests\n\n2. Open the desk\n\n3. Approve');
@@ -316,6 +107,7 @@ test('a loose numbered list, blank lines between its steps, is one list counting
     {li: [{p: 'Build it'}, {p: 'The build takes a minute.'}]}, {li: 'Ship it'}]}]);
   assert.deepEqual(desk.errors, []);
 });
+
 
 test('a fenced block inside a list item is a code block in that item, newlines and all', async () => {
   await describe('Test plan:\n\n'
@@ -345,6 +137,7 @@ test('a fenced block inside a list item is a code block in that item, newlines a
   assert.deepEqual(desk.errors, []);
 });
 
+
 test('tight lists, nested bullets, wrapped items and a list followed by a paragraph keep their shape', async () => {
   await describe([
     '- one', '- two', '- three', '',
@@ -367,6 +160,7 @@ test('tight lists, nested bullets, wrapped items and a list followed by a paragr
   ]);
   assert.deepEqual(desk.errors, []);
 });
+
 
 test('inside list items, markup is escaped, links open away, and a mermaid fence stays a diagram source', async () => {
   await describe('- <img src=x onerror="window.__ran=1"> and **bold**\n'
@@ -417,6 +211,7 @@ const neutralised = async sel => {
   assert.equal(await desk.page.evaluate(() => window.__ran), undefined);
 };
 
+
 test('a description\'s javascript:, data: and vbscript: links render as text, not links', async () => {
   await describe(unsafeText + '\n\nAnd [inline](javascript:window.__ran=1) in a paragraph.');
   await neutralised('#sheet');
@@ -424,6 +219,7 @@ test('a description\'s javascript:, data: and vbscript: links render as text, no
     'the reviewer does not see where the link pointed');
   assert.deepEqual(desk.errors, []);
 });
+
 
 test('http, https, mailto, fragment and relative links keep their exact hrefs and open away', async () => {
   await describe([
@@ -445,18 +241,6 @@ test('http, https, mailto, fragment and relative links keep their exact hrefs an
   assert.deepEqual(desk.errors, []);
 });
 
-test('the same unsafe links in a session reply and in a carried markdown file are text too', async () => {
-  desk = await open(browser, {seed: answered('Look:\n\n' + unsafeText),
-    data: payload({documents: [{name: 'docs/notes.md', text: '# Notes\n\n' + unsafeText}]})});
-  await desk.page.click('.leaf:nth-child(2)');
-  await desk.page.waitForSelector('#sheet h1');
-  await neutralised('#sheet');
-
-  await desk.page.click('#fab');
-  await desk.page.waitForSelector('.said.rich li');
-  await neutralised('.said.rich');
-  assert.deepEqual(desk.errors, []);
-});
 
 test('safeHref, called directly, allows only http, https, mailto and scheme-less targets', async () => {
   desk = await open(browser);
@@ -494,6 +278,7 @@ test('safeHref, called directly, allows only http, https, mailto and scheme-less
   assert.equal(got.find(g => g.attr === 'javascript&colon;alert(1)').protocol, 'javascript:');
 });
 
+
 test('no rewrite after the link check changes an href: comments, bold markers and code spans', async () => {
   desk = await open(browser);
   const got = await desk.page.evaluate(srcs => srcs.map(src => {
@@ -523,133 +308,3 @@ const answered = (text, quote) => ({[PR]: {pr: 42, title: 'Harness desk', decisi
     {role: 'assistant', via: 'session', answers: 'u1', status: 'done', sentAt: 1000, rungAt: 1400}]}]},
   [REPLIES + '/u1']: {turn: 'u1', status: 'done', text, at: AT}});
 
-test('headings and quotes in a session reply are sized to the chat bubble', async () => {
-  desk = await open(browser, {seed: answered('# Summary\n\n## Details\n\n### Verified\n\n'
-    + 'See the run.\n\n> The lease is held for thirty seconds.\n\n1. First\n\n2. Second')});
-  await desk.page.click('#fab');
-  await desk.page.waitForSelector('.said.rich h2');
-  const got = await desk.page.evaluate(() => {
-    const px = (sel, prop) => parseFloat(getComputedStyle(document.querySelector('.said.rich ' + sel))[prop]);
-    return {h1: px('h1', 'fontSize'), h2: px('h2', 'fontSize'), h3: px('h3', 'fontSize'), p: px('p', 'fontSize'),
-      h1Top: px('h1', 'marginTop'), quoteLeft: px('blockquote', 'marginLeft'),
-      quoteRight: px('blockquote', 'marginRight'), items: document.querySelectorAll('.said.rich ol > li').length,
-      lists: document.querySelectorAll('.said.rich ol').length};
-  });
-  for (const h of ['h1', 'h2', 'h3']) assert.ok(got[h] <= 16, `${h} is ${got[h]}px`);
-  assert.equal(got.h1Top, 0, 'the first heading adds space above the bubble\'s own padding');
-  assert.ok(got.quoteLeft <= 12, `blockquote left margin is ${got.quoteLeft}px`);
-  assert.ok(got.quoteRight <= 12, `blockquote right margin is ${got.quoteRight}px`);
-  assert.deepEqual([got.lists, got.items], [1, 2], 'a loose list in a reply is one list');
-  assert.deepEqual(desk.errors, []);
-});
-
-// An identifier with nothing a line may break at: no spaces, slashes or hyphens.
-const TOKEN = Array.from({length: 14}, (_, i) => 'segment_' + String(i).padStart(2, '0')).join('_').slice(0, 140);
-
-test('a long unbroken token wraps in the quote, the reply and the description, at phone width', async () => {
-  assert.equal(TOKEN.length, 140);
-  assert.ok(!/[\s/-]/.test(TOKEN));
-  const narrow = {viewport: {width: 400, height: 800}};
-  desk = await open(browser, {context: narrow, seed: answered('It is `' + TOKEN + '`, set in ' + TOKEN + '.', TOKEN),
-    data: payload({body: '## What it does\n\nRenames `' + TOKEN + '` in one place.\n\n- also ' + TOKEN + '\n'})});
-  await desk.page.waitForSelector('#sheet code');
-
-  // The page: the description's inline code wraps instead of widening it.
-  const pageFits = await desk.page.evaluate(() => ({doc: document.documentElement.scrollWidth, view: innerWidth,
-    code: document.querySelector('#sheet p code').getBoundingClientRect(),
-    sheet: document.getElementById('sheet').getBoundingClientRect()}));
-  assert.ok(pageFits.doc <= pageFits.view, `the page is ${pageFits.doc}px wide in a ${pageFits.view}px viewport`);
-  // Wrapped, not clipped: the code sits inside the sheet and runs over more than one line.
-  assert.ok(pageFits.code.right <= pageFits.sheet.right + 0.5, 'the inline code runs past the sheet');
-  assert.ok(pageFits.code.height > 30, `the inline code is one ${pageFits.code.height}px line`);
-
-  await desk.page.click('#fab');
-  await desk.page.waitForSelector('.said.rich code');
-  const panel = await desk.page.evaluate(() => {
-    const box = el => ({scroll: el.scrollWidth, client: el.clientWidth});
-    return {stream: box(document.getElementById('stream')), quoted: box(document.querySelector('.quoted')),
-      said: box(document.querySelector('.said.rich')), doc: document.documentElement.scrollWidth, view: innerWidth};
-  });
-  assert.ok(panel.stream.scroll <= panel.stream.client, `#stream scrolls sideways: ${JSON.stringify(panel.stream)}`);
-  assert.ok(panel.quoted.scroll <= panel.quoted.client, `the quote overflows its box: ${JSON.stringify(panel.quoted)}`);
-  assert.ok(panel.said.scroll <= panel.said.client, `the reply overflows its bubble: ${JSON.stringify(panel.said)}`);
-  assert.ok(panel.doc <= panel.view, `the page is ${panel.doc}px wide with the panel open`);
-  assert.ok((await desk.page.textContent('.quoted')).includes(TOKEN), 'the quote lost part of the token');
-  assert.deepEqual(desk.errors, []);
-});
-
-/* ---------------- contrast ---------------- */
-
-// WCAG 2 contrast of each element's computed text colour on its computed
-// background, both opaque in these rules.
-const contrasts = selectors => desk.page.evaluate(selectors => {
-  const lum = css => {
-    const [r, g, b] = css.match(/[\d.]+/g).slice(0, 3).map(v => {
-      const c = +v / 255;
-      return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
-    });
-    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
-  };
-  return Object.fromEntries(selectors.map(sel => {
-    const st = getComputedStyle(document.querySelector(sel));
-    const [hi, lo] = [lum(st.color), lum(st.backgroundColor)].sort((a, b) => b - a);
-    return [sel, Math.round((hi + 0.05) / (lo + 0.05) * 100) / 100];
-  }));
-}, selectors);
-
-for (const scheme of ['dark', 'light']){
-  test(`${scheme} mode: Approve, Send, the active tab and the reviewer's own message clear 4.5:1`, async () => {
-    desk = await open(browser, {context: {colorScheme: scheme}});
-    assert.equal(await desk.page.evaluate(() => matchMedia('(prefers-color-scheme: dark)').matches),
-      scheme === 'dark', 'the context does not emulate the colour scheme, so this test would prove nothing');
-    await desk.page.click('#fab');
-    await desk.page.fill('#box', 'Mine, in my own bubble');
-    await desk.page.press('#box', 'Enter');
-    await desk.page.waitForSelector('.turn.mine .said');
-    const got = await contrasts(['#ok', '#send', '.tab.on', '.turn.mine .said']);
-    for (const [sel, ratio] of Object.entries(got)) assert.ok(ratio >= 4.5, `${sel} is ${ratio}:1`);
-    assert.deepEqual(desk.errors, []);
-  });
-}
-
-// The same measure for text drawn in --faint, which has no background of its own:
-// the colour it sits on is the nearest ancestor's that paints one.
-const faintContrasts = selectors => desk.page.evaluate(selectors => {
-  const rgb = css => css.match(/[\d.]+/g).map(Number);
-  const lum = css => {
-    const [r, g, b] = rgb(css).slice(0, 3).map(v => {
-      const c = v / 255;
-      return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
-    });
-    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
-  };
-  const ground = el => {
-    for (let n = el; n; n = n.parentElement){
-      const bg = getComputedStyle(n).backgroundColor, a = rgb(bg);
-      if (a.length < 4 || a[3] > 0) return bg;
-    }
-    return 'rgb(255, 255, 255)';
-  };
-  return Object.fromEntries(selectors.map(sel => {
-    const el = document.querySelector(sel);
-    if (!el) return [sel, 'missing'];
-    const [hi, lo] = [lum(getComputedStyle(el).color), lum(ground(el))].sort((a, b) => b - a);
-    return [sel, Math.round((hi + 0.05) / (lo + 0.05) * 100) / 100];
-  }));
-}, selectors);
-
-for (const scheme of ['dark', 'light']){
-  test(`${scheme} mode: unopened document tabs, the hint, footer, meta line, speaker labels and section name clear 4.5:1`, async () => {
-    desk = await open(browser, {context: {colorScheme: scheme},
-      data: payload({documents: [{name: 'docs/a.md', text: '# A\n\nAlpha'}]})});
-    await desk.page.click('#fab');
-    await desk.page.waitForSelector('#stream .hint >> text=Ask the working session anything');
-    const got = await faintContrasts(['.leaf:not(.on)', '.hint', 'footer', '.meta', '.ptop .where']);
-    await desk.page.fill('#box', 'A turn, so a speaker label shows');
-    await desk.page.press('#box', 'Enter');
-    await desk.page.waitForSelector('.turn.mine .who');
-    Object.assign(got, await faintContrasts(['.who']));
-    for (const [sel, ratio] of Object.entries(got)) assert.ok(ratio >= 4.5, `${sel} is ${ratio}:1`);
-    assert.deepEqual(desk.errors, []);
-  });
-}

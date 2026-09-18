@@ -68,9 +68,11 @@ export function built(data, title = 'Harness Desk'){
 export const build = (data, title) => built(data, title).html;
 
 // Approve is two presses: #ok opens the confirm step, and Confirm records.
+// Approve, through the confirm step: the page stores the decision with the
+// commit it was showing, and the session merges only that commit.
 export async function approve(desk){
-  await desk.page.click('#ok');
-  await desk.page.click('#approveConfirm');
+  await desk.page.click('#approve');
+  await desk.page.click('#confirm');
 }
 
 const LEVELS = ['view', 'interact', 'admin', 'owner'];
@@ -82,6 +84,7 @@ const PUBLISH_CODES = ['conflict', 'not_writer', 'not_declared', 'too_large', 'i
 // Runs in every frame before any of its scripts. Serialised by Playwright, so it
 // may use only its argument.
 function installStub({seed, capabilities, publishError, getDelay, getFailures, leases: held,
+  listening = 'available', composerOpens = true,
     subscribeFailures, setFailures, setDelay, rules, level, levels, cacheFirst, firstFromCache}){
   const frozen = v => {
     if (v && typeof v === 'object'){ Object.values(v).forEach(frozen); Object.freeze(v); }
@@ -355,8 +358,29 @@ function installStub({seed, capabilities, publishError, getDelay, getFailures, l
       }
     },
   };
+  // The comment channel, as the page uses it: ask whether a session is
+  // listening, then open the shell's own composer on what the reviewer
+  // selected. The page never posts -- the shell does -- so the stub records the
+  // opens and answers canSendToClaude from the test's `listening` option.
+  const opens = [];
+  const comments = strict('comments', {
+    canSendToClaude: async () => listening,
+    anchorFor: async el => {
+      if (!el || !el.ownerDocument) throw {code: 'invalid', message: 'not an element'};
+      return {path: el.id || el.tagName, x: 0, y: 0};
+    },
+    openComposer: async target => {
+      const t = target && (target.range ? 'range' : target.element ? 'element' : 'bad');
+      if (t === 'bad') throw {code: 'invalid', message: 'no target'};
+      const text = target.range ? String(target.range) : (target.element.id || '');
+      opens.push({on: t, text, at: Date.now()});
+      log.push({op: 'openComposer', on: t, text});
+      return {opened: composerOpens};
+    },
+  });
+  window.__desk.opens = () => clone(opens);
   window.claude = strict('claude', {
-    use: async name => (capabilities.includes(name) ? {db, artifact}[name] || null : null),
+    use: async name => (capabilities.includes(name) ? {db, artifact, comments}[name] || null : null),
   });
 }
 
@@ -376,11 +400,12 @@ const skeleton = html => '<!doctype html><html><head>'
 // `capabilities` is what this view is granted: ['db', 'artifact'], ['db'] for a
 // view that cannot ring, [] for one that cannot reach the store. `declared` is the
 // capabilities object build_desk.py printed, whose db rules the stub enforces.
-function stubOptions({seed = {}, capabilities = ['db', 'artifact'], publishError = null,
+function stubOptions({seed = {}, capabilities = ['db', 'artifact', 'comments'], publishError = null,
+  listening = 'available', composerOpens = true,
     getDelay = 0, getFailures = 0, leases = {}, subscribeFailures = {}, setFailures = {}, setDelay = 0,
     level = 'interact', cacheFirst = {}, firstFromCache = false}, declared){
-  const unknown = capabilities.filter(c => !['db', 'artifact'].includes(c));
-  if (unknown.length) throw new Error('the stub grants only db and artifact, not ' + unknown);
+  const unknown = capabilities.filter(c => !['db', 'artifact', 'comments'].includes(c));
+  if (unknown.length) throw new Error('the stub grants only db, artifact and comments, not ' + unknown);
   const codes = publishError === null ? [] : [].concat(publishError).filter(c => c !== null);
   const bad = codes.filter(c => !PUBLISH_CODES.includes(c));
   if (bad.length) throw new Error('not an artifact.d.ts publish code: ' + bad);
@@ -392,7 +417,8 @@ function stubOptions({seed = {}, capabilities = ['db', 'artifact'], publishError
       throw new Error('the stub enforces only path and write levels, not ' + JSON.stringify(r));
   }
   return {seed, capabilities, publishError, getDelay, getFailures, leases, subscribeFailures, setFailures,
-    setDelay, rules, level, levels: LEVELS, cacheFirst, firstFromCache: !!firstFromCache};
+    setDelay, rules, level, levels: LEVELS, cacheFirst, firstFromCache: !!firstFromCache,
+    listening, composerOpens};
 }
 
 // Everything a test does to one view. `frame` is a Page for a lone desk, or the

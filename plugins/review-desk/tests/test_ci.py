@@ -107,10 +107,10 @@ class Workflow(unittest.TestCase):
 
 
 class Scripts(unittest.TestCase):
-    # WebKit skips only the two 270 KiB "too large" storage tests, which time out
-    # on ubuntu WebKit (see review-desk.yml). Pinned exactly so the exclusion
-    # cannot quietly widen to other tests or files.
-    WEBKIT_SKIP = "--test-skip-pattern='too large' "
+    # WebKit used to skip two 270 KiB storage tests that timed out on ubuntu.
+    # Both went with the chat they tested, so both engines now run everything,
+    # and a skip pattern appearing here again wants explaining.
+    WEBKIT_SKIP = ""
 
     def test_page_job_runs_a_node_that_has_test_skip_pattern(self):
         version = re.search(r'node-version: "(\d+)"', read(OWN)).group(1)
@@ -123,15 +123,18 @@ class Scripts(unittest.TestCase):
             scripts["test:webkit"],
             "DESK_BROWSER=webkit node --test " + self.WEBKIT_SKIP + "tests/desk/*.test.mjs")
 
-    def test_webkit_skip_names_only_the_two_oversized_storage_tests(self):
+    def test_every_page_test_runs_on_both_engines(self):
         titles = []
         desk = os.path.join(ROOT, "tests", "desk")
         for name in sorted(os.listdir(desk)):
             if name.endswith(".test.mjs"):
                 titles += [(name, t) for t in re.findall(r"^test\('([^']+)'", read(os.path.join(desk, name)), re.M)]
-        skipped = [(f, t) for f, t in titles if re.search("too large", t)]
-        self.assertEqual([f for f, _ in skipped], ["storage.test.mjs", "storage.test.mjs"])
-        self.assertGreater(len(titles), 60)
+        # Nothing is skipped on either engine now. The two 270 KiB storage tests
+        # that timed out on ubuntu WebKit went with the chat they tested, and the
+        # reviewer reads on an iPad, so WebKit is the engine that decides.
+        self.assertEqual([t for _, t in titles if "too large" in t], [])
+        self.assertNotIn("--test-skip-pattern", read(os.path.join(ROOT, "package.json")))
+        self.assertGreater(len(titles), 25)
 
 
 if __name__ == "__main__":

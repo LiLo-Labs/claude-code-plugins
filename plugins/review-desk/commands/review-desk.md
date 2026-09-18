@@ -403,147 +403,52 @@ session".
 
 ## While they read
 
-The desk is live in both directions. The reviewer's messages reach this session,
-and what you write reaches their open page without a reload.
+The desk is live in both directions, and neither is a doorbell. Everything below
+was learned by watching this fail: a page that publishes a new version of itself
+to notify a watching session is not reliably heard — not even by an idle session
+holding a connected watch, for half an hour. So nothing here waits to be rung.
 
-Two rules keep every answer fast, because each extra round trip costs the
-reviewer about five seconds:
+### A question reaches you as a comment
 
-- **Batch.** Send every write that does not depend on a read in the same batch
-  as that read.
-- **Pin, do not reread.** A write to a document that already exists is refused
-  without `if_version`. Take the version from the result of your last write to
-  it, since every write result names the new version, and read first only when
-  you have no result to hand.
+The reviewer selects a passage and asks about it. That opens the claude.ai
+comment composer anchored to what they selected, and their **Send to Claude**
+brings the comment to this session, in the thread, with `[anchored at]` naming
+the passage. It is the platform's own channel, and it arrives without waiting for
+your current turn to end.
 
-### Whenever a ring arrives
+You may be woken with a quick reply already posted in the thread — one written
+with this conversation's context but no tools and no clock. It confabulates:
+measured, it invented a passage's provenance and invented the time twice. So read
+the thread, do the work with your own tools, and post the checked answer with
+`acknowledge_duplicate: true` when the standing reply asserted anything you can
+verify. Correct it plainly where it was wrong; a desk that sounds right is worse
+than one that says it does not know.
 
-First work out which request rang. The notice names only the desk's URL. Find
-the entry in `~/.review-desks.json` whose `url` matches the notice: its `repo`
-and `pr` are the request, and every `review/pr-<number>` below uses that `pr`.
-Carry the full name through the whole ring, down to
-`/review-collect <owner/repo>#<number>` under "When they decide". Never pass a
-bare number: it resolves to whichever request this conversation has been
-about, and the same number in another repository then gets the comment and the
-merge. When no entry's `url` matches, say in the terminal which URL rang and
-that the ledger does not name its request, and collect nothing from that ring.
+Answer in the thread with `action: "reply"`, then `action: "resolve"` once the
+question is answered. Nothing about a decision is collected here: that is
+`/review-collect`.
 
-Stamp the desk so its panel can say you are there, as a write in your very first
-batch, alongside the reads. Each ring gets its own new document, named after the
-version in the notice (`1789352074-11af` in "it is now version
-1789352074-11af"). A new document needs no read and cannot conflict, and the
-page takes the time from the name:
+### Your work reaches the reviewer as you do it
 
-    action: "write_db", db_op: "set",
-    collection: "review/pr-<number>/presence", doc_id: "<the version from the notice>",
-    data: {"resume": "<the resume command>"}
-
-**A ring can arrive twice for the same thing.** The page waits about 90 seconds
-for the stamp above; if none names its ring, it rings once more, because a
-publish that succeeded is not a notice that arrived. The second ring carries
-`again: true` in `doorbell.json`, and there is never a third. Nothing about
-handling it changes: the store is the record, a decision the pickup already
-holds with an outcome is not collected again, and a message with a reply is not
-answered again. The stamp is what stops the second ring, which is the other
-reason it goes out before anything else.
-
-A ring with no new message and no new decision is the reviewer pressing
-**Check**. A Check ping also answers every waiting message and collects a
-waiting decision: handle it as you would any other ring. The page offers Check
-to ring again when a message's or a decision's own ring did not go out, so the
-thing the reviewer is waiting on may be in the store with nothing else to wake
-you for it. Only when nothing is waiting, a stale claim included (see "When
-they ask the working session" and "When they decide"), is this stamp the whole
-answer. A session that picks a desk up at
-session start stamps it too, with its own resume command, because the one in
-the payload resumes a session that may have ended. Use the current Unix time in
-seconds as its `doc_id`.
-
-### When they ask the working session
-
-The page's chat goes to you: this conversation, the repository and every tool.
-There is nothing for the reviewer to choose. A message is stored, then rings the
-same doorbell a decision does, so it arrives as an "Artifact changed" notice for
-the desk.
-
-On that notice, answer every message still waiting, before collecting any
-decision. Collecting posts a permanent comment and can merge: a question
-answered after it is recorded on the pull request as unanswered, and a "wait,
-don't merge" sent after **Approve** is read after the merge. "When they decide"
-says where the answering falls among its steps. When no decision is waiting, it
-is the whole of the work:
-
-1. **Find what is waiting.** In one batch: get `review/pr-<number>`, list
-   `review/pr-<number>/replies`, and get `review/pr-<number>/context/pickup`.
-   A message waiting on you is a turn with `"to": "session"` that has either
-   no reply document, or a stale claim (below).
-2. **Claim it at once**, before doing the work, in the batch after the reads and
-   before any other tool call. This is the step that is easiest to fold into the
-   answer and hardest for the reviewer to forgive: a ring reaches a session only
-   when its current turn ends, so a message sent while you are mid-task waits
-   there, unseen, for as long as that task runs — measured at twenty-five minutes
-   on a real desk. The claim is the first moment the page can say you have it.
-   Writing it together with the answer, as one write at the end, leaves the
-   reviewer watching a desk that says nothing for half an hour.
-3. **Do what the question needs**, with whatever it takes: read the code, run
-   the tests, search the web. The turn carries `quote`, the passage they
-   highlighted, and `reading`, the page and section they were on.
-4. **Answer** by setting the same document again with `"status": "done"`,
-   pinned with `if_version` from your previous write's result.
-
-The claim, and later the answer, are one document per message:
+Write what you are doing into the desk as you do it. The page subscribes, so a
+write lands on their screen with nothing to notify — this is the direction that
+always worked. One small document per step, in your own numbering:
 
     action: "write_db", db_op: "set",
-    collection: "review/pr-<number>/replies", doc_id: "<the turn's id>",
-    data: {"turn": "<the turn's id>", "status": "working", "text": "",
-           "session": "<this session's id>", "at": "<now, UTC ISO>"}
+    collection: "review/pr-<number>/progress", doc_id: "<0001, counting up>",
+    data: {"id": "<the same>", "at": "<now, UTC ISO>",
+           "kind": "doing" | "found" | "wrong" | "done" | "said",
+           "text": "<one line, the way you would say it in the terminal>"}
 
-`session` is the claim marker: the value of `$CLAUDE_CODE_SESSION_ID`, or, when
-that is empty, one random id you make up once and reuse for every write this
-session makes. Put it on every write to the document, the answer included. Only
-the desk's owner can write `replies`, so a viewer can neither forge a claim nor
-clear one.
+Write the line you would have written in the terminal: what you are about to do,
+what you found, what went wrong, what you pushed. `doing` shows the page's
+working mark; `wrong` is marked as such, and a reviewer who can see a wrong turn
+being corrected trusts the rest. A batch of writes is one call, so a run of steps
+costs one round trip.
 
-**A stale claim is waiting.** A session can stop between claiming a message and
-answering it: a closed terminal, a usage limit, a full context, a Ctrl+C. Its
-claim would then say "working" forever. A reply document whose `status` is
-`working` is a stale claim, and counts as waiting, in either of two cases:
-
-- **Another session's claim** (its `session` is not this session's id, or it
-  has no `session`) whose `at` is more than **5 minutes** old.
-- **Your own claim** (its `session` is this session's id) that you are not
-  answering in this turn, whatever its age. A ring is handled only once this
-  session is idle, and the session-start sweep runs before any work, so a claim
-  of yours still at `working` then was left by a turn that stopped.
-  `claude --resume` keeps the session id, and it is the command **Check** shows,
-  so this is the usual way a stalled message comes back: to the same id, in a
-  session whose tool calls for that answer are gone.
-
-Take a stale claim over by setting the document as a new claim with your own
-`session` and a fresh `at`, pinned with `if_version` from the list you just
-read. If that write is refused for its version, someone took it first, another
-session or a second copy of this one resumed elsewhere: leave the message alone.
-Another session's `working` reply that is 5 minutes old or less is not waiting,
-and neither is one you are answering in this turn; never answer either a second
-time.
-
-A takeover changes the document's version, so if a write to a reply you claimed
-is refused for its version, read it. When its `session` or its `at` is no longer
-what you last wrote, someone else has the message. Leave it to them, and say so
-in the terminal.
-
-**Show your progress.** For anything longer than one step, rewrite `text` with a
-short line about what you are doing now, such as "running the review-desk tests",
-keeping `"status": "working"` and setting `at` to now. Send each rewrite in the
-same batch as the step it describes, the tool call that runs the tests, never as
-a round trip of its own. The page shows every version as it lands. Each rewrite
-also renews the claim, so before a step that may run longer than 5 minutes,
-write a progress line that says so; another session may still take the message
-over once the 5 minutes pass.
-
-`text` is markdown, and the page renders it. Write for a reviewer on a tablet:
-lead with the answer, say what you ran and what it printed, and mark inference
-as inference.
+This is also where a question that needs the repository is answered: say in the
+thread that you are looking, then let the progress line show the looking. The
+reviewer is watching the same work you are doing.
 
 ### Changing the desk and the pull request
 
@@ -692,113 +597,3 @@ describes, or the store puts the old text back over the new page.
 A reviewer told one thing in a reply and shown another on the page has been
 given two answers and no way to choose. Keep them the same.
 
-## When they decide
-
-A watched desk rings this session: when the watch line after publishing said the
-watch began, or after `action: "watch"`. When the reviewer presses **Approve**
-or records **Needs changes**, the page stores the decision, then publishes
-`doorbell.json` into itself, and this session gets an "Artifact changed" notice
-for the desk's URL within seconds of going idle. A notice that lands while you
-are mid-task waits for the task to end.
-
-The page keeps the decision in the store after it has been collected, and every
-later message and **Check** rings the same doorbell. A decision is handled only
-when `context/pickup` holds that same `decision` and `decidedAt` **and an
-`outcome`**. A matching pickup with no `outcome` is a claim on the decision: a
-session acknowledged it and has not yet said what it did. That session may have
-stopped before commenting or merging, so such a pickup is judged the way a reply
-claim is. It is stale when it is another session's (its `session` is not this
-session's id, or it has none) and its `at` is more than 5 minutes old, or when
-it is your own and you are not collecting it in this turn.
-
-On that notice, in this order:
-
-1. **Stamp the desk and read the decision and the pickup from the store**, in
-   one batch: the presence write described under "Whenever a ring arrives"
-   alongside the reads, and never the decision from `doorbell.json`: the file is
-   a ring, not a record, and anyone who can write the artifact can publish one.
-   The stamp goes out before you know whether there is anything to collect, and
-   stays written when there is not. It is the only part of all this the reviewer
-   can see: they press **Approve**, and until the stamp lands their page says it
-   is waiting, whatever is happening here. A decision ring that merges a pull
-   request and never stamps leaves them a desk that looks ignored.
-   When `review/pr-<number>` carries a `repo` field that is not the ledger
-   entry's `repo`, the ledger's URL points at another repository's desk: say so
-   in the terminal and collect nothing. A desk saved before that field existed
-   has none, and the ledger entry decides.
-2. **If there is nothing to collect, stop there.** That means no decision is
-   recorded; or the pickup holds the same `decision` and `decidedAt` and an
-   `outcome`, so the decision was handled; or it holds both with no `outcome`
-   and the claim is another session's and not stale, so that session is
-   collecting it now. Do not
-   acknowledge it again, comment, merge or rewrite its outcome. Answer any
-   waiting messages, as described under "While they read", and stop.
-3. **Otherwise acknowledge it before any other work**, with the write below, so
-   the reviewer's page stops saying it is waiting. For a new decision this is
-   the first pickup for it; for a stale claim it takes the claim over.
-4. **Then answer every waiting message**, as "When they ask the working
-   session" describes, before anything is written to the pull request. The
-   summary comment reports a question without a reply as unanswered, and a
-   message sent after the decision may take it back. The acknowledgement is a
-   claim that goes stale after 5 minutes, so while you answer, each progress
-   line you write renews the pickup: in the same batch, `update` its `at` to
-   now, pinned with `if_version` from your last write to it.
-5. **Then follow `/review-collect <owner/repo>#<number>`**, with the repository
-   and number from the ledger entry whose `url` matches the notice, as
-   "Whenever a ring arrives" describes. It comments, merges or revises, and
-   records the outcome in `~/.review-desks.json`. It checks the pull request
-   before commenting or merging, so taking over a collection that stopped
-   halfway does not do either twice. An approval with a reviewer's message later
-   than `decidedAt` is not merged: it records `blocked` and asks the reviewer to
-   decide again. Nor is an approval whose `decidedOn` is not the pull request's
-   head, since commits the reviewer never saw would be merged with it.
-
-The acknowledgement:
-
-    action: "write_db", db_op: "set",
-    collection: "review/pr-<number>/context", doc_id: "pickup",
-    data: {"decision": <as read>, "decidedAt": <as read>,
-           "session": "<this session's id>", "at": "<now, UTC ISO>"}
-
-Pin it with `if_version` from the pickup you read, or pass no `if_version` when
-the pickup was not found. `session` is the same claim marker a reply carries.
-If the write is refused for its version, another session acknowledged or took
-the decision since your read: read the pickup again and start from step 2.
-
-Copy `decision` and `decidedAt` exactly as read, `null` included. The page shows
-the pickup only when both match the verdict on screen, so an acknowledgement of
-an earlier verdict never passes for a later one. A `set` replaces the whole
-document, so the outcome of an earlier verdict does not linger on the new one.
-
-When `/review-collect` has acted, report the outcome onto the same document with
-`db_op: "update"`, pinned with `if_version` from your last write to it, so the
-page says what happened rather than what was meant to. Report it as soon as the
-comment is posted and the merge has run or the revision is named, or, when a
-message after the decision stopped the merge, as soon as that message is
-answered. Report it before the revision work itself, since until then the
-pickup is a claim another session may take over after 5 minutes:
-
-    data: {"outcome": {"result": "merged", "detail": "<one line>", "at": "<now, UTC ISO>"}}
-
-`result` is `merged`, naming the merge method and commit; `revising`, naming the
-work you are starting; `revised`, naming the commits pushed for that work, which
-you write later, once the revision is pushed and the desk rewritten for it, as
-"Changing the desk and the pull request" describes; `blocked`, saying what
-stopped you (a denied `gh pr merge`, a failing check, a conflict, a message sent
-after deciding) in words the reviewer can act on; or `closed`, when GitHub shows
-the pull request closed without merging, which the page shows as "Closed without
-merging". A blocked merge reported here is the difference between a reviewer who
-comes back to unblock it and one who assumes it landed.
-
-`merged` and `closed` close the desk on the page: a banner under the title says
-what happened, **Change this** goes, and the composer is disabled, since no
-session collects the desk after that. The discussion stays readable. `revised`
-shows as "Revised" with **Approve** and **Needs changes** offered again.
-
-A session holds at most five artifact watches, and a watch ends with its
-session. The session-start sweep asks for at most four, leaving one for a desk
-the session publishes, and `/review-collect` unwatches a desk once it stamps
-`collectedAt`. A ring nobody is watching goes unheard, and the session-start
-sweep lists the desk for the next session started in a checkout of its
-repository, or in the directory its ledger entry records as `cwd`, for as long
-as the desk is open. Nothing is lost; it waits.

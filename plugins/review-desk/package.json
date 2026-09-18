@@ -5,7 +5,7 @@
   "description": "Browser tests for templates/review.html with a stubbed window.claude",
   "scripts": {
     "test": "node --test tests/desk/*.test.mjs",
-    "test:webkit": "DESK_BROWSER=webkit node --test --test-skip-pattern='too large' tests/desk/*.test.mjs"
+    "test:webkit": "DESK_BROWSER=webkit node --test tests/desk/*.test.mjs"
   },
   "devDependencies": {
     "playwright": "1.58.2"
