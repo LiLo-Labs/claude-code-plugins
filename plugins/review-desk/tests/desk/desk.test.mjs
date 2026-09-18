@@ -96,11 +96,17 @@ test('a question carries the passage, the reviewer’s words, and an instruction
     s.removeAllRanges();
     s.addRange(r);
   });
+  await desk.page.click('#fab');
   await desk.page.waitForFunction(() =>
-    document.getElementById('ask').textContent.includes('what you selected'));
+    document.getElementById('ask').textContent.includes('about the passage'));
   assert.match(await desk.page.textContent('#quoted'), /At most one phase may be open/);
 
+  // The bug this replaced: focusing the box collapses the selection, and the
+  // page used to say the passage was gone while still holding it.
   await desk.page.fill('#question', 'Is this one requirement or two?');
+  assert.match(await desk.page.textContent('#quoted'), /At most one phase may be open/,
+    'the passage is held while the reviewer types');
+  assert.match(await desk.page.textContent('#ask'), /about the passage/);
   await desk.page.click('#ask');
   const sent = await desk.page.evaluate(() => window.__desk.sent());
   assert.equal(sent.length, 1);
@@ -121,6 +127,7 @@ test('with nothing selected the question is about the page being read', async ()
     documents: [{name: 'docs/spec.md', text: '# Spec\n\nOne rule.', base: null}]})});
   await ready(desk);
   await desk.page.click('[data-leaf="1"]');
+  await desk.page.click('#fab');
   await desk.page.fill('#question', 'Why is this file here at all?');
   await desk.page.click('#ask');
   const sent = await desk.page.evaluate(() => window.__desk.sent());
@@ -131,6 +138,7 @@ test('when no session is listening the page says so, and will not send', async (
   // The answer the old desk never had: it rang its doorbell into the dark.
   desk = await open(browser, {listening: 'no_session'});
   await ready(desk);
+  await desk.page.click('#fab');
   await desk.page.fill('#question', 'Anyone there?');
   assert.equal(await desk.page.$eval('#ask', el => el.disabled), true);
   assert.match(await desk.page.textContent('#askState'), /No session is listening right now/);
@@ -140,6 +148,7 @@ test('when no session is listening the page says so, and will not send', async (
 test('a refusal keeps the reviewer’s words and says what happened', async () => {
   desk = await open(browser, {sendToClaudeError: 'claude_unavailable'});
   await ready(desk);
+  await desk.page.click('#fab');
   await desk.page.fill('#question', 'Does the head still match?');
   await desk.page.click('#ask');
   await desk.page.waitForFunction(() =>
@@ -152,6 +161,7 @@ test('a refusal keeps the reviewer’s words and says what happened', async () =
 test('consent not yet given is said as itself, not as a failure', async () => {
   desk = await open(browser, {sendToClaudeError: 'consent_required'});
   await ready(desk);
+  await desk.page.click('#fab');
   await desk.page.fill('#question', 'Why this bound?');
   await desk.page.click('#ask');
   await desk.page.waitForFunction(() =>
@@ -162,8 +172,41 @@ test('consent not yet given is said as itself, not as a failure', async () => {
 test('a view that cannot comment at all says that, rather than failing when pressed', async () => {
   desk = await open(browser, {capabilities: ['db', 'artifact']});
   await ready(desk);
+  await desk.page.click('#fab');
   assert.equal(await desk.page.$eval('#ask', el => el.disabled), true);
   assert.match(await desk.page.textContent('#askState'), /not available in this view/);
+});
+
+test('the held passage can be dropped, and then the question is about the page', async () => {
+  desk = await open(browser, {data: payload({body: '## Rule\n\nAt most one phase may be open.\n'})});
+  await ready(desk);
+  await desk.page.evaluate(() => {
+    const p = [...document.querySelectorAll('#sheet p')].find(x => x.textContent.includes('one phase'));
+    const r = document.createRange();
+    r.selectNodeContents(p);
+    const s = window.getSelection();
+    s.removeAllRanges();
+    s.addRange(r);
+  });
+  await desk.page.click('#fab');
+  await desk.page.waitForFunction(() => !document.getElementById('quoted').hidden);
+  await desk.page.click('#drop');
+  await desk.page.waitForFunction(() => document.getElementById('quoted').hidden);
+  await desk.page.fill('#question', 'What is this desk for?');
+  await desk.page.click('#ask');
+  const sent = await desk.page.evaluate(() => window.__desk.sent());
+  assert.match(sent[0].text, /^User states from the desk, on What this is:/);
+});
+
+test('asking closes the panel, because the answer arrives on the page', async () => {
+  desk = await open(browser);
+  await ready(desk);
+  await desk.page.click('#fab');
+  await desk.page.fill('#question', 'Does this close?');
+  await desk.page.click('#ask');
+  await desk.page.waitForFunction(() => document.getElementById('panel').hidden);
+  assert.equal(await desk.page.$eval('#fab', el => el.hidden), false, 'the button comes back');
+  assert.match(await desk.page.textContent('#askState'), /answers in the thread/);
 });
 
 /* ---------------- and a decision, on a commit ---------------- */
