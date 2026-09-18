@@ -1149,12 +1149,19 @@ let note = '';
 async function drawAsk(){
   const el = $('askState');
   const sel = window.getSelection();
-  const some = sel && !sel.isCollapsed && String(sel).trim().length > 1;
+  const some = sel && !sel.isCollapsed && String(sel).trim().length > 1
+    && inSheet(sel.anchorNode);
   const typed = ($('question').value || '').trim().length > 1;
-  $('ask').disabled = listening !== 'available' || !typed;
-  $('ask').textContent = some ? 'Ask about what you selected' : 'Ask about this page';
-  $('quoted').textContent = some ? String(sel).trim().slice(0, 160) : '';
-  $('quoted').hidden = !some;
+  // Written only when it changes. Rewriting the button's text on every
+  // selectionchange replaced its text node between a press and its release, and
+  // WebKit then delivered no click at all: the question went nowhere, silently.
+  const set = (el, text) => { if (el.textContent !== text) el.textContent = text; };
+  const label = some ? 'Ask about what you selected' : 'Ask about this page';
+  const want = listening !== 'available' || !typed;
+  if ($('ask').disabled !== want) $('ask').disabled = want;
+  set($('ask'), label);
+  set($('quoted'), some ? String(sel).trim().slice(0, 160) : '');
+  if ($('quoted').hidden !== !some) $('quoted').hidden = !some;
   el.className = 'askState ' + (note ? 'yes' : listening === 'available' ? 'yes' : 'no');
   if (note){ el.textContent = note; return; }
   el.textContent = listening === 'available'
@@ -1271,9 +1278,17 @@ $('decide').addEventListener('click', async e => {
 // collapses it.
 let held = null;
 $('question').addEventListener('input', () => { note = ''; if (comments) drawAsk(); });
+// Only a selection in the document counts. A caret or a selection inside the
+// question box is not a passage, and taking one made the quoted block appear
+// under the reviewer's own pointer: in WebKit that moved the Ask button out from
+// under the press, and the question went nowhere.
+const inSheet = node => {
+  const el = node && (node.nodeType === 1 ? node : node.parentElement);
+  return !!el && $('sheet').contains(el);
+};
 document.addEventListener('selectionchange', () => {
   const sel = window.getSelection();
-  if (sel && !sel.isCollapsed && String(sel).trim().length > 1){
+  if (sel && !sel.isCollapsed && String(sel).trim().length > 1 && inSheet(sel.anchorNode)){
     held = {text: String(sel).trim(), node: sel.anchorNode};
   }
   if (comments) drawAsk();
