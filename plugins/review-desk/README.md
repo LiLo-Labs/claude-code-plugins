@@ -31,28 +31,6 @@ to the pull request while you watch. Whatever you highlight goes along with the
 question, with the tab and section you were reading. A message sent while no
 session is running is answered by the next one to start.
 
-**The desk is read on a timer, not when it rings.** The page does ring — it
-publishes a new version of itself, and a session watching it should be notified —
-but measured on real desks that notification is lost often enough to be useless:
-a question asked at 03:11 sat for half an hour while an idle session held a
-connected watch on it. Every part of this plugin that has always worked is a
-pull, so that is what serves a desk now.
-
-`/review-attend`, run in a spare terminal, takes the watches (free, and faster
-when a ring does land) and then starts `/loop 1m /review-answer`: once a minute,
-read each desk, answer anything waiting, say nothing when there is nothing. A
-question is answered inside a minute whether or not any notification arrives.
-Stop the loop when the review is over — a poll of a quiet desk is a cost with
-nobody on the other end, and the session-start sweep finds whatever arrives while
-nothing is running.
-
-Run it in a session of its own: one in the middle of a task cannot answer, and
-one waking every minute cannot do a long task. When a question turns on what the
-session that built the request knows, the attendant asks it by resuming a fork of
-it headlessly — that fork has the whole conversation and the repository's tools,
-and leaves the session itself undisturbed. `/review-answer <owner/repo>#<number>`
-is the same answering on demand, and nothing else: no comment, no merge.
-
 The panel says when the working session last answered, and has a **Check**
 button that rings it and waits. If nothing answers, the page shows the command
 that brings that session back (`claude --resume …`), for someone at the computer
