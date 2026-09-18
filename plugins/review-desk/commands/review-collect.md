@@ -124,10 +124,9 @@ store is not by itself a reason to act. Compare it with the pickup:
   read", and stop.
 - **The pickup holds the same `decision` and `decidedAt` but no `outcome`:** a
   session claimed this decision and has not said what it did. Which session
-  decides what you do, as `/review-desk` defines under "When they decide":
+  decides what you do:
   - **Your own claim, written in this turn.** This is the usual case: a ring
-    acknowledged a new decision under "When they decide" and then sent you
-    here. You are the session collecting it. Do not write the pickup again;
+    acknowledged a new decision and then carried on here. You are the session collecting it. Do not write the pickup again;
     carry on below.
   - **Another session's claim that is not stale** (its `session` is not this
     session's id, or it has none, and its `at` is 5 minutes old or less): that
@@ -142,7 +141,7 @@ store is not by itself a reason to act. Compare it with the pickup:
     steps below check for each before doing it.
 - **A decision, and no pickup or one holding a different `decision` or
   `decidedAt`:** this is a new decision. Write the pickup before anything else,
-  as `/review-desk` describes under "When they decide". Until one lands, the
+  with the write below. Until one lands, the
   reviewer's page says it is still waiting. Then carry on below.
 
 A reviewer who presses **Change this** and decides again gets a new `decidedAt`,
@@ -177,9 +176,8 @@ Before anything is written to the pull request, answer every message still
 waiting, as `/review-desk` describes under "While they read", and write each
 reply as `done`. The comment below is permanent and summarises the replies:
 posted first, it records a question the session was about to answer as
-unanswered. On a ring, `/review-desk` has already answered them under "When they
-decide", so nothing is left waiting by the time you get here. A message another
-session is answering under a claim that is not stale is left to that session.
+unanswered. A question still open in a comment thread is answered there first,
+as `/review-desk` describes under "While they read".
 
 Then compare the reviewer's turns with the decision. The page keeps **Send**
 open after a decision, so "wait, don't merge until I check X" arrives as a
@@ -194,7 +192,7 @@ the reviewer's next **Approve** would store the old commit and block again.
 - **Approved, with a reviewer's turn whose `at` is later than `decidedAt`:** do
   not merge, and do not post the comment. Answer the turn, as above, then report
   the outcome onto the pickup as `blocked`, as `/review-desk` describes under
-  "When they decide":
+  the pickup:
 
       data: {"outcome": {"result": "blocked", "detail": "You sent a message after deciding, so this was not merged. Read the reply, then decide again.", "at": "<now, UTC ISO>"}}
 
@@ -343,8 +341,7 @@ ready to judge again.
 **Undecided** — say so and stop. Do not interpret silence as either.
 
 After acting on a decision, report what happened as the pickup's `outcome` at
-once, before any revision work, as `/review-desk` describes under "When they
-decide": `merged` with the method and
+once, before any revision work: `merged` with the method and
 commit, `revising` with the work, `blocked` with what stopped you, or `closed`
 when GitHub shows the pull request closed without merging. A merge
 that auto mode, branch protection or `--match-head-commit` refuses is `blocked`, never silence; the

@@ -40,8 +40,10 @@ class DocLinks(unittest.TestCase):
         self.assertEqual(missing, [], f"{source} names sections no command doc has")
 
     def test_sweep_names_real_sections(self):
+        # One, not two: the sweep used to send a session to the ring protocol as
+        # well, and there is no ring protocol.
         self.assert_sections_exist(strings(os.path.join(ROOT, "hooks", "sweep.py")),
-                                   "hooks/sweep.py", 2)
+                                   "hooks/sweep.py", 1)
 
     def test_after_push_names_real_sections(self):
         self.assert_sections_exist(strings(os.path.join(ROOT, "hooks", "after_push.py")),

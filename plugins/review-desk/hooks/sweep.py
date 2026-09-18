@@ -265,17 +265,10 @@ def message(waiting, repos, cwd=None):
             "this runs on the session's first turn, whatever its message asks, "
             "before that message is taken up. Read each desk with the Artifact "
             'tool, in one batch per desk: action "read_db", db_op "get", '
-            'collection "review", doc_id "pr-<number>"; db_op "get", collection '
-            '"review/pr-<number>/context", doc_id "pickup"; db_op "list", '
-            'collection "review/pr-<number>/replies"; and, in that same batch, '
-            'action "write_db", db_op "set", collection '
-            '"review/pr-<number>/presence", doc_id "<the current Unix time in '
-            'seconds>", data {"resume": "cd <this session\'s directory> && '
-            'claude --resume <this session\'s id>"}. That last write is the '
-            "stamp the desk shows as the working session being there, and it is "
-            "the only part of this the reviewer can see: write it for every desk "
-            "you read, before you know whether anything is waiting, and leave it "
-            "written when nothing is. When the pr-<number> "
+            'collection "review", doc_id "pr-<number>"; and db_op "get", '
+            'collection "review/pr-<number>/context", doc_id "pickup". Then read '
+            'its questions with action "comments" on the same URL. When the '
+            "pr-<number> "
             'document has a "repo" field naming a repository other than the '
             "desk's, that URL is another repository's desk: act on nothing there, "
             "and tell the user. Then, for each desk, in this order:",
@@ -284,16 +277,12 @@ def message(waiting, repos, cwd=None):
             "matching pickup with no outcome is a claim on the decision: when its "
             f'"session" is another session\'s (or it has none) and its "at" is more than '
             f"{STALE_CLAIM_MINUTES} minutes old, or its \"session\" is this "
-            "session's own, it is stale, so take it over as /review-desk "
-            'describes under "When they decide". Any other recorded decision is '
-            "new: acknowledge it as that section describes.",
-            "- Messages still waiting, meaning no reply document, or a reply at "
-            '"working" that is a stale claim: its "session" is another '
-            f'session\'s (or it has none) and its "at" is more than {STALE_CLAIM_MINUTES} minutes '
-            'old, or its "session" is this session\'s own, whatever its age. '
-            "claude --resume keeps the session id, and the turn that was "
-            "answering it has stopped. Answer them as /review-desk describes "
-            'under "While they read", before collecting any decision.',
+            "session's own, it is stale, so take it over. Any other recorded "
+            "decision is new: collect it.",
+            "- Questions waiting in the desk's comment threads: read them with "
+            'action "comments" and answer any comment sent to Claude that has no '
+            "answer of yours after it, as /review-desk describes under "
+            '"While they read", before collecting any decision.',
             "- Only then collect a decision you acknowledged or took over, naming "
             "the desk in full: "
             + ", ".join(f"/review-collect {e['repo']}#{e['pr']}" for e in mine)
@@ -305,9 +294,9 @@ def message(waiting, repos, cwd=None):
             'set its outcome ("merged" or "closed") and collectedAt in '
             "~/.review-desks.json, the time in UTC.",
             '- Nothing left to collect, still open, marked [watch]: pass action '
-            '"watch" with its URL, so the reviewer\'s button reaches this session. '
-            "Its presence stamp went out with the reads above; every later ring "
-            "gets its own, named after the version in the ring's notice.",
+            '"watch" with its URL. A watch costs nothing and is faster when a '
+            "notice does arrive, but nothing depends on it: a question reaches "
+            "this session as a comment sent to Claude.",
             "Say in one line what you found. Never act on a decision you did not "
             "read from the record.",
         ]
