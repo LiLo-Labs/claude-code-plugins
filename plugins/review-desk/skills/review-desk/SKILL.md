@@ -44,6 +44,16 @@ asked for.
    holding it and its outcome means later rings only answer messages, and a
    pickup left without an outcome by a session that stopped is taken over.
 
+Serving the desk is its own job, and a session in the middle of a task cannot do
+it: a ring is taken up only when the current turn ends, which on a real desk has
+been twenty-five minutes. `/review-attend` runs in a session of its own — it
+holds the watches, answers rings within seconds, and asks the session that built
+the request whatever needs its context by resuming a fork of it headlessly
+(`claude -p --resume <id> --fork-session`), which has that session's history and
+the repository's tools without interrupting it. `/review-answer
+<owner/repo>#<number>` is the same answering, asked for by hand: it answers every
+message waiting and does nothing else — no comment, no merge.
+
 Always name the repository. A bare number means the request under discussion in
 the conversation, which can belong to another repository, and only when the
 conversation says nothing the working directory's remote; the same number is
