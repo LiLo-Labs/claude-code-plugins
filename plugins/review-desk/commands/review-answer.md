@@ -11,6 +11,12 @@ answers waiting messages on its way to collecting a decision, but it is decision
 machinery: asked in prose to go and look, a session improvises, and a reviewer
 who is sitting there watching gets nothing. One thing, named, doing only that.
 
+It is also the body of the poll. The desk's doorbell — the page republishing
+itself to notify a watching session — is lost often enough to be useless, so
+what actually serves a desk is this command on a timer, `/loop 1m
+/review-answer`, as `/review-attend` sets up. Everything below is written to be
+run once a minute: cheap when nothing is waiting, and silent.
+
 ## Which desk
 
 `$1` is `owner/repo#number`, or a pull request URL. With no argument, every open
@@ -36,6 +42,12 @@ In one batch per desk — the reads and the stamp together:
 The stamp is what the reviewer sees. A desk that says nothing while a session
 works on it is indistinguishable from a desk nobody heard, and that is the
 complaint this plugin keeps earning.
+
+**On a poll, stamp only when it is worth something**: when something was
+waiting, or when the newest stamp already there is more than five minutes old.
+A stamp a minute is a document a minute in a collection nobody prunes, and it
+tells the reviewer no more than one every five minutes does. On a ring, stamp
+always, named after the version in the notice.
 
 When `review/pr-<n>` carries a `repo` field that is not the repository you
 resolved, this is another repository's desk for the same number: say so and
@@ -89,3 +101,5 @@ it needs to be: the page renders it.
   that arrives afterwards rings whichever session is watching.
 
 Say in one line what you answered, per desk, and name any decision waiting.
+**Nothing waiting, nothing to say**: end the turn with no line at all, so a poll
+running every minute leaves a terminal someone can still read.
