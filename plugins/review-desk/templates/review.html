@@ -1458,7 +1458,7 @@ function goReadOnly(){
 // current task, so the page says both, and how to bring one back.
 let lastHeard = 0, lastResume = '', stampsSeen = new Set(), checkedAt = null, answeredAt = 0;
 // Whether the presence listener has had a server-definitive snapshot yet.
-let presenceIn = false;
+let presenceIn = false, pickupIn = false;
 // Measured: a ring reaches an idle session in about 16 seconds, and a one-write
 // answer adds about 5. 75 seconds leaves room for a session finishing a step.
 const CHECK_WAIT = 75000;
@@ -1580,8 +1580,10 @@ function sessionWait(m, r){
   // A stored 'sent' proves the message was saved, not that the ring went out or
   // that anything is listening. Only a presence stamp from after the send shows a
   // session is answering rings here, so until one arrives the page promises nothing.
-  if (!heardSince(m.sentAt || 0)) return 'Saved and rung. No working session has '
-    + 'answered on this desk since, so it may be busy or not running. '
+  if (!heardSince(m.sentAt || 0)) return 'Saved and rung. Nothing has been written '
+    + 'on this desk since, so the session is either working on something else or '
+    + 'not running. One in the middle of a task takes it up when that task ends, '
+    + 'which has been half an hour. '
     + (!bellOn || !ackDue(m.rungAt) ? ''
       : m.again ? 'Check, at the top of this panel, rings it again. '
       : 'This view rings it once more. ')
@@ -1593,6 +1595,15 @@ function sessionWait(m, r){
 // snapshot is history, timed by its name: the epoch second of the ring, which
 // can fall up to a second before a send made in that same second.
 const heardSince = ms => answeredAt > ms || lastHeard + 1000 > ms;
+// A write the session made, timed by what it carries. Everything delivered up to
+// the first definitive snapshot is history and only moves lastHeard; a write
+// after that is the session working now.
+function wroteAt(at, history){
+  const t = typeof at === 'number' ? at : Date.parse(at || '');
+  if (!Number.isFinite(t) || t <= 0 || t > Date.now() + 86400000) return;
+  lastHeard = Math.max(lastHeard, t);
+  if (!history) answeredAt = Math.max(answeredAt, Date.now());
+}
 
 function said(m){
   if (m.via !== 'session') return '<div class="said">'+esc(m.content)+'</div>';
@@ -2997,6 +3008,12 @@ function listenReplies(){
         replied.add(r.turn);
         const text = typeof r.text === 'string' ? r.text : '';
         const status = r.status === 'done' ? 'done' : 'working';
+        // Anything the session writes on this desk is a sign of life, not only a
+        // presence stamp: a reply, and a claim at "working", both say it is here
+        // and reading. Liveness judged by stamps alone let a desk where answers
+        // were arriving still say that nobody had answered on it, which is the
+        // page calling a working session dead.
+        wroteAt(replyAt(r), history);
         const was = sessionReplies.get(r.turn);
         const changed = !was || was.text !== text || was.status !== status;
         if (changed) sessionReplies.set(r.turn, {text, status, at: replyAt(r)});
@@ -3528,6 +3545,12 @@ function followPage(){
   follow('pickup', 'the working session’s pickup of your decision', 'page',
     () => db.doc('review/pr-' + DATA.number + '/context/pickup'), snap => {
       pickup = (snap.exists && snap.data()) || null;
+      // The pickup is the session's word too, and its outcome later.
+      if (pickup){
+        wroteAt(pickup.at, !pickupIn);
+        if (isRow(pickup.outcome)) wroteAt(pickup.outcome.at, !pickupIn);
+      }
+      pickupIn = true;
       drawOutcome();
       if (closedOutcome() || showingDecided || showingRevised) drawDecided();
     });

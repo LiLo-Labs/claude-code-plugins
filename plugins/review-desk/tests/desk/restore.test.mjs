@@ -422,7 +422,7 @@ test('a re-ring into a document with malformed threads stores its outcome and ke
   assert.deepEqual(desk.errors, []);
 });
 
-test('the Sent line promises no answer until a presence stamp newer than the send', async () => {
+test('the Sent line promises no answer until the session writes something newer than the send', async () => {
   const sentAt = Date.now() - 5000;
   const tenMinutesAgo = Math.floor((Date.now() - 600000) / 1000);
   const seed = {
@@ -435,7 +435,7 @@ test('the Sent line promises no answer until a presence stamp newer than the sen
   };
   desk = await open(browser, {seed});
   await desk.page.click('#fab');
-  await desk.page.waitForSelector('text=No working session has answered');
+  await desk.page.waitForSelector('text=Nothing has been written on this desk since');
   const said = () => desk.page.textContent('.turn.theirs .said');
   assert.doesNotMatch(await said(), /within seconds/);
 

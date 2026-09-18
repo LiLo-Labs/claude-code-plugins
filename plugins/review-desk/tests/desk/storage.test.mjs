@@ -347,7 +347,9 @@ test('a replies listener killed after it has delivered says the view stopped rec
   await desk.page.click('#fab');
   await desk.page.waitForSelector('.said.rich strong >> text=two views');
   await desk.page.click('.tab[data-go="1"]');
-  await desk.page.waitForSelector('text=Saved and rung');
+  // The session answered the other thread after this message was sent, so the
+  // page knows it is there: the waiting line is the one that says so.
+  await desk.page.waitForSelector('text=Sent to the working session');
 
   // not_granted is never retried on its own, so the state holds still to be read.
   await desk.kill(REPLIES, 'not_granted');
@@ -356,13 +358,13 @@ test('a replies listener killed after it has delivered says the view stopped rec
     /This view stopped receiving the working session’s replies \(not_granted\)\. What shows here may be out of date\./);
   assert.match(await desk.page.textContent('#stream'),
     /This view stopped receiving the working session’s replies \(not_granted\), so an answer may be waiting/);
-  assert.doesNotMatch(await desk.page.textContent('#stream'), /Saved and rung|could not be loaded/);
+  assert.doesNotMatch(await desk.page.textContent('#stream'), /Sent to the working session|could not be loaded/);
   await desk.page.waitForTimeout(3500);
   assert.equal(await desk.subscribes(REPLIES), 1);
 
   // Try again brings the feed, and the waiting line, back.
   await desk.page.click('#feedSlot button');
-  await desk.page.waitForSelector('#stream >> text=Saved and rung');
+  await desk.page.waitForSelector('#stream >> text=Sent to the working session');
   assert.equal(await desk.page.textContent('#feedSlot'), '');
   assert.deepEqual(desk.errors, []);
 });
