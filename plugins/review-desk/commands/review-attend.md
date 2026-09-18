@@ -6,27 +6,31 @@ argument-hint: "[owner/repo#number to attend one desk, or nothing for all open h
 Attend the open review desks: hold their watches, answer what arrives, and stay
 out of the way otherwise. This session becomes the desk's hands.
 
-## Why a session does nothing but this
+## Why this polls, and does not wait to be rung
 
 A desk can only be read and written with the Artifact tool, and that tool exists
 only in an interactive session — a headless `claude -p` run does not have it,
 even resuming a session's own context. So a desk is always served by an
-interactive session, and an interactive session takes up a ring only when its
-current turn ends.
+interactive session.
 
-That is the whole of the latency problem. On `LiLo-Labs/accrue#11` three
-questions were each answered twenty-five minutes after they were asked, because
-the session serving the desk was in the middle of writing a specification. The
-doorbell was not lost: it rang, and rang again ninety-three seconds later when
-nothing answered. There was simply no gap between turns to deliver it into.
+**And the ring does not reliably arrive.** This was built on the doorbell: the
+page publishes a new version of itself, and the session watching it is notified.
+Measured on real desks, that notification is lost often enough to be useless. A
+question asked at 03:11 sat for half an hour while an idle session held a
+connected watch on that desk and was told nothing. Earlier the same thing
+happened on three others, and each time the page had rung correctly — a new
+version exists, at the right second, with the reviewer's words already in the
+store. What fails is the last hop, and nothing in this plugin owns it.
 
-A session attending desks has nothing else to be in the middle of. A ring
-reaches it in about sixteen seconds, and the reviewer sees a claim and a stamp
-while the answer is still being written.
+So the desk is read on a timer. Everything about this plugin that has always
+worked is a pull: the session-start sweep, the after-push hook, a reviewer saying
+"look at the desk". A poll every minute is one small read per desk and answers
+in under a minute, whether or not any notification ever arrives. The watch is
+still taken — when a ring does land it is faster, and it costs nothing to
+have — but nothing depends on it.
 
-**Run this in a session of its own**, not in the one doing the work. Two
-sessions watching one desk is not an error — the claims and the pickup are
-written with a session id and taken over only when stale — but it wastes both.
+**Run this in a session of its own**, not in the one doing the work: a session
+mid-task cannot answer, and one waking every minute cannot do a long task.
 
 ## Take the desks
 
@@ -45,14 +49,25 @@ Then answer whatever is already waiting, exactly as `/review-answer` describes,
 and collect any decision already recorded, as `/review-collect` describes. A desk
 does not start being attended from the moment you looked.
 
-Say in one line what is watched and what was waiting, then stop and be idle. Do
-not poll the store: polling is what the doorbell replaces, and a session in a
-loop is a session with no gap between turns, which is the thing this exists to
-avoid.
+Then start the poll, which is what actually serves the desk:
 
-## Whenever a ring arrives
+    /loop 1m /review-answer
 
-An "Artifact changed" notice for a watched desk. Handle it as
+That is the existing loop machinery running the existing answering command: every
+minute, read each desk, answer anything waiting, and say nothing when there is
+nothing. Leave the terminal alone after that.
+
+Say in one line what is watched, what was waiting, and that the poll is running.
+
+**When the review is over** — the desks collected, or the reviewer gone for the
+day — stop the loop. A minute-by-minute poll of a quiet desk is a cost with no
+reader on the other end, and the session-start sweep will find anything that
+arrives while nothing is running.
+
+## Whenever a ring arrives, or the poll comes round
+
+A poll that finds something waiting, or — when the notification does arrive — an
+"Artifact changed" notice for a watched desk. Both are the same work. Handle it as
 `/review-desk` describes under "Whenever a ring arrives" — stamp presence named
 after the version in the notice, in the same batch as the reads — then:
 
