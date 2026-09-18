@@ -84,7 +84,7 @@ const PUBLISH_CODES = ['conflict', 'not_writer', 'not_declared', 'too_large', 'i
 // Runs in every frame before any of its scripts. Serialised by Playwright, so it
 // may use only its argument.
 function installStub({seed, capabilities, publishError, getDelay, getFailures, leases: held,
-  listening = 'available', composerOpens = true,
+  listening = 'available', composerOpens = true, sendToClaudeError = null,
     subscribeFailures, setFailures, setDelay, rules, level, levels, cacheFirst, firstFromCache}){
   const frozen = v => {
     if (v && typeof v === 'object'){ Object.values(v).forEach(frozen); Object.freeze(v); }
@@ -362,12 +362,24 @@ function installStub({seed, capabilities, publishError, getDelay, getFailures, l
   // listening, then open the shell's own composer on what the reviewer
   // selected. The page never posts -- the shell does -- so the stub records the
   // opens and answers canSendToClaude from the test's `listening` option.
-  const opens = [];
+  const opens = [], sent = [];
   const comments = strict('comments', {
     canSendToClaude: async () => listening,
     anchorFor: async el => {
       if (!el || !el.ownerDocument) throw {code: 'invalid', message: 'not an element'};
       return {path: el.id || el.tagName, x: 0, y: 0};
+    },
+    // What the page sends, and to whom: the stub records it so a test can read
+    // the exact text a desk question carries.
+    sendToClaude: async target => {
+      if (!target || typeof target.text !== 'string' || !target.text.trim())
+        throw {code: 'invalid', message: 'no text'};
+      if (sendToClaudeError) throw {code: sendToClaudeError, message: 'stubbed'};
+      const id = 't' + (++counter.version);
+      sent.push({text: target.text, anchor: target.anchor || null,
+                 threadId: target.threadId || id});
+      log.push({op: 'sendToClaude', text: target.text});
+      return {threadId: target.threadId || id, commentId: 'c' + id};
     },
     openComposer: async target => {
       const t = target && (target.range ? 'range' : target.element ? 'element' : 'bad');
@@ -379,6 +391,7 @@ function installStub({seed, capabilities, publishError, getDelay, getFailures, l
     },
   });
   window.__desk.opens = () => clone(opens);
+  window.__desk.sent = () => clone(sent);
   window.claude = strict('claude', {
     use: async name => (capabilities.includes(name) ? {db, artifact, comments}[name] || null : null),
   });
@@ -401,7 +414,7 @@ const skeleton = html => '<!doctype html><html><head>'
 // view that cannot ring, [] for one that cannot reach the store. `declared` is the
 // capabilities object build_desk.py printed, whose db rules the stub enforces.
 function stubOptions({seed = {}, capabilities = ['db', 'artifact', 'comments'], publishError = null,
-  listening = 'available', composerOpens = true,
+  listening = 'available', composerOpens = true, sendToClaudeError = null,
     getDelay = 0, getFailures = 0, leases = {}, subscribeFailures = {}, setFailures = {}, setDelay = 0,
     level = 'interact', cacheFirst = {}, firstFromCache = false}, declared){
   const unknown = capabilities.filter(c => !['db', 'artifact', 'comments'].includes(c));
@@ -418,7 +431,7 @@ function stubOptions({seed = {}, capabilities = ['db', 'artifact', 'comments'], 
   }
   return {seed, capabilities, publishError, getDelay, getFailures, leases, subscribeFailures, setFailures,
     setDelay, rules, level, levels: LEVELS, cacheFirst, firstFromCache: !!firstFromCache,
-    listening, composerOpens};
+    listening, composerOpens, sendToClaudeError};
 }
 
 // Everything a test does to one view. `frame` is a Page for a lone desk, or the

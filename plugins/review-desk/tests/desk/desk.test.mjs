@@ -81,13 +81,13 @@ test('a row with no text is not a step, and the page says nothing rather than so
 
 /* ---------------- a question reaches the session ---------------- */
 
-test('asking opens the platform’s composer on what the reviewer selected', async () => {
+test('a question carries the passage, the reviewer’s words, and an instruction not to guess', async () => {
   desk = await open(browser, {data: payload({body: '## Rule\n\nAt most one phase may be open.\n'})});
   await ready(desk);
   assert.match(await desk.page.textContent('#askState'), /A session is listening/);
-  assert.equal(await desk.page.$eval('#ask', el => el.disabled), false);
+  assert.equal(await desk.page.$eval('#ask', el => el.disabled), true, 'nothing typed yet');
 
-  // Select a passage the way a reviewer would, then ask about it.
+  // Select the passage, the way a reviewer does before asking about it.
   await desk.page.evaluate(() => {
     const p = [...document.querySelectorAll('#sheet p')].find(x => x.textContent.includes('one phase'));
     const r = document.createRange();
@@ -98,31 +98,65 @@ test('asking opens the platform’s composer on what the reviewer selected', asy
   });
   await desk.page.waitForFunction(() =>
     document.getElementById('ask').textContent.includes('what you selected'));
-  await desk.page.click('#ask');
+  assert.match(await desk.page.textContent('#quoted'), /At most one phase may be open/);
 
-  const opens = await desk.page.evaluate(() => window.__desk.opens());
-  assert.equal(opens.length, 1);
-  assert.equal(opens[0].on, 'range', 'anchored to the passage, not the whole page');
-  assert.match(opens[0].text, /At most one phase may be open/);
-  assert.match(await desk.page.textContent('#askState'), /Type your question, then press Send to Claude/);
+  await desk.page.fill('#question', 'Is this one requirement or two?');
+  await desk.page.click('#ask');
+  const sent = await desk.page.evaluate(() => window.__desk.sent());
+  assert.equal(sent.length, 1);
+  assert.match(sent[0].text, /^User states from the desk, on “At most one phase may be open\.”:/);
+  assert.match(sent[0].text, /Is this one requirement or two\?/);
+  // The instruction that makes the quick reply a receipt rather than a guess.
+  assert.match(sent[0].text, /Do not answer this from context/);
+  assert.match(sent[0].text, /Reply with exactly: "Taken to the session\."/);
+  assert.match(sent[0].text, /with the repository and its tools/);
+  assert.ok(sent[0].anchor, 'anchored to the passage');
+
+  assert.equal(await desk.page.inputValue('#question'), '', 'the box is cleared once sent');
+  assert.match(await desk.page.textContent('#askState'), /answers in the thread on this page/);
 });
 
-test('with nothing selected, asking anchors to the page being read', async () => {
-  desk = await open(browser);
+test('with nothing selected the question is about the page being read', async () => {
+  desk = await open(browser, {data: payload({
+    documents: [{name: 'docs/spec.md', text: '# Spec\n\nOne rule.', base: null}]})});
   await ready(desk);
-  assert.match(await desk.page.textContent('#ask'), /Ask about this page/);
+  await desk.page.click('[data-leaf="1"]');
+  await desk.page.fill('#question', 'Why is this file here at all?');
   await desk.page.click('#ask');
-  const opens = await desk.page.evaluate(() => window.__desk.opens());
-  assert.deepEqual(opens.map(o => o.on), ['element']);
+  const sent = await desk.page.evaluate(() => window.__desk.sent());
+  assert.match(sent[0].text, /^User states from the desk, on docs\/spec\.md:/);
 });
 
-test('when no session is listening the page says so, and does not offer to ask', async () => {
+test('when no session is listening the page says so, and will not send', async () => {
   // The answer the old desk never had: it rang its doorbell into the dark.
   desk = await open(browser, {listening: 'no_session'});
   await ready(desk);
+  await desk.page.fill('#question', 'Anyone there?');
   assert.equal(await desk.page.$eval('#ask', el => el.disabled), true);
   assert.match(await desk.page.textContent('#askState'), /No session is listening right now/);
-  assert.deepEqual(await desk.page.evaluate(() => window.__desk.opens()), []);
+  assert.deepEqual(await desk.page.evaluate(() => window.__desk.sent()), []);
+});
+
+test('a refusal keeps the reviewer’s words and says what happened', async () => {
+  desk = await open(browser, {sendToClaudeError: 'claude_unavailable'});
+  await ready(desk);
+  await desk.page.fill('#question', 'Does the head still match?');
+  await desk.page.click('#ask');
+  await desk.page.waitForFunction(() =>
+    document.getElementById('askState').textContent.includes('could not reach a session'));
+  assert.match(await desk.page.textContent('#askState'), /nothing was posted/);
+  assert.equal(await desk.page.inputValue('#question'), 'Does the head still match?',
+    'the question is not thrown away');
+});
+
+test('consent not yet given is said as itself, not as a failure', async () => {
+  desk = await open(browser, {sendToClaudeError: 'consent_required'});
+  await ready(desk);
+  await desk.page.fill('#question', 'Why this bound?');
+  await desk.page.click('#ask');
+  await desk.page.waitForFunction(() =>
+    document.getElementById('askState').textContent.includes('Allow this page to comment'));
+  assert.equal(await desk.page.inputValue('#question'), 'Why this bound?');
 });
 
 test('a view that cannot comment at all says that, rather than failing when pressed', async () => {

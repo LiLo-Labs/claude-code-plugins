@@ -534,6 +534,44 @@ class Desk(unittest.TestCase):
         self.assertIn("cap the id or carry an excerpt", publish)
 
 
+class Asking(unittest.TestCase):
+    """A question from the desk is answered by this session, with tools. The
+    platform answers it first, from context alone, and that cannot be switched
+    off -- so the desk controls what that reply is asked to do."""
+    doc = read("review-desk.md")
+
+    def test_the_quick_reply_is_told_to_be_a_receipt(self):
+        text = flat(section(self.doc, "A question reaches you as a comment"))
+        self.assertIn("User states from the desk, on <the passage>:", text)
+        self.assertIn('reply with exactly "Taken to the session."', text)
+        self.assertIn("It cannot be switched off", text)
+        self.assertIn("the same armed mechanism is what delivers the comment", text)
+
+    def test_the_session_writes_the_answer_over_it(self):
+        text = flat(section(self.doc, "A question reaches you as a comment"))
+        self.assertIn("do the work with your own tools", text)
+        self.assertIn("acknowledge_duplicate: true", text)
+        self.assertIn("correct it plainly", text.lower())
+
+    def test_the_page_carries_that_instruction_itself(self):
+        # The doc is not enough: the words are sent by the page, so they live in
+        # the template too, and the two must not drift.
+        with open(os.path.join(ROOT, "templates", "review.html"), encoding="utf-8") as f:
+            page = f.read()
+        self.assertIn("Do not answer this from context.", page)
+        # Wrapped across two source lines in the template, so match the halves.
+        self.assertIn('Reply with exactly: "Taken to ', page)
+        self.assertIn("the session.\" The session itself answers here", page)
+        self.assertIn("User states from the desk, on ", page)
+
+    def test_progress_is_written_as_the_work_happens(self):
+        text = flat(section(self.doc, "Your work reaches the reviewer as you do it"))
+        self.assertIn('collection: "review/pr-<number>/progress"', text)
+        self.assertIn('"kind": "doing" | "found" | "wrong" | "done" | "said"', text)
+        self.assertIn("the line you would have written in the terminal", text)
+        self.assertIn("nothing to notify", text)
+
+
 class Outcomes(unittest.TestCase):
     def test_every_enumeration_of_outcomes_includes_closed_with_one_meaning(self):
         # The page renders a `closed` outcome and review-collect reports one, but
