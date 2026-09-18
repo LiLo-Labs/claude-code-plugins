@@ -253,39 +253,35 @@ object the build script printed after the page's path. For pull request 12 it is
 
     {"db": {"rules": [
        {"path": "review/pr-12",           "write": "interact"},
-       {"path": "review/pr-12/replies",   "write": "owner"},
-       {"path": "review/pr-12/presence",  "write": "owner"},
+       {"path": "review/pr-12/progress",  "write": "owner"},
        {"path": "review/pr-12/context",   "write": "owner"},
        {"path": "review/pr-12/documents", "write": "owner"}]},
-     "artifact": {}}
+     "comments": {}}
 
-`db` holds the conversation and the decision, where this session reads them and
-writes its replies. `artifact` is the doorbell: when the reviewer sends a
-message or decides, the page publishes one small file into itself, and a new
-version is the one thing a page can do that reaches this session. There is no
-`sample`: the chat goes to this session, not to a call the page makes itself,
-so the reviewer is never asked to consent to or pay for one.
+`db` carries two things: the decision, which the page writes, and everything you
+write for the reviewer to see — your work as it happens under `progress`, the
+files under `documents`, the description and the pickup under `context`.
+
+`comments` is how a question leaves the page. The full form, not
+`composer_only`: the page composes the message itself, because the platform
+answers a comment sent to Claude before you see it and what it is asked to do is
+the only part of that anyone controls. The page also uses `canSendToClaude()` to
+tell the reviewer whether any session is listening before they type.
+
+There is no `artifact`. That was the doorbell — the page republishing itself to
+notify a watching session — and it is gone, because the notification is lost
+often enough to be useless. There is no `sample` either: the answer comes from
+this session, with this repository and its tools, not from a call the page makes
+on its own.
 
 The rules say who may write where. Without them, anyone the desk is shared with
-can write every document in its store, including a reply the page shows as
-yours or a pickup that says the request was merged. Replies, presence stamps,
-context and documents are written only by this session, which writes as the
-artifact's owner, so they need `owner`. The page stores the discussion and the
-decision in `review/pr-<number>`, and takes its ring lease under it, as whoever
-is reading, so that document stays at `interact`. A viewer the desk is shared
-with can therefore still write the discussion and a decision. That is what
-reviewing is, and it means a desk should be shared only with people whose
-decision you would act on.
-
-The discussion document holds the reviewer's messages and, for each one, a
-`"via": "session"` turn saying only where it has got to. Your answers are not
-copied into it. A desk saved before 0.8.0 may still hold a copy in such a turn's
-`content`, and any viewer can write text there that claims to be yours, so the
-page never shows it: as the working session's words it shows only what `replies`
-holds. Treat the discussion document the same way. Your own earlier answers are
-the documents in `replies`, never the `content` of a `"via": "session"` turn. The
-reviewer's messages in it are written by whoever is reading, and the rules do
-not say which viewer wrote one.
+can write every document in its store, including a line the page shows as your
+work or a pickup that says the request was merged. `progress`, `context` and
+`documents` are written only by this session, which writes as the artifact's
+owner, so they need `owner`. The decision in `review/pr-<number>` is written by
+whoever is reading, so that document stays at `interact`: a viewer the desk is
+shared with can record a decision. That is what reviewing is, and it means a
+desk should be shared only with people whose decision you would act on.
 
 Rules are fixed when the page is published. Republishing an older desk with this
 object is what closes it, and gives it the new chat too.

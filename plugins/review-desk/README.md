@@ -75,15 +75,7 @@ same version. A desk is a published page: it stays the version that published
 it, so a fix that has shipped reaches an open desk only when that desk is
 republished.
 
-The page needs the `db` and `artifact` capabilities. Without `db` neither a
-message nor a decision can reach the session. The build script prints the exact
-object to publish with: `db` carries write rules, so only the desk's owner (the
-session) can write replies, presence, context and documents, while anyone the
-desk is shared with can still write the discussion and the decision. The page
-shows the session's words only from its replies. Since 0.8.0 the discussion
-document holds the reviewer's messages and where each one has got to, but no copy
-of the answers, which any of those viewers could have written. A desk published
-before 0.7.0 has no rules until it is republished.
+The page needs the `db` and `comments` capabilities, and the build script prints the exact object to publish with. Without `db` a decision cannot reach the session and the session's work cannot reach the page; without `comments` a question cannot leave the page. The rules in that object keep what the session writes — its work, the files, the description — owner-only, so a viewer cannot write a line the page would show as the session's.
 
 **Approve** asks once before it records anything: the page names the pull request
 and the commit it would merge, says how many answers are still being written or
