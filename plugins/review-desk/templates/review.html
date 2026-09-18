@@ -54,6 +54,11 @@ h1#title{font-size:22px;font-weight:600;letter-spacing:-0.015em;margin:0 0 3px;
   letter-spacing:0.08em;color:var(--faint);margin:0 0 1px}
 .step.found .kind{color:var(--good)} .step.wrong .kind{color:var(--mark)}
 .step.said .kind{color:var(--cool)} .step.done .what{color:var(--soft)}
+.step.asked .kind{color:var(--ink)}
+.step.asked .what{border-left:2px solid var(--edge);padding-left:9px}
+.step .on{display:block;font-size:12px;color:var(--faint);margin-top:2px}
+.step .waiting{display:block;font-size:12px;color:var(--faint);
+  font-style:italic;margin-top:2px}
 .quiet{color:var(--faint);font-size:13.5px;font-style:italic;margin:0}
 
 /* the documents */
@@ -98,6 +103,8 @@ h1#title{font-size:22px;font-weight:600;letter-spacing:-0.015em;margin:0 0 3px;
 .hljs-string,.hljs-attr,.hljs-addition,.hljs-symbol{color:var(--good)}
 .hljs-number,.hljs-built_in,.hljs-type,.hljs-class .hljs-title{color:var(--cool)}
 .hljs-title,.hljs-function .hljs-title,.hljs-name{color:var(--ink);font-weight:600}
+.hljs-variable,.hljs-template-variable,.hljs-params{color:var(--soft)}
+.hljs-meta{color:var(--faint);font-style:italic}
 .hljs-deletion{color:var(--mark);text-decoration:line-through}
 
 /* the three views, and the redlines */
@@ -179,6 +186,15 @@ footer{padding:22px 0 0;font-size:12.5px;color:var(--faint);line-height:1.6}
 footer .built{margin-top:10px;font-family:var(--mono);font-size:11.5px}
 .where{display:block;margin:10px 0 0;font-size:12px;color:var(--faint)}
 </style>
+
+<!-- highlight.js, pinned by version and by hash. Subresource integrity because
+     this runs inside the page, and the page carries a decision. The hash was
+     computed from the downloaded file and checked against the one cdnjs
+     publishes; both are sha512 and they agree. A changed file fails to load and
+     the page loses colour, nothing more. -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"
+        integrity="sha512-D9gUyxqja7hBtkWpPWGt9wfbfaMGVt9gnyCvYa+jojwwPHLCzUm5i8rpk7vD7wNee9bA35eYIjobYPaQuKS1MQ=="
+        crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 
 <div class="page">
   <h1 id="title">Review Desk</h1>
@@ -809,20 +825,36 @@ function redline(before, after, page, note = ''){
   // Prose goes through the markdown parser as a document, marks and all.
   if (prose) return head + marks(markdown(lines.map(l => l.s).join('\n')));
   // Source keeps every line, changed or not: a file read as a patch of
-  // fragments cannot be judged, and the reviewer asked to see all of it.
+  // fragments cannot be judged, and the reviewer asked to see all of it. Each
+  // line is coloured on its own rather than the block as a whole, because a
+  // block's highlighting is one run of markup and the marks have to sit inside
+  // it: the cost is that a comment or a string spanning lines loses its colour
+  // after the first, and the gain is that changed code is still code.
+  const lang = tongue(page).lang;
+  const colour = text => {
+    if (!window.hljs || !lang) return esc(text);
+    try {
+      if (!hljs.getLanguage(lang)) return esc(text);
+      return hljs.highlight(text, {language: lang, ignoreIllegals: true}).value;
+    } catch (e) { return esc(text); }
+  };
   return head + '<pre class="redline"><code>' + lines.map(l =>
     '<span class="row ' + (l.t === 'same' ? 'ctx' : l.t) + '">'
-    + marks(esc(l.s)) + '\n</span>').join('') + '</code></pre>';
+    + marks(colour(l.s)) + '\n</span>').join('') + '</code></pre>';
 }
 
 // Highlighting is applied after render rather than baked into the markup, so
 // the parser stays a parser and a missing library costs nothing but colour.
-function paintCode(){
+function paintCode(marked){
   if (!window.hljs) return;
   // Only a block that names its language is highlighted. Left to guess,
   // highlight.js coloured the command docs' untagged JSON and shell lines as CSS
   // or VB.NET, which reads worse than no colour at all.
   document.querySelectorAll('.md pre code[class*="language-"]:not(.language-mermaid)').forEach(el => {
+    // In a redline, a block holding a mark is left plain: highlightElement
+    // rewrites the block's markup and would take the mark with it, and what
+    // changed matters more than what colour it is.
+    if (marked && el.querySelector('ins.rl, del.rl')) return;
     try { hljs.highlightElement(el); } catch (e) {}
   });
 }
@@ -906,10 +938,9 @@ function paint(){
               view === 'base' && baseText(leaf) === null
                 ? 'This request adds this file, so all of it is new.' : '');
   // A redline keeps the document's headings, so the panel can still say where
-  // the reader is. The highlighter and mermaid are skipped: both replace the
-  // markup of a block wholesale, and would drop the marks inside it. Colour and
-  // drawings are worth less than knowing what changed.
-  if (was !== null){ watchHeadings(); return; }
+  // the reader is, and its code blocks are still coloured -- except any block
+  // holding a mark, which highlightElement would rewrite and strip.
+  if (was !== null){ paintCode(true); watchHeadings(); return; }
   paintCode();
   watchHeadings();
 }
@@ -1135,21 +1166,56 @@ const PR = () => 'review/pr-' + DATA.number;
 // renders. This is the direction that always worked and went unused.
 const KINDS = {doing: 'doing', found: 'found', wrong: 'went wrong', done: 'done',
   said: 'answer', asked: 'you asked'};
-let work = [];
+let work = [], asked = [];
+// Two streams, rendered as one transcript. The session writes `progress`, which
+// only an owner may write, so nothing in a browser can forge its narration. The
+// page writes `asked` when the reviewer sends a question -- it has to, because
+// `comments` is write-only: the shell renders the thread, and no page can read
+// one back. Without this the desk could send a question and never show it, and
+// the reviewer watched their words disappear.
+// `mine` holds a question this page has shown but the store has not confirmed,
+// so a question is never on screen one moment and gone the next because a
+// snapshot arrived, or because the write failed.
+let mine = [];
+function feed(){
+  const seen = new Set();
+  return work.concat(asked, mine)
+    .filter(r => { const k = String(r.id || ''); if (seen.has(k)) return false; seen.add(k); return true; })
+    .sort((a, b) => String(a.at || '').localeCompare(String(b.at || ''))
+      || String(a.id || '').localeCompare(String(b.id || '')))
+    .slice(-300);
+}
 function drawWork(){
   const el = $('work');
-  if (!work.length){
+  const rows = feed();
+  if (!rows.length){
     el.innerHTML = '<p class="quiet">Nothing from the session yet. What it does while you '
       + 'wait shows here.</p>';
     $('pulse').hidden = true;
     return;
   }
-  $('pulse').hidden = !work.some(r => r.kind === 'doing');
-  rebuild(el, work.map(r =>
+  // Something is outstanding while the session says it is working, and while the
+  // last thing that happened was a question nobody has answered yet.
+  const last = rows[rows.length - 1];
+  $('pulse').hidden = !(rows.some(r => r.kind === 'doing') || last.kind === 'asked');
+  rebuild(el, rows.map((r, i) =>
     '<div class="step ' + esc(r.kind || 'doing') + '">'
     + '<time>' + esc(String(when(r.at)).replace(/^ at /, '')) + '</time>'
     + '<div class="what"><span class="kind">' + esc(KINDS[r.kind] || r.kind || 'doing')
-    + '</span>' + esc(r.text || '') + '</div></div>').join(''));
+    + '</span>' + esc(r.text || '')
+    + (r.kind === 'asked' && r.where ? '<span class="on">on ' + esc(r.where) + '</span>' : '')
+    + (r.kind === 'asked' && i === rows.length - 1
+      ? '<span class="waiting">Sent to the session. Its answer arrives here.</span>' : '')
+    + '</div></div>').join(''));
+}
+
+// A question is kept as well as shown, so it survives a reload and reaches a
+// second device -- and so the session can read back what it was asked without
+// depending on a thread it cannot query. Returns the failure code, or nothing.
+async function keep(row){
+  if (!db) return 'no store';
+  try { await db.doc(PR() + '/asked/' + row.id).set(row); }
+  catch (e){ return (e && e.code) || 'unknown'; }
 }
 
 /* ---- asking about a passage ---- */
@@ -1354,8 +1420,17 @@ $('ask').addEventListener('click', async () => {
     await comments.sendToClaude({anchor, text: askText(where, question)});
     $('question').value = '';
     held = null;
-    note = 'Asked. The session answers in the thread on this page, and what it does '
-      + 'while it works shows at the top.';
+    // Shown from here, before the store answers: the question is on screen the
+    // moment it leaves, and the snapshot replaces this row with the stored one.
+    const row = {id: String(Date.now()) + '-' + Math.random().toString(36).slice(2, 6),
+      at: new Date().toISOString(), kind: 'asked', text: question, where: String(where)};
+    mine = mine.concat([row]);
+    drawWork();
+    const failed = await keep(row);
+    note = failed
+      ? 'Asked — the session has it. This page could not store the question ('
+        + failed + '), so the record above will not survive a reload.'
+      : 'Asked. It is in the record above, and the session answers there.';
     openPanel(false);
   } catch (e){
     const code = (e && e.code) || 'unknown';
@@ -1453,6 +1528,17 @@ function listen(){
       work = snap.docs.map(d => Object.assign({id: d.id}, d.data()))
         .filter(r => typeof r.text === 'string')
         .sort((a, b) => String(a.id).localeCompare(String(b.id)))
+        .slice(-300);
+      drawWork();
+    });
+
+  // And the questions asked from this desk. They are written by the page rather
+  // than the session, so they come back from the store like anything else --
+  // which is what makes them survive a reload and show up on a second device.
+  follow('asked', 'your questions', 'page',
+    () => db.collection(PR() + '/asked'), snap => {
+      asked = snap.docs.map(d => Object.assign({id: d.id}, d.data(), {kind: 'asked'}))
+        .filter(r => typeof r.text === 'string')
         .slice(-300);
       drawWork();
     });

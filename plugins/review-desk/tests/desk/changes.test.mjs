@@ -127,6 +127,62 @@ test('a source file keeps every line, with the changed one marked in place', asy
   assert.equal(drawn[39][1], 'x_39 = 39');
 });
 
+// The harness blocks every outside request, so highlight.js never loads in a
+// test. These stub it the way the real library behaves -- wrapping tokens in
+// spans and escaping the text -- to prove the marks survive being coloured,
+// which is the part that could quietly break.
+const withHljs = {init: () => {
+  window.hljs = {
+    getLanguage: name => name === 'python' || name === 'javascript',
+    highlight: (code, opts) => ({
+      value: code.replace(/[&<>]/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;'}[c]))
+        .replace(/\b(def|return|const|let)\b/g, '<span class="hljs-keyword">$1</span>'),
+    }),
+    highlightElement: el => {
+      el.innerHTML = el.innerHTML.replace(/\b(def|return|const|let)\b/g,
+        '<span class="hljs-keyword">$1</span>');
+    },
+  };
+}};
+
+test('a changed line of source is coloured and marked at once', async () => {
+  const before = ['def one():', '    return 1', '', 'def two():', '    return 2'].join('\n');
+  const after = before.replace('return 2', 'return 22');
+  desk = await open(browser, {...withHljs, data: payload({baseRefName: 'main',
+    documents: [{name: 'tools/a.py', text: after, base: before}]})});
+  await desk.page.waitForSelector('.leaf[data-leaf="1"]');
+  await openNotes();
+  await desk.page.click('[data-view="base"]');
+  await desk.page.waitForSelector('#sheet pre.redline');
+
+  // Keywords coloured on every line, including the one that changed.
+  assert.ok(await desk.page.locator('#sheet .row.ctx .hljs-keyword').count() >= 2,
+    'unchanged lines are coloured');
+  assert.equal(await desk.page.locator('#sheet .row.both .hljs-keyword').count(), 1,
+    'and so is the line that changed');
+  // And the marks are still there, inside the coloured line.
+  assert.deepEqual(await went(), ['2']);
+  assert.deepEqual(await arrived(), ['22']);
+});
+
+test('in prose, an unchanged code block is coloured and a changed one keeps its marks', async () => {
+  const before = '# Doc\n\n```python\ndef stays():\n    return 1\n```\n\n```python\ndef moves():\n    return 2\n```\n';
+  const after = before.replace('return 2', 'return 22');
+  desk = await open(browser, {...withHljs, data: payload({baseRefName: 'main',
+    documents: [{name: 'docs/spec.md', text: after, base: before}]})});
+  await desk.page.waitForSelector('.leaf[data-leaf="1"]');
+  await openNotes();
+  await desk.page.click('[data-view="base"]');
+  await marked();
+  const blocks = desk.page.locator('#sheet pre code');
+  assert.equal(await blocks.count(), 2);
+  assert.ok(await blocks.nth(0).locator('.hljs-keyword').count() >= 1,
+    'the block that did not change is coloured');
+  assert.equal(await blocks.nth(1).locator('.hljs-keyword').count(), 0,
+    'the block holding a mark is left plain rather than rewritten');
+  assert.deepEqual(await arrived(), ['22']);
+});
+
 test('a line that only went, and one that only arrived, are marked whole', async () => {
   const before = ['keep me', 'delete me', 'keep me too'].join('\n');
   const after = ['keep me', 'keep me too', 'added at the end'].join('\n');
