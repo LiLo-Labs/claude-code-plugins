@@ -441,6 +441,15 @@ class Desk(unittest.TestCase):
         # A progress rewrite renews the claim, or a long answer looks abandoned.
         self.assertIn('keeping `"status": "working"` and setting `at` to now', body)
 
+    def test_a_message_is_claimed_before_the_work_not_with_the_answer(self):
+        # Observed on LiLo-Labs/accrue#11: three messages, each claimed and
+        # answered in the same second, twenty-five minutes after they were sent.
+        # The reviewer saw a silent desk for that whole time.
+        text = flat(section(self.doc, "When they ask the working session"))
+        self.assertIn("**Claim it at once**, before doing the work", text)
+        self.assertIn("before any other tool call", text)
+        self.assertIn("a ring reaches a session only when its current turn ends", text)
+
     def test_a_ring_can_arrive_twice_and_the_stamp_is_what_stops_the_second(self):
         # The page rings again when no stamp answered the first ring, so a session
         # that handles a ring must expect a duplicate rather than treat it as a

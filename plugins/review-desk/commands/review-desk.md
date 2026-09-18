@@ -477,7 +477,14 @@ is the whole of the work:
    `review/pr-<number>/replies`, and get `review/pr-<number>/context/pickup`.
    A message waiting on you is a turn with `"to": "session"` that has either
    no reply document, or a stale claim (below).
-2. **Claim it at once**, before doing the work, so the page stops saying "sent".
+2. **Claim it at once**, before doing the work, in the batch after the reads and
+   before any other tool call. This is the step that is easiest to fold into the
+   answer and hardest for the reviewer to forgive: a ring reaches a session only
+   when its current turn ends, so a message sent while you are mid-task waits
+   there, unseen, for as long as that task runs — measured at twenty-five minutes
+   on a real desk. The claim is the first moment the page can say you have it.
+   Writing it together with the answer, as one write at the end, leaves the
+   reviewer watching a desk that says nothing for half an hour.
 3. **Do what the question needs**, with whatever it takes: read the code, run
    the tests, search the web. The turn carries `quote`, the passage they
    highlighted, and `reading`, the page and section they were on.
