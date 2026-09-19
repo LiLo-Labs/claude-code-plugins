@@ -260,3 +260,81 @@ def footprint(frames, rest, reference_frames, offset=(0, 0)):
         return 0.0, 0, 0
     wrong = int((ours & ~truth).sum())
     return wrong / float(total), wrong, total
+
+
+# -- does the outline MOVE the way the artist's does? -----------------------
+#
+# `footprint` compares two clips as sets of disturbed pixels, and a set has no
+# shape. That is what lets a clip score well by sweeping a part through the
+# region the artist happens to disturb, whatever it looks like while doing it --
+# the failure mode this plugin has now hit eleven times, where a number improved
+# and the picture got worse. The grazing deer is the sharpest case: at a 80
+# degree neck rotation it scored 17.7%, the best figure ever measured here, and
+# the head does not lower at all.
+#
+# Ask about the silhouette's SHAPE over time instead. The artist's deer drops
+# the top of its outline by 19 rows and pushes the left edge out by 13 as the
+# head goes to the grass. Every clip this plugin can produce for that deer moves
+# the top edge by 0 to 2. One subtraction says what eleven renders said.
+#
+# Two properties make this worth keeping beside `footprint` rather than instead
+# of it. It needs NO alignment -- each clip's travel is measured against its own
+# frames, so there is no rest pose to place and no byte-exact check to pass
+# first. And it cannot be gamed by moving more: a clip that thrashes scores a
+# LARGER span, not a smaller error, so over- and under-travel are both visible
+# and signed.
+
+OUTLINE = ("top", "bottom", "left", "right", "cy", "cx")
+
+
+def outline(frame):
+    """Where this frame's silhouette begins, ends and sits. None if empty.
+
+    The four extremes and the centroid. Extremes catch a reach -- a sword arm,
+    a head going down to graze -- and the centroid catches the whole figure
+    shifting when no edge happens to be the part that moved.
+    """
+    mask = img.alpha_mask(frame)
+    ys, xs = np.nonzero(mask)
+    if not len(ys):
+        return None
+    return {"top": float(ys.min()), "bottom": float(ys.max()),
+            "left": float(xs.min()), "right": float(xs.max()),
+            "cy": float(ys.mean()), "cx": float(xs.mean())}
+
+
+def travel(frames):
+    """{descriptor: how far it moves across the clip}, peak to peak.
+
+    Peak-to-peak rather than a per-frame difference because a cycle returns to
+    where it started: summing the steps of a loop gives zero however far the
+    character reached.
+    """
+    seen = [shape for shape in (outline(frame) for frame in frames) if shape]
+    if not seen:
+        return {key: 0.0 for key in OUTLINE}
+    return {key: max(s[key] for s in seen) - min(s[key] for s in seen)
+            for key in OUTLINE}
+
+
+def travel_gap(frames, reference_frames, floor=3.0):
+    """{descriptor: (theirs, ours)} where the artist moves and we do not.
+
+    Only descriptors the reference moves by at least `floor` are reported: on a
+    32px sprite a one-pixel disagreement is rounding, and reporting it would
+    bury the deer's seventeen. Positive shortfall means we UNDER-travel, which
+    is the failure this was built for; a negative one means we thrash, which is
+    worth seeing too and so is not filtered out.
+    """
+    theirs, ours = travel(reference_frames), travel(frames)
+    return {key: (theirs[key], ours[key])
+            for key in OUTLINE if theirs[key] >= float(floor)}
+
+
+def understated(frames, reference_frames, floor=3.0):
+    """(worst shortfall in pixels, which descriptor). 0.0 when nothing falls short."""
+    worst, which = 0.0, None
+    for key, (mine, yours) in travel_gap(frames, reference_frames, floor).items():
+        if mine - yours > worst:
+            worst, which = mine - yours, key
+    return worst, which
