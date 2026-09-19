@@ -81,6 +81,21 @@ h1#title{font-size:22px;font-weight:600;letter-spacing:-0.015em;margin:0 0 3px;
   letter-spacing:0.07em;color:var(--faint);margin:0 0 6px}
 .diagram.changed .side:first-child .sideTag{color:var(--mark)}
 .diagram.changed .side:nth-child(2) .sideTag{color:var(--good)}
+/* A diagram is dense and a tablet is small, so any drawing opens full screen,
+   where it can be pinched and dragged at whatever size it needs. */
+.diagram .side, .diagram > div:not(.diagramSource){cursor:zoom-in}
+.blowup{position:fixed;inset:0;z-index:40;background:var(--paper);
+  display:flex;flex-direction:column;
+  padding:calc(8px + env(safe-area-inset-top, 0px)) 8px
+          calc(8px + env(safe-area-inset-bottom, 0px))}
+.blowup-bar{display:flex;align-items:center;gap:8px;flex:none;padding:0 0 8px}
+.blowup-bar .what{flex:1;min-width:0;font-size:12px;color:var(--faint);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.blowup-bar button{min-height:40px;padding:0 14px}
+.blowup-art{flex:1;min-height:0;overflow:auto;touch-action:pinch-zoom pan-x pan-y;
+  -webkit-overflow-scrolling:touch;background:var(--card);border-radius:8px}
+.blowup-art > div{padding:10px;display:inline-block;min-width:100%}
+.blowup-art svg{max-width:none !important;height:auto}
 .diagramSource{margin:4px 0 0;font-size:13px}
 .diagramSource summary{color:var(--faint);cursor:pointer}
 .diagramSource pre{margin:8px 0 0}
@@ -955,6 +970,60 @@ function sideOf(el, drop){
   return out;
 }
 
+// Any drawing opens full screen on a tap, because a diagram worth carrying is
+// denser than a tablet column. Mark asked for it after a third screenshot of
+// labels he could not read: "why not allow for clicking with a magnifying glass
+// and blowing it up?"
+let atScale = 1;
+function blowUp(art, what){
+  const over = document.createElement('div');
+  over.className = 'blowup';
+  const bar = document.createElement('div');
+  bar.className = 'blowup-bar';
+  const say = document.createElement('span');
+  say.className = 'what';
+  say.textContent = what || 'diagram';
+  const out = document.createElement('button');
+  out.className = 'plain'; out.textContent = '−'; out.setAttribute('aria-label', 'Smaller');
+  const inn = document.createElement('button');
+  inn.className = 'plain'; inn.textContent = '+'; inn.setAttribute('aria-label', 'Bigger');
+  const shut = document.createElement('button');
+  shut.className = 'go'; shut.textContent = 'Close';
+  bar.append(say, out, inn, shut);
+  const pane = document.createElement('div');
+  pane.className = 'blowup-art';
+  const inner = document.createElement('div');
+  inner.appendChild(art.cloneNode(true));
+  pane.appendChild(inner);
+  over.append(bar, pane);
+  document.body.appendChild(over);
+
+  // Opens at whatever makes the drawing fill the width, so the first thing the
+  // reviewer sees is bigger than what they tapped, never smaller.
+  // The drawing itself is resized rather than transformed: a transform leaves
+  // the layout box the size it was, so the pane has nothing to scroll and the
+  // enlarged half of the diagram is simply unreachable.
+  const svg = inner.querySelector('svg');
+  const natural = svg ? (svg.viewBox && svg.viewBox.baseVal && svg.viewBox.baseVal.width)
+    || svg.getBoundingClientRect().width : 0;
+  atScale = natural ? Math.max(1, Math.min(3, (pane.clientWidth - 20) / natural)) : 1;
+  const draw = () => {
+    if (!svg || !natural) return;
+    svg.style.width = Math.round(natural * atScale) + 'px';
+    svg.style.height = 'auto';
+    svg.style.maxWidth = 'none';
+  };
+  draw();
+  const step = by => { atScale = Math.max(0.5, Math.min(6, atScale + by)); draw(); };
+  inn.addEventListener('click', () => step(0.25));
+  out.addEventListener('click', () => step(-0.25));
+  const close = () => { over.remove(); document.removeEventListener('keydown', esc); };
+  const esc = e => { if (e.key === 'Escape') close(); };
+  shut.addEventListener('click', close);
+  document.addEventListener('keydown', esc);
+  return over;
+}
+
 function paintDiagrams(marked){
   const blocks = [...document.querySelectorAll('.md pre code.language-mermaid')];
   if (!blocks.length) return;
@@ -995,6 +1064,14 @@ function paintDiagrams(marked){
           }
           const art = document.createElement('div');
           art.innerHTML = svg;
+          art.setAttribute('role', 'button');
+          art.setAttribute('tabindex', '0');
+          art.title = 'Open this diagram full screen';
+          const open = () => blowUp(art, label ? 'this diagram, ' + label : 'this diagram');
+          art.addEventListener('click', open);
+          art.addEventListener('keydown', e => {
+            if (e.key === 'Enter' || e.key === ' '){ e.preventDefault(); open(); }
+          });
           one.appendChild(art);
           box.appendChild(one);
         }
