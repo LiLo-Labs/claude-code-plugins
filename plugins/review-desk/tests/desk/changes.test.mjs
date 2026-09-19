@@ -441,3 +441,29 @@ test('a changed diagram keeps its marked source when the library cannot load', a
     'and what changed in it is still marked');
   assert.deepEqual(desk.errors, []);
 });
+
+test('any drawing opens full screen, and gets out of the way again', async () => {
+  // The drawing needs the library, which never loads here, so the overlay is
+  // driven directly: what is tested is the part that is ours.
+  desk = await open(browser, {context: {hasTouch: true, viewport: {width: 390, height: 780}}});
+  await desk.page.waitForFunction('restore === "done"');
+  const sizes = await desk.page.evaluate(() => {
+    const art = document.createElement('div');
+    art.innerHTML = '<svg viewBox="0 0 900 300" width="900" height="300">'
+      + '<rect width="900" height="300"></rect></svg>';
+    document.body.appendChild(art);
+    blowUp(art, 'this diagram');
+    const svg = document.querySelector('.blowup svg');
+    const opened = Math.round(svg.getBoundingClientRect().width);
+    document.querySelectorAll('.blowup-bar button')[1].click();
+    return {opened, bigger: Math.round(svg.getBoundingClientRect().width),
+      pane: !!document.querySelector('.blowup-art')};
+  });
+  assert.ok(sizes.opened > 390, 'it opens larger than the column it was read in');
+  assert.ok(sizes.bigger > sizes.opened, 'and the plus makes it bigger, not smaller');
+  assert.equal(sizes.pane, true);
+
+  await desk.page.keyboard.press('Escape');
+  assert.equal(await desk.page.locator('.blowup').count(), 0, 'Escape closes it');
+  assert.deepEqual(desk.errors, []);
+});
