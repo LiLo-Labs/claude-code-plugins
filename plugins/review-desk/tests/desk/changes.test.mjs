@@ -376,3 +376,32 @@ test('a wholesale rewrite past the diff table’s cap says so', async () => {
   assert.ok((await went()).some(t => t.includes('old line 0')), 'the old text is struck through');
   assert.ok((await arrived()).some(t => t.includes('new line 0')), 'the new text is underlined');
 });
+
+/* ---------------- diagrams ---------------- */
+
+test('a mermaid block asks for the pinned library, and stays readable when it cannot load', async () => {
+  // The desk carried a comment about drawing diagrams for two versions with no
+  // code under it, so a design document full of them read as a wall of arrows.
+  // Nothing leaves the machine here, so this covers the pin and the fallback.
+  desk = await open(browser, {data: payload({
+    body: '## Shape\n\n```mermaid\ngraph TD\n  A[Desk] --> B[Session]\n```\n'})});
+  await desk.page.waitForFunction('restore === "done"');
+
+  const src = await desk.page.textContent('#sheet pre code.language-mermaid');
+  assert.match(src, /graph TD/, 'the source is still on the page when no drawing arrives');
+  assert.deepEqual(desk.errors, [], 'a library that cannot load is not a page error');
+
+  const asked = desk.wanted().filter(u => u.includes('mermaid'));
+  assert.equal(asked.length, 1, 'fetched once, and only because this page carries a diagram');
+  assert.match(asked[0], /^https:\/\/cdnjs\.cloudflare\.com\/ajax\/libs\/mermaid\/11\.15\.0\//);
+  const tag = await desk.page.$eval('script[src*="mermaid"]',
+    el => ({integrity: el.integrity, cross: el.crossOrigin}));
+  assert.match(tag.integrity, /^sha512-/, 'pinned by hash');
+  assert.equal(tag.cross, 'anonymous');
+});
+
+test('a page with no diagram never fetches the 3 MB library', async () => {
+  desk = await open(browser, {data: payload({body: '## Plain\n\nNo diagrams here.\n'})});
+  await desk.page.waitForFunction('restore === "done"');
+  assert.deepEqual(desk.wanted().filter(u => u.includes('mermaid')), []);
+});

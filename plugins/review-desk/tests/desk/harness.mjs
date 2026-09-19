@@ -436,9 +436,11 @@ function stubOptions({seed = {}, capabilities = ['db', 'artifact', 'comments'], 
 
 // Everything a test does to one view. `frame` is a Page for a lone desk, or the
 // view's Frame in openPair(); both answer the calls the tests make.
-function deskFor(frame, {page, errors, pr, html, close}){
+function deskFor(frame, {page, errors, pr, html, close, wanted = []}){
   const desk = {
     page: frame, errors, pr, html,
+    // URLs the page asked the network for; the route answers none of them.
+    wanted: () => wanted.slice(),
     store: () => frame.evaluate(() => window.__desk.store()),
     log: () => frame.evaluate(() => window.__desk.log()),
     rings: () => frame.evaluate(() => window.__desk.rings()),
@@ -495,6 +497,10 @@ export async function open(browser, options = {}){
   if (options.init) await page.addInitScript(options.init);
   // `clock` may also be install()'s options, {time} starting the clock at a fixed moment.
   if (options.clock) await page.clock.install(options.clock === true ? undefined : options.clock);
+  // Every URL the page reaches for, so a test can check what it asked the
+  // network for without the network answering.
+  const wanted = [];
+  page.on('request', r => wanted.push(r.url()));
   // Nothing leaves the machine: fonts, highlight.js and mermaid are refused, which
   // the page is built to survive (it loses colour and drawings, nothing else).
   await page.route('**/*', route => {
@@ -503,7 +509,7 @@ export async function open(browser, options = {}){
     return route.abort();
   });
   await page.goto(ORIGIN + '/');
-  return deskFor(page, {page, errors, pr: 'review/pr-' + data.number, html,
+  return deskFor(page, {page, errors, pr: 'review/pr-' + data.number, html, wanted,
     close: () => context.close()});
 }
 

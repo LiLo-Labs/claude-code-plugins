@@ -63,6 +63,11 @@ h1#title{font-size:22px;font-weight:600;letter-spacing:-0.015em;margin:0 0 3px;
 .step .waiting{display:block;font-size:12px;color:var(--faint);
   font-style:italic;margin-top:2px}
 .quiet{color:var(--faint);font-size:13.5px;font-style:italic;margin:0}
+/* A drawing is wider than prose more often than not, so it scrolls in its own
+   box rather than pushing the page sideways. */
+.diagram{margin:14px 0;overflow-x:auto;text-align:center}
+.diagram svg{max-width:100%;height:auto}
+.undrawn{margin:12px 0 4px;font-size:13px;color:var(--mark)}
 
 /* the documents */
 .leaves{display:flex;gap:3px;overflow-x:auto;margin:0;border-bottom:1px solid var(--edge);
@@ -890,6 +895,69 @@ function paintCode(marked){
 //
 // The page draws its own rather than leaning on the host's built-in handling of
 // pre.mermaid, which cannot be themed from these tokens and was never shown to
+// work on a node the page inserts after load. That comment stood here for two
+// versions with no code under it: the desk has never drawn a diagram, and a
+// design document full of them read as a wall of arrows. This is the code.
+const MERMAID_URL = 'https://cdnjs.cloudflare.com/ajax/libs/mermaid/11.15.0/mermaid.min.js';
+const MERMAID_SRI = 'sha512-HH52omhHpZF6RfVnGiQwYgYm4H/ya2xsZYLl5xJ4'
+  + '+tLfX+rN4+8zF7V/H/KLeicPrKZYi1g6iBmVkk2AhXTGlg==';
+let mermaidAsked = null;
+function loadMermaid(){
+  if (mermaidAsked) return mermaidAsked;
+  mermaidAsked = new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = MERMAID_URL;
+    s.integrity = MERMAID_SRI;
+    s.crossOrigin = 'anonymous';
+    s.referrerPolicy = 'no-referrer';
+    s.onload = () => resolve(window.mermaid || null);
+    s.onerror = () => reject(Object.assign(new Error('mermaid did not load'), {quiet: true}));
+    document.head.appendChild(s);
+  });
+  return mermaidAsked;
+}
+
+// One id per drawing, per page load: mermaid puts the id in the SVG it returns,
+// and two drawings sharing one id share the arrowhead definitions the second
+// then removes from the first.
+let drawn = 0;
+// A block whose source has not changed is left alone, so a redraw of the sheet
+// does not refetch or reparse what is already on screen.
+function paintDiagrams(marked){
+  const blocks = [...document.querySelectorAll('.md pre code.language-mermaid')]
+    .filter(el => !(marked && el.querySelector('ins.rl, del.rl')));
+  if (!blocks.length) return;
+  loadMermaid().then(mermaid => {
+    if (!mermaid) return;
+    mermaid.initialize({startOnLoad: false, securityLevel: 'strict',
+      theme: matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'default',
+      fontFamily: getComputedStyle(document.body).fontFamily});
+    blocks.forEach(async el => {
+      const pre = el.parentElement;
+      if (!pre || !pre.isConnected) return;
+      const source = el.textContent;
+      try {
+        const {svg} = await mermaid.render('rd-diagram-' + (++drawn), source);
+        if (!pre.isConnected) return;
+        const box = document.createElement('div');
+        box.className = 'diagram';
+        box.innerHTML = svg;
+        pre.replaceWith(box);
+      } catch (e){
+        // The source stays where it is, with the parser's complaint above it:
+        // a diagram that will not parse is a fact about the request, and
+        // hiding it would leave the reviewer wondering what they were missing.
+        if (!pre.isConnected || pre.previousElementSibling
+          && pre.previousElementSibling.className === 'undrawn') return;
+        const why = document.createElement('p');
+        why.className = 'undrawn';
+        why.textContent = 'This diagram did not draw: '
+          + String((e && e.message) || e).split('\n')[0];
+        pre.parentNode.insertBefore(why, pre);
+      }
+    });
+  }).catch(() => {});
+}
 
 /* ---- lifted: the page shell ---- */
 // A commit or a long name, shortened for a line of prose.
@@ -960,8 +1028,9 @@ function paint(){
   // A redline keeps the document's headings, so the panel can still say where
   // the reader is, and its code blocks are still coloured -- except any block
   // holding a mark, which highlightElement would rewrite and strip.
-  if (was !== null){ paintCode(true); watchHeadings(); return; }
+  if (was !== null){ paintCode(true); paintDiagrams(true); watchHeadings(); return; }
   paintCode();
+  paintDiagrams();
   watchHeadings();
 }
 
