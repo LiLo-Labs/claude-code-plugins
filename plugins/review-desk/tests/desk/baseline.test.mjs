@@ -31,12 +31,12 @@ test('a page write to a session path is refused under the desk rules, and the pa
       catch (e){ out[p] = e.code; }
     }
     return out;
-  }, ['review/pr-42/context/pickup', 'review/pr-42/replies/m1', 'review/pr-42/presence/1700000000',
+  }, ['review/pr-42/context/pickup', 'review/pr-42/progress/0001',
     'review/pr-42/documents/d1']);
 
   desk = await open(browser);
   await desk.page.waitForFunction('restore === "done"');
-  assert.deepEqual(Object.values(await tryWrites(desk)), Array(4).fill('invalid_argument'));
+  assert.deepEqual(Object.values(await tryWrites(desk)), Array(3).fill('invalid_argument'));
   await approve(desk);
   const store = await desk.until((s, pr) => s[pr] && s[pr].decision === 'approved', desk.pr);
   assert.deepEqual(Object.keys(store), [desk.pr]);
@@ -45,7 +45,7 @@ test('a page write to a session path is refused under the desk rules, and the pa
   // The rules never limit the owner, so the same writes land from an owner's view.
   desk = await open(browser, {level: 'owner'});
   await desk.page.waitForFunction('restore === "done"');
-  assert.deepEqual(Object.values(await tryWrites(desk)), Array(4).fill('stored'));
+  assert.deepEqual(Object.values(await tryWrites(desk)), Array(3).fill('stored'));
 });
 
 test('the stub update merges nested objects and replaces arrays, as db.d.ts says', async () => {

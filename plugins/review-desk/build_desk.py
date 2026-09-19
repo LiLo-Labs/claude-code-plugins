@@ -99,12 +99,12 @@ def page_script(page):
 
 # Who may write where in the desk's store (db.d.ts, ACCESS RULES). Without rules
 # every viewer the desk is shared with writes every path, so one could write a
-# reply the page labels "working session", or a pickup reading "Merged". Those
+# line the page shows as the session's work, or a pickup reading "Merged". Those
 # paths are written only by the session, which writes as the artifact's owner.
-# The page itself writes review/pr-N and its rering lease at interact, so that
-# subtree stays open. Rules are fixed at publish: a desk published before these
-# existed stays open until it is republished with them.
-SESSION_PATHS = ("replies", "presence", "context", "documents")
+# The page itself writes review/pr-N, the decision, at interact. Rules are fixed
+# at publish: a desk published before these existed stays open until it is
+# republished with them.
+SESSION_PATHS = ("progress", "context", "documents")
 MAX_RULES = 64
 
 
@@ -114,12 +114,24 @@ def capabilities(number):
     rules += [{"path": base + "/" + name, "write": "owner"} for name in SESSION_PATHS]
     if len(rules) > MAX_RULES:
         raise BuildError("the store allows at most %d rules" % MAX_RULES)
-    return {"db": {"rules": rules}, "artifact": {}}
+    # `comments` is the channel a question leaves by, and the page needs the full
+    # form: it composes the message itself, so that the quick reply the platform
+    # posts is asked for a receipt rather than an answer. `artifact` is gone with
+    # the doorbell that used it.
+    return {"db": {"rules": rules}, "comments": {}}
 
 
 def check_payload(payload):
     if not isinstance(payload, dict):
         raise BuildError("the payload must be a JSON object")
+    # Each document carries the file twice: as it will be, and as it is on the
+    # base branch. A `base` that is neither text nor an explicit null would draw
+    # a redline against nothing, so it is refused here rather than on the page.
+    for doc in payload.get("documents") or []:
+        if isinstance(doc, dict) and "base" in doc and not (
+                doc["base"] is None or isinstance(doc["base"], str)):
+            raise BuildError("a document's base must be the file's text on the base "
+                             "branch, or null when the request adds it: %r" % (doc.get("name"),))
     missing = [k for k in REQUIRED if k not in payload]
     if missing:
         raise BuildError("the payload is missing " + ", ".join(missing))

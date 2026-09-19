@@ -37,10 +37,13 @@ h1#title{font-size:22px;font-weight:600;letter-spacing:-0.015em;margin:0 0 3px;
 .meta .newer{color:var(--mark)}
 
 /* the session at work */
-.work{background:var(--card);border:1px solid var(--edge);border-radius:8px;
-  padding:13px 15px;margin:0 0 16px}
-.work h2{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.08em;
+/* The narrative lives in the panel with the conversation, not above the
+   document: the page is for reading the request, and a block of the session's
+   working notes at the top of it competed with the thing the reviewer came for. */
+.atwork{margin:14px 0 0;padding:12px 0 0;border-top:1px solid var(--edge)}
+.atwork h3{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.08em;
   color:var(--faint);margin:0 0 8px;display:flex;align-items:center;gap:8px}
+.atwork #work{max-height:min(30vh, 220px);overflow-y:auto;overscroll-behavior:contain}
 .pulse{width:7px;height:7px;border-radius:4px;background:var(--good);
   animation:beat 1.4s ease-in-out infinite}
 @keyframes beat{0%,100%{opacity:.25}50%{opacity:1}}
@@ -54,6 +57,11 @@ h1#title{font-size:22px;font-weight:600;letter-spacing:-0.015em;margin:0 0 3px;
   letter-spacing:0.08em;color:var(--faint);margin:0 0 1px}
 .step.found .kind{color:var(--good)} .step.wrong .kind{color:var(--mark)}
 .step.said .kind{color:var(--cool)} .step.done .what{color:var(--soft)}
+.step.asked .kind{color:var(--ink)}
+.step.asked .what{border-left:2px solid var(--edge);padding-left:9px}
+.step .on{display:block;font-size:12px;color:var(--faint);margin-top:2px}
+.step .waiting{display:block;font-size:12px;color:var(--faint);
+  font-style:italic;margin-top:2px}
 .quiet{color:var(--faint);font-size:13.5px;font-style:italic;margin:0}
 
 /* the documents */
@@ -98,6 +106,8 @@ h1#title{font-size:22px;font-weight:600;letter-spacing:-0.015em;margin:0 0 3px;
 .hljs-string,.hljs-attr,.hljs-addition,.hljs-symbol{color:var(--good)}
 .hljs-number,.hljs-built_in,.hljs-type,.hljs-class .hljs-title{color:var(--cool)}
 .hljs-title,.hljs-function .hljs-title,.hljs-name{color:var(--ink);font-weight:600}
+.hljs-variable,.hljs-template-variable,.hljs-params{color:var(--soft)}
+.hljs-meta{color:var(--faint);font-style:italic}
 .hljs-deletion{color:var(--mark);text-decoration:line-through}
 
 /* the three views, and the redlines */
@@ -122,14 +132,51 @@ pre.redline .row.add{background:var(--addbg)}
 pre.redline .row.del{background:var(--delbg)}
 
 /* asking, and deciding */
-.asking{margin:18px 0 0;padding:14px 16px;background:var(--card);
-  border:1px solid var(--edge);border-radius:8px}
-.asking label{display:block;font-size:12px;font-weight:600;text-transform:uppercase;
-  letter-spacing:0.07em;color:var(--faint);margin:0 0 7px}
-.asking .quoted{margin:0 0 8px;padding:6px 10px;border-left:2px solid var(--mark);
-  font-family:var(--doc);font-size:15px;color:var(--soft)}
-.asking textarea{width:100%;font-family:var(--ui);font-size:15px;line-height:1.5;
-  padding:9px 10px;border:1px solid var(--edge);border-radius:6px;background:var(--paper);
+/* Asking happens over what you are reading, not in a box under it. */
+#fab{position:fixed;right:18px;bottom:calc(18px + env(safe-area-inset-bottom, 0px));
+  min-height:52px;padding:0 20px;border-radius:26px;border:1px solid var(--good);
+  background:var(--good);color:var(--on-accent);font-weight:600;font-size:15px;
+  box-shadow:0 2px 10px rgba(0,0,0,.18);z-index:20}
+.panel{position:fixed;left:0;right:0;bottom:0;z-index:21;
+  padding:14px 16px calc(16px + env(safe-area-inset-bottom, 0px));
+  background:var(--card);border-top:1px solid var(--edge);
+  box-shadow:0 -4px 20px rgba(0,0,0,.14)}
+@media (min-width: 620px){
+  .panel{left:auto;right:18px;bottom:calc(18px + env(safe-area-inset-bottom, 0px));
+    width:420px;border:1px solid var(--edge);border-radius:12px}
+}
+.panel-head{display:flex;align-items:center;justify-content:space-between;
+  font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:0.07em;
+  color:var(--faint);margin:0 0 10px}
+.panel-head button{min-height:32px;padding:0 10px;font-size:12px;font-weight:500}
+/* The conversation, in the panel rather than at the top of the page: the button
+   follows the reader down a long document, and an answer that lands where they
+   are not looking reads as no answer at all. */
+.badge{display:inline-block;min-width:18px;margin-left:7px;padding:0 5px;
+  border-radius:9px;background:var(--on-accent);color:var(--good);
+  font-size:12px;line-height:18px;text-align:center}
+.threads{max-height:min(46vh, 340px);overflow-y:auto;margin:0 0 10px;
+  overscroll-behavior:contain}
+.threads:empty{display:none}
+.qa{padding:0 0 10px;margin:0 0 10px;border-bottom:1px solid var(--rule)}
+.qa:last-child{border-bottom:none;margin-bottom:0}
+.qa .q{font-size:14.5px;line-height:1.45}
+.qa .on{display:block;font-size:12px;color:var(--faint);margin:2px 0 0}
+.qa .a{margin:7px 0 0;padding:7px 10px;border-radius:7px;background:var(--paper);
+  font-size:14.5px;line-height:1.5;white-space:pre-wrap}
+.qa .a.fresh{border-left:2px solid var(--good)}
+.qa .pending{margin:5px 0 0;font-size:12.5px;color:var(--faint);font-style:italic}
+/* The passage the question is about: held until it is dropped, never mirroring
+   whatever happens to be selected now. Tapping into the box collapses the
+   selection, and a page that then said "no passage" was lying about what it
+   was about. */
+.held{display:flex;align-items:flex-start;gap:8px;margin:0 0 10px;padding:7px 10px;
+  border-left:2px solid var(--mark);background:var(--paper);border-radius:0 6px 6px 0}
+.held span{flex:1;min-width:0;font-family:var(--doc);font-size:15px;line-height:1.45;
+  color:var(--soft)}
+.held button{flex:none;min-height:30px;padding:0 9px;font-size:12px}
+.panel textarea{width:100%;font-family:var(--ui);font-size:16px;line-height:1.5;
+  padding:10px 11px;border:1px solid var(--edge);border-radius:7px;background:var(--paper);
   color:var(--ink);resize:vertical}
 .ask-bar{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin:10px 0 0}
 .askState{flex:1 1 220px;min-width:0;font-size:13px;color:var(--soft)}
@@ -160,15 +207,19 @@ footer .built{margin-top:10px;font-family:var(--mono);font-size:11.5px}
 .where{display:block;margin:10px 0 0;font-size:12px;color:var(--faint)}
 </style>
 
+<!-- highlight.js, pinned by version and by hash. Subresource integrity because
+     this runs inside the page, and the page carries a decision. The hash was
+     computed from the downloaded file and checked against the one cdnjs
+     publishes; both are sha512 and they agree. A changed file fails to load and
+     the page loses colour, nothing more. -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"
+        integrity="sha512-D9gUyxqja7hBtkWpPWGt9wfbfaMGVt9gnyCvYa+jojwwPHLCzUm5i8rpk7vD7wNee9bA35eYIjobYPaQuKS1MQ=="
+        crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+
 <div class="page">
   <h1 id="title">Review Desk</h1>
   <div class="repoTag" id="repoTag"></div>
   <div class="meta" id="meta"></div>
-
-  <div class="work">
-    <h2><span class="pulse" id="pulse" hidden></span>The session at work</h2>
-    <div id="work"></div>
-  </div>
 
   <div id="pageFeeds"></div>
 
@@ -176,25 +227,39 @@ footer .built{margin-top:10px;font-family:var(--mono);font-size:11.5px}
   <div class="sheet"><div class="revbar" id="revbar" hidden></div><div class="md" id="sheet"></div></div>
   <span class="where" id="where"></span>
 
-  <div class="asking">
-    <label for="question">Ask the session</label>
-    <div class="quoted" id="quoted" hidden></div>
-    <textarea id="question" rows="2" placeholder="Select a passage first, then ask about it."></textarea>
-    <div class="ask-bar">
-      <button id="ask" class="go" disabled>Ask about this page</button>
-      <span class="askState" id="askState">Checking whether a session is listening…</span>
-    </div>
-  </div>
 
   <div class="decide" id="decide"></div>
   <div id="lost"></div>
 
   <footer>
-    Questions you ask here reach the Claude Code session that published this desk — the one
-    with the repository, its tools, and the conversation behind this request. What it does
-    while you wait shows at the top of this page.
+    A question you ask here reaches the Claude Code session that published this desk — the
+    one with the repository, its tools, and the conversation behind this request. Its
+    answers, and what it does while you wait, are in that same panel.
     <div class="built">review desk <span id="built"></span></div>
   </footer>
+</div>
+
+<button id="fab" title="Ask the session">Ask<span class="badge" id="badge" hidden></span></button>
+
+<div class="panel" id="panel" hidden>
+  <div class="panel-head">
+    <span>Conversation</span>
+    <button id="shut" aria-label="Close">Close</button>
+  </div>
+  <div class="threads" id="threads"></div>
+  <div class="held" id="quoted" hidden>
+    <span id="quotedText"></span>
+    <button id="drop" aria-label="Ask about the page instead">Not this</button>
+  </div>
+  <textarea id="question" rows="3" placeholder="Ask about what you selected, or about this page."></textarea>
+  <div class="ask-bar">
+    <button id="ask" class="go" disabled>Ask about this page</button>
+    <span class="askState" id="askState">Checking whether a session is listening…</span>
+  </div>
+  <div class="atwork">
+    <h3><span class="pulse" id="pulse" hidden></span>The session at work</h3>
+    <div id="work"></div>
+  </div>
 </div>
 
 <script>
@@ -780,20 +845,36 @@ function redline(before, after, page, note = ''){
   // Prose goes through the markdown parser as a document, marks and all.
   if (prose) return head + marks(markdown(lines.map(l => l.s).join('\n')));
   // Source keeps every line, changed or not: a file read as a patch of
-  // fragments cannot be judged, and the reviewer asked to see all of it.
+  // fragments cannot be judged, and the reviewer asked to see all of it. Each
+  // line is coloured on its own rather than the block as a whole, because a
+  // block's highlighting is one run of markup and the marks have to sit inside
+  // it: the cost is that a comment or a string spanning lines loses its colour
+  // after the first, and the gain is that changed code is still code.
+  const lang = tongue(page).lang;
+  const colour = text => {
+    if (!window.hljs || !lang) return esc(text);
+    try {
+      if (!hljs.getLanguage(lang)) return esc(text);
+      return hljs.highlight(text, {language: lang, ignoreIllegals: true}).value;
+    } catch (e) { return esc(text); }
+  };
   return head + '<pre class="redline"><code>' + lines.map(l =>
     '<span class="row ' + (l.t === 'same' ? 'ctx' : l.t) + '">'
-    + marks(esc(l.s)) + '\n</span>').join('') + '</code></pre>';
+    + marks(colour(l.s)) + '\n</span>').join('') + '</code></pre>';
 }
 
 // Highlighting is applied after render rather than baked into the markup, so
 // the parser stays a parser and a missing library costs nothing but colour.
-function paintCode(){
+function paintCode(marked){
   if (!window.hljs) return;
   // Only a block that names its language is highlighted. Left to guess,
   // highlight.js coloured the command docs' untagged JSON and shell lines as CSS
   // or VB.NET, which reads worse than no colour at all.
   document.querySelectorAll('.md pre code[class*="language-"]:not(.language-mermaid)').forEach(el => {
+    // In a redline, a block holding a mark is left plain: highlightElement
+    // rewrites the block's markup and would take the mark with it, and what
+    // changed matters more than what colour it is.
+    if (marked && el.querySelector('ins.rl, del.rl')) return;
     try { hljs.highlightElement(el); } catch (e) {}
   });
 }
@@ -877,10 +958,9 @@ function paint(){
               view === 'base' && baseText(leaf) === null
                 ? 'This request adds this file, so all of it is new.' : '');
   // A redline keeps the document's headings, so the panel can still say where
-  // the reader is. The highlighter and mermaid are skipped: both replace the
-  // markup of a block wholesale, and would drop the marks inside it. Colour and
-  // drawings are worth less than knowing what changed.
-  if (was !== null){ watchHeadings(); return; }
+  // the reader is, and its code blocks are still coloured -- except any block
+  // holding a mark, which highlightElement would rewrite and strip.
+  if (was !== null){ paintCode(true); watchHeadings(); return; }
   paintCode();
   watchHeadings();
 }
@@ -1106,21 +1186,113 @@ const PR = () => 'review/pr-' + DATA.number;
 // renders. This is the direction that always worked and went unused.
 const KINDS = {doing: 'doing', found: 'found', wrong: 'went wrong', done: 'done',
   said: 'answer', asked: 'you asked'};
-let work = [];
+let work = [], asked = [];
+// Two streams, rendered as one transcript. The session writes `progress`, which
+// only an owner may write, so nothing in a browser can forge its narration. The
+// page writes `asked` when the reviewer sends a question -- it has to, because
+// `comments` is write-only: the shell renders the thread, and no page can read
+// one back. Without this the desk could send a question and never show it, and
+// the reviewer watched their words disappear.
+// `mine` holds a question this page has shown but the store has not confirmed,
+// so a question is never on screen one moment and gone the next because a
+// snapshot arrived, or because the write failed.
+let mine = [];
+// The narrative above the document is the session's work, and only that. The
+// questions and their answers are the conversation, and they belong in the
+// panel the Ask button opens -- one tap away wherever the reader has scrolled
+// to, rather than at the top of a page they have already read past.
+function feed(){
+  const seen = new Set();
+  return work
+    .filter(r => !(r.kind === 'said' && r.re))
+    .filter(r => { const k = String(r.id || ''); if (seen.has(k)) return false; seen.add(k); return true; })
+    .sort((a, b) => String(a.at || '').localeCompare(String(b.at || ''))
+      || String(a.id || '').localeCompare(String(b.id || '')))
+    .slice(-300);
+}
+// The conversation, threaded. A question is one of the page's own `asked` rows;
+// its answers are the session's `said` rows carrying `re` with that question's
+// id. A `said` row with no `re` is not an answer to anything -- it stays in the
+// narrative above the document with the rest of the work.
+function threads(){
+  const byQuestion = new Map();
+  work.forEach(r => {
+    if (r.kind !== 'said' || !r.re) return;
+    const list = byQuestion.get(String(r.re)) || [];
+    byQuestion.set(String(r.re), list);
+    list.push(r);
+  });
+  return work.concat(asked, mine)
+    .filter(r => r.kind === 'asked')
+    .filter((r, i, all) => all.findIndex(x => x.id === r.id) === i)
+    .sort((a, b) => String(a.at || '').localeCompare(String(b.at || '')))
+    .map(q => ({q, answers: (byQuestion.get(String(q.id)) || [])
+      .sort((a, b) => String(a.id).localeCompare(String(b.id)))}));
+}
+
+// An answer that arrived while the panel was shut. Kept per view rather than in
+// the store: it is about what this reader has looked at, not about the request.
+const SEEN_KEY = 'review-desk seen ' + (typeof DATA.repo === 'string' ? DATA.repo : '')
+  + '#' + DATA.number;
+let seenAt = '';
+try { seenAt = sessionStorage.getItem(SEEN_KEY) || ''; } catch (e) { seenAt = ''; }
+const unread = () => threads().flatMap(t => t.answers)
+  .filter(a => String(a.at || '') > seenAt);
+
+function drawThreads(){
+  const list = threads();
+  rebuild($('threads'), list.map(t =>
+    '<div class="qa"><div class="q">' + esc(t.q.text || '')
+    + (t.q.where ? '<span class="on">on ' + esc(t.q.where) + '</span>' : '') + '</div>'
+    + t.answers.map(a => '<div class="a' + (String(a.at || '') > seenAt ? ' fresh' : '')
+      + '">' + esc(a.text || '') + '</div>').join('')
+    + (t.answers.length ? ''
+      : '<div class="pending">Sent to the session. Its answer arrives here.</div>')
+    + '</div>').join(''));
+  const n = unread().length;
+  $('badge').hidden = !n;
+  if (n) $('badge').textContent = String(n);
+}
+
+// Opening the panel is what marks answers read, so the badge counts what landed
+// while it was shut.
+function markSeen(){
+  const all = threads().flatMap(t => t.answers).map(a => String(a.at || '')).sort();
+  if (!all.length) return;
+  seenAt = all[all.length - 1];
+  try { sessionStorage.setItem(SEEN_KEY, seenAt); } catch (e) {}
+  drawThreads();
+}
+
 function drawWork(){
+  drawThreads();
   const el = $('work');
-  if (!work.length){
+  const rows = feed();
+  // Something is outstanding while the session says it is working, and while a
+  // question is still waiting on an answer. Settled before the empty case
+  // returns: a question asked before the session has written anything leaves no
+  // narrative at all, and the mark still belongs on.
+  $('pulse').hidden = !(rows.some(r => r.kind === 'doing')
+    || threads().some(t => !t.answers.length));
+  if (!rows.length){
     el.innerHTML = '<p class="quiet">Nothing from the session yet. What it does while you '
       + 'wait shows here.</p>';
-    $('pulse').hidden = true;
     return;
   }
-  $('pulse').hidden = !work.some(r => r.kind === 'doing');
-  rebuild(el, work.map(r =>
+  rebuild(el, rows.map(r =>
     '<div class="step ' + esc(r.kind || 'doing') + '">'
     + '<time>' + esc(String(when(r.at)).replace(/^ at /, '')) + '</time>'
     + '<div class="what"><span class="kind">' + esc(KINDS[r.kind] || r.kind || 'doing')
     + '</span>' + esc(r.text || '') + '</div></div>').join(''));
+}
+
+// A question is kept as well as shown, so it survives a reload and reaches a
+// second device -- and so the session can read back what it was asked without
+// depending on a thread it cannot query. Returns the failure code, or nothing.
+async function keep(row){
+  if (!db) return 'no store';
+  try { await db.doc(PR() + '/asked/' + row.id).set(row); }
+  catch (e){ return (e && e.code) || 'unknown'; }
 }
 
 /* ---- asking about a passage ---- */
@@ -1148,19 +1320,20 @@ function askText(label, question){
 let note = '';
 async function drawAsk(){
   const el = $('askState');
-  const sel = window.getSelection();
-  const some = sel && !sel.isCollapsed && String(sel).trim().length > 1
-    && inSheet(sel.anchorNode);
+  // The held passage, not the live selection: tapping into the box collapses
+  // the selection, and drawing from it told the reviewer their passage was gone
+  // while the page still had it.
+  const some = !!(held && held.text);
   const typed = ($('question').value || '').trim().length > 1;
   // Written only when it changes. Rewriting the button's text on every
   // selectionchange replaced its text node between a press and its release, and
   // WebKit then delivered no click at all: the question went nowhere, silently.
-  const set = (el, text) => { if (el.textContent !== text) el.textContent = text; };
-  const label = some ? 'Ask about what you selected' : 'Ask about this page';
+  const set = (node, text) => { if (node.textContent !== text) node.textContent = text; };
+  const label = some ? 'Ask about the passage' : 'Ask about this page';
   const want = listening !== 'available' || !typed;
   if ($('ask').disabled !== want) $('ask').disabled = want;
   set($('ask'), label);
-  set($('quoted'), some ? String(sel).trim().slice(0, 160) : '');
+  set($('quotedText'), some ? held.text.slice(0, 200) : '');
   if ($('quoted').hidden !== !some) $('quoted').hidden = !some;
   el.className = 'askState ' + (note ? 'yes' : listening === 'available' ? 'yes' : 'no');
   if (note){ el.textContent = note; return; }
@@ -1286,12 +1459,48 @@ const inSheet = node => {
   const el = node && (node.nodeType === 1 ? node : node.parentElement);
   return !!el && $('sheet').contains(el);
 };
-document.addEventListener('selectionchange', () => {
+// Take whatever is selected in the document now, if anything. A collapsed
+// selection, or one inside the panel, changes nothing: the held passage is
+// dropped only when the reviewer drops it.
+function grabSelection(){
   const sel = window.getSelection();
-  if (sel && !sel.isCollapsed && String(sel).trim().length > 1 && inSheet(sel.anchorNode)){
-    held = {text: String(sel).trim(), node: sel.anchorNode};
-  }
+  if (!sel || sel.isCollapsed || String(sel).trim().length < 2) return;
+  if (!inSheet(sel.anchorNode)) return;
+  held = {text: String(sel).trim(), node: sel.anchorNode};
   if (comments) drawAsk();
+}
+// Three chances to catch it, because one was not enough on a tablet. Mark
+// selected a passage on an iPad, typed, and the question still went up against
+// the page rather than the passage -- the store shows `where` as the page name
+// for every question that evening. `selectionchange` is the ordinary path;
+// touch release covers a selection made with the native handles, whose events
+// iOS does not always deliver as one; and reading it again as the button goes
+// down covers the tap itself clearing the selection before the click lands.
+document.addEventListener('selectionchange', grabSelection);
+['touchend', 'pointerup', 'mouseup'].forEach(kind =>
+  $('sheet').addEventListener(kind, () => setTimeout(grabSelection, 0)));
+
+// Asking happens over the document, so the button opens a panel rather than
+// sending the reader to a box beneath it.
+function openPanel(on){
+  $('panel').hidden = !on;
+  $('fab').hidden = on;
+  if (!on) return;
+  // Opening is reading: the badge counts what landed while this was shut.
+  markSeen();
+  const list = $('threads');
+  if (list) list.scrollTop = list.scrollHeight;
+  $('question').focus();
+}
+// Read the selection as the button goes down, before the tap that opens the
+// panel can collapse it. `pointerdown` runs ahead of the click on both engines.
+$('fab').addEventListener('pointerdown', grabSelection);
+$('fab').addEventListener('touchstart', grabSelection, {passive: true});
+$('fab').addEventListener('click', () => { openPanel(true); drawAsk(); });
+$('shut').addEventListener('click', () => openPanel(false));
+$('drop').addEventListener('click', () => { held = null; drawAsk(); $('question').focus(); });
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && !$('panel').hidden) openPanel(false);
 });
 
 $('ask').addEventListener('click', async () => {
@@ -1308,8 +1517,21 @@ $('ask').addEventListener('click', async () => {
     await comments.sendToClaude({anchor, text: askText(where, question)});
     $('question').value = '';
     held = null;
-    note = 'Asked. The session answers in the thread on this page, and what it does '
-      + 'while it works shows at the top.';
+    // Shown from here, before the store answers: the question is on screen the
+    // moment it leaves, and the snapshot replaces this row with the stored one.
+    const row = {id: String(Date.now()) + '-' + Math.random().toString(36).slice(2, 6),
+      at: new Date().toISOString(), kind: 'asked', text: question, where: String(where)};
+    mine = mine.concat([row]);
+    drawWork();
+    // The panel stays open, and the question is now the last thing in it. It
+    // used to close on send, which put the answer somewhere the reader was not.
+    const list = $('threads');
+    if (list) list.scrollTop = list.scrollHeight;
+    const failed = await keep(row);
+    note = failed
+      ? 'Asked — the session has it. This page could not store the question ('
+        + failed + '), so it will not survive a reload.'
+      : 'Asked. The answer arrives above, in this panel.';
   } catch (e){
     const code = (e && e.code) || 'unknown';
     note = code === 'consent_required'
@@ -1406,6 +1628,17 @@ function listen(){
       work = snap.docs.map(d => Object.assign({id: d.id}, d.data()))
         .filter(r => typeof r.text === 'string')
         .sort((a, b) => String(a.id).localeCompare(String(b.id)))
+        .slice(-300);
+      drawWork();
+    });
+
+  // And the questions asked from this desk. They are written by the page rather
+  // than the session, so they come back from the store like anything else --
+  // which is what makes them survive a reload and show up on a second device.
+  follow('asked', 'your questions', 'page',
+    () => db.collection(PR() + '/asked'), snap => {
+      asked = snap.docs.map(d => Object.assign({id: d.id}, d.data(), {kind: 'asked'}))
+        .filter(r => typeof r.text === 'string')
         .slice(-300);
       drawWork();
     });

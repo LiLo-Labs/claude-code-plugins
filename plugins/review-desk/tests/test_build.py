@@ -127,23 +127,32 @@ class Capabilities(unittest.TestCase):
         self.rules = self.caps["db"]["rules"]
         self.write = {r["path"]: r["write"] for r in self.rules}
 
-    def test_declares_db_and_artifact_only(self):
-        self.assertEqual(sorted(self.caps), ["artifact", "db"])
-        self.assertEqual(self.caps["artifact"], {})
+    def test_declares_db_and_comments_only(self):
+        # `comments` is how a question leaves the page, in its full form because
+        # the page composes the message. `artifact` went with the doorbell: the
+        # page no longer republishes itself to notify anyone.
+        self.assertEqual(sorted(self.caps), ["comments", "db"])
+        self.assertEqual(self.caps["comments"], {})
 
     def test_the_page_writes_its_own_document_at_interact(self):
         self.assertEqual(self.write["review/pr-12"], "interact")
 
     def test_session_paths_are_owner_only(self):
-        for name in ("replies", "presence", "context", "documents"):
+        for name in ("progress", "context", "documents"):
             self.assertEqual(self.write["review/pr-12/" + name], "owner", name)
 
-    def test_the_rering_lease_stays_page_writable(self):
-        # A rule covers its path and everything below; the nearest one decides.
-        lease = "review/pr-12/rering/lease"
-        nearest = max((p for p in self.write if lease == p or lease.startswith(p + "/")), key=len)
-        self.assertEqual(nearest, "review/pr-12")
-        self.assertEqual(self.write[nearest], "interact")
+    def test_a_documents_base_must_be_text_or_an_explicit_null(self):
+        # The redline against the base branch is drawn from this. Anything else
+        # would compare the file with nothing and call the result a diff.
+        good = dict(HOSTILE, documents=[{"name": "a.md", "text": "x", "base": None},
+                                        {"name": "b.md", "text": "x", "base": "y"},
+                                        {"name": "c.md", "text": "x"}])
+        build_desk.check_payload(good)
+        for bad in (0, [], {}, True):
+            with self.subTest(base=bad):
+                with self.assertRaises(build_desk.BuildError):
+                    build_desk.check_payload(
+                        dict(HOSTILE, documents=[{"name": "a.md", "text": "x", "base": bad}]))
 
     def test_rules_are_well_formed_and_within_the_limit(self):
         self.assertLessEqual(len(self.rules), 64)
