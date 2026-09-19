@@ -68,6 +68,22 @@ h1#title{font-size:22px;font-weight:600;letter-spacing:-0.015em;margin:0 0 3px;
 .diagram{margin:14px 0;overflow-x:auto;text-align:center}
 .diagram svg{max-width:100%;height:auto}
 .undrawn{margin:12px 0 4px;font-size:13px;color:var(--mark)}
+/* A changed diagram is two drawings, not a diff of its source: side by side
+   where there is room, stacked on a tablet held upright. */
+.diagram.changed{display:grid;gap:14px;text-align:left;
+  border:1px solid var(--edge);border-radius:8px;padding:12px}
+@media (min-width: 720px){
+  .diagram.changed{grid-template-columns:1fr 1fr;align-items:start}
+  .diagram.changed .diagramSource{grid-column:1 / -1}
+}
+.diagram.changed .side{min-width:0;overflow-x:auto}
+.sideTag{font-size:11px;font-weight:600;text-transform:uppercase;
+  letter-spacing:0.07em;color:var(--faint);margin:0 0 6px}
+.diagram.changed .side:first-child .sideTag{color:var(--mark)}
+.diagram.changed .side:nth-child(2) .sideTag{color:var(--good)}
+.diagramSource{margin:4px 0 0;font-size:13px}
+.diagramSource summary{color:var(--faint);cursor:pointer}
+.diagramSource pre{margin:8px 0 0}
 
 /* the documents */
 .leaves{display:flex;gap:3px;overflow-x:auto;margin:0;border-bottom:1px solid var(--edge);
@@ -923,25 +939,77 @@ function loadMermaid(){
 let drawn = 0;
 // A block whose source has not changed is left alone, so a redraw of the sheet
 // does not refetch or reparse what is already on screen.
+// One side of a changed diagram: the block's text with the other side's marks
+// left out. `ins` is what the request adds, `del` what it removes, so dropping
+// the inserts gives the diagram as it was and dropping the deletes gives it as
+// it will be.
+function sideOf(el, drop){
+  let out = '';
+  const walk = node => {
+    if (node.nodeType === 3){ out += node.nodeValue; return; }
+    if (node.nodeType !== 1) return;
+    if (node.matches(drop)) return;
+    node.childNodes.forEach(walk);
+  };
+  el.childNodes.forEach(walk);
+  return out;
+}
+
 function paintDiagrams(marked){
-  const blocks = [...document.querySelectorAll('.md pre code.language-mermaid')]
-    .filter(el => !(marked && el.querySelector('ins.rl, del.rl')));
+  const blocks = [...document.querySelectorAll('.md pre code.language-mermaid')];
   if (!blocks.length) return;
-  loadMermaid().then(mermaid => {
+  loadMermaid().then(async mermaid => {
     if (!mermaid) return;
     mermaid.initialize({startOnLoad: false, securityLevel: 'strict',
       theme: matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'default',
       fontFamily: getComputedStyle(document.body).fontFamily});
+    // Wait for the page's own font before measuring anything. Mermaid sizes
+    // every box by measuring its label, and if the webfont arrives after that
+    // measurement the text is laid out in a wider face than the box was cut
+    // for: every label in the drawing is clipped at its edge. Offline the fonts
+    // never arrive and this resolves at once.
+    try { if (document.fonts && document.fonts.ready) await document.fonts.ready; }
+    catch (e) {}
     blocks.forEach(async el => {
       const pre = el.parentElement;
       if (!pre || !pre.isConnected) return;
-      const source = el.textContent;
+      // A diagram the request changed is two diagrams. Marked source is not a
+      // diff of a drawing, it is a wall of arrows with colours in it -- so both
+      // sides are drawn, labelled, and the source stays underneath.
+      const changed = marked && el.querySelector('ins.rl, del.rl');
+      const sides = changed
+        ? [['as it was', sideOf(el, 'ins.rl')], ['as it will be', sideOf(el, 'del.rl')]]
+        : [[null, el.textContent]];
       try {
-        const {svg} = await mermaid.render('rd-diagram-' + (++drawn), source);
-        if (!pre.isConnected) return;
         const box = document.createElement('div');
-        box.className = 'diagram';
-        box.innerHTML = svg;
+        box.className = changed ? 'diagram changed' : 'diagram';
+        for (const [label, text] of sides){
+          const {svg} = await mermaid.render('rd-diagram-' + (++drawn), text);
+          const one = document.createElement('div');
+          one.className = 'side';
+          if (label){
+            const tag = document.createElement('div');
+            tag.className = 'sideTag';
+            tag.textContent = label;
+            one.appendChild(tag);
+          }
+          const art = document.createElement('div');
+          art.innerHTML = svg;
+          one.appendChild(art);
+          box.appendChild(one);
+        }
+        if (!pre.isConnected) return;
+        // The source of a changed diagram stays with it, marked, for anyone who
+        // wants to read what actually moved.
+        if (changed){
+          const keep = document.createElement('details');
+          keep.className = 'diagramSource';
+          const sum = document.createElement('summary');
+          sum.textContent = 'the diagram’s source, with the changes marked';
+          keep.appendChild(sum);
+          keep.appendChild(pre.cloneNode(true));
+          box.appendChild(keep);
+        }
         pre.replaceWith(box);
       } catch (e){
         // The source stays where it is, with the parser's complaint above it:
