@@ -405,3 +405,39 @@ test('a page with no diagram never fetches the 3 MB library', async () => {
   await desk.page.waitForFunction('restore === "done"');
   assert.deepEqual(desk.wanted().filter(u => u.includes('mermaid')), []);
 });
+
+test('the two sides of a changed diagram are the source without the other side’s marks', async () => {
+  // A diagram the request changed is drawn twice rather than diffed as text.
+  // The drawing itself needs the library, which never arrives here; this is the
+  // part that decides what each drawing is made of.
+  desk = await open(browser);
+  await desk.page.waitForFunction('restore === "done"');
+  const sides = await desk.page.evaluate(() => {
+    const el = document.createElement('code');
+    el.innerHTML = 'graph LR\n  a["<del class="rl">weekly</del><ins class="rl">nightly</ins>"]'
+      + '\n<ins class="rl">  a --> b\n</ins>';
+    return {was: sideOf(el, 'ins.rl'), willBe: sideOf(el, 'del.rl')};
+  });
+  assert.match(sides.was, /weekly/);
+  assert.doesNotMatch(sides.was, /nightly/);
+  assert.doesNotMatch(sides.was, /a --> b/, 'a line the request adds is not in the old drawing');
+  assert.match(sides.willBe, /nightly/);
+  assert.doesNotMatch(sides.willBe, /weekly/);
+  assert.match(sides.willBe, /a --> b/);
+});
+
+test('a changed diagram keeps its marked source when the library cannot load', async () => {
+  const fence = b => '```mermaid\n' + b + '\n```';
+  desk = await open(browser, {data: payload({documents: [{name: 'docs/shape.md',
+    text: '# Shape\n\n' + fence('graph LR\n  a --> c') + '\n',
+    base: '# Shape\n\n' + fence('graph LR\n  a --> b') + '\n'}]})});
+  await desk.page.waitForFunction('restore === "done"');
+  await desk.page.click('[data-leaf="1"]');
+  await desk.page.evaluate(() => { view = 'base'; paint(); });
+  const code = await desk.page.textContent('#sheet pre code.language-mermaid');
+  assert.match(code, /a --> [bc]/, 'the source is still readable with no drawing');
+  assert.equal(await desk.page.locator('#sheet pre code.language-mermaid ins.rl, '
+    + '#sheet pre code.language-mermaid del.rl').count() > 0, true,
+    'and what changed in it is still marked');
+  assert.deepEqual(desk.errors, []);
+});
