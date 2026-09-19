@@ -213,6 +213,40 @@ test('a question asked on one device shows on the other', async () => {
   await a.close();
 });
 
+test('a passage selected on a touch screen is still the passage when the question goes', async () => {
+  // Mark selected a passage on an iPad, typed, and the question went up against
+  // the page: every question that evening was stored with `where` as the page
+  // name. The selection is read on touch release and again as the button goes
+  // down, not on selectionchange alone.
+  desk = await open(browser, {context: {hasTouch: true, viewport: {width: 390, height: 780}},
+    data: payload({body: '## Rule\n\nAt most one phase may be open.\n'})});
+  await ready(desk);
+  const box = await desk.page.evaluate(() => {
+    const p = [...document.querySelectorAll('#sheet p')].find(x => x.textContent.includes('one phase'));
+    const r = document.createRange();
+    r.selectNodeContents(p);
+    const s = window.getSelection();
+    s.removeAllRanges();
+    s.addRange(r);
+    const fab = document.getElementById('fab').getBoundingClientRect();
+    return {x: fab.x + fab.width / 2, y: fab.y + fab.height / 2};
+  });
+  await desk.page.dispatchEvent('#sheet', 'touchend');
+  await desk.page.touchscreen.tap(box.x, box.y);
+  await desk.page.waitForFunction(() => !document.getElementById('panel').hidden);
+  assert.match(await desk.page.textContent('#quoted'), /At most one phase may be open/,
+    'the passage is shown as held after a tap');
+
+  await desk.page.fill('#question', 'One requirement or two?');
+  await desk.page.click('#ask');
+  const sent = await desk.page.evaluate(() => window.__desk.sent());
+  assert.match(sent[0].text, /on “At most one phase may be open\.”/,
+    'the question is about the passage, not the page');
+  const store = await desk.store();
+  const asked = Object.entries(store).find(([k]) => k.startsWith(PR + '/asked/'))[1];
+  assert.match(asked.where, /At most one phase may be open/);
+});
+
 test('with nothing selected the question is about the page being read', async () => {
   desk = await open(browser, {data: payload({
     documents: [{name: 'docs/spec.md', text: '# Spec\n\nOne rule.', base: null}]})});

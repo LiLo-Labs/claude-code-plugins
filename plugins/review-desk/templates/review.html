@@ -37,10 +37,13 @@ h1#title{font-size:22px;font-weight:600;letter-spacing:-0.015em;margin:0 0 3px;
 .meta .newer{color:var(--mark)}
 
 /* the session at work */
-.work{background:var(--card);border:1px solid var(--edge);border-radius:8px;
-  padding:13px 15px;margin:0 0 16px}
-.work h2{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.08em;
+/* The narrative lives in the panel with the conversation, not above the
+   document: the page is for reading the request, and a block of the session's
+   working notes at the top of it competed with the thing the reviewer came for. */
+.atwork{margin:14px 0 0;padding:12px 0 0;border-top:1px solid var(--edge)}
+.atwork h3{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.08em;
   color:var(--faint);margin:0 0 8px;display:flex;align-items:center;gap:8px}
+.atwork #work{max-height:min(30vh, 220px);overflow-y:auto;overscroll-behavior:contain}
 .pulse{width:7px;height:7px;border-radius:4px;background:var(--good);
   animation:beat 1.4s ease-in-out infinite}
 @keyframes beat{0%,100%{opacity:.25}50%{opacity:1}}
@@ -218,11 +221,6 @@ footer .built{margin-top:10px;font-family:var(--mono);font-size:11.5px}
   <div class="repoTag" id="repoTag"></div>
   <div class="meta" id="meta"></div>
 
-  <div class="work">
-    <h2><span class="pulse" id="pulse" hidden></span>The session at work</h2>
-    <div id="work"></div>
-  </div>
-
   <div id="pageFeeds"></div>
 
   <div class="leaves" id="leaves"></div>
@@ -235,8 +233,8 @@ footer .built{margin-top:10px;font-family:var(--mono);font-size:11.5px}
 
   <footer>
     A question you ask here reaches the Claude Code session that published this desk — the
-    one with the repository, its tools, and the conversation behind this request. What it
-    does while you wait shows at the top of this page.
+    one with the repository, its tools, and the conversation behind this request. Its
+    answers, and what it does while you wait, are in that same panel.
     <div class="built">review desk <span id="built"></span></div>
   </footer>
 </div>
@@ -257,6 +255,10 @@ footer .built{margin-top:10px;font-family:var(--mono);font-size:11.5px}
   <div class="ask-bar">
     <button id="ask" class="go" disabled>Ask about this page</button>
     <span class="askState" id="askState">Checking whether a session is listening…</span>
+  </div>
+  <div class="atwork">
+    <h3><span class="pulse" id="pulse" hidden></span>The session at work</h3>
+    <div id="work"></div>
   </div>
 </div>
 
@@ -1457,15 +1459,26 @@ const inSheet = node => {
   const el = node && (node.nodeType === 1 ? node : node.parentElement);
   return !!el && $('sheet').contains(el);
 };
-document.addEventListener('selectionchange', () => {
+// Take whatever is selected in the document now, if anything. A collapsed
+// selection, or one inside the panel, changes nothing: the held passage is
+// dropped only when the reviewer drops it.
+function grabSelection(){
   const sel = window.getSelection();
-  if (sel && !sel.isCollapsed && String(sel).trim().length > 1 && inSheet(sel.anchorNode)){
-    held = {text: String(sel).trim(), node: sel.anchorNode};
-    if (comments) drawAsk();
-  }
-  // A collapsed selection, or one inside the panel, changes nothing: the held
-  // passage is dropped only when the reviewer drops it.
-});
+  if (!sel || sel.isCollapsed || String(sel).trim().length < 2) return;
+  if (!inSheet(sel.anchorNode)) return;
+  held = {text: String(sel).trim(), node: sel.anchorNode};
+  if (comments) drawAsk();
+}
+// Three chances to catch it, because one was not enough on a tablet. Mark
+// selected a passage on an iPad, typed, and the question still went up against
+// the page rather than the passage -- the store shows `where` as the page name
+// for every question that evening. `selectionchange` is the ordinary path;
+// touch release covers a selection made with the native handles, whose events
+// iOS does not always deliver as one; and reading it again as the button goes
+// down covers the tap itself clearing the selection before the click lands.
+document.addEventListener('selectionchange', grabSelection);
+['touchend', 'pointerup', 'mouseup'].forEach(kind =>
+  $('sheet').addEventListener(kind, () => setTimeout(grabSelection, 0)));
 
 // Asking happens over the document, so the button opens a panel rather than
 // sending the reader to a box beneath it.
@@ -1479,6 +1492,10 @@ function openPanel(on){
   if (list) list.scrollTop = list.scrollHeight;
   $('question').focus();
 }
+// Read the selection as the button goes down, before the tap that opens the
+// panel can collapse it. `pointerdown` runs ahead of the click on both engines.
+$('fab').addEventListener('pointerdown', grabSelection);
+$('fab').addEventListener('touchstart', grabSelection, {passive: true});
 $('fab').addEventListener('click', () => { openPanel(true); drawAsk(); });
 $('shut').addEventListener('click', () => openPanel(false));
 $('drop').addEventListener('click', () => { held = null; drawAsk(); $('question').focus(); });
