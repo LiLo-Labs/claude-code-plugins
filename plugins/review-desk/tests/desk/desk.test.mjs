@@ -124,45 +124,77 @@ test('a question carries the passage, the reviewer’s words, and an instruction
   assert.ok(sent[0].anchor, 'anchored to the passage');
 
   assert.equal(await desk.page.inputValue('#question'), '', 'the box is cleared once sent');
-  assert.match(await desk.page.textContent('#askState'), /in the record above/);
+  assert.match(await desk.page.textContent('#askState'), /arrives above, in this panel/);
 });
 
-test('the question joins the record, and the session’s answer lands beside it', async () => {
+test('a question and its answer make a thread in the panel', async () => {
   // The desk could send and show nothing: `comments` is write-only, so the page
-  // cannot read the thread its question went to. The reviewer saw their words
-  // vanish. Both halves of the conversation are on the page or this fails.
+  // cannot read the thread its question went to. The conversation lives here
+  // instead, behind the button, where the reader's thumb already is.
   desk = await open(browser);
   await ready(desk);
-  await desk.write(PR + '/progress/0001',
-    {id: '0001', at: '2026-09-18T17:39:00Z', kind: 'done', text: 'Read the branch.'});
-  await desk.page.waitForFunction(() => document.querySelectorAll('#work .step').length === 1);
-  assert.equal(await desk.page.$eval('#pulse', el => el.hidden), true, 'nothing outstanding yet');
-
   await desk.page.click('#fab');
   await desk.page.fill('#question', 'Does this drop the old callers?');
   await desk.page.click('#ask');
-  await desk.page.waitForFunction(() => document.querySelectorAll('#work .step').length === 2);
-  assert.deepEqual((await steps())[1], ['asked', 'Does this drop the old callers?'],
-    'shown the moment it is sent, not when the store answers');
-  assert.match(await desk.page.textContent('#work .step.asked'), /Sent to the session/);
+
+  await desk.page.waitForSelector('#threads .qa');
+  assert.equal(await desk.page.$eval('#panel', el => el.hidden), false,
+    'the panel stays open: the answer arrives in it');
+  assert.match(await desk.page.textContent('#threads .qa .q'), /Does this drop the old callers\?/);
+  assert.match(await desk.page.textContent('#threads .qa .pending'), /Sent to the session/);
   assert.equal(await desk.page.$eval('#pulse', el => el.hidden), false,
     'a question nobody has answered is something outstanding');
 
-  // Stored, not only drawn. This is what the session reads back, and what a
-  // second view of the desk is shown.
+  // Stored, not only drawn. This is what the session reads back.
   const store = await desk.store();
   const kept = Object.entries(store).filter(([k]) => k.startsWith(PR + '/asked/'));
   assert.equal(kept.length, 1);
   assert.equal(kept[0][1].text, 'Does this drop the old callers?');
-  assert.equal(kept[0][1].kind, 'asked');
+  const qid = kept[0][1].id;
 
+  // The session answers by naming the question it is answering.
   await desk.write(PR + '/progress/0002',
-    {id: '0002', at: new Date(Date.now() + 60000).toISOString(), kind: 'said',
+    {id: '0002', at: new Date().toISOString(), kind: 'said', re: qid,
      text: 'No — both callers are updated in the same commit.'});
-  await desk.page.waitForFunction(() => document.querySelectorAll('#work .step').length === 3);
-  assert.deepEqual((await steps())[2],
-    ['said', 'No — both callers are updated in the same commit.']);
+  await desk.page.waitForSelector('#threads .qa .a');
+  assert.match(await desk.page.textContent('#threads .qa .a'),
+    /both callers are updated in the same commit/);
+  assert.equal(await desk.page.locator('#threads .qa .pending').count(), 0);
   assert.equal(await desk.page.$eval('#pulse', el => el.hidden), true, 'answered');
+
+  // An answer belongs to its question, not to the narrative above the document.
+  assert.equal(await desk.page.locator('#work .step').count(), 0);
+});
+
+test('an answer that lands while the panel is shut is counted on the button', async () => {
+  desk = await open(browser);
+  await ready(desk);
+  await desk.page.click('#fab');
+  await desk.page.fill('#question', 'Why this order?');
+  await desk.page.click('#ask');
+  await desk.page.waitForSelector('#threads .qa');
+  const store = await desk.store();
+  const qid = Object.entries(store).find(([k]) => k.startsWith(PR + '/asked/'))[1].id;
+
+  await desk.page.click('#shut');
+  await desk.write(PR + '/progress/0001',
+    {id: '0001', at: new Date().toISOString(), kind: 'said', re: qid, text: 'Because B needs A.'});
+  await desk.page.waitForFunction(() => !document.getElementById('badge').hidden);
+  assert.equal(await desk.page.textContent('#badge'), '1');
+
+  // Opening it is reading it.
+  await desk.page.click('#fab');
+  await desk.page.waitForFunction(() => document.getElementById('badge').hidden);
+});
+
+// A `said` row that answers nothing is narration, and stays above the document.
+test('an unattached said row is narrative, not a thread', async () => {
+  desk = await open(browser);
+  await ready(desk);
+  await desk.write(PR + '/progress/0001',
+    {id: '0001', at: '2026-09-18T17:39:00Z', kind: 'said', text: 'Answered in the terminal.'});
+  await desk.page.waitForFunction(() => document.querySelectorAll('#work .step').length === 1);
+  assert.equal(await desk.page.locator('#threads .qa').count(), 0);
 });
 
 test('a question asked on one device shows on the other', async () => {
@@ -175,8 +207,9 @@ test('a question asked on one device shows on the other', async () => {
   await a.page.fill('#question', 'Which commit is this judged at?');
   await a.page.click('#ask');
 
-  await b.page.waitForFunction(() => document.querySelectorAll('#work .step').length === 1);
-  assert.match(await b.page.textContent('#work .step.asked'), /Which commit is this judged at\?/);
+  await b.page.click('#fab');
+  await b.page.waitForSelector('#threads .qa');
+  assert.match(await b.page.textContent('#threads .qa .q'), /Which commit is this judged at\?/);
   await a.close();
 });
 
@@ -256,15 +289,15 @@ test('the held passage can be dropped, and then the question is about the page',
   assert.match(sent[0].text, /^User states from the desk, on What this is:/);
 });
 
-test('asking closes the panel, because the answer arrives on the page', async () => {
+test('asking leaves the panel open, because the answer arrives in it', async () => {
   desk = await open(browser);
   await ready(desk);
   await desk.page.click('#fab');
   await desk.page.fill('#question', 'Does this close?');
   await desk.page.click('#ask');
-  await desk.page.waitForFunction(() => document.getElementById('panel').hidden);
-  assert.equal(await desk.page.$eval('#fab', el => el.hidden), false, 'the button comes back');
-  assert.match(await desk.page.textContent('#askState'), /in the record above/);
+  await desk.page.waitForSelector('#threads .qa');
+  assert.equal(await desk.page.$eval('#panel', el => el.hidden), false);
+  assert.match(await desk.page.textContent('#askState'), /arrives above, in this panel/);
 });
 
 /* ---------------- and a decision, on a commit ---------------- */

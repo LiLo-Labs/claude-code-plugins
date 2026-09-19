@@ -146,6 +146,23 @@ pre.redline .row.del{background:var(--delbg)}
   font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:0.07em;
   color:var(--faint);margin:0 0 10px}
 .panel-head button{min-height:32px;padding:0 10px;font-size:12px;font-weight:500}
+/* The conversation, in the panel rather than at the top of the page: the button
+   follows the reader down a long document, and an answer that lands where they
+   are not looking reads as no answer at all. */
+.badge{display:inline-block;min-width:18px;margin-left:7px;padding:0 5px;
+  border-radius:9px;background:var(--on-accent);color:var(--good);
+  font-size:12px;line-height:18px;text-align:center}
+.threads{max-height:min(46vh, 340px);overflow-y:auto;margin:0 0 10px;
+  overscroll-behavior:contain}
+.threads:empty{display:none}
+.qa{padding:0 0 10px;margin:0 0 10px;border-bottom:1px solid var(--rule)}
+.qa:last-child{border-bottom:none;margin-bottom:0}
+.qa .q{font-size:14.5px;line-height:1.45}
+.qa .on{display:block;font-size:12px;color:var(--faint);margin:2px 0 0}
+.qa .a{margin:7px 0 0;padding:7px 10px;border-radius:7px;background:var(--paper);
+  font-size:14.5px;line-height:1.5;white-space:pre-wrap}
+.qa .a.fresh{border-left:2px solid var(--good)}
+.qa .pending{margin:5px 0 0;font-size:12.5px;color:var(--faint);font-style:italic}
 /* The passage the question is about: held until it is dropped, never mirroring
    whatever happens to be selected now. Tapping into the box collapses the
    selection, and a page that then said "no passage" was lying about what it
@@ -224,13 +241,14 @@ footer .built{margin-top:10px;font-family:var(--mono);font-size:11.5px}
   </footer>
 </div>
 
-<button id="fab" title="Ask the session">Ask</button>
+<button id="fab" title="Ask the session">Ask<span class="badge" id="badge" hidden></span></button>
 
 <div class="panel" id="panel" hidden>
   <div class="panel-head">
-    <span>Ask the session</span>
+    <span>Conversation</span>
     <button id="shut" aria-label="Close">Close</button>
   </div>
+  <div class="threads" id="threads"></div>
   <div class="held" id="quoted" hidden>
     <span id="quotedText"></span>
     <button id="drop" aria-label="Ask about the page instead">Not this</button>
@@ -1177,36 +1195,93 @@ let work = [], asked = [];
 // so a question is never on screen one moment and gone the next because a
 // snapshot arrived, or because the write failed.
 let mine = [];
+// The narrative above the document is the session's work, and only that. The
+// questions and their answers are the conversation, and they belong in the
+// panel the Ask button opens -- one tap away wherever the reader has scrolled
+// to, rather than at the top of a page they have already read past.
 function feed(){
   const seen = new Set();
-  return work.concat(asked, mine)
+  return work
+    .filter(r => !(r.kind === 'said' && r.re))
     .filter(r => { const k = String(r.id || ''); if (seen.has(k)) return false; seen.add(k); return true; })
     .sort((a, b) => String(a.at || '').localeCompare(String(b.at || ''))
       || String(a.id || '').localeCompare(String(b.id || '')))
     .slice(-300);
 }
+// The conversation, threaded. A question is one of the page's own `asked` rows;
+// its answers are the session's `said` rows carrying `re` with that question's
+// id. A `said` row with no `re` is not an answer to anything -- it stays in the
+// narrative above the document with the rest of the work.
+function threads(){
+  const byQuestion = new Map();
+  work.forEach(r => {
+    if (r.kind !== 'said' || !r.re) return;
+    const list = byQuestion.get(String(r.re)) || [];
+    byQuestion.set(String(r.re), list);
+    list.push(r);
+  });
+  return work.concat(asked, mine)
+    .filter(r => r.kind === 'asked')
+    .filter((r, i, all) => all.findIndex(x => x.id === r.id) === i)
+    .sort((a, b) => String(a.at || '').localeCompare(String(b.at || '')))
+    .map(q => ({q, answers: (byQuestion.get(String(q.id)) || [])
+      .sort((a, b) => String(a.id).localeCompare(String(b.id)))}));
+}
+
+// An answer that arrived while the panel was shut. Kept per view rather than in
+// the store: it is about what this reader has looked at, not about the request.
+const SEEN_KEY = 'review-desk seen ' + (typeof DATA.repo === 'string' ? DATA.repo : '')
+  + '#' + DATA.number;
+let seenAt = '';
+try { seenAt = sessionStorage.getItem(SEEN_KEY) || ''; } catch (e) { seenAt = ''; }
+const unread = () => threads().flatMap(t => t.answers)
+  .filter(a => String(a.at || '') > seenAt);
+
+function drawThreads(){
+  const list = threads();
+  rebuild($('threads'), list.map(t =>
+    '<div class="qa"><div class="q">' + esc(t.q.text || '')
+    + (t.q.where ? '<span class="on">on ' + esc(t.q.where) + '</span>' : '') + '</div>'
+    + t.answers.map(a => '<div class="a' + (String(a.at || '') > seenAt ? ' fresh' : '')
+      + '">' + esc(a.text || '') + '</div>').join('')
+    + (t.answers.length ? ''
+      : '<div class="pending">Sent to the session. Its answer arrives here.</div>')
+    + '</div>').join(''));
+  const n = unread().length;
+  $('badge').hidden = !n;
+  if (n) $('badge').textContent = String(n);
+}
+
+// Opening the panel is what marks answers read, so the badge counts what landed
+// while it was shut.
+function markSeen(){
+  const all = threads().flatMap(t => t.answers).map(a => String(a.at || '')).sort();
+  if (!all.length) return;
+  seenAt = all[all.length - 1];
+  try { sessionStorage.setItem(SEEN_KEY, seenAt); } catch (e) {}
+  drawThreads();
+}
+
 function drawWork(){
+  drawThreads();
   const el = $('work');
   const rows = feed();
+  // Something is outstanding while the session says it is working, and while a
+  // question is still waiting on an answer. Settled before the empty case
+  // returns: a question asked before the session has written anything leaves no
+  // narrative at all, and the mark still belongs on.
+  $('pulse').hidden = !(rows.some(r => r.kind === 'doing')
+    || threads().some(t => !t.answers.length));
   if (!rows.length){
     el.innerHTML = '<p class="quiet">Nothing from the session yet. What it does while you '
       + 'wait shows here.</p>';
-    $('pulse').hidden = true;
     return;
   }
-  // Something is outstanding while the session says it is working, and while the
-  // last thing that happened was a question nobody has answered yet.
-  const last = rows[rows.length - 1];
-  $('pulse').hidden = !(rows.some(r => r.kind === 'doing') || last.kind === 'asked');
-  rebuild(el, rows.map((r, i) =>
+  rebuild(el, rows.map(r =>
     '<div class="step ' + esc(r.kind || 'doing') + '">'
     + '<time>' + esc(String(when(r.at)).replace(/^ at /, '')) + '</time>'
     + '<div class="what"><span class="kind">' + esc(KINDS[r.kind] || r.kind || 'doing')
-    + '</span>' + esc(r.text || '')
-    + (r.kind === 'asked' && r.where ? '<span class="on">on ' + esc(r.where) + '</span>' : '')
-    + (r.kind === 'asked' && i === rows.length - 1
-      ? '<span class="waiting">Sent to the session. Its answer arrives here.</span>' : '')
-    + '</div></div>').join(''));
+    + '</span>' + esc(r.text || '') + '</div></div>').join(''));
 }
 
 // A question is kept as well as shown, so it survives a reload and reaches a
@@ -1397,7 +1472,12 @@ document.addEventListener('selectionchange', () => {
 function openPanel(on){
   $('panel').hidden = !on;
   $('fab').hidden = on;
-  if (on) $('question').focus();
+  if (!on) return;
+  // Opening is reading: the badge counts what landed while this was shut.
+  markSeen();
+  const list = $('threads');
+  if (list) list.scrollTop = list.scrollHeight;
+  $('question').focus();
 }
 $('fab').addEventListener('click', () => { openPanel(true); drawAsk(); });
 $('shut').addEventListener('click', () => openPanel(false));
@@ -1426,12 +1506,15 @@ $('ask').addEventListener('click', async () => {
       at: new Date().toISOString(), kind: 'asked', text: question, where: String(where)};
     mine = mine.concat([row]);
     drawWork();
+    // The panel stays open, and the question is now the last thing in it. It
+    // used to close on send, which put the answer somewhere the reader was not.
+    const list = $('threads');
+    if (list) list.scrollTop = list.scrollHeight;
     const failed = await keep(row);
     note = failed
       ? 'Asked — the session has it. This page could not store the question ('
-        + failed + '), so the record above will not survive a reload.'
-      : 'Asked. It is in the record above, and the session answers there.';
-    openPanel(false);
+        + failed + '), so it will not survive a reload.'
+      : 'Asked. The answer arrives above, in this panel.';
   } catch (e){
     const code = (e && e.code) || 'unknown';
     note = code === 'consent_required'

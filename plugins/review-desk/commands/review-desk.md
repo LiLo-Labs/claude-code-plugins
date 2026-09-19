@@ -429,15 +429,23 @@ beside the question and the work that produced it:
 
     action: "write_db", db_op: "set",
     collection: "review/pr-<number>/progress", doc_id: "<counting up>",
-    data: {"id": "<the same>", "at": "<now, UTC ISO>", "kind": "said",
+    data: {"id": "<the same>", "at": "<the clock, read not guessed>", "kind": "said",
+           "re": "<the id of the question, from review/pr-<number>/asked>",
            "text": "<the answer, in full>"}
+
+`re` is what threads it. The page shows each question with its own answers under
+it, in the panel the Ask button opens — so read `review/pr-<number>/asked` to
+find the question you are answering and copy its `id`. A `said` row without `re`
+answers nothing and stays in the narrative with the rest of the work, which is
+right for something you are telling the reviewer unprompted.
 
 The page is where the reviewer is looking, and it is the only place they can
 look: the `comments` capability is write-only, so the page sends a question but
 can never read a thread back. An answer that exists only in the thread is an
 answer they may never see — that failure is why this rule exists. The question
 itself is already on the page, written there by the desk under
-`review/pr-<number>/asked/<id>`, so the two read as one conversation.
+`review/pr-<number>/asked/<id>`, so the two read as one conversation, and the
+reviewer's button carries a count of answers that landed while it was shut.
 
 Then reply in the thread as well, with `action: "reply"` and
 `acknowledge_duplicate: true` (a receipt reply already stands), and
@@ -456,9 +464,23 @@ always worked. One small document per step, in your own numbering:
 
     action: "write_db", db_op: "set",
     collection: "review/pr-<number>/progress", doc_id: "<0001, counting up>",
-    data: {"id": "<the same>", "at": "<now, UTC ISO>",
+    data: {"id": "<the same>", "at": "<the clock, read not guessed>",
            "kind": "doing" | "found" | "wrong" | "done" | "said",
            "text": "<one line, the way you would say it in the terminal>"}
+
+**Read the clock. Never write a time you did not read.** You have no clock unless
+you run one, and a guess comes out confidently wrong:
+
+    date -u +%Y-%m-%dT%H:%M:%SZ
+
+This is not pedantry. The page sorts the record by `at`, and the reviewer writes
+their questions with the browser's real clock. Invented times sort the session's
+own lines into the future, after questions that came before them, and the
+reviewer reads a transcript in which the answers precede the questions. It
+happened on 2026-09-18: six rows stamped 00:20 to 00:42 for work done at 23:45 to
+23:59, and Mark's report was "the history shows things from the future". One
+`date` call per batch of writes is the whole fix. The same rule holds for every
+`at` on this page, documents included.
 
 Write the line you would have written in the terminal: what you are about to do,
 what you found, what went wrong, what you pushed. `doing` shows the page's
